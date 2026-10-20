@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.X86;
@@ -32,6 +33,7 @@ internal sealed partial class PictureDecoder
     ];
 
     /// <summary>Filters the whole picture, macroblock by macroblock in raster order (8.7).</summary>
+    [SkipLocalsInit]
     public void Deblock()
     {
         // bS per edge (0..3) and per 4-sample segment along it, for vertical and horizontal edges.
@@ -103,8 +105,9 @@ internal sealed partial class PictureDecoder
 
             // Chroma (4:2:0): edges 0 and 4 use the bS of luma edges 0 and 8.
             int qpc = ChromaQp(qp, slice.ChromaQpIndexOffset);
-            foreach (var plane in new[] { Picture.Cb, Picture.Cr })
+            for (int c = 0; c < 2; c++)
             {
+                byte[] plane = c == 0 ? Picture.Cb : Picture.Cr;
                 for (int edge = 0; edge < 2; edge++)
                 {
                     int qpcP = edge == 0 && mbX > 0 ? ChromaQp(_qp[mbAddr - 1], slice.ChromaQpIndexOffset) : qpc;
@@ -151,7 +154,7 @@ internal sealed partial class PictureDecoder
     /// </summary>
     private bool HasUniformMotionWithoutCoefficients(int mbAddr)
     {
-        if (_totalCoeffLuma.AsSpan(mbAddr * 16, 16).IndexOfAnyExcept((byte)0) >= 0)
+        if (Vector128.Create(_totalCoeffLuma.AsSpan(mbAddr * 16, 16)) != Vector128<byte>.Zero)
         {
             return false;
         }
@@ -164,7 +167,10 @@ internal sealed partial class PictureDecoder
 
         var mvX = _mvX.AsSpan(mbAddr * 16, 16);
         var mvY = _mvY.AsSpan(mbAddr * 16, 16);
-        return mvX.IndexOfAnyExcept(mvX[0]) < 0 && mvY.IndexOfAnyExcept(mvY[0]) < 0;
+        var x0 = Vector128.Create(mvX[0]);
+        var y0 = Vector128.Create(mvY[0]);
+        return Vector128.Create(mvX) == x0 && Vector128.Create(mvX[8..]) == x0
+            && Vector128.Create(mvY) == y0 && Vector128.Create(mvY[8..]) == y0;
     }
 
     private bool IsIntra(int mbAddr) => _kind[mbAddr] is MbKind.Intra4x4 or MbKind.Intra16x16 or MbKind.IPcm;
@@ -176,9 +182,9 @@ internal sealed partial class PictureDecoder
     /// </summary>
     internal static void FilterEdge(byte[] plane, int q0, int across, int along, int length, ReadOnlySpan<byte> strengths, int qpP, int qpQ, int alphaOffset, int betaOffset, bool chroma, bool vectorized = true)
     {
-        if (strengths.IndexOfAnyExcept((byte)0) < 0)
+        if (MemoryMarshal.Read<uint>(strengths) == 0)
         {
-            return;
+            return; // all four segments have bS 0
         }
 
         int qpAv = (qpP + qpQ + 1) >> 1;
@@ -299,6 +305,7 @@ internal sealed partial class PictureDecoder
     /// The same filter on up to 16 positions at once. The samples across the edge (p3 .. q3) are
     /// gathered into rows, filtered in 16-bit lanes with per-lane bS, and written back.
     /// </summary>
+    [SkipLocalsInit]
     private static void FilterEdgeVector(byte[] plane, int q0, int across, int along, int length, ReadOnlySpan<byte> strengths, int indexA, int alpha, int beta, bool chroma)
     {
         // taps[k * 16 + i]: sample k (0 = p3, 3 = p0, 4 = q0, 7 = q3) at position i along the edge.
@@ -409,7 +416,15 @@ internal sealed partial class PictureDecoder
             var row = taps.Slice(k * 16, length);
             if (along == 1)
             {
-                plane.AsSpan(start, length).CopyTo(row);
+                if (length == 16)
+                {
+                    Vector128.Create(plane.AsSpan(start, 16)).CopyTo(row);
+                }
+                else
+                {
+                    MemoryMarshal.Write(row, MemoryMarshal.Read<ulong>(plane.AsSpan(start, 8)));
+                }
+
                 continue;
             }
 
@@ -434,7 +449,15 @@ internal sealed partial class PictureDecoder
             var row = taps.Slice(k * 16, length);
             if (along == 1)
             {
-                row.CopyTo(plane.AsSpan(start, length));
+                if (length == 16)
+                {
+                    Vector128.Create(row).CopyTo(plane.AsSpan(start, 16));
+                }
+                else
+                {
+                    MemoryMarshal.Write(plane.AsSpan(start, 8), MemoryMarshal.Read<ulong>(row));
+                }
+
                 continue;
             }
 
@@ -449,6 +472,7 @@ internal sealed partial class PictureDecoder
     /// Vertical luma edge: 16 rows of p3 .. q3 (8 bytes each, starting at <paramref name="start"/>)
     /// become the 8 tap rows of 16 lanes, by interleaving at 8, 16, 32 and 64 bits.
     /// </summary>
+    [SkipLocalsInit]
     private static void TransposeIn(byte[] plane, int start, int stride, Span<byte> taps)
     {
         Span<Vector128<byte>> pairs = stackalloc Vector128<byte>[8];
@@ -485,6 +509,7 @@ internal sealed partial class PictureDecoder
     }
 
     /// <summary>The inverse of <see cref="TransposeIn"/>: writes all 8 bytes of each of the 16 rows.</summary>
+    [SkipLocalsInit]
     private static void TransposeOut(ReadOnlySpan<byte> taps, byte[] plane, int start, int stride)
     {
         Span<Vector128<ushort>> low = stackalloc Vector128<ushort>[4];

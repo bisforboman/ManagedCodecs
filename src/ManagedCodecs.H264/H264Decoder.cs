@@ -8,8 +8,9 @@ namespace ManagedCodecs.H264;
 /// Implemented from ITU-T H.264; output is bit-exact with any conforming decoder. Streams that
 /// use features outside Constrained Baseline (CABAC, B slices, interlacing, 8x8 transforms,
 /// scaling matrices, weighted prediction, FMO, other chroma formats or bit depths) are rejected
-/// with <see cref="NotSupportedException"/>. Frames come out in decoding order, which is
-/// display order for streams without B slices.
+/// with <see cref="NotSupportedException"/>. Frames come out in display order (picture order
+/// count, 8.2.1), held back as far as the stream's max_num_reorder_frames says reordering can
+/// reach; <see cref="Flush"/> returns the rest at the end.
 /// </remarks>
 public sealed class H264Decoder : IVideoDecoder
 {
@@ -22,6 +23,9 @@ public sealed class H264Decoder : IVideoDecoder
     // is the per-macroblock state, as long as the picture size stays the same.
     private readonly List<Picture> _pictures = [];
     private PictureDecoder? _decoder;
+
+    private readonly PictureOrder _order = new();
+    private readonly OutputQueue _output = new();
 
     /// <param name="codecPrivate">The AVCDecoderConfigurationRecord ('avcC') from the container.</param>
     public H264Decoder(ReadOnlySpan<byte> codecPrivate)
@@ -44,7 +48,60 @@ public sealed class H264Decoder : IVideoDecoder
     {
     }
 
-    public VideoFrame Decode(ReadOnlySpan<byte> packet)
+    /// <summary>Decodes one packet, which holds one picture (MP4 sample), and returns the frames ready for display.</summary>
+    public IReadOnlyList<VideoFrame> Decode(Packet packet)
+    {
+        var (frame, state) = DecodePicture(packet.Data.Span);
+        frame.Pts = packet.Pts;
+
+        bool restart = state.Header.IsIdr || state.Header.MemoryManagement.Any(op => op.Op == 5);
+        return _output.Add(frame, state.Poc, restart, ReorderDepth(state.Sps));
+    }
+
+    public IReadOnlyList<VideoFrame> Flush() => _output.Flush();
+
+    /// <summary>
+    /// How many decoded frames can precede, in decoding order, a frame shown before them: the
+    /// VUI's max_num_reorder_frames, else none for order count type 2 (which follows decoding
+    /// order), else the whole DPB (A.3.1, the bound with no other information).
+    /// </summary>
+    private static int ReorderDepth(SequenceParameterSet sps)
+    {
+        if (sps.MaxNumReorderFrames is int reorder)
+        {
+            return reorder;
+        }
+
+        if (sps.PicOrderCntType == 2)
+        {
+            return 0;
+        }
+
+        if (sps.MaxDecFrameBuffering is int buffering)
+        {
+            return buffering;
+        }
+
+        // MaxDpbMbs of Table A-1 by level_idc; level 1b counts as 1.1, the larger.
+        int maxDpbMbs = sps.LevelIdc switch
+        {
+            <= 10 => 396,
+            11 => 900,
+            <= 20 => 2376,
+            21 => 4752,
+            <= 30 => 8100,
+            31 => 18000,
+            32 => 20480,
+            <= 41 => 32768,
+            42 => 34816,
+            50 => 110400,
+            <= 52 => 184320,
+            _ => 696320,
+        };
+        return Math.Clamp(maxDpbMbs / (sps.WidthInMbs * sps.HeightInMbs), 1, 16);
+    }
+
+    private (VideoFrame Frame, PictureState State) DecodePicture(ReadOnlySpan<byte> packet)
     {
         PictureState? current = null;
         int pos = 0;
@@ -76,7 +133,7 @@ public sealed class H264Decoder : IVideoDecoder
             throw new InvalidDataException("The packet contains no picture.");
         }
 
-        return FinishPicture(current);
+        return (FinishPicture(current), current);
     }
 
     private PictureState? HandleNal(NalUnit nal, PictureState? current)
@@ -140,7 +197,7 @@ public sealed class H264Decoder : IVideoDecoder
         }
 
         _decoder.Begin(TakePicture(sps, header.FrameNum));
-        return new PictureState(header, sps, _decoder);
+        return new PictureState(header, sps, _decoder, _order.Next(header, sps));
     }
 
     /// <summary>A picture of the stream's size that is not a reference, reused when one is free.</summary>
@@ -201,8 +258,8 @@ public sealed class H264Decoder : IVideoDecoder
         return frame;
     }
 
-    /// <summary>The picture being decoded: its first slice header, its SPS and its decoder.</summary>
-    private sealed record PictureState(SliceHeader Header, SequenceParameterSet Sps, PictureDecoder Decoder);
+    /// <summary>The picture being decoded: its first slice header, its SPS, its decoder and its order count.</summary>
+    private sealed record PictureState(SliceHeader Header, SequenceParameterSet Sps, PictureDecoder Decoder, int Poc);
 
     private static void CheckSupported(SequenceParameterSet sps, PictureParameterSet pps)
     {

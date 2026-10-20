@@ -5,7 +5,7 @@ namespace ManagedCodecs.Tests.H264;
 
 /// <summary>
 /// Decodes every Constrained Baseline H.264 sample (samples/*.mp4 with a .framemd5) and
-/// compares each frame's MD5 with FFmpeg's. See samples/README.md.
+/// compares each frame's MD5 and timestamp, in output order, with FFmpeg's. See samples/README.md.
 /// </summary>
 public class H264ConformanceTests
 {
@@ -18,18 +18,34 @@ public class H264ConformanceTests
     {
         var lines = File.ReadAllLines(TestSamples.ReferenceOf(sampleName, ".framemd5"));
         var expected = FrameMd5.Parse(lines).Where(e => e.StreamIndex == 0).ToList(); // FFmpeg lists video first
+        var timeBase = FrameMd5.ParseTimeBase(lines);
 
         using var demuxer = Mp4Demuxer.Open(TestSamples.PathOf(sampleName));
         var video = demuxer.Video!;
         var decoder = new H264Decoder(video);
 
         int index = 0;
-        foreach (var packet in demuxer.ReadPackets().Where(p => p.StreamIndex == video.StreamIndex))
+        void Check(VideoFrame frame)
         {
-            var frame = decoder.Decode(packet.Data.Span);
             Assert.True(index < expected.Count, $"More frames than the reference ({expected.Count}).");
             Assert.True(expected[index].Md5 == FrameMd5.Hash(frame), $"Frame {index} differs from FFmpeg.");
+            Assert.True(
+                FrameMd5.SameTime(expected[index].Pts, timeBase, frame.Pts, video.TimeBase),
+                $"Frame {index}: pts {frame.Pts} ({video.TimeBase}) is not FFmpeg's {expected[index].Pts} ({timeBase}).");
             index++;
+        }
+
+        foreach (var packet in demuxer.ReadPackets().Where(p => p.StreamIndex == video.StreamIndex))
+        {
+            foreach (var frame in decoder.Decode(packet))
+            {
+                Check(frame);
+            }
+        }
+
+        foreach (var frame in decoder.Flush())
+        {
+            Check(frame);
         }
 
         Assert.Equal(expected.Count, index);

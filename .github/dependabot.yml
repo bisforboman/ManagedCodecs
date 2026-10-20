@@ -1,0 +1,27 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    # One PR a week instead of one per action (each is a full CI run): minor and patch updates together, which
+    # dependabot-auto-merge.yml merges once green, and majors together, which wait for a look.
+    groups:
+      actions:
+        patterns: ["*"]
+        update-types: [minor, patch]
+      actions-major:
+        patterns: ["*"]
+        update-types: [major]
+  - package-ecosystem: nuget
+    directory: /
+    schedule:
+      interval: weekly
+    # The test and benchmark packages; same grouping as the actions.
+    groups:
+      nuget:
+        patterns: ["*"]
+        update-types: [minor, patch]
+      nuget-major:
+        patterns: ["*"]
+        update-types: [major]

@@ -14,34 +14,41 @@ then the same approach for H.264 + AAC in MP4.
 | `src/ManagedCodecs.H264` | `H264Decoder`: Constrained Baseline H.264 (CAVLC, I/P, deblocking), bit-exact |
 | `src/ManagedCodecs.Aac` | `AacDecoder`: AAC LC (mono to 7.1, M/S, intensity, PNS, TNS), within 3e-7 of FFmpeg's float output |
 | `src/Shared` | Source files linked into several codec projects (the VLC decoder) |
+| `tools/ManagedCodecs.Cli` | `mcdec`: decodes a file and times it, to compare with `ffmpeg -benchmark` |
+| `tools/make-samples.sh` | Generates the test samples and FFmpeg's references |
 | `tests/ManagedCodecs.Tests` | Unit tests and FFmpeg conformance tests (framemd5 for frames and packets) |
 | `benchmarks/ManagedCodecs.Benchmarks` | BenchmarkDotNet decode benchmark |
 
 ## Getting started
 
-Requires the .NET 10 SDK. FFmpeg on `PATH` is only needed to generate test samples.
+Requires the .NET 10 SDK. The tests also need samples made with FFmpeg (with libx264) and ImageMagick:
 
 ```
+tools/make-samples.sh    # once; Git Bash or WSL on Windows
 dotnet build
 dotnet test
 ```
 
-The conformance tests need samples (see `samples/README.md`) and fail if `samples/` has no
-`.avi` + `.framemd5` pairs, which is intentional. They decode every frame and compare its MD5 with
-FFmpeg's.
+The conformance tests compare every decoded frame, packet and audio sample with FFmpeg's (see
+`samples/README.md`) and fail if `samples/` is empty, which is intentional. CI (`.github/workflows/ci.yml`) runs
+the same steps on every pull request.
 
 ## Benchmarking
 
+`mcdec` (`tools/ManagedCodecs.Cli`) takes the same file as FFmpeg, decodes every stream it has a decoder for, and
+prints FFmpeg's `bench:` line:
+
 ```
-dotnet run -c Release --project benchmarks/ManagedCodecs.Benchmarks
-ffmpeg -benchmark -threads 1 -stream_loop 39 -i samples/testsrc-420.avi -f null -
+f=samples/h264-bench-720p.mp4    # any sample, or a file of your own
+dotnet run -c Release --project tools/ManagedCodecs.Cli -- $f --loops 10
+ffmpeg -benchmark -threads 1 -stream_loop 9 -i $f -f null -
 ```
 
-Divide FFmpeg's `utime` by the number of frames decoded (40 loops of the file). Its figure also
-includes demuxing and passing frames on, so it slightly flatters us. `--filter *H264*` runs only
-the H.264 benchmark, which decodes `samples/h264-bench-720p.mp4` (50 frames) per iteration;
-`--filter *Aac*` decodes `samples/aac-5.1.mp4`. Audio figures are per 1024-sample frame. Single-threaded, on an
-AVX2 Xeon cloud VM (µs per frame):
+Both lines time the whole process, demuxing included; mcdec's also includes .NET's startup and JIT, and its
+`last loop` line shows the steady speed per frame. For statistics on the bundled samples there is
+BenchmarkDotNet: `dotnet run -c Release --project benchmarks/ManagedCodecs.Benchmarks` (`--filter *H264*` or
+`*Aac*` for one codec). A snapshot (2026-10-20, single-threaded on an AVX2 Xeon cloud VM; µs per frame, audio
+frames are 1024 samples):
 
 | Sample | ManagedCodecs | FFmpeg 6.1 |
 | --- | ---: | ---: |

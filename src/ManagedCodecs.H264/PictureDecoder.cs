@@ -42,6 +42,9 @@ internal sealed partial class PictureDecoder
     // Coefficients of the macroblock being decoded, reused from one macroblock to the next.
     private readonly Residual _residual = new();
 
+    // The CABAC engine and contexts, reinitialized for every CABAC slice.
+    private readonly Cabac _cabac = new();
+
     public PictureDecoder(SequenceParameterSet sps)
     {
         Sps = sps;
@@ -57,6 +60,7 @@ internal sealed partial class PictureDecoder
         _intra4x4Mode = new sbyte[_mbCount * 16];
 
         InitInter();
+        InitCabacState();
     }
 
     public SequenceParameterSet Sps { get; }
@@ -78,11 +82,12 @@ internal sealed partial class PictureDecoder
         Array.Clear(_totalCoeffChroma);
         Array.Clear(_intra4x4Mode);
         ResetInter();
+        ResetCabacState();
     }
 
     public bool IsComplete => DecodedMbCount == _mbCount;
 
-    /// <summary>slice_data (7.3.4) for CAVLC.</summary>
+    /// <summary>slice_data (7.3.4).</summary>
     public void DecodeSlice(SliceHeader header, PictureParameterSet pps, BitReader r, IReadOnlyList<Picture> refList)
     {
         int sliceNum = _slices.Count;
@@ -91,11 +96,18 @@ internal sealed partial class PictureDecoder
         var slice = new SliceState(header, pps, sliceNum, refList)
         {
             Qp = pps.PicInitQp + header.SliceQpDelta,
+            Cabac = pps.EntropyCodingModeCabac ? _cabac : null,
         };
 
         if (slice.Qp is < 0 or > 51)
         {
             throw new InvalidDataException($"Slice QP {slice.Qp} is out of range.");
+        }
+
+        if (slice.Cabac is not null)
+        {
+            DecodeSliceDataCabac(slice, r);
+            return;
         }
 
         int mbAddr = header.FirstMbInSlice;
@@ -155,6 +167,12 @@ internal sealed partial class PictureDecoder
 
         /// <summary>QP_Y of the previous macroblock in the slice (QP_Y,PRED).</summary>
         public int Qp { get; set; }
+
+        /// <summary>The CABAC engine for a CABAC slice, null for CAVLC.</summary>
+        public Cabac? Cabac { get; init; }
+
+        /// <summary>Whether the previous macroblock in the slice had a nonzero mb_qp_delta (its CABAC context).</summary>
+        public bool LastQpDeltaNonZero { get; set; }
     }
 
     // ---- Neighbours (6.4.12) ----
@@ -236,7 +254,9 @@ internal sealed partial class PictureDecoder
     // ---- Macroblock layer (7.3.5) ----
     private void DecodeMacroblock(SliceState slice, BitReader r, int mbAddr)
     {
-        int mbType = (int)r.ReadUe();
+        int mbType = slice.Cabac is not { } c ? (int)r.ReadUe()
+            : slice.Header.Type == SliceType.P ? CabacPMbType(c, mbAddr)
+            : CabacIntraMbType(c, mbAddr, inPSlice: false);
         if (slice.Header.Type == SliceType.P)
         {
             if (mbType < 5)
@@ -261,6 +281,7 @@ internal sealed partial class PictureDecoder
         _sliceOfMb[mbAddr] = slice.Number;
         DecodedMbCount++;
         ClearInter(mbAddr);
+        _dcCoded[mbAddr] = 0;
 
         if (mbType == 25)
         {
@@ -290,10 +311,11 @@ internal sealed partial class PictureDecoder
             {
                 var (x, y) = BlockPosition(idx);
                 int mode = PredictIntra4x4Mode(slice, mbAddr, x, y);
-                if (!r.ReadFlag())
+
+                // prev_intra4x4_pred_mode_flag, else rem_intra4x4_pred_mode.
+                int remaining = slice.Cabac is { } c ? CabacIntra4x4Mode(c) : r.ReadFlag() ? -1 : (int)r.ReadBits(3);
+                if (remaining >= 0)
                 {
-                    // prev_intra4x4_pred_mode_flag
-                    int remaining = (int)r.ReadBits(3);
                     mode = remaining < mode ? remaining : remaining + 1;
                 }
 
@@ -304,25 +326,28 @@ internal sealed partial class PictureDecoder
             cbpChroma = 0;
         }
 
-        int chromaPredMode = r.ReadUe(3, "intra_chroma_pred_mode");
+        int chromaPredMode = slice.Cabac is { } cabac ? CabacChromaPredMode(cabac, mbAddr) : r.ReadUe(3, "intra_chroma_pred_mode");
+        _chromaPredMode[mbAddr] = (byte)chromaPredMode;
 
         if (!is16x16)
         {
-            int codeNum = r.ReadUe(47, "coded_block_pattern");
-            int cbp = CavlcTables.CodedBlockPatternIntra[codeNum];
+            int cbp = slice.Cabac is { } cabacCbp ? CabacCbp(cabacCbp, mbAddr) : CavlcTables.CodedBlockPatternIntra[r.ReadUe(47, "coded_block_pattern")];
             cbpLuma = cbp & 15;
             cbpChroma = cbp >> 4;
         }
+
+        _cbp[mbAddr] = (byte)(cbpLuma | (cbpChroma << 4));
 
         var residual = _residual;
         if (cbpLuma > 0 || cbpChroma > 0 || is16x16)
         {
             UpdateQp(slice, r);
-            ReadResidual(r, mbAddr, residual, is16x16, cbpLuma, cbpChroma);
+            ReadResidual(slice, r, mbAddr, residual, is16x16, cbpLuma, cbpChroma);
         }
         else
         {
             ClearCounts(mbAddr);
+            slice.LastQpDeltaNonZero = false;
         }
 
         _qp[mbAddr] = slice.Qp;
@@ -339,6 +364,12 @@ internal sealed partial class PictureDecoder
         _intra4x4Mode.AsSpan(mbAddr * 16, 16).Fill(-1);
         _totalCoeffLuma.AsSpan(mbAddr * 16, 16).Fill(16);
         _totalCoeffChroma.AsSpan(mbAddr * 8, 8).Fill(16);
+
+        // For the CABAC contexts of later macroblocks I_PCM counts as fully coded.
+        _cbp[mbAddr] = 15 | (2 << 4);
+        _dcCoded[mbAddr] = 7;
+        _chromaPredMode[mbAddr] = 0;
+        slice.LastQpDeltaNonZero = false;
 
         while (!r.IsByteAligned)
         {
@@ -364,11 +395,15 @@ internal sealed partial class PictureDecoder
                 }
             }
         }
+
+        // After the samples the arithmetic decoder starts afresh (9.3.1.2).
+        slice.Cabac?.InitEngine(r);
     }
 
     private void UpdateQp(SliceState slice, BitReader r)
     {
-        int delta = r.ReadSe();
+        int delta = slice.Cabac is { } c ? CabacQpDelta(slice, c) : r.ReadSe();
+        slice.LastQpDeltaNonZero = delta != 0;
         if (delta is < -26 or > 25)
         {
             throw new InvalidDataException($"mb_qp_delta {delta} is out of range.");
@@ -436,7 +471,24 @@ internal sealed partial class PictureDecoder
         public int[][] ChromaAc { get; } = [.. Enumerable.Range(0, 8).Select(_ => new int[16])];
     }
 
-    private void ReadResidual(BitReader r, int mbAddr, Residual residual, bool is16x16, int cbpLuma, int cbpChroma)
+    /// <summary>One residual block by either entropy coder; levels by scan position, returns the number of nonzero ones.</summary>
+    private int ReadBlock(SliceState slice, BitReader r, int mbAddr, BlockCategory category, int x, int y, int component, int maxNumCoeff, Span<int> levels)
+    {
+        if (slice.Cabac is { } c)
+        {
+            return CabacResidualBlock(c, category, CodedBlockFlagInc(mbAddr, category, x, y, component), maxNumCoeff, levels);
+        }
+
+        int nC = category switch
+        {
+            BlockCategory.ChromaDc => Cavlc.ChromaDcNc,
+            BlockCategory.ChromaAc => ChromaNc(mbAddr, component, x, y),
+            _ => LumaNc(mbAddr, x, y),
+        };
+        return Cavlc.ReadResidualBlock(r, nC, maxNumCoeff, levels);
+    }
+
+    private void ReadResidual(SliceState slice, BitReader r, int mbAddr, Residual residual, bool is16x16, int cbpLuma, int cbpChroma)
     {
         Span<int> levels = stackalloc int[16];
         var zigZag = Transform.ZigZag4x4;
@@ -447,7 +499,11 @@ internal sealed partial class PictureDecoder
 
         if (is16x16)
         {
-            Cavlc.ReadResidualBlock(r, LumaNc(mbAddr, 0, 0), 16, levels);
+            if (ReadBlock(slice, r, mbAddr, BlockCategory.LumaDc, 0, 0, 0, 16, levels) != 0)
+            {
+                _dcCoded[mbAddr] |= 1;
+            }
+
             for (int k = 0; k < 16; k++)
             {
                 residual.LumaDc[zigZag[k]] = levels[k];
@@ -462,10 +518,9 @@ internal sealed partial class PictureDecoder
             }
 
             var (x, y) = BlockPosition(idx);
-            int nC = LumaNc(mbAddr, x, y);
             var block = residual.Luma[(y * 4) + x];
             int first = is16x16 ? 1 : 0;
-            int count = Cavlc.ReadResidualBlock(r, nC, 16 - first, levels);
+            int count = ReadBlock(slice, r, mbAddr, is16x16 ? BlockCategory.LumaAc : BlockCategory.Luma4x4, x, y, 0, 16 - first, levels);
             lumaCounts[(y * 4) + x] = (byte)count;
             if (count == 0)
             {
@@ -485,7 +540,11 @@ internal sealed partial class PictureDecoder
 
         for (int c = 0; c < 2; c++)
         {
-            Cavlc.ReadResidualBlock(r, Cavlc.ChromaDcNc, 4, levels);
+            if (ReadBlock(slice, r, mbAddr, BlockCategory.ChromaDc, 0, 0, c, 4, levels) != 0)
+            {
+                _dcCoded[mbAddr] |= (byte)(2 << c);
+            }
+
             levels[..4].CopyTo(residual.ChromaDc[c]);
         }
 
@@ -501,7 +560,7 @@ internal sealed partial class PictureDecoder
                 int x = b & 1;
                 int y = b >> 1;
                 var block = residual.ChromaAc[(c * 4) + b];
-                int count = Cavlc.ReadResidualBlock(r, ChromaNc(mbAddr, c, x, y), 15, levels);
+                int count = ReadBlock(slice, r, mbAddr, BlockCategory.ChromaAc, x, y, c, 15, levels);
                 chromaCounts[(c * 4) + b] = (byte)count;
                 if (count == 0)
                 {

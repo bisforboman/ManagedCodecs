@@ -1,7 +1,7 @@
 # ManagedCodecs
 
 Pure managed C# media decoders: no native binaries, Native AOT friendly. MJPEG (bit-exact with FFmpeg), H.264
-Constrained Baseline (bit-exact), AAC LC (within 2^-17 of FFmpeg's float output, measured 3e-7), AVI and MP4
+Constrained Baseline and Main without B frames (CAVLC and CABAC, bit-exact), AAC LC (within 2^-17 of FFmpeg's float output, measured 3e-7), AVI and MP4
 demuxing. README.md has the layout, the roadmap and what is not supported yet.
 
 ## Core idea
@@ -30,8 +30,9 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
   `dotnet test ManagedCodecs.slnx`; for SIMD changes also with `DOTNET_EnableHWIntrinsic=0` (CI runs both).
 - **New feature, new sample**: add it to tools/make-samples.sh with a comment saying what it isolates, and check
   that it really exercises the feature (the AAC decoder's `Statistics`, `ffmpeg -bsf:v trace_headers` for H.264)
-  before relying on it. Encoders often never emit a tool (libx264 Baseline: no ref list modification or MMCO;
-  FFmpeg's AAC: no pulse data); cover those with unit tests and say so in the docs.
+  before relying on it. Encoders often never emit a tool (libx264: no ref list modification, MMCO, I_PCM or
+  cabac_init_idc other than 0; FFmpeg's AAC: no pulse data); cover those with unit tests and say so in the docs.
+  `tests/ManagedCodecs.Tests/H264/CabacEncoder.cs` (a CABAC encoder and bit writer) builds such H.264 streams.
 - **Code style**: StyleBro (analyzers on build; rules in `.editorconfig`, chosen by `stylebro-migrate init` from this
   code's own conventions). The pre-commit hook formats the staged .cs files (`git config core.hooksPath .githooks`
   once per clone); by hand: `dotnet tool run stylebro-migrate format ManagedCodecs.slnx`. CI checks it with

@@ -58,6 +58,20 @@ ff -f lavfi -i "testsrc2=size=320x240:rate=25,scroll=h=0.02,noise=alls=10:allf=t
 ff -f lavfi -i "testsrc2=size=176x144:rate=25,scroll=h=0.01" -t 3 "${B[@]}" -refs 4 -g 1000 samples/h264-long-gop.mp4
 ff -f lavfi -i "testsrc2=size=1280x720:rate=25,scroll=h=0.005,noise=alls=6:allf=t" -t 2 "${B[@]}" -refs 3 samples/h264-bench-720p.mp4
 
+# ---- H.264 Main profile (CABAC), without B frames ----
+# The same cases with CABAC: intra only (also at QP 4 on noise, for large levels and the Exp-Golomb suffixes), P frames
+# with several references and all partitions, fast motion, slices, an odd size, constrained intra prediction and a
+# long GOP. Weighted prediction is off (Main turns it on by default). libx264 always writes cabac_init_idc 0.
+M=(-c:v libx264 -profile:v main -pix_fmt yuv420p -bf 0 -weightp 0)
+ff -f lavfi -i testsrc2=size=320x240:rate=25 -t 0.2 "${M[@]}" -g 1 samples/h264-main-intra.mp4
+ff -f lavfi -i testsrc2=size=320x240:rate=25,noise=alls=40:allf=t -t 0.2 "${M[@]}" -g 1 -qp 4 samples/h264-main-intra-qp4.mp4
+ff -f lavfi -i testsrc2=size=320x240:rate=25 -t 2 "${M[@]}" -refs 4 -x264-params partitions=all samples/h264-main-p-refs.mp4
+ff -f lavfi -i "testsrc2=size=320x240:rate=25,scroll=h=0.013:v=-0.021,noise=alls=12:allf=t" -t 2 "${M[@]}" -refs 3 -qp 22 -x264-params partitions=all:me=umh:merange=32 samples/h264-main-p-motion.mp4
+ff -f lavfi -i "testsrc2=size=320x240:rate=25,scroll=h=0.01" -t 1 "${M[@]}" -refs 2 -x264-params slices=4 samples/h264-main-slices.mp4
+ff -f lavfi -i "testsrc2=size=321x239:rate=25,scroll=v=0.02" -t 1 "${M[@]}" -refs 2 samples/h264-main-odd-size.mp4
+ff -f lavfi -i "testsrc2=size=320x240:rate=25,scroll=h=0.02,noise=alls=10:allf=t" -t 1 "${M[@]}" -refs 2 -x264-params constrained-intra=1:chroma-qp-offset=4 samples/h264-main-constrained-intra.mp4
+ff -f lavfi -i "testsrc2=size=176x144:rate=25,scroll=h=0.01" -t 3 "${M[@]}" -refs 4 -g 1000 samples/h264-main-long-gop.mp4
+
 # ---- AAC LC ----
 # Each aimed at one tool; the conformance test checks the tool really occurs. PNS is off except in the PNS samples.
 ff -f lavfi -i "sine=frequency=440:sample_rate=44100:duration=1" -c:a aac -b:a 96k -aac_pns 0 samples/aac-mono-44k.mp4

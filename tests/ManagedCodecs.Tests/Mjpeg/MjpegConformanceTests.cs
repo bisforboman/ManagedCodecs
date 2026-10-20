@@ -1,50 +1,68 @@
-using ManagedCodecs.Containers.Avi;
+using ManagedCodecs.Containers;
 using ManagedCodecs.Mjpeg;
 
 namespace ManagedCodecs.Tests.Mjpeg;
 
 /// <summary>
-/// Decodes every samples/*.avi and compares each frame's MD5 with the matching
-/// samples/*.framemd5 produced by FFmpeg. See samples/README.md for how to generate them.
+/// Decodes every MJPEG sample (samples/*.avi and *.mp4) and compares each frame's MD5 and pts
+/// with the matching samples/*.framemd5 produced by FFmpeg. See samples/README.md.
 /// </summary>
 public class MjpegConformanceTests
 {
-    public static TheoryData<string> Samples()
-    {
-        var data = new TheoryData<string>();
-        var dir = FindSamplesDirectory();
-        if (dir is null)
-        {
-            return data;
-        }
+    public static TheoryData<string> Samples() => new(SampleNames());
 
-        foreach (var avi in Directory.EnumerateFiles(dir, "*.avi").Order())
-        {
-            if (File.Exists(Path.ChangeExtension(avi, ".framemd5")))
-            {
-                data.Add(Path.GetFileName(avi));
-            }
-        }
+    private static IEnumerable<string> SampleNames() =>
+        TestSamples.WithReference(".framemd5").Where(name => TestSamples.CodecOf(name) == CodecIds.Mjpeg);
 
-        return data;
-    }
-
-    [Theory(Skip = "Enable once MjpegDecoder decodes frames.")]
+    [Theory]
     [MemberData(nameof(Samples))]
     public void MatchesFfmpegFrameByFrame(string sampleName)
     {
-        var dir = FindSamplesDirectory()!;
-        var avi = Path.Combine(dir, sampleName);
-        var expected = FrameMd5.Parse(File.ReadLines(Path.ChangeExtension(avi, ".framemd5")));
+        var lines = File.ReadAllLines(TestSamples.ReferenceOf(sampleName, ".framemd5"));
+        var expected = FrameMd5.Parse(lines).Where(e => e.StreamIndex == 0).ToList(); // FFmpeg lists video first
+        var timeBase = FrameMd5.ParseTimeBase(lines); // FFmpeg's decoded output may use another time base
 
-        using var demuxer = AviDemuxer.Open(avi);
+        using var demuxer = Demuxer.Open(TestSamples.PathOf(sampleName));
+        var video = demuxer.Video!;
         var decoder = new MjpegDecoder();
 
         int index = 0;
-        foreach (var packet in demuxer.ReadPackets())
+        foreach (var packet in demuxer.ReadPackets().Where(p => p.StreamIndex == video.StreamIndex))
         {
             var frame = decoder.Decode(packet.Data.Span);
             Assert.True(index < expected.Count, $"More frames than the reference ({expected.Count}).");
+            Assert.True(expected[index].Md5 == FrameMd5.Hash(frame), $"Frame {index} differs from FFmpeg.");
+            Assert.True(
+                FrameMd5.SameTime(expected[index].Pts, timeBase, packet.Pts, video.TimeBase),
+                $"Frame {index}: pts {packet.Pts} ({video.TimeBase}) is not FFmpeg's {expected[index].Pts} ({timeBase}).");
+            index++;
+        }
+
+        Assert.Equal(expected.Count, index);
+    }
+
+    public static TheoryData<string> StandardHuffmanSamples() =>
+        new(SampleNames().Where(name => name.Contains("stdhuff", StringComparison.Ordinal)));
+
+    /// <summary>
+    /// Samples encoded with <c>-huffman default</c> carry the Annex K tables in DHT. With every
+    /// DHT removed, as many camera streams do, the built-in tables must give the same frames.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(StandardHuffmanSamples))]
+    public void MatchesFfmpegWithoutDht(string sampleName)
+    {
+        var expected = FrameMd5.Parse(File.ReadLines(TestSamples.ReferenceOf(sampleName, ".framemd5"))).Where(e => e.StreamIndex == 0).ToList();
+
+        using var demuxer = Demuxer.Open(TestSamples.PathOf(sampleName));
+        var decoder = new MjpegDecoder();
+
+        int index = 0;
+        foreach (var packet in demuxer.ReadPackets().Where(p => p.StreamIndex == demuxer.Video!.StreamIndex))
+        {
+            var stripped = RemoveSegments(packet.Data.Span, JpegMarker.Dht);
+            Assert.True(stripped.Length < packet.Data.Length, "Sample has no DHT to remove.");
+            var frame = decoder.Decode(stripped);
             Assert.True(expected[index].Md5 == FrameMd5.Hash(frame), $"Frame {index} differs from FFmpeg.");
             index++;
         }
@@ -52,17 +70,24 @@ public class MjpegConformanceTests
         Assert.Equal(expected.Count, index);
     }
 
-    private static string? FindSamplesDirectory()
+    private static byte[] RemoveSegments(ReadOnlySpan<byte> jpeg, byte marker)
     {
-        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
+        var output = new List<byte>(jpeg.Length);
+        int copied = 0;
+        foreach (var segment in JpegMarkerReader.ReadSegments(jpeg))
         {
-            var candidate = Path.Combine(dir.FullName, "samples");
-            if (Directory.Exists(candidate) && File.Exists(Path.Combine(dir.FullName, "ManagedCodecs.slnx")))
+            if (segment.Marker != marker)
             {
-                return candidate;
+                continue;
             }
+
+            // The segment starts at its 0xFF, two bytes of marker and two of length before the payload.
+            int start = segment.PayloadOffset - 4;
+            output.AddRange(jpeg[copied..start]);
+            copied = segment.PayloadOffset + segment.PayloadLength;
         }
 
-        return null;
+        output.AddRange(jpeg[copied..]);
+        return [.. output];
     }
 }

@@ -50,11 +50,17 @@ public sealed record JpegFrameHeader(byte Marker, int Precision, int Width, int 
             return PixelFormat.Gray8;
         }
 
+        // Only the luma/chroma ratio matters: FFmpeg itself writes 4:2:2 as 2x2, 1x2, 1x2.
         if (Components.Count == 3
-            && Components[1] is { HorizontalSampling: 1, VerticalSampling: 1 }
-            && Components[2] is { HorizontalSampling: 1, VerticalSampling: 1 })
+            && Components[1].HorizontalSampling == Components[2].HorizontalSampling
+            && Components[1].VerticalSampling == Components[2].VerticalSampling
+            && Components[1].HorizontalSampling > 0
+            && Components[1].VerticalSampling > 0
+            && Components[0].HorizontalSampling % Components[1].HorizontalSampling == 0
+            && Components[0].VerticalSampling % Components[1].VerticalSampling == 0)
         {
-            return (Components[0].HorizontalSampling, Components[0].VerticalSampling) switch
+            return (Components[0].HorizontalSampling / Components[1].HorizontalSampling,
+                    Components[0].VerticalSampling / Components[1].VerticalSampling) switch
             {
                 (2, 2) => PixelFormat.Yuv420P,
                 (2, 1) => PixelFormat.Yuv422P,

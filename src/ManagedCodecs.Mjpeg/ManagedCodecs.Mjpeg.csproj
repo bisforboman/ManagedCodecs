@@ -7,6 +7,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="ManagedCodecs.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\ManagedCodecs.Core\ManagedCodecs.Core.csproj" />
   </ItemGroup>
 

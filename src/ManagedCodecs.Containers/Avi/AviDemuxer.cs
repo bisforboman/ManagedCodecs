@@ -11,7 +11,7 @@ namespace ManagedCodecs.Containers.Avi;
 /// <remarks>
 /// Not yet supported: OpenDML / AVI 2.0 files over 1 GB (RIFF 'AVIX' extensions), the idx1 or
 /// indx index (so <see cref="Packet.IsKeyframe"/> is always true, which is correct for MJPEG),
-/// and audio streams.
+/// and audio streams (<see cref="Audio"/> is always null).
 /// </remarks>
 public sealed class AviDemuxer : IDemuxer
 {
@@ -83,11 +83,20 @@ public sealed class AviDemuxer : IDemuxer
         }
 
         _videoStreamIndex = header.VideoStreamIndex;
-        double fps = header.MicrosecondsPerFrame > 0 ? 1_000_000.0 / header.MicrosecondsPerFrame : 0;
-        Video = new VideoStreamInfo(header.Codec, header.Width, header.Height, fps, header.TotalFrames);
+
+        // Like FFmpeg, take the time base from the stream header (dwScale / dwRate) and fall
+        // back to the main header's frame duration. Each chunk is one tick.
+        var timeBase = header.Scale > 0 && header.Rate > 0
+            ? Rational.Reduce(header.Scale, header.Rate)
+            : Rational.Reduce(header.MicrosecondsPerFrame, 1_000_000);
+        double fps = timeBase.Numerator > 0 ? 1 / timeBase.ToDouble() : 0;
+        Video = new VideoStreamInfo(NormalizeCodec(header.Codec), header.Width, header.Height, fps, header.TotalFrames, timeBase, ReadOnlyMemory<byte>.Empty, _videoStreamIndex);
     }
 
     public VideoStreamInfo Video { get; }
+
+    /// <summary>Always null: audio in AVI is not exposed.</summary>
+    public AudioStreamInfo? Audio => null;
 
     public static AviDemuxer Open(string path) => new(File.OpenRead(path));
 
@@ -124,7 +133,8 @@ public sealed class AviDemuxer : IDemuxer
                 {
                     var data = new byte[size];
                     _stream.ReadExactly(data);
-                    yield return new Packet(_videoStreamIndex, sequence++, data, IsKeyframe: true);
+                    yield return new Packet(_videoStreamIndex, sequence, data, IsKeyframe: true, Dts: sequence, Pts: sequence, Duration: 1);
+                    sequence++;
                 }
 
                 pos = next;
@@ -162,10 +172,12 @@ public sealed class AviDemuxer : IDemuxer
             }
             else if (id == "LIST" && size >= 4 && ReadFourCC(_stream) == "strl")
             {
-                if (info.VideoStreamIndex < 0 && TryReadVideoStream(pos + 12, Math.Min(pos + 8 + size, end), out string codec))
+                if (info.VideoStreamIndex < 0 && TryReadVideoStream(pos + 12, Math.Min(pos + 8 + size, end), out string codec, out uint scale, out uint rate))
                 {
                     info.VideoStreamIndex = streamCount;
                     info.Codec = codec;
+                    info.Scale = scale;
+                    info.Rate = rate;
                 }
 
                 streamCount++;
@@ -177,11 +189,14 @@ public sealed class AviDemuxer : IDemuxer
         return info;
     }
 
-    private bool TryReadVideoStream(long start, long end, out string codec)
+    private bool TryReadVideoStream(long start, long end, out string codec, out uint scale, out uint rate)
     {
         codec = "????";
+        scale = 0;
+        rate = 0;
         bool isVideo = false;
         Span<byte> bitmapInfo = stackalloc byte[20];
+        Span<byte> streamHeader = stackalloc byte[28];
 
         long pos = start;
         while (pos + 8 <= end)
@@ -189,9 +204,13 @@ public sealed class AviDemuxer : IDemuxer
             _stream.Position = pos;
             var (id, size) = ReadChunkHeader(_stream);
 
-            if (id == "strh" && size >= 4)
+            if (id == "strh" && size >= 28)
             {
-                isVideo = ReadFourCC(_stream) == "vids";
+                // AVISTREAMHEADER: fccType at 0, dwScale at 20, dwRate at 24.
+                _stream.ReadExactly(streamHeader);
+                isVideo = streamHeader[..4].SequenceEqual("vids"u8);
+                scale = BinaryPrimitives.ReadUInt32LittleEndian(streamHeader[20..]);
+                rate = BinaryPrimitives.ReadUInt32LittleEndian(streamHeader[24..]);
             }
             else if (id == "strf" && isVideo && size >= 20)
             {
@@ -205,6 +224,13 @@ public sealed class AviDemuxer : IDemuxer
 
         return isVideo;
     }
+
+    private static string NormalizeCodec(string fourCC) => fourCC.ToUpperInvariant() switch
+    {
+        "MJPG" => CodecIds.Mjpeg,
+        "H264" or "X264" or "AVC1" => CodecIds.H264,
+        _ => fourCC,
+    };
 
     // RIFF chunks are padded to an even number of bytes.
     private static long NextChunk(long chunkStart, uint size) => chunkStart + 8 + size + (size & 1);
@@ -228,6 +254,10 @@ public sealed class AviDemuxer : IDemuxer
         public uint MicrosecondsPerFrame { get; set; }
 
         public uint TotalFrames { get; set; }
+
+        public uint Scale { get; set; }
+
+        public uint Rate { get; set; }
 
         public int Width { get; set; }
 

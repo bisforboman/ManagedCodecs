@@ -75,14 +75,7 @@ internal sealed partial class PictureDecoder
             }
             else
             {
-                for (int edge = 1; edge < 4; edge++)
-                {
-                    for (int k = 0; k < 4; k++)
-                    {
-                        vertical[(edge * 4) + k] = (byte)BoundaryStrength(mbAddr, (k * 4) + edge - 1, mbAddr, (k * 4) + edge, mbEdge: false);
-                        horizontal[(edge * 4) + k] = (byte)BoundaryStrength(mbAddr, ((edge - 1) * 4) + k, mbAddr, (edge * 4) + k, mbEdge: false);
-                    }
-                }
+                InternalStrengths(mbAddr, vertical, horizontal);
             }
 
             var (lumaOrigin, chromaOrigin) = Origins(mbAddr);
@@ -149,6 +142,43 @@ internal sealed partial class PictureDecoder
     }
 
     /// <summary>
+    /// bS of the internal edges (1..3) of an inter macroblock: <see cref="BoundaryStrength"/> with
+    /// both blocks in the same macroblock, so neither is intra and one reference list applies.
+    /// </summary>
+    private void InternalStrengths(int mbAddr, Span<byte> vertical, Span<byte> horizontal)
+    {
+        var coefficients = _totalCoeffLuma.AsSpan(mbAddr * 16, 16);
+        var mvX = _mvX.AsSpan(mbAddr * 16, 16);
+        var mvY = _mvY.AsSpan(mbAddr * 16, 16);
+        var refs = _refPic.AsSpan(mbAddr * 4, 4);
+
+        int Strength(int p, int q, Span<byte> coefficients, Span<short> mvX, Span<short> mvY, Span<Picture?> refs)
+        {
+            if ((coefficients[p] | coefficients[q]) != 0)
+            {
+                return 2;
+            }
+
+            // The 8x8 partition of 4x4 block b is (b >> 3) * 2 + ((b & 3) >> 1).
+            if (refs[((p >> 3) * 2) + ((p & 3) >> 1)] != refs[((q >> 3) * 2) + ((q & 3) >> 1)])
+            {
+                return 1;
+            }
+
+            return Math.Abs(mvX[p] - mvX[q]) >= 4 || Math.Abs(mvY[p] - mvY[q]) >= 4 ? 1 : 0;
+        }
+
+        for (int edge = 1; edge < 4; edge++)
+        {
+            for (int k = 0; k < 4; k++)
+            {
+                vertical[(edge * 4) + k] = (byte)Strength((k * 4) + edge - 1, (k * 4) + edge, coefficients, mvX, mvY, refs);
+                horizontal[(edge * 4) + k] = (byte)Strength(((edge - 1) * 4) + k, (edge * 4) + k, coefficients, mvX, mvY, refs);
+            }
+        }
+    }
+
+    /// <summary>
     /// True when every internal edge of an inter macroblock has bS 0: no luma coefficients and
     /// the same reference picture and motion vector in all 16 blocks (P_Skip, uncoded 16x16).
     /// </summary>
@@ -210,10 +240,10 @@ internal sealed partial class PictureDecoder
     /// <summary>The filter of 8.7.2.3 / 8.7.2.4 sample by sample; the reference for the vector version.</summary>
     private static void FilterEdgeScalar(byte[] plane, int q0, int across, int along, int length, ReadOnlySpan<byte> strengths, int indexA, int alpha, int beta, bool chroma)
     {
-        int samplesPerSegment = chroma ? 2 : 4;
+        int segmentShift = chroma ? 1 : 2; // 2 or 4 samples per segment
         for (int i = 0; i < length; i++)
         {
-            int bS = strengths[i / samplesPerSegment];
+            int bS = strengths[i >> segmentShift];
             if (bS == 0)
             {
                 continue;
@@ -314,14 +344,20 @@ internal sealed partial class PictureDecoder
         int lastTap = chroma ? 5 : 7;
         Gather(plane, q0, across, along, length, taps, firstTap, lastTap);
 
-        int samplesPerSegment = chroma ? 2 : 4;
+        int segmentShift = chroma ? 1 : 2; // 2 or 4 samples per segment
+        Span<short> tc0OfSegment = stackalloc short[4];
+        for (int s = 0; s < 4; s++)
+        {
+            int bS = strengths[s];
+            tc0OfSegment[s] = bS is > 0 and < 4 ? Tc0[(indexA * 3) + bS - 1] : (short)0;
+        }
+
         Span<short> bsLanes = stackalloc short[16];
         Span<short> tc0Lanes = stackalloc short[16];
         for (int i = 0; i < length; i++)
         {
-            int bS = strengths[i / samplesPerSegment];
-            bsLanes[i] = (short)bS;
-            tc0Lanes[i] = bS is > 0 and < 4 ? Tc0[(indexA * 3) + bS - 1] : (short)0;
+            bsLanes[i] = strengths[i >> segmentShift];
+            tc0Lanes[i] = tc0OfSegment[i >> segmentShift];
         }
 
         var alphaV = Vector128.Create((short)alpha);

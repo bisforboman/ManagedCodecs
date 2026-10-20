@@ -16,6 +16,7 @@ then the same approach for H.264 + AAC in MP4.
 | `src/Shared` | Source files linked into several codec projects (the VLC decoder) |
 | `tools/ManagedCodecs.Cli` | `mcdec`: decodes a file and times it, to compare with `ffmpeg -benchmark` |
 | `tools/make-samples.sh` | Generates the test samples and FFmpeg's references |
+| `tools/compare.sh` | Times mcdec and FFmpeg on the same file |
 | `tests/ManagedCodecs.Tests` | Unit tests and FFmpeg conformance tests (framemd5 for frames and packets) |
 | `benchmarks/ManagedCodecs.Benchmarks` | BenchmarkDotNet decode benchmark |
 
@@ -37,29 +38,40 @@ the same steps on every pull request.
 ## Benchmarking
 
 `mcdec` (`tools/ManagedCodecs.Cli`) takes the same file as FFmpeg, decodes every stream it has a decoder for, and
-prints FFmpeg's `bench:` line:
+prints FFmpeg's `bench:` line. `tools/compare.sh` runs both on one file, the same number of times, and prints each
+one's wall time per frame:
 
 ```
-f=samples/h264-bench-720p.mp4    # any sample, or a file of your own
+tools/compare.sh samples/h264-bench-720p.mp4 10    # any sample, or a file of your own; 10 loops
+```
+
+which comes down to these two commands on the same `$f`:
+
+```
 dotnet run -c Release --project tools/ManagedCodecs.Cli -- $f --loops 10
 ffmpeg -benchmark -threads 1 -stream_loop 9 -i $f -f null -
 ```
 
-Both lines time the whole process, demuxing included; mcdec's also includes .NET's startup and JIT, and its
-`last loop` line shows the steady speed per frame. For statistics on the bundled samples there is
-BenchmarkDotNet: `dotnet run -c Release --project benchmarks/ManagedCodecs.Benchmarks` (`--filter *H264*` or
-`*Aac*` for one codec). A snapshot (2026-10-20, single-threaded on an AVX2 Xeon cloud VM; µs per frame, audio
-frames are 1024 samples):
+Both time the whole process, demuxing included; mcdec's also includes .NET's startup and JIT (mcdec's `last loop`
+line shows the steady speed without them). A snapshot, made that way (2026-10-20, FFmpeg 6.1, single-threaded on a
+4-core AVX2 Xeon cloud VM, median of three runs; µs per frame, audio frames are 1024 samples):
 
-| Sample | ManagedCodecs | FFmpeg 6.1 |
-| --- | ---: | ---: |
-| `testsrc-420` (320x240 4:2:0) | 198 | 292 |
-| `testsrc-444` | 315 | 377 |
-| `noise-q1` (noise, highest quality) | 773 | 1157 |
-| `h264-p-refs` (320x240 H.264, P frames) | 632 | 154 |
-| `h264-bench-720p` (1280x720 H.264) | 8166 | 2290 |
-| `aac-stereo-48k` (AAC, stereo) | 85 | 25 |
-| `aac-5.1` (AAC, 5.1) | 290 | 67 |
+| Sample | Loops | ManagedCodecs | FFmpeg |
+| --- | ---: | ---: | ---: |
+| `testsrc-420.avi` (320x240 MJPEG 4:2:0) | 100 | 343 | 386 |
+| `testsrc-444.avi` (MJPEG 4:4:4) | 100 | 512 | 526 |
+| `noise-q1.avi` (MJPEG, noise at the highest quality) | 100 | 1133 | 1332 |
+| `h264-p-refs.mp4` (320x240 H.264, P frames) | 40 | 804 | 232 |
+| `h264-bench-720p.mp4` (1280x720 H.264) | 10 | 11372 | 2456 |
+| `aac-stereo-48k.mp4` (AAC, stereo) | 100 | 58 | 65 |
+| `aac-5.1.mp4` (AAC, 5.1) | 100 | 205 | 85 |
+
+Cloud VMs are noisy (single runs differed by up to a third), so compare before and after on one machine. For
+statistics on the decoder alone there is BenchmarkDotNet, `dotnet run -c Release --project
+benchmarks/ManagedCodecs.Benchmarks` (`--filter *H264*` or `*Aac*` for one codec). It decodes packets already read
+into memory, from `samples/testsrc-420.avi`, `samples/h264-bench-720p.mp4` and `samples/aac-5.1.mp4` (or the files
+in `MANAGEDCODECS_SAMPLE`, `MANAGEDCODECS_H264_SAMPLE` and `MANAGEDCODECS_AAC_SAMPLE`), so its numbers leave out
+what the two commands above include and are not comparable with FFmpeg's `bench:` line.
 
 ## Roadmap
 

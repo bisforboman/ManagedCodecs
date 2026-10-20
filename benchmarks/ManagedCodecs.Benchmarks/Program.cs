@@ -10,7 +10,7 @@ using ManagedCodecs.Mjpeg;
 // Sample files: MANAGEDCODECS_SAMPLE (MJPEG, default samples/testsrc-420.avi),
 // MANAGEDCODECS_H264_SAMPLE (default samples/h264-bench-720p.mp4) and
 // MANAGEDCODECS_AAC_SAMPLE (default samples/aac-5.1.mp4).
-// Compare with FFmpeg: ffmpeg -benchmark -threads 1 -i <sample> -f null -
+// Decodes packets already in memory; to compare with FFmpeg on the same file, see tools/compare.sh (README, Benchmarking).
 BenchmarkSwitcher.FromAssembly(typeof(MjpegDecodeBenchmark).Assembly).Run(args);
 
 [MemoryDiagnoser]

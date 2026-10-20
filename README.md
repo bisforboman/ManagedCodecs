@@ -8,10 +8,10 @@ then the same approach for H.264 + AAC in MP4.
 
 | Project | What it holds |
 | --- | --- |
-| `src/ManagedCodecs.Core` | `VideoFrame`, `PixelFormat`, `Packet`, `IDemuxer`, `IVideoDecoder` |
-| `src/ManagedCodecs.Containers` | `AviDemuxer` (MP4 to come) |
+| `src/ManagedCodecs.Core` | `VideoFrame`, `PixelFormat`, `Packet`, `Rational`, `IDemuxer`, `IVideoDecoder` |
+| `src/ManagedCodecs.Containers` | `AviDemuxer`, `Mp4Demuxer`, and `Demuxer.Open` to pick one by content |
 | `src/ManagedCodecs.Mjpeg` | `MjpegDecoder`: baseline/extended Huffman JPEG, bit-exact with FFmpeg |
-| `tests/ManagedCodecs.Tests` | Unit tests and FFmpeg conformance tests (framemd5) |
+| `tests/ManagedCodecs.Tests` | Unit tests and FFmpeg conformance tests (framemd5 for frames and packets) |
 | `benchmarks/ManagedCodecs.Benchmarks` | BenchmarkDotNet decode benchmark |
 
 ## Getting started
@@ -51,7 +51,8 @@ AVX2 Xeon cloud VM (µs per frame):
 2. SIMD: `Span`, `Vector128`/`Vector256` IDCT and colour paths; measure the ratio to FFmpeg.
    Done so far: AVX2 IDCT, DC-only blocks, single-lookup coefficient decoding, buffer reuse.
    Still open: an ARM64 (AdvSimd) IDCT, decoding straight into the output frame
-3. MP4 demuxer (ISO BMFF: `moov`, `trak`, `stbl` sample tables)
+3. ~~MP4 demuxer (ISO BMFF: `moov`, `trak`, `stbl` sample tables)~~ done: packets, timestamps and
+   codec private data match FFmpeg. Still open: fragmented MP4, multi-edit edit lists, audio tracks
 4. H.264 decoder, starting with Constrained Baseline (CAVLC, I/P frames)
 5. AAC-LC decoder
 

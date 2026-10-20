@@ -1,42 +1,28 @@
-using ManagedCodecs.Containers.Avi;
+using ManagedCodecs.Containers;
 using ManagedCodecs.Mjpeg;
 
 namespace ManagedCodecs.Tests.Mjpeg;
 
 /// <summary>
-/// Decodes every samples/*.avi and compares each frame's MD5 with the matching
-/// samples/*.framemd5 produced by FFmpeg. See samples/README.md for how to generate them.
+/// Decodes every MJPEG sample (samples/*.avi and *.mp4) and compares each frame's MD5 and pts
+/// with the matching samples/*.framemd5 produced by FFmpeg. See samples/README.md.
 /// </summary>
 public class MjpegConformanceTests
 {
     public static TheoryData<string> Samples() => new(SampleNames());
 
-    private static IEnumerable<string> SampleNames()
-    {
-        var dir = FindSamplesDirectory();
-        if (dir is null)
-        {
-            yield break;
-        }
-
-        foreach (var avi in Directory.EnumerateFiles(dir, "*.avi").Order())
-        {
-            if (File.Exists(Path.ChangeExtension(avi, ".framemd5")))
-            {
-                yield return Path.GetFileName(avi);
-            }
-        }
-    }
+    private static IEnumerable<string> SampleNames() =>
+        TestSamples.WithReference(".framemd5").Where(name => TestSamples.CodecOf(name) == CodecIds.Mjpeg);
 
     [Theory]
     [MemberData(nameof(Samples))]
     public void MatchesFfmpegFrameByFrame(string sampleName)
     {
-        var dir = FindSamplesDirectory()!;
-        var avi = Path.Combine(dir, sampleName);
-        var expected = FrameMd5.Parse(File.ReadLines(Path.ChangeExtension(avi, ".framemd5")));
+        var lines = File.ReadAllLines(TestSamples.ReferenceOf(sampleName, ".framemd5"));
+        var expected = FrameMd5.Parse(lines);
+        var timeBase = FrameMd5.ParseTimeBase(lines); // FFmpeg's decoded output may use another time base
 
-        using var demuxer = AviDemuxer.Open(avi);
+        using var demuxer = Demuxer.Open(TestSamples.PathOf(sampleName));
         var decoder = new MjpegDecoder();
 
         int index = 0;
@@ -45,6 +31,9 @@ public class MjpegConformanceTests
             var frame = decoder.Decode(packet.Data.Span);
             Assert.True(index < expected.Count, $"More frames than the reference ({expected.Count}).");
             Assert.True(expected[index].Md5 == FrameMd5.Hash(frame), $"Frame {index} differs from FFmpeg.");
+            Assert.True(
+                FrameMd5.SameTime(expected[index].Pts, timeBase, packet.Pts, demuxer.Video.TimeBase),
+                $"Frame {index}: pts {packet.Pts} ({demuxer.Video.TimeBase}) is not FFmpeg's {expected[index].Pts} ({timeBase}).");
             index++;
         }
 
@@ -62,11 +51,9 @@ public class MjpegConformanceTests
     [MemberData(nameof(StandardHuffmanSamples))]
     public void MatchesFfmpegWithoutDht(string sampleName)
     {
-        var dir = FindSamplesDirectory()!;
-        var avi = Path.Combine(dir, sampleName);
-        var expected = FrameMd5.Parse(File.ReadLines(Path.ChangeExtension(avi, ".framemd5")));
+        var expected = FrameMd5.Parse(File.ReadLines(TestSamples.ReferenceOf(sampleName, ".framemd5")));
 
-        using var demuxer = AviDemuxer.Open(avi);
+        using var demuxer = Demuxer.Open(TestSamples.PathOf(sampleName));
         var decoder = new MjpegDecoder();
 
         int index = 0;
@@ -101,19 +88,5 @@ public class MjpegConformanceTests
 
         output.AddRange(jpeg[copied..]);
         return [.. output];
-    }
-
-    private static string? FindSamplesDirectory()
-    {
-        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
-        {
-            var candidate = Path.Combine(dir.FullName, "samples");
-            if (Directory.Exists(candidate) && File.Exists(Path.Combine(dir.FullName, "ManagedCodecs.slnx")))
-            {
-                return candidate;
-            }
-        }
-
-        return null;
     }
 }

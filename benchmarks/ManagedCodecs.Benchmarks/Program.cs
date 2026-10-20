@@ -1,6 +1,6 @@
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Running;
-using ManagedCodecs.Containers.Avi;
+using ManagedCodecs.Containers;
 using ManagedCodecs.Mjpeg;
 
 // Run in Release: dotnet run -c Release --project benchmarks/ManagedCodecs.Benchmarks
@@ -20,7 +20,7 @@ public class MjpegDecodeBenchmark
         var path = Environment.GetEnvironmentVariable("MANAGEDCODECS_SAMPLE")
             ?? Path.Combine(FindRepositoryRoot(), "samples", "testsrc-420.avi");
 
-        using var demuxer = AviDemuxer.Open(Path.GetFullPath(path));
+        using var demuxer = Demuxer.Open(Path.GetFullPath(path));
         _packets = demuxer.ReadPackets().Select(p => p.Data.ToArray()).ToArray();
     }
 

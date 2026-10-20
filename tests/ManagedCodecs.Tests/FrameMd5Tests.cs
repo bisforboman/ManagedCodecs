@@ -18,8 +18,23 @@ public class FrameMd5Tests
         var entries = FrameMd5.Parse(lines);
 
         Assert.Equal(2, entries.Count);
-        Assert.Equal(new FrameMd5Entry(0, 0, 115200, "9e0f8a3b1c2d4e5f60718293a4b5c6d7"), entries[0]);
+        Assert.Equal(new FrameMd5Entry(0, 0, 0, 1, 115200, "9e0f8a3b1c2d4e5f60718293a4b5c6d7"), entries[0]);
         Assert.Equal(1L, entries[1].Pts);
+    }
+
+    [Fact]
+    public void ParseExtradata_ReadsHeaderLine()
+    {
+        string[] lines =
+        [
+            "#format: frame checksums",
+            "#extradata 0,                              46, 8CB85D22C5BABB0D597CD76F06BD3B8F",
+            "0,      -1024,          0,      512,     4932, 8e9b82f671e4da149eb08b2988f15c7a",
+        ];
+
+        Assert.Equal((46, "8cb85d22c5babb0d597cd76f06bd3b8f"), FrameMd5.ParseExtradata(lines));
+        Assert.Null(FrameMd5.ParseExtradata(lines, streamIndex: 1));
+        Assert.Equal(-1024L, FrameMd5.Parse(lines)[0].Dts);
     }
 
     [Fact]

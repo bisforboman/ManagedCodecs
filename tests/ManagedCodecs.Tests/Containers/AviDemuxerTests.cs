@@ -16,6 +16,7 @@ public class AviDemuxerTests
         Assert.Equal(16, demuxer.Video.Height);
         Assert.Equal(25.0, demuxer.Video.FramesPerSecond, precision: 6);
         Assert.Equal(2, demuxer.Video.FrameCount);
+        Assert.Equal(new Rational(1, 25), demuxer.Video.TimeBase);
 
         var packets = demuxer.ReadPackets().ToList();
 
@@ -23,6 +24,7 @@ public class AviDemuxerTests
         Assert.Equal(new byte[] { 1, 2, 3 }, packets[0].Data.ToArray());          // odd size: padding skipped
         Assert.Equal(new byte[] { 4, 5, 6, 7 }, packets[1].Data.ToArray());       // inside a 'rec ' list
         Assert.Equal(new long[] { 0, 1 }, packets.Select(p => p.Sequence).ToArray());
+        Assert.Equal(new long[] { 0, 1 }, packets.Select(p => p.Pts).ToArray());
     }
 
     [Fact]
@@ -44,6 +46,8 @@ public class AviDemuxerTests
 
         var videoStrh = new byte[56];
         Encoding.ASCII.GetBytes("vidsMJPG").CopyTo(videoStrh, 0);
+        BinaryPrimitives.WriteUInt32LittleEndian(videoStrh.AsSpan(20), 2);  // dwScale
+        BinaryPrimitives.WriteUInt32LittleEndian(videoStrh.AsSpan(24), 50); // dwRate: 2/50 = 1/25
 
         var videoStrf = new byte[40];
         BinaryPrimitives.WriteUInt32LittleEndian(videoStrf.AsSpan(0), 40);

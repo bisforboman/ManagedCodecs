@@ -35,13 +35,29 @@ magick gray-frames/f*.png -colorspace Gray -type Grayscale -quality 90 gray-fram
 ffmpeg -framerate 25 -i gray-frames/f%02d.jpg -c:v copy samples/gray.avi
 ```
 
-Then write the reference hashes for every sample:
+MP4 samples. The MJPEG remux is decoded end to end; the others check the demuxer packet by
+packet (H.264 with B-frames needs the edit list right, MPEG-4 Part 2 carries its codec private
+data in `esds`, faststart puts `moov` before `mdat`, and the delayed one starts with an empty edit):
+
+```
+ffmpeg -i samples/testsrc-420.avi -c copy samples/mjpeg-420.mp4
+ffmpeg -f lavfi -i testsrc2=size=320x240:rate=25 -t 2 -c:v libx264 -bf 2 -g 12 samples/h264-bframes.mp4
+ffmpeg -f lavfi -i testsrc2=size=320x240:rate=30000/1001 -t 2 -c:v libx264 -bf 0 -movflags +faststart samples/h264-faststart.mp4
+ffmpeg -f lavfi -i testsrc2=size=320x240:rate=25 -t 1 -c:v mpeg4 -bf 2 samples/mpeg4-bframes.mp4
+ffmpeg -f lavfi -i testsrc2=size=320x240:rate=25 -t 1 -c:v libx264 -bf 0 -output_ts_offset 0.4 samples/h264-delayed.mp4
+```
+
+Then write the reference hashes for every sample. `name.framemd5` hashes decoded frames;
+`name.packets.framemd5` hashes the demuxed packets. `-copyts` keeps FFmpeg from moving the
+timestamps to start at zero, so they are the demuxer's own:
 
 ```
 # bash
-for f in samples/*.avi; do ffmpeg -i "$f" -f framemd5 "${f%.avi}.framemd5"; done
+for f in samples/*.avi samples/mjpeg-*.mp4; do ffmpeg -i "$f" -f framemd5 "${f%.*}.framemd5"; done
+for f in samples/*.mp4; do ffmpeg -copyts -i "$f" -c copy -f framemd5 "${f%.mp4}.packets.framemd5"; done
 # PowerShell
-Get-ChildItem samples/*.avi | ForEach-Object { ffmpeg -i $_ -f framemd5 ($_.FullName -replace '\.avi$', '.framemd5') }
+Get-ChildItem samples/*.avi, samples/mjpeg-*.mp4 | ForEach-Object { ffmpeg -i $_ -f framemd5 ($_.FullName -replace '\.\w+$', '.framemd5') }
+Get-ChildItem samples/*.mp4 | ForEach-Object { ffmpeg -copyts -i $_ -c copy -f framemd5 ($_.FullName -replace '\.mp4$', '.packets.framemd5') }
 ```
 
 (ImageMagick 6 calls the command `convert` instead of `magick`.)

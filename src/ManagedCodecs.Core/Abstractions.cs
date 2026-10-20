@@ -99,10 +99,22 @@ public interface IDemuxer : IDisposable
     IEnumerable<Packet> ReadPackets();
 }
 
-/// <summary>Turns one compressed packet into one decoded frame.</summary>
+/// <summary>
+/// Turns compressed packets, given in decode order, into frames in display order. A codec with
+/// frame reordering (H.264 with B frames) holds frames back until every frame that is shown
+/// before them has been decoded, so one packet can give no frame or several.
+/// </summary>
 public interface IVideoDecoder
 {
-    VideoFrame Decode(ReadOnlySpan<byte> packet);
+    /// <summary>
+    /// Decodes one packet and returns the frames that are now ready to be shown, in display
+    /// order. Each frame's <see cref="VideoFrame.Pts"/> is the <see cref="Packet.Pts"/> of the
+    /// packet it was coded in.
+    /// </summary>
+    IReadOnlyList<VideoFrame> Decode(Packet packet);
+
+    /// <summary>At the end of the stream: returns the frames still held back, in display order.</summary>
+    IReadOnlyList<VideoFrame> Flush();
 }
 
 /// <summary>Turns one compressed packet into one block of audio samples.</summary>

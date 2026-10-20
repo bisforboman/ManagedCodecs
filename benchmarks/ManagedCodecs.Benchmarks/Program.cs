@@ -61,7 +61,7 @@ public class MjpegDecodeBenchmark
 [MemoryDiagnoser]
 public class H264DecodeBenchmark
 {
-    private byte[][] _packets = [];
+    private Packet[] _packets = [];
     private VideoStreamInfo? _stream;
 
     [GlobalSetup]
@@ -72,20 +72,20 @@ public class H264DecodeBenchmark
 
         using var demuxer = Demuxer.Open(Path.GetFullPath(path));
         _stream = demuxer.Video!;
-        _packets = demuxer.ReadPackets().Where(p => p.StreamIndex == _stream.StreamIndex).Select(p => p.Data.ToArray()).ToArray();
+        _packets = demuxer.ReadPackets().Where(p => p.StreamIndex == _stream.StreamIndex).Select(p => p with { Data = p.Data.ToArray() }).ToArray();
     }
 
     [Benchmark]
     public int DecodeAllFrames()
     {
         var decoder = new H264Decoder(_stream!);
-        int pixels = 0;
+        int frames = 0;
         foreach (var packet in _packets)
         {
-            pixels += decoder.Decode(packet).Width;
+            frames += decoder.Decode(packet).Count;
         }
 
-        return pixels;
+        return frames + decoder.Flush().Count;
     }
 }
 

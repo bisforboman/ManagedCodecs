@@ -35,6 +35,33 @@ The conformance tests compare every decoded frame, packet and audio sample with 
 `samples/README.md`) and fail if `samples/` is empty, which is intentional. CI (`.github/workflows/ci.yml`) runs
 the same steps on every pull request.
 
+## Decoding a file
+
+Packets go in in decode order; frames come out in display order, each with the `Pts` of its packet. A decoder may
+hold frames back while later packets can still be shown before them (H.264 frame reordering), so `Decode` returns
+zero or more frames and `Flush` returns the rest:
+
+```csharp
+using var demuxer = Demuxer.Open("video.mp4");
+var video = demuxer.Video!;
+IVideoDecoder decoder = video.Codec == CodecIds.H264 ? new H264Decoder(video) : new MjpegDecoder();
+
+foreach (var packet in demuxer.ReadPackets().Where(p => p.StreamIndex == video.StreamIndex))
+{
+    foreach (var frame in decoder.Decode(packet))
+    {
+        Show(frame); // frame.Pts is in video.TimeBase
+    }
+}
+
+foreach (var frame in decoder.Flush())
+{
+    Show(frame);
+}
+```
+
+`AacDecoder.Decode` takes a packet's data and returns one `AudioFrame` (1024 samples per channel).
+
 ## Benchmarking
 
 `mcdec` (`tools/ManagedCodecs.Cli`) takes the same file as FFmpeg, decodes every stream it has a decoder for, and
@@ -81,7 +108,7 @@ what the two commands above include and are not comparable with FFmpeg's `bench:
    Done so far: AVX2 IDCT, DC-only blocks, single-lookup coefficient decoding, buffer reuse.
    Still open: an ARM64 (AdvSimd) IDCT, decoding straight into the output frame
 3. ~~MP4 demuxer (ISO BMFF: `moov`, `trak`, `stbl` sample tables)~~ done: packets, timestamps and
-   codec private data match FFmpeg. Still open: fragmented MP4, multi-edit edit lists, audio tracks
+   codec private data match FFmpeg, for video and audio tracks. Still open: fragmented MP4, multi-edit edit lists
 4. ~~H.264 decoder, starting with Constrained Baseline (CAVLC, I/P frames)~~ done: bit-exact with
    FFmpeg on libx264 samples covering intra and inter prediction, all partitions, multiple
    references and slices, cropping and constrained intra. Still open: CABAC / Main profile with

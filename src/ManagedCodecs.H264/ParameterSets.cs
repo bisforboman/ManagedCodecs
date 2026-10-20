@@ -45,6 +45,12 @@ internal sealed class SequenceParameterSet
 
     public bool Direct8x8Inference { get; internal init; }
 
+    /// <summary>max_num_reorder_frames from the VUI's bitstream restriction, if it has one.</summary>
+    public int? MaxNumReorderFrames { get; internal init; }
+
+    /// <summary>max_dec_frame_buffering from the VUI's bitstream restriction, if it has one.</summary>
+    public int? MaxDecFrameBuffering { get; internal init; }
+
     /// <summary>Crop offsets in luma samples (already scaled by CropUnitX/Y).</summary>
     public (int Left, int Right, int Top, int Bottom) Crop { get; internal init; }
 
@@ -132,7 +138,9 @@ internal sealed class SequenceParameterSet
             crop = ((int)r.ReadUe() * unitX, (int)r.ReadUe() * unitX, (int)r.ReadUe() * unitY, (int)r.ReadUe() * unitY);
         }
 
-        // vui_parameters are not needed for decoding and are left unread.
+        // Of the VUI, only the bitstream restriction matters: it says how far output is reordered.
+        (int Reorder, int Buffering)? restriction = r.ReadFlag() ? ReadVuiBitstreamRestriction(r) : null;
+
         var sps = new SequenceParameterSet
         {
             ProfileIdc = profile,
@@ -157,6 +165,8 @@ internal sealed class SequenceParameterSet
             FrameMbsOnly = frameMbsOnly,
             Direct8x8Inference = direct8x8,
             Crop = crop,
+            MaxNumReorderFrames = restriction?.Reorder,
+            MaxDecFrameBuffering = restriction?.Buffering,
         };
 
         if (sps.Width <= 0 || sps.Height <= 0)
@@ -165,6 +175,89 @@ internal sealed class SequenceParameterSet
         }
 
         return sps;
+    }
+
+    /// <summary>vui_parameters (E.1.1), read up to and including bitstream_restriction; null when absent.</summary>
+    private static (int Reorder, int Buffering)? ReadVuiBitstreamRestriction(BitReader r)
+    {
+        if (r.ReadFlag() && r.ReadBits(8) == 255)
+        {
+            r.ReadBits(32); // aspect_ratio_idc Extended_SAR: sar_width, sar_height
+        }
+
+        if (r.ReadFlag())
+        {
+            r.ReadFlag(); // overscan_appropriate_flag
+        }
+
+        if (r.ReadFlag())
+        {
+            r.ReadBits(4); // video_format, video_full_range_flag
+            if (r.ReadFlag())
+            {
+                r.ReadBits(24); // colour_primaries, transfer_characteristics, matrix_coefficients
+            }
+        }
+
+        if (r.ReadFlag())
+        {
+            r.ReadUe(); // chroma_sample_loc_type_top_field
+            r.ReadUe(); // chroma_sample_loc_type_bottom_field
+        }
+
+        if (r.ReadFlag())
+        {
+            r.ReadBits(32); // num_units_in_tick
+            r.ReadBits(32); // time_scale
+            r.ReadFlag(); // fixed_frame_rate_flag
+        }
+
+        bool nalHrd = r.ReadFlag();
+        if (nalHrd)
+        {
+            SkipHrdParameters(r);
+        }
+
+        bool vclHrd = r.ReadFlag();
+        if (vclHrd)
+        {
+            SkipHrdParameters(r);
+        }
+
+        if (nalHrd || vclHrd)
+        {
+            r.ReadFlag(); // low_delay_hrd_flag
+        }
+
+        r.ReadFlag(); // pic_struct_present_flag
+        if (!r.ReadFlag())
+        {
+            return null;
+        }
+
+        r.ReadFlag(); // motion_vectors_over_pic_boundaries_flag
+        r.ReadUe(); // max_bytes_per_pic_denom
+        r.ReadUe(); // max_bits_per_mb_denom
+        r.ReadUe(); // log2_max_mv_length_horizontal
+        r.ReadUe(); // log2_max_mv_length_vertical
+        int reorder = r.ReadUe(16, "max_num_reorder_frames");
+        int buffering = r.ReadUe(16, "max_dec_frame_buffering");
+        return (reorder, buffering);
+    }
+
+    /// <summary>hrd_parameters (E.1.2).</summary>
+    private static void SkipHrdParameters(BitReader r)
+    {
+        int cpbCount = 1 + r.ReadUe(31, "cpb_cnt_minus1");
+        r.ReadBits(8); // bit_rate_scale, cpb_size_scale
+        for (int i = 0; i < cpbCount; i++)
+        {
+            r.ReadUe(); // bit_rate_value_minus1
+            r.ReadUe(); // cpb_size_value_minus1
+            r.ReadFlag(); // cbr_flag
+        }
+
+        r.ReadBits(20); // initial_cpb_removal_delay_length_minus1 .. time_offset_length
     }
 
     private static void SkipScalingList(BitReader r, int size)

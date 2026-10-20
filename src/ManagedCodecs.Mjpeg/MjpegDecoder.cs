@@ -28,6 +28,18 @@ public sealed class MjpegDecoder : IVideoDecoder
         _acTables[1] = new HuffmanTable(JpegTables.AcChrominanceBits, JpegTables.AcChrominanceValues);
     }
 
+    /// <summary>Decodes one MJPEG packet; every packet is a complete frame, so exactly one comes out.</summary>
+    public IReadOnlyList<VideoFrame> Decode(Packet packet)
+    {
+        var frame = Decode(packet.Data.Span);
+        frame.Pts = packet.Pts;
+        return [frame];
+    }
+
+    /// <summary>MJPEG holds no frames back.</summary>
+    public IReadOnlyList<VideoFrame> Flush() => [];
+
+    /// <summary>Decodes one JPEG image (one MJPEG packet's data).</summary>
     public VideoFrame Decode(ReadOnlySpan<byte> packet)
     {
         var segments = JpegMarkerReader.ReadSegments(packet);

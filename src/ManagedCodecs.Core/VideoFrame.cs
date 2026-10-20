@@ -37,6 +37,12 @@ public sealed class VideoFrame
 
     public int[] Strides { get; }
 
+    /// <summary>
+    /// Presentation timestamp in the stream's time base, from the packet the frame was coded in;
+    /// 0 for frames decoded without one.
+    /// </summary>
+    public long Pts { get; set; }
+
     /// <summary>The visible samples of one row in one plane.</summary>
     public Span<byte> GetRow(int plane, int y)
     {

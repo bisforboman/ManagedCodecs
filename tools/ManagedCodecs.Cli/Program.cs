@@ -60,14 +60,18 @@ for (int loop = 0; loop < loops; loop++)
     {
         if (packet.StreamIndex == video?.StreamIndex && videoDecoder is not null)
         {
-            videoDecoder.Decode(packet.Data.Span);
-            videoFrames++;
+            videoFrames += videoDecoder.Decode(packet).Count;
         }
         else if (packet.StreamIndex == audio?.StreamIndex && audioDecoder is not null)
         {
             audioDecoder.Decode(packet.Data.Span);
             audioFrames++;
         }
+    }
+
+    if (videoDecoder is not null)
+    {
+        videoFrames += videoDecoder.Flush().Count; // frames held back for reordering
     }
 
     lastLoop = wall.Elapsed - loopStart;

@@ -3,6 +3,7 @@
     <Project Path="src/ManagedCodecs.Core/ManagedCodecs.Core.csproj" />
     <Project Path="src/ManagedCodecs.Containers/ManagedCodecs.Containers.csproj" />
     <Project Path="src/ManagedCodecs.Mjpeg/ManagedCodecs.Mjpeg.csproj" />
+    <Project Path="src/ManagedCodecs.H264/ManagedCodecs.H264.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/ManagedCodecs.Tests/ManagedCodecs.Tests.csproj" />

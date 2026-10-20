@@ -65,5 +65,5 @@ public class AacTablesTests
     }
 
     private static double KraftSum(IEnumerable<string> codes) =>
-        codes.Select(c => c.Replace(" ", string.Empty, StringComparison.Ordinal)).Sum(c => Math.Pow(2, -c.Length));
+        codes.Select(c => c.Replace(" ", "", StringComparison.Ordinal)).Sum(c => Math.Pow(2, -c.Length));
 }

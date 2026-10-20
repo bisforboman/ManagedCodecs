@@ -202,10 +202,22 @@ internal static class SimpleIdct
         var dcShortcut = r0 << DcShift;
 
         Butterfly(
-            Avx2.ConvertToVector256Int32(r0) * W4 + Vector256.Create(1 << (RowShift - 1)),
-            r1, r2, r3, r4, r5, r6, r7,
-            out var a0b0, out var a1b1, out var a2b2, out var a3b3,
-            out var a3b3n, out var a2b2n, out var a1b1n, out var a0b0n);
+            (Avx2.ConvertToVector256Int32(r0) * W4) + Vector256.Create(1 << (RowShift - 1)),
+            r1,
+            r2,
+            r3,
+            r4,
+            r5,
+            r6,
+            r7,
+            out var a0b0,
+            out var a1b1,
+            out var a2b2,
+            out var a3b3,
+            out var a3b3n,
+            out var a2b2n,
+            out var a1b1n,
+            out var a0b0n);
 
         r0 = Vector128.ConditionalSelect(dcOnly, dcShortcut, NarrowRow(a0b0));
         r1 = Vector128.ConditionalSelect(dcOnly, dcShortcut, NarrowRow(a1b1));
@@ -221,9 +233,21 @@ internal static class SimpleIdct
 
         Butterfly(
             (Avx2.ConvertToVector256Int32(r0) + Vector256.Create(ColumnRounding)) * W4,
-            r1, r2, r3, r4, r5, r6, r7,
-            out var y0, out var y1, out var y2, out var y3,
-            out var y4, out var y5, out var y6, out var y7);
+            r1,
+            r2,
+            r3,
+            r4,
+            r5,
+            r6,
+            r7,
+            out var y0,
+            out var y1,
+            out var y2,
+            out var y3,
+            out var y4,
+            out var y5,
+            out var y6,
+            out var y7);
 
         ref byte output = ref MemoryMarshal.GetReference(dest);
         StoreRows(ref output, stride, 0, y0, y1);
@@ -239,10 +263,21 @@ internal static class SimpleIdct
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void Butterfly(
         Vector256<int> a,
-        Vector128<short> v1, Vector128<short> v2, Vector128<short> v3, Vector128<short> v4,
-        Vector128<short> v5, Vector128<short> v6, Vector128<short> v7,
-        out Vector256<int> o0, out Vector256<int> o1, out Vector256<int> o2, out Vector256<int> o3,
-        out Vector256<int> o4, out Vector256<int> o5, out Vector256<int> o6, out Vector256<int> o7)
+        Vector128<short> v1,
+        Vector128<short> v2,
+        Vector128<short> v3,
+        Vector128<short> v4,
+        Vector128<short> v5,
+        Vector128<short> v6,
+        Vector128<short> v7,
+        out Vector256<int> o0,
+        out Vector256<int> o1,
+        out Vector256<int> o2,
+        out Vector256<int> o3,
+        out Vector256<int> o4,
+        out Vector256<int> o5,
+        out Vector256<int> o6,
+        out Vector256<int> o7)
     {
         var c1 = Avx2.ConvertToVector256Int32(v1);
         var c2 = Avx2.ConvertToVector256Int32(v2);
@@ -303,8 +338,14 @@ internal static class SimpleIdct
     /// <summary>8x8 transpose of 16-bit values held as eight rows.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void Transpose(
-        ref Vector128<short> r0, ref Vector128<short> r1, ref Vector128<short> r2, ref Vector128<short> r3,
-        ref Vector128<short> r4, ref Vector128<short> r5, ref Vector128<short> r6, ref Vector128<short> r7)
+        ref Vector128<short> r0,
+        ref Vector128<short> r1,
+        ref Vector128<short> r2,
+        ref Vector128<short> r3,
+        ref Vector128<short> r4,
+        ref Vector128<short> r5,
+        ref Vector128<short> r6,
+        ref Vector128<short> r7)
     {
         var a0 = Sse2.UnpackLow(r0, r1).AsInt32();
         var a1 = Sse2.UnpackHigh(r0, r1).AsInt32();

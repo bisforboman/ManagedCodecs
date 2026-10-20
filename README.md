@@ -27,6 +27,7 @@ Requires the .NET 10 SDK. The tests also need samples made with FFmpeg (with lib
 tools/make-samples.sh    # once; Git Bash or WSL on Windows
 dotnet build
 dotnet test
+git config core.hooksPath .githooks    # once: formats staged C# with StyleBro before each commit
 ```
 
 The conformance tests compare every decoded frame, packet and audio sample with FFmpeg's (see

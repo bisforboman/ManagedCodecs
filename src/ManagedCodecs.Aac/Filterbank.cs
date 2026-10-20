@@ -26,9 +26,7 @@ internal sealed class Filterbank
     private readonly double[] _shortTime = new double[256];
     private int _previousShape;
 
-    /// <summary>
-    /// Turns 1024 spectral coefficients (8 x 128 for short windows) into 1024 output samples.
-    /// </summary>
+    /// <summary>Turns 1024 spectral coefficients (8 x 128 for short windows) into 1024 output samples.</summary>
     public void Synthesize(WindowSequence sequence, int shape, ReadOnlySpan<double> spectrum, Span<float> output)
     {
         double[] longRise = _previousShape == 1 ? KbdLong : SineLong;

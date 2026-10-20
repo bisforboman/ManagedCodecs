@@ -24,19 +24,19 @@ internal static partial class InterPrediction
         Span<byte> copy = stackalloc byte[(WindowStride * WindowStride) + 32]; // slack for 16-byte loads
         ReadOnlySpan<byte> window = copy;
         int ws;
-        int G;
+        int g;
         if (left >= 0 && top >= 0 && left + width + 4 <= maxX && top + height + 4 <= maxY
             && ((top + height + 5) * stride) + left + 16 <= reference.Y.Length)
         {
             window = reference.Y;
             ws = stride;
-            G = ((top + 2) * stride) + left + 2;
+            g = ((top + 2) * stride) + left + 2;
         }
         else
         {
             FetchWindow(reference.Y, stride, maxX, maxY, left, top, width + 5, height + 5, copy);
             ws = WindowStride;
-            G = (2 * WindowStride) + 2; // G of output (0, 0) sits at window (2, 2)
+            g = (2 * WindowStride) + 2; // G of output (0, 0) sits at window (2, 2)
         }
 
         var output = dest.AsSpan((y * stride) + x);
@@ -45,7 +45,7 @@ internal static partial class InterPrediction
         {
             for (int j = 0; j < height; j++)
             {
-                window.Slice(G + (j * ws), width).CopyTo(output.Slice(j * stride, width));
+                window.Slice(g + (j * ws), width).CopyTo(output.Slice(j * stride, width));
             }
 
             return;
@@ -58,55 +58,55 @@ internal static partial class InterPrediction
         {
             case (_, 0):
                 // a, b, c: horizontal half sample b, averaged with G or H for the quarter positions.
-                HalfHorizontal(window, ws, G, width, height, first);
+                HalfHorizontal(window, ws, g, width, height, first);
                 if (xFrac == 2)
                 {
                     Store(first, width, height, output, stride);
                 }
                 else
                 {
-                    AverageWithWindow(first, window, ws, G + (xFrac == 3 ? 1 : 0), width, height, output, stride);
+                    AverageWithWindow(first, window, ws, g + (xFrac == 3 ? 1 : 0), width, height, output, stride);
                 }
 
                 break;
 
             case (0, _):
                 // d, h, n: vertical half sample h, averaged with G or M.
-                HalfVertical(window, ws, G, width, height, first);
+                HalfVertical(window, ws, g, width, height, first);
                 if (yFrac == 2)
                 {
                     Store(first, width, height, output, stride);
                 }
                 else
                 {
-                    AverageWithWindow(first, window, ws, G + (yFrac == 3 ? ws : 0), width, height, output, stride);
+                    AverageWithWindow(first, window, ws, g + (yFrac == 3 ? ws : 0), width, height, output, stride);
                 }
 
                 break;
 
             case (2, 2):
-                Center(window, ws, G, width, height, first);
+                Center(window, ws, g, width, height, first);
                 Store(first, width, height, output, stride);
                 break;
 
             case (2, _):
                 // f, q: j averaged with b on this row or the next.
-                Center(window, ws, G, width, height, first);
-                HalfHorizontal(window, ws, G + (yFrac == 3 ? ws : 0), width, height, second);
+                Center(window, ws, g, width, height, first);
+                HalfHorizontal(window, ws, g + (yFrac == 3 ? ws : 0), width, height, second);
                 Average(first, second, width, height, output, stride);
                 break;
 
             case (_, 2):
                 // i, k: j averaged with h in this column or the next.
-                Center(window, ws, G, width, height, first);
-                HalfVertical(window, ws, G + (xFrac == 3 ? 1 : 0), width, height, second);
+                Center(window, ws, g, width, height, first);
+                HalfVertical(window, ws, g + (xFrac == 3 ? 1 : 0), width, height, second);
                 Average(first, second, width, height, output, stride);
                 break;
 
             default:
                 // e, g, p, r: b (this row or next) averaged with h (this column or next).
-                HalfHorizontal(window, ws, G + (yFrac == 3 ? ws : 0), width, height, first);
-                HalfVertical(window, ws, G + (xFrac == 3 ? 1 : 0), width, height, second);
+                HalfHorizontal(window, ws, g + (yFrac == 3 ? ws : 0), width, height, first);
+                HalfVertical(window, ws, g + (xFrac == 3 ? 1 : 0), width, height, second);
                 Average(first, second, width, height, output, stride);
                 break;
         }
@@ -129,6 +129,7 @@ internal static partial class InterPrediction
         ReadOnlySpan<byte> window = copy;
         int windowStride = 9;
         int origin = 0;
+
         // The last row is read as 16 bytes from left + 1 (the right-hand neighbours).
         if (left >= 0 && top >= 0 && left + width <= maxX && top + height <= maxY && ((top + height) * stride) + left + 17 <= plane.Length)
         {

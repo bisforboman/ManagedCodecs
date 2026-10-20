@@ -32,6 +32,11 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
   that it really exercises the feature (the AAC decoder's `Statistics`, `ffmpeg -bsf:v trace_headers` for H.264)
   before relying on it. Encoders often never emit a tool (libx264 Baseline: no ref list modification or MMCO;
   FFmpeg's AAC: no pulse data); cover those with unit tests and say so in the docs.
+- **Code style**: StyleBro (analyzers on build; rules in `.editorconfig`, chosen by `stylebro-migrate init` from this
+  code's own conventions). The pre-commit hook formats the staged .cs files (`git config core.hooksPath .githooks`
+  once per clone); by hand: `dotnet tool run stylebro-migrate format ManagedCodecs.slnx`. CI checks it with
+  `--verify-no-changes`. The tool's version (.config/dotnet-tools.json) and the analyzers' (Directory.Packages.props)
+  move together, by hand while StyleBro is a prerelease. Package versions are central (Directory.Packages.props).
 - **Timing**: `mcdec` (tools/ManagedCodecs.Cli) and `ffmpeg -benchmark -threads 1` on the same file (README,
   Benchmarking). Cloud VMs are noisy: compare before/after on one machine, repeat runs, and don't trust one number.
 

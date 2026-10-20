@@ -88,32 +88,32 @@ internal static class IntraPrediction
                         break;
 
                     case 5: // Vertical_Right
-                    {
-                        Require(n.Top && n.Left && n.TopLeft, mode);
-                        int z = (2 * x) - y;
-                        value = z switch
                         {
-                            >= 0 when (z & 1) == 0 => (T(x - (y >> 1) - 1) + T(x - (y >> 1)) + 1) >> 1,
-                            >= 0 => (T(x - (y >> 1) - 2) + (2 * T(x - (y >> 1) - 1)) + T(x - (y >> 1)) + 2) >> 2,
-                            -1 => (L(0) + (2 * L(-1)) + T(0) + 2) >> 2,
-                            _ => (L(y - 1) + (2 * L(y - 2)) + L(y - 3) + 2) >> 2,
-                        };
-                        break;
-                    }
+                            Require(n.Top && n.Left && n.TopLeft, mode);
+                            int z = (2 * x) - y;
+                            value = z switch
+                            {
+                                >= 0 when (z & 1) == 0 => (T(x - (y >> 1) - 1) + T(x - (y >> 1)) + 1) >> 1,
+                                >= 0 => (T(x - (y >> 1) - 2) + (2 * T(x - (y >> 1) - 1)) + T(x - (y >> 1)) + 2) >> 2,
+                                -1 => (L(0) + (2 * L(-1)) + T(0) + 2) >> 2,
+                                _ => (L(y - 1) + (2 * L(y - 2)) + L(y - 3) + 2) >> 2,
+                            };
+                            break;
+                        }
 
                     case 6: // Horizontal_Down
-                    {
-                        Require(n.Top && n.Left && n.TopLeft, mode);
-                        int z = (2 * y) - x;
-                        value = z switch
                         {
-                            >= 0 when (z & 1) == 0 => (L(y - (x >> 1) - 1) + L(y - (x >> 1)) + 1) >> 1,
-                            >= 0 => (L(y - (x >> 1) - 2) + (2 * L(y - (x >> 1) - 1)) + L(y - (x >> 1)) + 2) >> 2,
-                            -1 => (L(0) + (2 * L(-1)) + T(0) + 2) >> 2,
-                            _ => (T(x - 1) + (2 * T(x - 2)) + T(x - 3) + 2) >> 2,
-                        };
-                        break;
-                    }
+                            Require(n.Top && n.Left && n.TopLeft, mode);
+                            int z = (2 * y) - x;
+                            value = z switch
+                            {
+                                >= 0 when (z & 1) == 0 => (L(y - (x >> 1) - 1) + L(y - (x >> 1)) + 1) >> 1,
+                                >= 0 => (L(y - (x >> 1) - 2) + (2 * L(y - (x >> 1) - 1)) + L(y - (x >> 1)) + 2) >> 2,
+                                -1 => (L(0) + (2 * L(-1)) + T(0) + 2) >> 2,
+                                _ => (T(x - 1) + (2 * T(x - 2)) + T(x - 3) + 2) >> 2,
+                            };
+                            break;
+                        }
 
                     case 7: // Vertical_Left
                         Require(n.Top, mode);
@@ -123,18 +123,18 @@ internal static class IntraPrediction
                         break;
 
                     case 8: // Horizontal_Up
-                    {
-                        Require(n.Left, mode);
-                        int z = x + (2 * y);
-                        value = z switch
                         {
-                            < 5 when (z & 1) == 0 => (L(y + (x >> 1)) + L(y + (x >> 1) + 1) + 1) >> 1,
-                            < 5 => (L(y + (x >> 1)) + (2 * L(y + (x >> 1) + 1)) + L(y + (x >> 1) + 2) + 2) >> 2,
-                            5 => (L(2) + (3 * L(3)) + 2) >> 2,
-                            _ => L(3),
-                        };
-                        break;
-                    }
+                            Require(n.Left, mode);
+                            int z = x + (2 * y);
+                            value = z switch
+                            {
+                                < 5 when (z & 1) == 0 => (L(y + (x >> 1)) + L(y + (x >> 1) + 1) + 1) >> 1,
+                                < 5 => (L(y + (x >> 1)) + (2 * L(y + (x >> 1) + 1)) + L(y + (x >> 1) + 2) + 2) >> 2,
+                                5 => (L(2) + (3 * L(3)) + 2) >> 2,
+                                _ => L(3),
+                            };
+                            break;
+                        }
 
                     default:
                         throw new InvalidDataException($"Invalid Intra4x4 prediction mode {mode}.");
@@ -197,62 +197,62 @@ internal static class IntraPrediction
                 break;
 
             case 2: // DC (16x16 only)
-            {
-                int sumTop = 0;
-                int sumLeft = 0;
-                for (int i = 0; i < 16; i++)
                 {
-                    sumTop += n.Top ? Top(i) : 0;
-                    sumLeft += n.Left ? Left(i) : 0;
+                    int sumTop = 0;
+                    int sumLeft = 0;
+                    for (int i = 0; i < 16; i++)
+                    {
+                        sumTop += n.Top ? Top(i) : 0;
+                        sumLeft += n.Left ? Left(i) : 0;
+                    }
+
+                    int value = (n.Left, n.Top) switch
+                    {
+                        (true, true) => (sumTop + sumLeft + 16) >> 5,
+                        (true, false) => (sumLeft + 8) >> 4,
+                        (false, true) => (sumTop + 8) >> 4,
+                        _ => 128,
+                    };
+
+                    for (int y = 0; y < 16; y++)
+                    {
+                        plane.AsSpan(offset + (y * stride), 16).Fill((byte)value);
+                    }
+
+                    break;
                 }
-
-                int value = (n.Left, n.Top) switch
-                {
-                    (true, true) => (sumTop + sumLeft + 16) >> 5,
-                    (true, false) => (sumLeft + 8) >> 4,
-                    (false, true) => (sumTop + 8) >> 4,
-                    _ => 128,
-                };
-
-                for (int y = 0; y < 16; y++)
-                {
-                    plane.AsSpan(offset + (y * stride), 16).Fill((byte)value);
-                }
-
-                break;
-            }
 
             case 3: // Plane
-            {
-                Require(n.Top && n.Left && n.TopLeft, mode);
-                int half = size / 2;
-                int TopOrCorner(int x) => x < 0 ? Corner() : Top(x);
-                int LeftOrCorner(int y) => y < 0 ? Corner() : Left(y);
-
-                int h = 0;
-                int v = 0;
-                for (int i = 0; i < half; i++)
                 {
-                    h += (i + 1) * (Top(half + i) - TopOrCorner(half - 2 - i));
-                    v += (i + 1) * (Left(half + i) - LeftOrCorner(half - 2 - i));
-                }
+                    Require(n.Top && n.Left && n.TopLeft, mode);
+                    int half = size / 2;
+                    int TopOrCorner(int x) => x < 0 ? Corner() : Top(x);
+                    int LeftOrCorner(int y) => y < 0 ? Corner() : Left(y);
 
-                int a = 16 * (Left(size - 1) + Top(size - 1));
-                int b = isChroma ? ((34 * h) + 32) >> 6 : ((5 * h) + 32) >> 6;
-                int c = isChroma ? ((34 * v) + 32) >> 6 : ((5 * v) + 32) >> 6;
-                int center = half - 1;
-
-                for (int y = 0; y < size; y++)
-                {
-                    for (int x = 0; x < size; x++)
+                    int h = 0;
+                    int v = 0;
+                    for (int i = 0; i < half; i++)
                     {
-                        int value = (a + (b * (x - center)) + (c * (y - center)) + 16) >> 5;
-                        plane[offset + (y * stride) + x] = (byte)Math.Clamp(value, 0, 255);
+                        h += (i + 1) * (Top(half + i) - TopOrCorner(half - 2 - i));
+                        v += (i + 1) * (Left(half + i) - LeftOrCorner(half - 2 - i));
                     }
-                }
 
-                break;
-            }
+                    int a = 16 * (Left(size - 1) + Top(size - 1));
+                    int b = isChroma ? ((34 * h) + 32) >> 6 : ((5 * h) + 32) >> 6;
+                    int c = isChroma ? ((34 * v) + 32) >> 6 : ((5 * v) + 32) >> 6;
+                    int center = half - 1;
+
+                    for (int y = 0; y < size; y++)
+                    {
+                        for (int x = 0; x < size; x++)
+                        {
+                            int value = (a + (b * (x - center)) + (c * (y - center)) + 16) >> 5;
+                            plane[offset + (y * stride) + x] = (byte)Math.Clamp(value, 0, 255);
+                        }
+                    }
+
+                    break;
+                }
 
             default:
                 throw new InvalidDataException($"Invalid Intra16x16 prediction mode {mode}.");

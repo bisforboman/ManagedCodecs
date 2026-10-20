@@ -1,0 +1,22 @@
+#!/bin/sh
+# Before a commit: formats the staged C# files with StyleBro (the tool in .config/dotnet-tools.json), as CI's format
+# check wants them. Turn it on once per clone: git config core.hooksPath .githooks
+files=$(git diff --cached --name-only --diff-filter=ACMR -- '*.cs')
+[ -z "$files" ] && exit 0
+
+# Re-staging a file that also has unstaged changes would commit those too.
+partial=$(git diff --name-only -- $files)
+if [ -n "$partial" ]; then
+  echo "pre-commit: these files have unstaged changes too; stage them whole (or commit with --no-verify):"
+  echo "$partial"
+  exit 1
+fi
+
+dotnet tool restore > /dev/null || exit 1
+if ! dotnet tool run stylebro-migrate format ManagedCodecs.slnx --files $files > /dev/null; then
+  echo "pre-commit: stylebro-migrate format failed; run it yourself to see why:"
+  echo "  dotnet tool run stylebro-migrate format ManagedCodecs.slnx"
+  exit 1
+fi
+
+git add -- $files

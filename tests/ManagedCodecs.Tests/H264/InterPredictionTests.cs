@@ -19,8 +19,8 @@ public class InterPredictionTests
         for (int n = 0; n < 4000; n++)
         {
             var (w, h) = BlockSizes[random.Next(BlockSizes.Length)];
-            int x = random.Next(0, 3) * 16 + (random.Next(0, 16 / w) * w);
-            int y = random.Next(0, 2) * 16 + (random.Next(0, 16 / h) * h);
+            int x = (random.Next(0, 3) * 16) + (random.Next(0, 16 / w) * w);
+            int y = (random.Next(0, 2) * 16) + (random.Next(0, 16 / h) * h);
 
             // Mostly small vectors, sometimes far outside the picture.
             int range = random.Next(4) == 0 ? 400 : 40;

@@ -30,7 +30,7 @@ var wall = Stopwatch.StartNew();
 var lastLoop = TimeSpan.Zero;
 long videoFrames = 0;
 long audioFrames = 0;
-string description = string.Empty;
+string description = "";
 
 for (int loop = 0; loop < loops; loop++)
 {
@@ -51,8 +51,8 @@ for (int loop = 0; loop < loops; loop++)
     {
         description = string.Join(", ", new[]
         {
-            video is null ? null : $"video {video.Codec} {video.Width}x{video.Height}{(videoDecoder is null ? " (no decoder, skipped)" : string.Empty)}",
-            audio is null ? null : $"audio {audio.Codec} {audio.SampleRate} Hz {audio.Channels} ch{(audioDecoder is null ? " (no decoder, skipped)" : string.Empty)}",
+            video is null ? null : $"video {video.Codec} {video.Width}x{video.Height}{(videoDecoder is null ? " (no decoder, skipped)" : "")}",
+            audio is null ? null : $"audio {audio.Codec} {audio.SampleRate} Hz {audio.Channels} ch{(audioDecoder is null ? " (no decoder, skipped)" : "")}",
         }.Where(s => s is not null));
     }
 

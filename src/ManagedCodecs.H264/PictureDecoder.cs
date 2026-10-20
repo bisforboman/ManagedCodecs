@@ -218,7 +218,6 @@ internal sealed partial class PictureDecoder
     }
 
     // ---- Macroblock layer (7.3.5) ----
-
     private void DecodeMacroblock(SliceState slice, BitReader r, int mbAddr)
     {
         int mbType = (int)r.ReadUe();
@@ -275,8 +274,9 @@ internal sealed partial class PictureDecoder
             {
                 var (x, y) = BlockPosition(idx);
                 int mode = PredictIntra4x4Mode(slice, mbAddr, x, y);
-                if (!r.ReadFlag()) // prev_intra4x4_pred_mode_flag
+                if (!r.ReadFlag())
                 {
+                    // prev_intra4x4_pred_mode_flag
                     int remaining = (int)r.ReadBits(3);
                     mode = remaining < mode ? remaining : remaining + 1;
                 }
@@ -516,7 +516,6 @@ internal sealed partial class PictureDecoder
     }
 
     // ---- Reconstruction ----
-
     private void ReconstructIntraLuma(SliceState slice, int mbAddr, Residual residual, bool is16x16, int predMode16x16, int cbpLuma, (bool A, bool B, bool C, bool D) mbs)
     {
         var (origin, _) = Origins(mbAddr);

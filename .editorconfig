@@ -1,0 +1,59 @@
+root = true
+
+# BEGIN stylebro-migrate (stylebro-migrate init: built-in .NET rules for StyleBro's preset; edits inside are replaced)
+[*.cs]
+# Built-in .NET rules that cover StyleCop rules, at the preset's severities. Their options (brace placement, modifier
+# order, ...) come from StyleBro's preset. The severities have to be here: 'dotnet format' ignores rule severities in a
+# package's global config. Add <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild> to report them on build too.
+
+# Braces (SA1503, SA1519, SA1520) are StyleBro's BRO1514-BRO1516: IDE0011's fix breaks multi-targeted projects
+dotnet_diagnostic.IDE0011.severity = none
+# Formatting: spacing, indentation, line breaks (SA1000-SA1028, SA1107, SA1134, SA1137, SA1500)
+dotnet_diagnostic.IDE0055.severity = warning
+# Access modifiers (SA1400, SA1205) are StyleBro's BRO1404/BRO1007: IDE0040's fix breaks multi-targeted projects
+dotnet_diagnostic.IDE0040.severity = none
+# Modifier order: access modifier first, then static (SA1206, SA1207)
+dotnet_diagnostic.IDE0036.severity = warning
+# 'int' instead of 'Int32' (SA1121)
+dotnet_diagnostic.IDE0049.severity = warning
+# Unnecessary parentheses (SA1119) are StyleBro's BRO1405: IDE0047's fix breaks multi-targeted projects
+dotnet_diagnostic.IDE0047.severity = none
+# Parentheses that show precedence (SA1407, SA1408) are StyleBro's BRO1406/BRO1407: IDE0048's fix breaks multi-targeted projects
+dotnet_diagnostic.IDE0048.severity = none
+# Using placement (SA1200) is StyleBro's BRO1008: IDE0065's fix can change what names bind to (CS0104, CS0118)
+dotnet_diagnostic.IDE0065.severity = none
+# Blank lines (SA1507, SA1508, SA1513) are StyleBro's BRO1517-BRO1519: the SDK's fixes break multi-targeted projects
+dotnet_diagnostic.IDE2000.severity = none
+dotnet_diagnostic.IDE2002.severity = none
+dotnet_diagnostic.IDE2003.severity = none
+# 'this.' qualification isn't required (SA1101 is off in the preset)
+dotnet_diagnostic.IDE0009.severity = none
+
+# Conventions in this repository's code (stylebro-migrate init counted them; delete a line to have it counted again)
+# init: private fields: named '_field' in 82 of 82 places in your code
+stylebro_private_field_naming = _camelCase
+# init: empty strings: "" in 30 of 37 places in your code
+stylebro_empty_string_style = literal
+# init: one-line <summary> texts: on one line in 208 of 209 places in your code
+stylebro_summary_layout = single_line_when_fits
+# init: default values: 'default' in 5 of 5 places in your code
+csharp_prefer_simple_default_expression = true
+# init: split lists: your code mixes both forms (19 first item on the next line, 8 first item after '('), so BRO1107 is off. To choose one: set stylebro_split_list_first_item and remove the next line.
+dotnet_diagnostic.BRO1107.severity = none
+# init: 'new T { ... }' with an initializer: your code mixes both forms (5 without '()', 6 with '()'), so BRO1141 is off. To choose one: set stylebro_object_creation_parentheses and remove the next line.
+dotnet_diagnostic.BRO1141.severity = none
+# init: switch sections: your code mixes both forms (36 after a blank line, 29 without a blank line), so BRO1526 is off. To choose one: set stylebro_blank_line_between_switch_sections and remove the next line.
+dotnet_diagnostic.BRO1526.severity = none
+# init: statements on their 'if'/loop/'case' line: on their owner's line in 26 of 191 places in your code (3 are enough to keep them: csharp_preserve_single_line_statements = false would move each to a line of its own)
+csharp_preserve_single_line_statements = true
+# init: types' members: your code mixes both forms (42 in BRO1001's order, 15 in another order), so BRO1001 is off. To choose one: set dotnet_diagnostic.BRO1001.severity and remove the next line.
+dotnet_diagnostic.BRO1001.severity = none
+# init: unsigned literal suffixes: your code mixes both forms (3 upper case ('0U', '1UL'), 4 lower case ('0u', '1ul')), so BRO1135 is off. To choose one: set dotnet_diagnostic.BRO1135.severity and remove the next line.
+dotnet_diagnostic.BRO1135.severity = none
+# init: property summaries: 21 of 21 in your code are in their own words, so BRO1604 is off. To turn it on: remove the next line.
+dotnet_diagnostic.BRO1604.severity = none
+# init: C# files' line endings: LF in 57 of 57 files in your code
+end_of_line = lf
+# init: using directives: 17 of 17 files sorted, 4 of 4 with System first
+dotnet_sort_system_directives_first = true
+# END stylebro-migrate

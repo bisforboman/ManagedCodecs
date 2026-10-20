@@ -1,4 +1,6 @@
 using System.Numerics;
+using System.Runtime.CompilerServices;
+using System.Runtime.Intrinsics;
 
 namespace ManagedCodecs.H264;
 
@@ -19,11 +21,17 @@ internal static class Cavlc
 
     /// <summary>
     /// Parses one residual_block_cavlc into <paramref name="levels"/>, indexed by scan position
-    /// within the block (0..maxNumCoeff-1), and returns TotalCoeff.
+    /// within the block (0..maxNumCoeff-1), and returns TotalCoeff. <paramref name="levels"/> must
+    /// hold 16 values; all 16 are cleared first.
     /// </summary>
+    [SkipLocalsInit]
     public static int ReadResidualBlock(BitReader r, int nC, int maxNumCoeff, Span<int> levels)
     {
-        levels[..maxNumCoeff].Clear();
+        // Four vector stores; Span.Clear's call costs more than the clearing at this size.
+        Vector128<int>.Zero.CopyTo(levels);
+        Vector128<int>.Zero.CopyTo(levels[4..]);
+        Vector128<int>.Zero.CopyTo(levels[8..]);
+        Vector128<int>.Zero.CopyTo(levels[12..]);
 
         var coeffTokenTable = nC switch
         {

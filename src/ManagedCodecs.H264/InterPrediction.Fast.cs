@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics;
 
@@ -9,6 +10,11 @@ internal static partial class InterPrediction
     private const int WindowStride = 16 + 5;
 
     /// <summary>Same output as <see cref="PredictLumaReference"/>.</summary>
+    /// <remarks>
+    /// The scratch buffers are not zeroed: lanes past the block's width may hold anything, and
+    /// only the first <c>width</c> bytes of each row are ever stored.
+    /// </remarks>
+    [SkipLocalsInit]
     public static void PredictLuma(Picture reference, byte[] dest, int stride, int x, int y, int width, int height, int mvX, int mvY)
     {
         int xFrac = mvX & 3;
@@ -45,7 +51,7 @@ internal static partial class InterPrediction
         {
             for (int j = 0; j < height; j++)
             {
-                window.Slice(g + (j * ws), width).CopyTo(output.Slice(j * stride, width));
+                StorePartial(Vector128.Create(window.Slice(g + (j * ws), 16)), output[(j * stride)..], width);
             }
 
             return;
@@ -113,6 +119,7 @@ internal static partial class InterPrediction
     }
 
     /// <summary>Same output as <see cref="PredictChromaReference"/>.</summary>
+    [SkipLocalsInit]
     public static void PredictChroma(Picture reference, int component, byte[] dest, int stride, int x, int y, int width, int height, int mvX, int mvY)
     {
         int xFrac = mvX & 7;
@@ -212,6 +219,7 @@ internal static partial class InterPrediction
     }
 
     /// <summary>j: vertical 6-tap over unrounded horizontal intermediates, Clip1((j1 + 512) >> 10).</summary>
+    [SkipLocalsInit]
     private static void Center(ReadOnlySpan<byte> window, int ws, int origin, int width, int height, Span<byte> output)
     {
         // b1 for rows -2 .. height + 2; it fits in 16 bits (-2550 .. 10710).
@@ -252,7 +260,7 @@ internal static partial class InterPrediction
     {
         for (int j = 0; j < height; j++)
         {
-            values.Slice(j * 16, width).CopyTo(output.Slice(j * stride, width));
+            StorePartial(Vector128.Create(values.Slice(j * 16, 16)), output[(j * stride)..], width);
         }
     }
 

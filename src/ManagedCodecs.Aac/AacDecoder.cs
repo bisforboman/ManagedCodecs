@@ -7,8 +7,8 @@ namespace ManagedCodecs.Aac;
 /// <remarks>
 /// Supports single and channel pair elements, LFE, M/S and intensity stereo, perceptual noise
 /// substitution, TNS, pulse data, long and short windows with sine and KBD shapes, and channel
-/// configurations 0 (program config element) to 7. Output is in the WAVE / FFmpeg channel order
-/// (for 5.1: FL FR FC LFE BL BR). Not supported: other object types (Main, SSR, LTP, HE-AAC),
+/// configurations 0 (program config element, channels in bitstream order) to 7. Output is in the
+/// WAVE / FFmpeg channel order (5.1: FL FR FC LFE BL BR; configuration 7: FL FR FC LFE BL BR SL SR). Not supported: other object types (Main, SSR, LTP, HE-AAC),
 /// coupling channel elements, 960-sample frames. Every packet yields 1024 samples, encoder
 /// priming included; the container's timestamps (negative for priming) and the last packet's
 /// duration say what to trim.
@@ -154,7 +154,9 @@ public sealed class AacDecoder : IAudioDecoder
         4 => [1, 2, 0, 3],                // C, L R, Cs -> FL FR FC BC
         5 => [1, 2, 0, 3, 4],             // C, L R, Ls Rs -> FL FR FC BL BR
         6 => [1, 2, 0, 5, 3, 4],          // C, L R, Ls Rs, LFE -> FL FR FC LFE BL BR
-        7 => [3, 4, 0, 7, 5, 6, 1, 2],    // C, Lc Rc, L R, Ls Rs, LFE -> FL FR FC LFE BL BR FLC FRC
+        // The spec calls configuration 7's second pair "outside front"; FFmpeg reads the pairs as
+        // front, side and back and outputs 7.1, and so do we, so FFmpeg's 7.1 files round-trip.
+        7 => [1, 2, 0, 7, 5, 6, 3, 4],    // C, L R, Ls Rs, Lb Rb, LFE -> FL FR FC LFE BL BR SL SR
         _ => [.. Enumerable.Range(0, channels)],
     };
 

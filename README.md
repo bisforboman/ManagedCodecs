@@ -12,7 +12,7 @@ then the same approach for H.264 + AAC in MP4.
 | `src/ManagedCodecs.Containers` | `AviDemuxer`, `Mp4Demuxer`, and `Demuxer.Open` to pick one by content |
 | `src/ManagedCodecs.Mjpeg` | `MjpegDecoder`: baseline/extended Huffman JPEG, bit-exact with FFmpeg |
 | `src/ManagedCodecs.H264` | `H264Decoder`: Constrained Baseline H.264 (CAVLC, I/P, deblocking), bit-exact |
-| `src/ManagedCodecs.Aac` | `AacDecoder`: AAC LC (mono to 7.1, M/S, intensity, PNS, TNS), within 3e-7 of FFmpeg |
+| `src/ManagedCodecs.Aac` | `AacDecoder`: AAC LC (mono to 7.1, M/S, intensity, PNS, TNS), within 3e-7 of FFmpeg's float output |
 | `src/Shared` | Source files linked into several codec projects (the VLC decoder) |
 | `tests/ManagedCodecs.Tests` | Unit tests and FFmpeg conformance tests (framemd5 for frames and packets) |
 | `benchmarks/ManagedCodecs.Benchmarks` | BenchmarkDotNet decode benchmark |
@@ -66,10 +66,12 @@ AVX2 Xeon cloud VM (µs per frame):
    FFmpeg on libx264 samples covering intra and inter prediction, all partitions, multiple
    references and slices, cropping and constrained intra. Still open: CABAC / Main profile with
    B frames (and output reordering), error concealment, more speed (about 3.6x FFmpeg at 720p)
-5. ~~AAC-LC decoder~~ done: 1 to 8 channels, all window sequences and shapes, M/S, intensity,
-   PNS (including correlated noise), TNS and pulse data. Output matches FFmpeg within 3e-7 (a
-   tolerance test, since both are floating point). Still open: HE-AAC (SBR, PS), ADTS input,
-   trimming priming and padding (the demuxer's timestamps and durations say how much)
+5. ~~AAC-LC decoder~~ done: channel configurations 1 to 7 and program config elements (1 to 8
+   channels), all window sequences and shapes, M/S, intensity, PNS, TNS. Both decoders are floating
+   point, so the tests compare values: they require 2^-17 (about 7.6e-6) and measure at most 3e-7.
+   Implemented but never produced by FFmpeg's encoder, so untested against it: pulse data and
+   correlated noise. Still open: HE-AAC (SBR, PS), ADTS input, trimming priming and padding (the
+   demuxer's timestamps and durations say how much)
 
 ## License note
 

@@ -414,6 +414,17 @@ internal sealed partial class PictureDecoder
             var p1Normal = Vector128.ConditionalSelect(ap, p1 + Vector128.Clamp((p2 + average - (p1 << 1)) >> 1, -tc0, tc0), p1);
             var q1Normal = Vector128.ConditionalSelect(aq, q1 + Vector128.Clamp((q2 + average - (q1 << 1)) >> 1, -tc0, tc0), q1);
 
+            var strongFilter = filter & strong;
+            if (strongFilter == Vector128<short>.Zero)
+            {
+                // Only bS < 4 here, which is every internal edge.
+                Store(taps, 2, h, Vector128.ConditionalSelect(filter, p1Normal, p1));
+                Store(taps, 3, h, Vector128.ConditionalSelect(filter, p0Normal, p0));
+                Store(taps, 4, h, Vector128.ConditionalSelect(filter, q0Normal, q0v));
+                Store(taps, 5, h, Vector128.ConditionalSelect(filter, q1Normal, q1));
+                continue;
+            }
+
             // bS == 4 (8.7.2.4).
             var small = Vector128.LessThan(Vector128.Abs(p0 - q0v), Vector128.Create((short)((alpha >> 2) + 2)));
             var sp = ap & small;
@@ -425,7 +436,6 @@ internal sealed partial class PictureDecoder
             var q1Strong = Vector128.ConditionalSelect(sq, (p0 + q0v + q1 + q2 + two) >> 2, q1);
             var q2Strong = Vector128.ConditionalSelect(sq, ((q3 << 1) + (q2 * 3) + q1 + q0v + p0 + four) >> 3, q2);
 
-            var strongFilter = filter & strong;
             Store(taps, 1, h, Vector128.ConditionalSelect(strongFilter, p2Strong, p2));
             Store(taps, 2, h, Vector128.ConditionalSelect(filter, Vector128.ConditionalSelect(strong, p1Strong, p1Normal), p1));
             Store(taps, 3, h, Vector128.ConditionalSelect(filter, Vector128.ConditionalSelect(strong, p0Strong, p0Normal), p0));
@@ -440,9 +450,11 @@ internal sealed partial class PictureDecoder
 
     private static void Gather(byte[] plane, int q0, int across, int along, int length, Span<byte> taps, int firstTap, int lastTap)
     {
-        if (across == 1 && length == 16 && firstTap == 0 && Sse2.IsSupported)
+        if (across == 1 && Sse2.IsSupported)
         {
-            TransposeIn(plane, q0 - 4, along, taps);
+            // Vertical edges: p3 .. q3 of each row are 8 contiguous bytes. Chroma needs only
+            // p1 .. q1 but takes all eight; they lie inside this macroblock and its left neighbour.
+            TransposeIn(plane, q0 - 4, along, taps, length);
             return;
         }
 
@@ -505,16 +517,19 @@ internal sealed partial class PictureDecoder
     }
 
     /// <summary>
-    /// Vertical luma edge: 16 rows of p3 .. q3 (8 bytes each, starting at <paramref name="start"/>)
-    /// become the 8 tap rows of 16 lanes, by interleaving at 8, 16, 32 and 64 bits.
+    /// Vertical edge: <paramref name="rows"/> (16 or 8) rows of p3 .. q3 (8 bytes each, starting at
+    /// <paramref name="start"/>) become the 8 tap rows of 16 lanes, by interleaving at 8, 16, 32 and
+    /// 64 bits. With 8 rows, lanes 8 .. 15 repeat row 7 and are not used.
     /// </summary>
     [SkipLocalsInit]
-    private static void TransposeIn(byte[] plane, int start, int stride, Span<byte> taps)
+    private static void TransposeIn(byte[] plane, int start, int stride, Span<byte> taps, int rows)
     {
         Span<Vector128<byte>> pairs = stackalloc Vector128<byte>[8];
         for (int k = 0; k < 8; k++)
         {
-            pairs[k] = Sse2.UnpackLow(Row8(plane, start + (2 * k * stride)), Row8(plane, start + (((2 * k) + 1) * stride)));
+            int even = Math.Min(2 * k, rows - 1);
+            int odd = Math.Min((2 * k) + 1, rows - 1);
+            pairs[k] = Sse2.UnpackLow(Row8(plane, start + (even * stride)), Row8(plane, start + (odd * stride)));
         }
 
         // quads[m] / quadsHigh[m]: bytes 0-3 / 4-7 of rows 4m .. 4m + 3, one 32-bit group per byte.

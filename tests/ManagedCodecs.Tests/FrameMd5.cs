@@ -23,7 +23,7 @@ public static class FrameMd5
                 continue;
             }
 
-            // stream_index, dts, pts, duration, size, hash
+            // stream_index, dts, pts, duration, size, hash, then optional side data ("S=1, size, md5")
             var fields = line.Split(',', StringSplitOptions.TrimEntries);
             if (fields.Length < 6)
             {
@@ -36,7 +36,7 @@ public static class FrameMd5
                 long.Parse(fields[2], CultureInfo.InvariantCulture),
                 long.Parse(fields[3], CultureInfo.InvariantCulture),
                 int.Parse(fields[4], CultureInfo.InvariantCulture),
-                fields[^1].ToLowerInvariant()));
+                fields[5].ToLowerInvariant()));
         }
 
         return entries;

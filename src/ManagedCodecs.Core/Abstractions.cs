@@ -29,6 +29,9 @@ public static class CodecIds
 
     /// <summary>MPEG-4 Part 2 Visual.</summary>
     public const string Mpeg4Visual = "MP4V";
+
+    /// <summary>MPEG-4 / MPEG-2 AAC.</summary>
+    public const string Aac = "AAC";
 }
 
 /// <summary>One compressed unit of data pulled out of a container, e.g. one MJPEG frame.</summary>
@@ -54,6 +57,7 @@ public readonly record struct Packet(
 /// <param name="CodecPrivate">
 /// Codec configuration from the container, e.g. the avcC payload for H.264; empty if none.
 /// </param>
+/// <param name="StreamIndex">The <see cref="Packet.StreamIndex"/> of this stream's packets.</param>
 public sealed record VideoStreamInfo(
     string Codec,
     int Width,
@@ -61,14 +65,36 @@ public sealed record VideoStreamInfo(
     double FramesPerSecond,
     long FrameCount,
     Rational TimeBase,
-    ReadOnlyMemory<byte> CodecPrivate);
+    ReadOnlyMemory<byte> CodecPrivate,
+    int StreamIndex);
+
+/// <summary>Basic facts about a container's audio stream.</summary>
+/// <param name="Codec">One of <see cref="CodecIds"/> when recognized, otherwise the container's own tag.</param>
+/// <param name="SampleRate">Samples per second, from the codec configuration where there is one.</param>
+/// <param name="CodecPrivate">Codec configuration, e.g. the AudioSpecificConfig for AAC; empty if none.</param>
+/// <param name="StreamIndex">The <see cref="Packet.StreamIndex"/> of this stream's packets.</param>
+public sealed record AudioStreamInfo(
+    string Codec,
+    int SampleRate,
+    int Channels,
+    long PacketCount,
+    Rational TimeBase,
+    ReadOnlyMemory<byte> CodecPrivate,
+    int StreamIndex);
 
 /// <summary>Reads packets out of a container format (AVI, MP4, ...).</summary>
 public interface IDemuxer : IDisposable
 {
-    VideoStreamInfo Video { get; }
+    /// <summary>The first video stream, or null if there is none.</summary>
+    VideoStreamInfo? Video { get; }
 
-    /// <summary>Packets of the video stream, in decode order.</summary>
+    /// <summary>The first audio stream, or null if there is none (or the container does not expose audio).</summary>
+    AudioStreamInfo? Audio { get; }
+
+    /// <summary>
+    /// Packets of the video and audio streams, interleaved in file order; each stream's packets
+    /// are in decode order. <see cref="Packet.StreamIndex"/> tells them apart.
+    /// </summary>
     IEnumerable<Packet> ReadPackets();
 }
 
@@ -76,4 +102,10 @@ public interface IDemuxer : IDisposable
 public interface IVideoDecoder
 {
     VideoFrame Decode(ReadOnlySpan<byte> packet);
+}
+
+/// <summary>Turns one compressed packet into one block of audio samples.</summary>
+public interface IAudioDecoder
+{
+    AudioFrame Decode(ReadOnlySpan<byte> packet);
 }

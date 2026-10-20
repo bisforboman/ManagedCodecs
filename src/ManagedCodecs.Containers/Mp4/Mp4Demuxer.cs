@@ -4,15 +4,15 @@ using System.Text;
 namespace ManagedCodecs.Containers.Mp4;
 
 /// <summary>
-/// MP4 / QuickTime (ISO/IEC 14496-12) demuxer: finds the first video track and yields its
-/// samples in decode order, using the sample tables in 'moov'.
+/// MP4 / QuickTime (ISO/IEC 14496-12) demuxer: finds the first video and the first audio track
+/// and yields their samples, using the sample tables in 'moov'.
 /// </summary>
 /// <remarks>
 /// Timestamps follow FFmpeg: the edit list's first non-empty edit shifts dts and pts back by
-/// its media time (so H.264 with B-frames starts at pts 0 and a negative dts), and leading
-/// empty edits delay them. Not yet supported: fragmented MP4 ('moof'), edit lists with more
-/// than one non-empty edit (only the first is honoured, nothing is trimmed), compressed
-/// 'cmov' headers, and audio tracks.
+/// its media time (so H.264 with B-frames starts at pts 0 and a negative dts, and AAC encoder
+/// priming has negative timestamps), and leading empty edits delay them. Not yet supported:
+/// fragmented MP4 ('moof'), edit lists with more than one non-empty edit (only the first is
+/// honoured, nothing is trimmed), compressed 'cmov' headers, and further tracks.
 /// </remarks>
 public sealed class Mp4Demuxer : IDemuxer
 {
@@ -21,8 +21,9 @@ public sealed class Mp4Demuxer : IDemuxer
 
     private readonly Stream _stream;
     private readonly bool _leaveOpen;
+
+    // Samples of every exposed track, merged in file order.
     private readonly Sample[] _samples;
-    private readonly int _streamIndex;
 
     public Mp4Demuxer(Stream stream, bool leaveOpen = false)
     {
@@ -38,6 +39,7 @@ public sealed class Mp4Demuxer : IDemuxer
         var moov = ReadMoov(stream);
         uint movieTimescale = 0;
         Track? video = null;
+        Track? audio = null;
         int trackIndex = 0;
 
         ReadOnlySpan<byte> boxes = moov;
@@ -49,54 +51,84 @@ public sealed class Mp4Demuxer : IDemuxer
             }
             else if (type == Box.Trak)
             {
-                if (video is null && IsVideoTrack(payload))
+                uint handler = HandlerType(payload);
+                if (video is null && handler == Box.Vide)
                 {
-                    video = new Track(payload) { StreamIndex = trackIndex };
+                    video = new Track(payload, isAudio: false) { StreamIndex = trackIndex };
+                }
+                else if (audio is null && handler == Box.Soun)
+                {
+                    audio = new Track(payload, isAudio: true) { StreamIndex = trackIndex };
                 }
 
                 trackIndex++;
             }
         }
 
-        if (video is null)
+        if (video is null && audio is null)
         {
-            throw new InvalidDataException("MP4 file has no video track.");
+            throw new InvalidDataException("MP4 file has no video or audio track.");
         }
 
-        if (video.SampleCount == 0 && FindChild(moov, Box.Mvex, out _))
+        if ((video ?? audio)!.SampleCount == 0 && FindChild(moov, Box.Mvex, out _))
         {
             throw new NotSupportedException("Fragmented MP4 is not supported.");
         }
 
-        _streamIndex = video.StreamIndex;
-        _samples = video.BuildSamples(movieTimescale);
-
-        long totalDuration = 0;
-        foreach (var sample in _samples)
+        var all = new List<Sample>();
+        if (video is not null)
         {
-            totalDuration += sample.Duration;
+            var samples = video.BuildSamples(movieTimescale);
+            all.AddRange(samples);
+
+            long totalDuration = 0;
+            foreach (var sample in samples)
+            {
+                totalDuration += sample.Duration;
+            }
+
+            double fps = totalDuration > 0 ? samples.Length * (double)video.Timescale / totalDuration : 0;
+
+            // ReadPackets skips empty samples, so the frame count does too.
+            Video = new VideoStreamInfo(
+                video.Codec,
+                video.Width,
+                video.Height,
+                fps,
+                samples.Count(sample => sample.Size > 0),
+                new Rational(1, checked((int)video.Timescale)),
+                video.CodecPrivate,
+                video.StreamIndex);
         }
 
-        double fps = totalDuration > 0 ? _samples.Length * (double)video.Timescale / totalDuration : 0;
+        if (audio is not null)
+        {
+            var samples = audio.BuildSamples(movieTimescale);
+            all.AddRange(samples);
+            Audio = new AudioStreamInfo(
+                audio.Codec,
+                audio.SampleRate,
+                audio.Channels,
+                samples.Count(sample => sample.Size > 0),
+                new Rational(1, checked((int)audio.Timescale)),
+                audio.CodecPrivate,
+                audio.StreamIndex);
+        }
 
-        // ReadPackets skips empty samples, so the frame count does too.
-        Video = new VideoStreamInfo(
-            video.Codec,
-            video.Width,
-            video.Height,
-            fps,
-            _samples.Count(sample => sample.Size > 0),
-            new Rational(1, checked((int)video.Timescale)),
-            video.CodecPrivate);
+        // File order, which is how the tracks are interleaved on disk; each track's own samples
+        // keep their decode order because they are sorted stably within equal offsets.
+        _samples = [.. all.OrderBy(sample => sample.Offset)];
     }
 
-    public VideoStreamInfo Video { get; }
+    public VideoStreamInfo? Video { get; }
+
+    public AudioStreamInfo? Audio { get; }
 
     public static Mp4Demuxer Open(string path) => new(File.OpenRead(path));
 
     public IEnumerable<Packet> ReadPackets()
     {
-        long sequence = 0;
+        var sequences = new Dictionary<int, long>();
         for (int i = 0; i < _samples.Length; i++)
         {
             var sample = _samples[i];
@@ -113,7 +145,9 @@ public sealed class Mp4Demuxer : IDemuxer
             var data = new byte[sample.Size];
             _stream.Position = sample.Offset;
             _stream.ReadExactly(data);
-            yield return new Packet(_streamIndex, sequence++, data, sample.IsKeyframe, sample.Dts, sample.Pts, sample.Duration);
+            long sequence = sequences.GetValueOrDefault(sample.StreamIndex);
+            sequences[sample.StreamIndex] = sequence + 1;
+            yield return new Packet(sample.StreamIndex, sequence, data, sample.IsKeyframe, sample.Dts, sample.Pts, sample.Duration);
         }
     }
 
@@ -180,10 +214,11 @@ public sealed class Mp4Demuxer : IDemuxer
         throw new InvalidDataException("Not an MP4 file: no 'moov' box.");
     }
 
-    private static bool IsVideoTrack(ReadOnlySpan<byte> trak) =>
-        FindChild(trak, Box.Mdia, out var mdia)
-        && FindChild(mdia, Box.Hdlr, out var hdlr)
-        && ReadUInt32(hdlr, 8) == Box.Vide; // FullBox header, pre_defined, then handler_type
+    /// <summary>The track's handler_type ('vide', 'soun', ...), or 0 when it has none.</summary>
+    private static uint HandlerType(ReadOnlySpan<byte> trak) =>
+        FindChild(trak, Box.Mdia, out var mdia) && FindChild(mdia, Box.Hdlr, out var hdlr)
+            ? ReadUInt32(hdlr, 8) // FullBox header, pre_defined, then handler_type
+            : 0;
 
     /// <summary>
     /// Takes the next box off the front of <paramref name="data"/>. Returns false at the end;
@@ -261,7 +296,7 @@ public sealed class Mp4Demuxer : IDemuxer
         return data;
     }
 
-    private readonly record struct Sample(long Offset, int Size, long Dts, long Pts, int Duration, bool IsKeyframe);
+    private readonly record struct Sample(int StreamIndex, long Offset, int Size, long Dts, long Pts, int Duration, bool IsKeyframe);
 
     /// <summary>The parts of one 'trak' needed to build its sample list.</summary>
     private sealed class Track
@@ -276,8 +311,11 @@ public sealed class Mp4Demuxer : IDemuxer
         private readonly byte[]? _stss;
         private readonly byte[]? _elst;
 
-        public Track(ReadOnlySpan<byte> trak)
+        private readonly bool _isAudio;
+
+        public Track(ReadOnlySpan<byte> trak, bool isAudio)
         {
+            _isAudio = isAudio;
             if (FindChild(trak, Box.Edts, out var edts) && FindChild(edts, Box.Elst, out var elst))
             {
                 _elst = elst.ToArray();
@@ -285,7 +323,7 @@ public sealed class Mp4Demuxer : IDemuxer
 
             if (!FindChild(trak, Box.Mdia, out var mdia) || !FindChild(mdia, Box.Mdhd, out var mdhd))
             {
-                throw new InvalidDataException("Video track has no 'mdhd' box.");
+                throw new InvalidDataException("Track has no 'mdhd' box.");
             }
 
             Timescale = ReadUInt32(mdhd, mdhd.Length > 0 && mdhd[0] == 1 ? 20 : 12);
@@ -296,7 +334,7 @@ public sealed class Mp4Demuxer : IDemuxer
 
             if (!FindChild(mdia, Box.Minf, out var minf) || !FindChild(minf, Box.Stbl, out var stbl))
             {
-                throw new InvalidDataException("Video track has no sample table.");
+                throw new InvalidDataException("Track has no sample table.");
             }
 
             var boxes = stbl;
@@ -338,6 +376,10 @@ public sealed class Mp4Demuxer : IDemuxer
 
         public int Height { get; private set; }
 
+        public int SampleRate { get; private set; }
+
+        public int Channels { get; private set; }
+
         public ReadOnlyMemory<byte> CodecPrivate { get; private set; } = ReadOnlyMemory<byte>.Empty;
 
         public Sample[] BuildSamples(uint movieTimescale)
@@ -364,7 +406,7 @@ public sealed class Mp4Demuxer : IDemuxer
             for (int i = 0; i < count; i++)
             {
                 long decodeTime = dts[i] - shift;
-                samples[i] = new Sample(offsets[i], sizes[i], decodeTime, decodeTime + compositionOffsets[i], durations[i], keyframes[i]);
+                samples[i] = new Sample(StreamIndex, offsets[i], sizes[i], decodeTime, decodeTime + compositionOffsets[i], durations[i], keyframes[i]);
             }
 
             return samples;
@@ -414,7 +456,7 @@ public sealed class Mp4Demuxer : IDemuxer
                 return sizes;
             }
 
-            throw new InvalidDataException("Video track has no sample size table.");
+            throw new InvalidDataException("Track has no sample size table.");
         }
 
         /// <summary>
@@ -567,6 +609,13 @@ public sealed class Mp4Demuxer : IDemuxer
                 throw new InvalidDataException("The 'stsd' box has no sample entry.");
             }
 
+            Codec = Box.Name(format);
+            if (_isAudio)
+            {
+                ParseAudioSampleEntry(format, entry);
+                return;
+            }
+
             // VisualSampleEntry: SampleEntry (8), pre_defined/reserved (16), width, height at 24,
             // then fields up to 78 bytes, then child boxes.
             Require(entry, 78, Box.Name(format));
@@ -598,6 +647,93 @@ public sealed class Mp4Demuxer : IDemuxer
                     Codec = CodecIds.Mjpeg;
                     break;
             }
+        }
+
+        /// <summary>
+        /// AudioSampleEntry (14496-12 12.2.3): SampleEntry (8), version and reserved fields,
+        /// channelcount at 16, samplesize, two reserved shorts, 16.16 samplerate at 24, then child
+        /// boxes after 28 bytes; QuickTime sound descriptions version 1 and 2 add 16 or 36 bytes.
+        /// The AudioSpecificConfig, when there is one, overrides rate and channel count.
+        /// </summary>
+        private void ParseAudioSampleEntry(uint format, ReadOnlySpan<byte> entry)
+        {
+            Require(entry, 28, Box.Name(format));
+            int version = BinaryPrimitives.ReadUInt16BigEndian(entry[8..]);
+            Channels = BinaryPrimitives.ReadUInt16BigEndian(entry[16..]);
+            SampleRate = (int)(BinaryPrimitives.ReadUInt32BigEndian(entry[24..]) >> 16);
+            int childrenStart = version switch
+            {
+                1 => 28 + 16,
+                2 => 28 + 36,
+                _ => 28,
+            };
+
+            if (format == Box.Mp4a && entry.Length > childrenStart && FindChild(entry[childrenStart..], Box.Esds, out var esds))
+            {
+                ParseEsds(esds);
+                if (Codec == CodecIds.Aac && TryReadAudioSpecificConfig(CodecPrivate.Span, out int rate, out int channels))
+                {
+                    SampleRate = rate;
+                    Channels = channels > 0 ? channels : Channels; // 0: the channels are in a program_config_element
+                }
+            }
+        }
+
+        /// <summary>
+        /// The start of an AudioSpecificConfig (14496-3 1.6.2.1): audioObjectType, then the sampling
+        /// frequency index (or an explicit 24-bit rate) and channelConfiguration.
+        /// </summary>
+        private static bool TryReadAudioSpecificConfig(ReadOnlySpan<byte> config, out int sampleRate, out int channels)
+        {
+            sampleRate = 0;
+            channels = 0;
+            if (config.Length < 2)
+            {
+                return false;
+            }
+
+            int bit = 0;
+            int Read(int count, ReadOnlySpan<byte> data)
+            {
+                int value = 0;
+                for (int i = 0; i < count; i++, bit++)
+                {
+                    int b = bit >> 3 < data.Length ? (data[bit >> 3] >> (7 - (bit & 7))) & 1 : 0;
+                    value = (value << 1) | b;
+                }
+
+                return value;
+            }
+
+            if (Read(5, config) == 31)
+            {
+                Read(6, config); // audioObjectTypeExt
+            }
+
+            int index = Read(4, config);
+            ReadOnlySpan<int> rates = [96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000, 7350];
+            if (index == 15)
+            {
+                sampleRate = Read(24, config);
+            }
+            else if (index < rates.Length)
+            {
+                sampleRate = rates[index];
+            }
+            else
+            {
+                return false;
+            }
+
+            int configuration = Read(4, config);
+            channels = configuration switch
+            {
+                >= 1 and <= 6 => configuration,
+                7 => 8,
+                _ => 0,
+            };
+
+            return sampleRate > 0;
         }
 
         /// <summary>
@@ -647,6 +783,8 @@ public sealed class Mp4Demuxer : IDemuxer
                     0x6C => CodecIds.Mjpeg,       // ISO/IEC 10918-1 (JPEG)
                     0x20 => CodecIds.Mpeg4Visual, // ISO/IEC 14496-2
                     0x21 => CodecIds.H264,
+                    0x40 => CodecIds.Aac,             // ISO/IEC 14496-3 (MPEG-4 audio)
+                    0x66 or 0x67 or 0x68 => CodecIds.Aac, // ISO/IEC 13818-7 (MPEG-2 AAC) Main, LC, SSR
                     _ => Codec,
                 };
 
@@ -741,6 +879,8 @@ public sealed class Mp4Demuxer : IDemuxer
         public const uint Ctts = 0x63747473;
         public const uint Stss = 0x73747373;
         public const uint Vide = 0x76696465;
+        public const uint Soun = 0x736F756E;
+        public const uint Mp4a = 0x6D703461;
         public const uint Avc1 = 0x61766331;
         public const uint Avc3 = 0x61766333;
         public const uint AvcC = 0x61766343;

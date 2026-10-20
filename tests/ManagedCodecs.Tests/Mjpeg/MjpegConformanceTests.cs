@@ -19,21 +19,22 @@ public class MjpegConformanceTests
     public void MatchesFfmpegFrameByFrame(string sampleName)
     {
         var lines = File.ReadAllLines(TestSamples.ReferenceOf(sampleName, ".framemd5"));
-        var expected = FrameMd5.Parse(lines);
+        var expected = FrameMd5.Parse(lines).Where(e => e.StreamIndex == 0).ToList(); // FFmpeg lists video first
         var timeBase = FrameMd5.ParseTimeBase(lines); // FFmpeg's decoded output may use another time base
 
         using var demuxer = Demuxer.Open(TestSamples.PathOf(sampleName));
+        var video = demuxer.Video!;
         var decoder = new MjpegDecoder();
 
         int index = 0;
-        foreach (var packet in demuxer.ReadPackets())
+        foreach (var packet in demuxer.ReadPackets().Where(p => p.StreamIndex == video.StreamIndex))
         {
             var frame = decoder.Decode(packet.Data.Span);
             Assert.True(index < expected.Count, $"More frames than the reference ({expected.Count}).");
             Assert.True(expected[index].Md5 == FrameMd5.Hash(frame), $"Frame {index} differs from FFmpeg.");
             Assert.True(
-                FrameMd5.SameTime(expected[index].Pts, timeBase, packet.Pts, demuxer.Video.TimeBase),
-                $"Frame {index}: pts {packet.Pts} ({demuxer.Video.TimeBase}) is not FFmpeg's {expected[index].Pts} ({timeBase}).");
+                FrameMd5.SameTime(expected[index].Pts, timeBase, packet.Pts, video.TimeBase),
+                $"Frame {index}: pts {packet.Pts} ({video.TimeBase}) is not FFmpeg's {expected[index].Pts} ({timeBase}).");
             index++;
         }
 
@@ -51,13 +52,13 @@ public class MjpegConformanceTests
     [MemberData(nameof(StandardHuffmanSamples))]
     public void MatchesFfmpegWithoutDht(string sampleName)
     {
-        var expected = FrameMd5.Parse(File.ReadLines(TestSamples.ReferenceOf(sampleName, ".framemd5")));
+        var expected = FrameMd5.Parse(File.ReadLines(TestSamples.ReferenceOf(sampleName, ".framemd5"))).Where(e => e.StreamIndex == 0).ToList();
 
         using var demuxer = Demuxer.Open(TestSamples.PathOf(sampleName));
         var decoder = new MjpegDecoder();
 
         int index = 0;
-        foreach (var packet in demuxer.ReadPackets())
+        foreach (var packet in demuxer.ReadPackets().Where(p => p.StreamIndex == demuxer.Video!.StreamIndex))
         {
             var stripped = RemoveSegments(packet.Data.Span, JpegMarker.Dht);
             Assert.True(stripped.Length < packet.Data.Length, "Sample has no DHT to remove.");

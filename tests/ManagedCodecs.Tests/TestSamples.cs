@@ -30,10 +30,11 @@ public static class TestSamples
     public static string ReferenceOf(string file, string suffix) =>
         Path.Combine(Path.GetDirectoryName(PathOf(file))!, Path.GetFileNameWithoutExtension(file) + suffix);
 
-    public static string CodecOf(string name)
+    /// <summary>The video codec of a sample, or null for audio-only files.</summary>
+    public static string? CodecOf(string name)
     {
         using var demuxer = Demuxer.Open(PathOf(name));
-        return demuxer.Video.Codec;
+        return demuxer.Video?.Codec;
     }
 
     private static string? Find()

@@ -11,7 +11,7 @@ namespace ManagedCodecs.Containers.Avi;
 /// <remarks>
 /// Not yet supported: OpenDML / AVI 2.0 files over 1 GB (RIFF 'AVIX' extensions), the idx1 or
 /// indx index (so <see cref="Packet.IsKeyframe"/> is always true, which is correct for MJPEG),
-/// and audio streams.
+/// and audio streams (<see cref="Audio"/> is always null).
 /// </remarks>
 public sealed class AviDemuxer : IDemuxer
 {
@@ -90,10 +90,13 @@ public sealed class AviDemuxer : IDemuxer
             ? Rational.Reduce(header.Scale, header.Rate)
             : Rational.Reduce(header.MicrosecondsPerFrame, 1_000_000);
         double fps = timeBase.Numerator > 0 ? 1 / timeBase.ToDouble() : 0;
-        Video = new VideoStreamInfo(NormalizeCodec(header.Codec), header.Width, header.Height, fps, header.TotalFrames, timeBase, ReadOnlyMemory<byte>.Empty);
+        Video = new VideoStreamInfo(NormalizeCodec(header.Codec), header.Width, header.Height, fps, header.TotalFrames, timeBase, ReadOnlyMemory<byte>.Empty, _videoStreamIndex);
     }
 
     public VideoStreamInfo Video { get; }
+
+    /// <summary>Always null: audio in AVI is not exposed.</summary>
+    public AudioStreamInfo? Audio => null;
 
     public static AviDemuxer Open(string path) => new(File.OpenRead(path));
 

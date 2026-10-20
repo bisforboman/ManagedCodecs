@@ -24,7 +24,8 @@ public class MjpegDecodeBenchmark
             ?? Path.Combine(FindRepositoryRoot(), "samples", "testsrc-420.avi");
 
         using var demuxer = Demuxer.Open(Path.GetFullPath(path));
-        _packets = demuxer.ReadPackets().Select(p => p.Data.ToArray()).ToArray();
+        int stream = demuxer.Video!.StreamIndex;
+        _packets = demuxer.ReadPackets().Where(p => p.StreamIndex == stream).Select(p => p.Data.ToArray()).ToArray();
     }
 
     // BenchmarkDotNet runs benchmarks in a child process with its own working directory.
@@ -68,8 +69,8 @@ public class H264DecodeBenchmark
             ?? Path.Combine(MjpegDecodeBenchmark.FindRepositoryRoot(), "samples", "h264-bench-720p.mp4");
 
         using var demuxer = Demuxer.Open(Path.GetFullPath(path));
-        _stream = demuxer.Video;
-        _packets = demuxer.ReadPackets().Select(p => p.Data.ToArray()).ToArray();
+        _stream = demuxer.Video!;
+        _packets = demuxer.ReadPackets().Where(p => p.StreamIndex == _stream.StreamIndex).Select(p => p.Data.ToArray()).ToArray();
     }
 
     [Benchmark]

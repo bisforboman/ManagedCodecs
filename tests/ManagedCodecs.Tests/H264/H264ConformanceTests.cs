@@ -17,13 +17,14 @@ public class H264ConformanceTests
     public void MatchesFfmpegFrameByFrame(string sampleName)
     {
         var lines = File.ReadAllLines(TestSamples.ReferenceOf(sampleName, ".framemd5"));
-        var expected = FrameMd5.Parse(lines);
+        var expected = FrameMd5.Parse(lines).Where(e => e.StreamIndex == 0).ToList(); // FFmpeg lists video first
 
         using var demuxer = Mp4Demuxer.Open(TestSamples.PathOf(sampleName));
-        var decoder = new H264Decoder(demuxer.Video);
+        var video = demuxer.Video!;
+        var decoder = new H264Decoder(video);
 
         int index = 0;
-        foreach (var packet in demuxer.ReadPackets())
+        foreach (var packet in demuxer.ReadPackets().Where(p => p.StreamIndex == video.StreamIndex))
         {
             var frame = decoder.Decode(packet.Data.Span);
             Assert.True(index < expected.Count, $"More frames than the reference ({expected.Count}).");
@@ -43,7 +44,12 @@ public class H264ConformanceTests
         }
 
         using var demuxer = Mp4Demuxer.Open(TestSamples.PathOf(name));
-        var avcC = demuxer.Video.CodecPrivate.Span;
-        return demuxer.Video.Codec == CodecIds.H264 && avcC.Length > 1 && avcC[1] == 66;
+        if (demuxer.Video is not { Codec: CodecIds.H264 } video)
+        {
+            return false;
+        }
+
+        var avcC = video.CodecPrivate.Span;
+        return avcC.Length > 1 && avcC[1] == 66;
     }
 }

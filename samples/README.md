@@ -48,16 +48,19 @@ ffmpeg -f lavfi -i testsrc2=size=320x240:rate=25 -t 1 -c:v libx264 -bf 0 -output
 ```
 
 Then write the reference hashes for every sample. `name.framemd5` hashes decoded frames;
-`name.packets.framemd5` hashes the demuxed packets. `-copyts` keeps FFmpeg from moving the
+`name.packets.framemd5` hashes the demuxed packets and `name.packets.flags` lists their keyframe
+flags. `-copyts` keeps FFmpeg from moving the
 timestamps to start at zero, so they are the demuxer's own:
 
 ```
 # bash
 for f in samples/*.avi samples/mjpeg-*.mp4; do ffmpeg -i "$f" -f framemd5 "${f%.*}.framemd5"; done
 for f in samples/*.mp4; do ffmpeg -copyts -i "$f" -c copy -f framemd5 "${f%.mp4}.packets.framemd5"; done
+for f in samples/*.mp4; do ffprobe -v error -select_streams v:0 -show_packets -show_entries packet=flags -of csv=p=0 "$f" > "${f%.mp4}.packets.flags"; done
 # PowerShell
 Get-ChildItem samples/*.avi, samples/mjpeg-*.mp4 | ForEach-Object { ffmpeg -i $_ -f framemd5 ($_.FullName -replace '\.\w+$', '.framemd5') }
 Get-ChildItem samples/*.mp4 | ForEach-Object { ffmpeg -copyts -i $_ -c copy -f framemd5 ($_.FullName -replace '\.mp4$', '.packets.framemd5') }
+Get-ChildItem samples/*.mp4 | ForEach-Object { ffprobe -v error -select_streams v:0 -show_packets -show_entries packet=flags -of csv=p=0 $_ | Set-Content ($_.FullName -replace '\.mp4$', '.packets.flags') }
 ```
 
 (ImageMagick 6 calls the command `convert` instead of `magick`.)

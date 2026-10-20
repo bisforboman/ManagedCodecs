@@ -5,7 +5,8 @@ namespace ManagedCodecs.Tests.Containers;
 /// <summary>
 /// Demuxes every samples/*.mp4 and compares each packet (dts, pts, duration, size, MD5) and the
 /// codec private data with samples/*.packets.framemd5, written by
-/// <c>ffmpeg -copyts -i x.mp4 -c copy -f framemd5</c>. See samples/README.md.
+/// <c>ffmpeg -copyts -i x.mp4 -c copy -f framemd5</c>, and keyframe flags with
+/// samples/*.packets.flags from ffprobe (framemd5 has no flags column). See samples/README.md.
 /// </summary>
 public class Mp4ConformanceTests
 {
@@ -42,5 +43,11 @@ public class Mp4ConformanceTests
             var actual = new FrameMd5Entry(0, p.Dts, p.Pts, p.Duration, p.Data.Length, FrameMd5.Hash(p.Data.Span));
             Assert.Equal(expected[i], actual);
         }
+
+        // One line per packet from ffprobe: "K__" for a keyframe, "___" otherwise.
+        var flags = File.ReadAllLines(TestSamples.ReferenceOf(sampleName, ".packets.flags"));
+        Assert.Equal(
+            flags.Select(f => f.StartsWith('K')),
+            packets.Select(p => p.IsKeyframe));
     }
 }

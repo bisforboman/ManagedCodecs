@@ -78,12 +78,14 @@ public sealed class Mp4Demuxer : IDemuxer
         }
 
         double fps = totalDuration > 0 ? _samples.Length * (double)video.Timescale / totalDuration : 0;
+
+        // ReadPackets skips empty samples, so the frame count does too.
         Video = new VideoStreamInfo(
             video.Codec,
             video.Width,
             video.Height,
             fps,
-            _samples.Length,
+            _samples.Count(sample => sample.Size > 0),
             new Rational(1, checked((int)video.Timescale)),
             video.CodecPrivate);
     }

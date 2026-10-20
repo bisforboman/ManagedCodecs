@@ -12,4 +12,5 @@ samples/*.avi
 samples/*.mp4
 samples/*.mjpeg
 samples/*.framemd5
+samples/*.flags
 gray-frames/

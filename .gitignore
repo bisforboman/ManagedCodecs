@@ -1,0 +1,14 @@
+bin/
+obj/
+.vs/
+.idea/
+*.user
+*.suo
+TestResults/
+BenchmarkDotNet.Artifacts/
+
+# Sample media is generated locally with FFmpeg (see samples/README.md)
+samples/*.avi
+samples/*.mp4
+samples/*.mjpeg
+samples/*.framemd5

@@ -1,0 +1,13 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/ManagedCodecs.Core/ManagedCodecs.Core.csproj" />
+    <Project Path="src/ManagedCodecs.Containers/ManagedCodecs.Containers.csproj" />
+    <Project Path="src/ManagedCodecs.Mjpeg/ManagedCodecs.Mjpeg.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/ManagedCodecs.Tests/ManagedCodecs.Tests.csproj" />
+  </Folder>
+  <Folder Name="/benchmarks/">
+    <Project Path="benchmarks/ManagedCodecs.Benchmarks/ManagedCodecs.Benchmarks.csproj" />
+  </Folder>
+</Solution>

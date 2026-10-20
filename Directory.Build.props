@@ -1,0 +1,16 @@
+<Project>
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <!-- Shared package metadata for the src/ libraries. -->
+  <PropertyGroup>
+    <Authors>Jakob Boman</Authors>
+    <PackageTags>video;audio;codec;decoder;mjpeg;h264;avi;mp4;pure-managed;aot</PackageTags>
+    <Description>Pure managed C# media codecs. No native binaries, Native AOT friendly.</Description>
+  </PropertyGroup>
+</Project>

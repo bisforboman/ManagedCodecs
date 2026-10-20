@@ -71,13 +71,14 @@ public sealed record VideoStreamInfo(
 /// <summary>Basic facts about a container's audio stream.</summary>
 /// <param name="Codec">One of <see cref="CodecIds"/> when recognized, otherwise the container's own tag.</param>
 /// <param name="SampleRate">Samples per second, from the codec configuration where there is one.</param>
+/// <param name="FrameCount">Number of packets, each one coded audio frame (1024 samples per channel for AAC LC).</param>
 /// <param name="CodecPrivate">Codec configuration, e.g. the AudioSpecificConfig for AAC; empty if none.</param>
 /// <param name="StreamIndex">The <see cref="Packet.StreamIndex"/> of this stream's packets.</param>
 public sealed record AudioStreamInfo(
     string Codec,
     int SampleRate,
     int Channels,
-    long PacketCount,
+    long FrameCount,
     Rational TimeBase,
     ReadOnlyMemory<byte> CodecPrivate,
     int StreamIndex);

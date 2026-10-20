@@ -32,7 +32,7 @@ public class Mp4ConformanceTests
 
         if (demuxer.Audio is { } audio)
         {
-            streams.Add((audio.StreamIndex, audio.PacketCount, audio.CodecPrivate));
+            streams.Add((audio.StreamIndex, audio.FrameCount, audio.CodecPrivate));
         }
 
         Assert.Equal(expected.Select(e => e.StreamIndex).Distinct().Count(), streams.Count);

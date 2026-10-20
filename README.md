@@ -61,8 +61,8 @@ line shows the steady speed without them). A snapshot, made that way (2026-10-20
 | `testsrc-420.avi` (320x240 MJPEG 4:2:0) | 100 | 343 | 386 |
 | `testsrc-444.avi` (MJPEG 4:4:4) | 100 | 512 | 526 |
 | `noise-q1.avi` (MJPEG, noise at the highest quality) | 100 | 1133 | 1332 |
-| `h264-p-refs.mp4` (320x240 H.264, P frames) | 40 | 804 | 232 |
-| `h264-bench-720p.mp4` (1280x720 H.264) | 10 | 11372 | 2456 |
+| `h264-p-refs.mp4` (320x240 H.264, P frames) | 40 | 613 | 197 |
+| `h264-bench-720p.mp4` (1280x720 H.264) | 10 | 7066 | 2352 |
 | `aac-stereo-48k.mp4` (AAC, stereo) | 100 | 58 | 65 |
 | `aac-5.1.mp4` (AAC, 5.1) | 100 | 205 | 85 |
 
@@ -85,7 +85,7 @@ what the two commands above include and are not comparable with FFmpeg's `bench:
 4. ~~H.264 decoder, starting with Constrained Baseline (CAVLC, I/P frames)~~ done: bit-exact with
    FFmpeg on libx264 samples covering intra and inter prediction, all partitions, multiple
    references and slices, cropping and constrained intra. Still open: CABAC / Main profile with
-   B frames (and output reordering), error concealment, more speed (about 3.6x FFmpeg at 720p)
+   B frames (and output reordering), error concealment, more speed (about 3x FFmpeg at 720p)
 5. ~~AAC-LC decoder~~ done: channel configurations 1 to 7 and program config elements (1 to 8
    channels), all window sequences and shapes, M/S, intensity, PNS, TNS. Both decoders are floating
    point, so the tests compare values: they require 2^-17 (about 7.6e-6) and measure at most 3e-7.

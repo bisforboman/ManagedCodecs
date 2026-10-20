@@ -42,7 +42,15 @@ internal sealed partial class PictureDecoder
         _mvY = new short[_mbCount * 16];
         _refIdx = new sbyte[_mbCount * 4];
         _refPic = new Picture?[_mbCount * 4];
+        ResetInter();
+    }
+
+    private void ResetInter()
+    {
+        Array.Clear(_mvX);
+        Array.Clear(_mvY);
         Array.Fill(_refIdx, (sbyte)-1);
+        Array.Clear(_refPic);
     }
 
     /// <summary>Resets the motion data of an intra macroblock.</summary>
@@ -125,7 +133,6 @@ internal sealed partial class PictureDecoder
         int cbpChroma = cbp >> 4;
 
         var residual = _residual;
-        residual.Clear();
         if (cbp != 0)
         {
             UpdateQp(slice, r);
@@ -145,7 +152,7 @@ internal sealed partial class PictureDecoder
         {
             int x = i & 3;
             int y = i >> 2;
-            if ((cbpLuma & (1 << (((y >> 1) * 2) + (x >> 1)))) == 0)
+            if ((cbpLuma & (1 << (((y >> 1) * 2) + (x >> 1)))) == 0 || _totalCoeffLuma[(mbAddr * 16) + i] == 0)
             {
                 continue;
             }

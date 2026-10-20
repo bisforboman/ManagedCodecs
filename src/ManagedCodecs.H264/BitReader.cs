@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using System.Numerics;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 
 namespace ManagedCodecs.H264;
 
@@ -48,18 +49,32 @@ internal sealed class BitReader
     public uint Peek(int count)
     {
         int bytePos = (int)(_position >> 3);
-        ulong word = bytePos + 8 <= _data.Length
-            ? BinaryPrimitives.ReadUInt64BigEndian(_data.AsSpan(bytePos))
-            : 0;
-
-        // Bytes past the RBSP length are padding and read as zero.
-        if (bytePos + 8 > _length)
+        ulong word;
+        if ((uint)bytePos + 8 <= (uint)_length)
         {
-            int valid = Math.Max(0, _length - bytePos);
-            word = valid == 0 ? 0 : word & (ulong.MaxValue << (64 - (valid * 8)));
+            // The common case, all eight bytes inside the RBSP; the check also keeps the read
+            // inside the array, which is at least _length + 8 long.
+            word = BinaryPrimitives.ReverseEndianness(Unsafe.ReadUnaligned<ulong>(ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(_data), bytePos)));
+        }
+        else
+        {
+            word = PeekNearEnd(bytePos);
         }
 
         return (uint)((word << (int)(_position & 7)) >> (64 - count));
+    }
+
+    /// <summary>The 64 bits at <paramref name="bytePos"/> when fewer than 8 bytes of RBSP remain; padding reads as zero.</summary>
+    private ulong PeekNearEnd(int bytePos)
+    {
+        int valid = _length - bytePos;
+        if (valid <= 0)
+        {
+            return 0;
+        }
+
+        ulong word = BinaryPrimitives.ReadUInt64BigEndian(_data.AsSpan(bytePos));
+        return word & (ulong.MaxValue << (64 - (valid * 8)));
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

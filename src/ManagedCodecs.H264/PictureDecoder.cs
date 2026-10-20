@@ -15,7 +15,8 @@ internal sealed record SliceInfo(int DisableDeblockingFilterIdc, int AlphaOffset
 
 /// <summary>
 /// Decodes the slices of one picture into a <see cref="Picture"/> and keeps the per-macroblock
-/// state that neighbouring macroblocks and the deblocking filter read.
+/// state that neighbouring macroblocks and the deblocking filter read. One instance serves every
+/// picture of a sequence: <see cref="Begin"/> resets it for the next.
 /// </summary>
 /// <remarks>
 /// Block arrays use raster order inside the macroblock: luma 4x4 block (x, y) is y * 4 + x,
@@ -23,7 +24,6 @@ internal sealed record SliceInfo(int DisableDeblockingFilterIdc, int AlphaOffset
 /// </remarks>
 internal sealed partial class PictureDecoder
 {
-    private readonly SequenceParameterSet _sps;
     private readonly int _widthInMbs;
     private readonly int _mbCount;
 
@@ -42,10 +42,9 @@ internal sealed partial class PictureDecoder
     // Coefficients of the macroblock being decoded, reused from one macroblock to the next.
     private readonly Residual _residual = new();
 
-    public PictureDecoder(SequenceParameterSet sps, Picture picture)
+    public PictureDecoder(SequenceParameterSet sps)
     {
-        _sps = sps;
-        Picture = picture;
+        Sps = sps;
         _widthInMbs = sps.WidthInMbs;
         _mbCount = sps.WidthInMbs * sps.HeightInMbs;
 
@@ -60,9 +59,26 @@ internal sealed partial class PictureDecoder
         InitInter();
     }
 
-    public Picture Picture { get; }
+    public SequenceParameterSet Sps { get; }
+
+    public Picture Picture { get; private set; } = null!;
 
     public int DecodedMbCount { get; private set; }
+
+    /// <summary>Starts decoding into <paramref name="picture"/>, forgetting the previous picture's state.</summary>
+    public void Begin(Picture picture)
+    {
+        Picture = picture;
+        DecodedMbCount = 0;
+        _slices.Clear();
+        Array.Fill(_sliceOfMb, -1);
+        Array.Clear(_kind);
+        Array.Clear(_qp);
+        Array.Clear(_totalCoeffLuma);
+        Array.Clear(_totalCoeffChroma);
+        Array.Clear(_intra4x4Mode);
+        ResetInter();
+    }
 
     public bool IsComplete => DecodedMbCount == _mbCount;
 
@@ -299,7 +315,6 @@ internal sealed partial class PictureDecoder
         }
 
         var residual = _residual;
-        residual.Clear();
         if (cbpLuma > 0 || cbpChroma > 0 || is16x16)
         {
             UpdateQp(slice, r);
@@ -419,22 +434,6 @@ internal sealed partial class PictureDecoder
 
         /// <summary>Chroma levels per component and raster 4x4 block.</summary>
         public int[][] ChromaAc { get; } = [.. Enumerable.Range(0, 8).Select(_ => new int[16])];
-
-        public void Clear()
-        {
-            foreach (var block in Luma)
-            {
-                Array.Clear(block);
-            }
-
-            Array.Clear(LumaDc);
-            Array.Clear(ChromaDc[0]);
-            Array.Clear(ChromaDc[1]);
-            foreach (var block in ChromaAc)
-            {
-                Array.Clear(block);
-            }
-        }
     }
 
     private void ReadResidual(BitReader r, int mbAddr, Residual residual, bool is16x16, int cbpLuma, int cbpChroma)
@@ -465,21 +464,17 @@ internal sealed partial class PictureDecoder
             var (x, y) = BlockPosition(idx);
             int nC = LumaNc(mbAddr, x, y);
             var block = residual.Luma[(y * 4) + x];
-            if (is16x16)
+            int first = is16x16 ? 1 : 0;
+            int count = Cavlc.ReadResidualBlock(r, nC, 16 - first, levels);
+            lumaCounts[(y * 4) + x] = (byte)count;
+            if (count == 0)
             {
-                lumaCounts[(y * 4) + x] = (byte)Cavlc.ReadResidualBlock(r, nC, 15, levels);
-                for (int k = 0; k < 15; k++)
-                {
-                    block[zigZag[k + 1]] = levels[k];
-                }
+                continue; // reconstruction reads the counts and leaves this block alone
             }
-            else
+
+            for (int k = first; k < 16; k++)
             {
-                lumaCounts[(y * 4) + x] = (byte)Cavlc.ReadResidualBlock(r, nC, 16, levels);
-                for (int k = 0; k < 16; k++)
-                {
-                    block[zigZag[k]] = levels[k];
-                }
+                block[zigZag[k]] = levels[k - first];
             }
         }
 
@@ -506,7 +501,13 @@ internal sealed partial class PictureDecoder
                 int x = b & 1;
                 int y = b >> 1;
                 var block = residual.ChromaAc[(c * 4) + b];
-                chromaCounts[(c * 4) + b] = (byte)Cavlc.ReadResidualBlock(r, ChromaNc(mbAddr, c, x, y), 15, levels);
+                int count = Cavlc.ReadResidualBlock(r, ChromaNc(mbAddr, c, x, y), 15, levels);
+                chromaCounts[(c * 4) + b] = (byte)count;
+                if (count == 0)
+                {
+                    continue;
+                }
+
                 for (int k = 0; k < 15; k++)
                 {
                     block[zigZag[k + 1]] = levels[k];
@@ -532,10 +533,17 @@ internal sealed partial class PictureDecoder
 
             for (int i = 0; i < 16; i++)
             {
+                var dest = plane.AsSpan(origin + ((i >> 2) * 4 * stride) + ((i & 3) * 4));
+                if (_totalCoeffLuma[(mbAddr * 16) + i] == 0)
+                {
+                    Transform.AddDc(dc[i], dest, stride);
+                    continue;
+                }
+
                 var block = residual.Luma[i];
                 block[0] = dc[i];
                 Transform.Dequantize(block, qp, skipDc: true);
-                Transform.InverseTransformAdd(block, plane.AsSpan(origin + ((i >> 2) * 4 * stride) + ((i & 3) * 4)), stride);
+                Transform.InverseTransformAdd(block, dest, stride);
             }
 
             return;
@@ -561,7 +569,7 @@ internal sealed partial class PictureDecoder
 
             IntraPrediction.Predict4x4(_intra4x4Mode[(mbAddr * 16) + (y * 4) + x], plane, offset, stride, new IntraNeighbors(left, top, topRight, topLeft));
 
-            if ((cbpLuma & (1 << (idx >> 2))) != 0)
+            if ((cbpLuma & (1 << (idx >> 2))) != 0 && _totalCoeffLuma[(mbAddr * 16) + (y * 4) + x] != 0)
             {
                 var block = residual.Luma[(y * 4) + x];
                 Transform.Dequantize(block, qp, skipDc: false);
@@ -599,10 +607,17 @@ internal sealed partial class PictureDecoder
 
             for (int b = 0; b < 4; b++)
             {
+                var dest = plane.AsSpan(origin + ((b >> 1) * 4 * stride) + ((b & 1) * 4));
+                if (_totalCoeffChroma[(mbAddr * 8) + (c * 4) + b] == 0)
+                {
+                    Transform.AddDc(dc[b], dest, stride);
+                    continue;
+                }
+
                 var block = residual.ChromaAc[(c * 4) + b];
                 block[0] = dc[b];
                 Transform.Dequantize(block, qpc, skipDc: true);
-                Transform.InverseTransformAdd(block, plane.AsSpan(origin + ((b >> 1) * 4 * stride) + ((b & 1) * 4)), stride);
+                Transform.InverseTransformAdd(block, dest, stride);
             }
         }
     }

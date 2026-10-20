@@ -108,7 +108,7 @@ internal sealed partial class PictureDecoder
         if (slice.Header.Type == SliceType.B)
         {
             DirectMotion(slice, mbAddr, 0, 4);
-            PredictDirect(mbAddr, 0, 4);
+            PredictDirect(slice, mbAddr, 0, 4);
             return;
         }
 
@@ -121,7 +121,7 @@ internal sealed partial class PictureDecoder
         }
 
         StoreMotion(slice, 0, mbAddr, 0, 0, 16, 16, 0, mv.X, mv.Y);
-        PredictPartition(mbAddr, 0, 0, 16, 16);
+        PredictPartition(slice, mbAddr, 0, 0, 16, 16);
     }
 
     /// <summary>
@@ -140,7 +140,7 @@ internal sealed partial class PictureDecoder
             // B_Direct_16x16.
             _directMb[mbAddr] = true;
             DirectMotion(slice, mbAddr, 0, 4);
-            PredictDirect(mbAddr, 0, 4);
+            PredictDirect(slice, mbAddr, 0, 4);
         }
         else if (isB ? mbType < 22 : mbType < 3)
         {
@@ -177,7 +177,7 @@ internal sealed partial class PictureDecoder
 
             foreach (var (x, y, w, h) in partitions)
             {
-                PredictPartition(mbAddr, x, y, w, h);
+                PredictPartition(slice, mbAddr, x, y, w, h);
             }
         }
         else
@@ -245,13 +245,13 @@ internal sealed partial class PictureDecoder
         {
             if (shapes[i] < 0)
             {
-                PredictDirect(mbAddr, i, 1);
+                PredictDirect(slice, mbAddr, i, 1);
                 continue;
             }
 
             foreach (var (x, y, w, h) in SubPartitions[shapes[i]])
             {
-                PredictPartition(mbAddr, ((i & 1) * 8) + x, ((i >> 1) * 8) + y, w, h);
+                PredictPartition(slice, mbAddr, ((i & 1) * 8) + x, ((i >> 1) * 8) + y, w, h);
             }
         }
     }
@@ -391,10 +391,12 @@ internal sealed partial class PictureDecoder
     }
 
     /// <summary>
-    /// Motion compensation of a partition from its stored motion (8.4.2): from one list, or the
-    /// rounded average of both (default weighted sample prediction, 8.4.2.3.1).
+    /// Motion compensation of a partition from its stored motion (8.4.2): from one list, or from
+    /// both, then weighted sample prediction (8.4.2.3): the default (one list as is, or the
+    /// rounded average), explicit weights from the slice's table, or implicit weights from the
+    /// order count distances (bi-predicted blocks of B slices with weighted_bipred_idc 2).
     /// </summary>
-    private void PredictPartition(int mbAddr, int x, int y, int w, int h)
+    private void PredictPartition(SliceState slice, int mbAddr, int x, int y, int w, int h)
     {
         int part = (mbAddr * 4) + ((y >> 3) * 2) + (x >> 3);
         int block = (mbAddr * 16) + ((y >> 2) * 4) + (x >> 2);
@@ -404,29 +406,165 @@ internal sealed partial class PictureDecoder
         int lumaY = ((mbAddr / _widthInMbs) * 16) + y;
         int lumaStride = Picture.LumaStride;
         int chromaStride = Picture.ChromaStride;
+        int chromaOffset = (lumaY / 2 * chromaStride) + (lumaX / 2);
+        bool bi = ref0 is not null && ref1 is not null;
+        var weighting = Weighting(slice, _refIdx[0][part], _refIdx[1][part], bi);
 
-        if (ref0 is null || ref1 is null)
+        if (!bi)
         {
             int list = ref0 is null ? 1 : 0;
             var reference = (ref0 ?? ref1)!;
             int mvX = _mvX[list][block];
             int mvY = _mvY[list][block];
-            InterPrediction.PredictLuma(reference, Picture.Y, lumaStride, lumaX, lumaY, w, h, mvX, mvY);
-            InterPrediction.PredictChroma(reference, 1, Picture.Cb, chromaStride, lumaX / 2, lumaY / 2, w / 2, h / 2, mvX, mvY);
-            InterPrediction.PredictChroma(reference, 2, Picture.Cr, chromaStride, lumaX / 2, lumaY / 2, w / 2, h / 2, mvX, mvY);
+            if (weighting.IsDefault)
+            {
+                InterPrediction.PredictLuma(reference, Picture.Y, lumaStride, lumaX, lumaY, w, h, mvX, mvY);
+                InterPrediction.PredictChroma(reference, 1, Picture.Cb, chromaStride, lumaX / 2, lumaY / 2, w / 2, h / 2, mvX, mvY);
+                InterPrediction.PredictChroma(reference, 2, Picture.Cr, chromaStride, lumaX / 2, lumaY / 2, w / 2, h / 2, mvX, mvY);
+                return;
+            }
+
+            InterPrediction.PredictLuma(reference, lumaX, lumaY, w, h, mvX, mvY, _predictionL0, 16);
+            WeightOne(_predictionL0, 16, w, h, Picture.Y.AsSpan((lumaY * lumaStride) + lumaX), lumaStride, weighting, list, 0);
+            for (int c = 1; c <= 2; c++)
+            {
+                InterPrediction.PredictChroma(reference, c, lumaX / 2, lumaY / 2, w / 2, h / 2, mvX, mvY, _predictionL0, 8);
+                WeightOne(_predictionL0, 8, w / 2, h / 2, Picture.Plane(c).AsSpan(chromaOffset), chromaStride, weighting, list, c);
+            }
+
             return;
         }
 
-        InterPrediction.PredictLuma(ref0, lumaX, lumaY, w, h, _mvX[0][block], _mvY[0][block], _predictionL0, 16);
-        InterPrediction.PredictLuma(ref1, lumaX, lumaY, w, h, _mvX[1][block], _mvY[1][block], _predictionL1, 16);
-        InterPrediction.Average(_predictionL0, _predictionL1, 16, w, h, Picture.Y.AsSpan((lumaY * lumaStride) + lumaX), lumaStride);
+        InterPrediction.PredictLuma(ref0!, lumaX, lumaY, w, h, _mvX[0][block], _mvY[0][block], _predictionL0, 16);
+        InterPrediction.PredictLuma(ref1!, lumaX, lumaY, w, h, _mvX[1][block], _mvY[1][block], _predictionL1, 16);
+        var lumaOut = Picture.Y.AsSpan((lumaY * lumaStride) + lumaX);
+        if (weighting.IsDefault)
+        {
+            InterPrediction.Average(_predictionL0, _predictionL1, 16, w, h, lumaOut, lumaStride);
+        }
+        else
+        {
+            WeightBoth(_predictionL0, _predictionL1, 16, w, h, lumaOut, lumaStride, weighting, 0);
+        }
 
-        int chromaOffset = (lumaY / 2 * chromaStride) + (lumaX / 2);
         for (int c = 1; c <= 2; c++)
         {
-            InterPrediction.PredictChroma(ref0, c, lumaX / 2, lumaY / 2, w / 2, h / 2, _mvX[0][block], _mvY[0][block], _predictionL0, 8);
-            InterPrediction.PredictChroma(ref1, c, lumaX / 2, lumaY / 2, w / 2, h / 2, _mvX[1][block], _mvY[1][block], _predictionL1, 8);
-            InterPrediction.Average(_predictionL0, _predictionL1, 8, w / 2, h / 2, Picture.Plane(c).AsSpan(chromaOffset), chromaStride);
+            InterPrediction.PredictChroma(ref0!, c, lumaX / 2, lumaY / 2, w / 2, h / 2, _mvX[0][block], _mvY[0][block], _predictionL0, 8);
+            InterPrediction.PredictChroma(ref1!, c, lumaX / 2, lumaY / 2, w / 2, h / 2, _mvX[1][block], _mvY[1][block], _predictionL1, 8);
+            var chromaOut = Picture.Plane(c).AsSpan(chromaOffset);
+            if (weighting.IsDefault)
+            {
+                InterPrediction.Average(_predictionL0, _predictionL1, 8, w / 2, h / 2, chromaOut, chromaStride);
+            }
+            else
+            {
+                WeightBoth(_predictionL0, _predictionL1, 8, w / 2, h / 2, chromaOut, chromaStride, weighting, c);
+            }
+        }
+    }
+
+    /// <summary>
+    /// The weights of one partition: per list and component (luma, Cb, Cr), with the log2
+    /// denominators logWD for luma and chroma. <see cref="IsDefault"/> when they give exactly the
+    /// default prediction, so the faster unweighted path can be taken.
+    /// </summary>
+    private readonly record struct PartitionWeights(bool IsDefault, int LumaLogWd, int ChromaLogWd, PredWeightTable? Table, int RefIdx0, int RefIdx1, int Implicit0, int Implicit1)
+    {
+        public int LogWd(int component) => component == 0 ? LumaLogWd : ChromaLogWd;
+
+        public int Weight(int list, int component) =>
+            Table is null ? (list == 0 ? Implicit0 : Implicit1) : Table.Weight(list, list == 0 ? RefIdx0 : RefIdx1, component);
+
+        public int Offset(int list, int component) =>
+            Table is null ? 0 : Table.Offset(list, list == 0 ? RefIdx0 : RefIdx1, component);
+    }
+
+    private static readonly PartitionWeights DefaultWeights = new(true, 0, 0, null, 0, 0, 0, 0);
+
+    private PartitionWeights Weighting(SliceState slice, int refIdx0, int refIdx1, bool bi)
+    {
+        var header = slice.Header;
+        if (header.Weights is { } table)
+        {
+            // Explicit (8.4.3): the table's entries for the partition's reference indices.
+            bool isDefault = true;
+            for (int list = 0; list < 2; list++)
+            {
+                int refIdx = list == 0 ? refIdx0 : refIdx1;
+                if (refIdx < 0)
+                {
+                    continue;
+                }
+
+                for (int c = 0; c < 3; c++)
+                {
+                    int denom = c == 0 ? table.LumaLog2Denom : table.ChromaLog2Denom;
+                    isDefault &= table.Weight(list, refIdx, c) == 1 << denom && table.Offset(list, refIdx, c) == 0;
+                }
+            }
+
+            return new PartitionWeights(isDefault, table.LumaLog2Denom, table.ChromaLog2Denom, table, refIdx0, refIdx1, 0, 0);
+        }
+
+        if (!bi || header.Type != SliceType.B || slice.Pps.WeightedBipredIdc != 2)
+        {
+            return DefaultWeights;
+        }
+
+        // Implicit (8.4.3): weights 64 - DistScaleFactor / 4 and DistScaleFactor / 4 out of 64,
+        // from the order count distances, unless the references are long-term, coincide or too far.
+        var pic0 = slice.RefList0[refIdx0];
+        var pic1 = slice.RefList1[refIdx1];
+        int w0 = 32;
+        int w1 = 32;
+        if (pic1.Poc != pic0.Poc && !pic0.IsLongTermReference && !pic1.IsLongTermReference)
+        {
+            int tb = Math.Clamp(Picture.Poc - pic0.Poc, -128, 127);
+            int td = Math.Clamp(pic1.Poc - pic0.Poc, -128, 127);
+            int tx = (16384 + Math.Abs(td / 2)) / td;
+            int distScaleFactor = Math.Clamp(((tb * tx) + 32) >> 6, -1024, 1023);
+            if (distScaleFactor >> 2 is >= -64 and <= 128)
+            {
+                w0 = 64 - (distScaleFactor >> 2);
+                w1 = distScaleFactor >> 2;
+            }
+        }
+
+        return w0 == 32 ? DefaultWeights : new PartitionWeights(false, 5, 5, null, refIdx0, refIdx1, w0, w1);
+    }
+
+    /// <summary>Weighted prediction from one list (8-449, 8-450).</summary>
+    private static void WeightOne(ReadOnlySpan<byte> prediction, int stride, int width, int height, Span<byte> output, int outputStride, PartitionWeights weights, int list, int component)
+    {
+        int logWd = weights.LogWd(component);
+        int w = weights.Weight(list, component);
+        int o = weights.Offset(list, component);
+        int round = logWd >= 1 ? 1 << (logWd - 1) : 0;
+        for (int j = 0; j < height; j++)
+        {
+            for (int i = 0; i < width; i++)
+            {
+                int p = prediction[(j * stride) + i];
+                int value = logWd >= 1 ? (((p * w) + round) >> logWd) + o : (p * w) + o;
+                output[(j * outputStride) + i] = (byte)Math.Clamp(value, 0, 255);
+            }
+        }
+    }
+
+    /// <summary>Weighted bi-prediction (8-451).</summary>
+    private static void WeightBoth(ReadOnlySpan<byte> prediction0, ReadOnlySpan<byte> prediction1, int stride, int width, int height, Span<byte> output, int outputStride, PartitionWeights weights, int component)
+    {
+        int logWd = weights.LogWd(component);
+        int w0 = weights.Weight(0, component);
+        int w1 = weights.Weight(1, component);
+        int offset = (weights.Offset(0, component) + weights.Offset(1, component) + 1) >> 1;
+        for (int j = 0; j < height; j++)
+        {
+            for (int i = 0; i < width; i++)
+            {
+                int value = (((prediction0[(j * stride) + i] * w0) + (prediction1[(j * stride) + i] * w1) + (1 << logWd)) >> (logWd + 1)) + offset;
+                output[(j * outputStride) + i] = (byte)Math.Clamp(value, 0, 255);
+            }
         }
     }
 

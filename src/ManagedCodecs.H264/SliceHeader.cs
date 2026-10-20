@@ -18,47 +18,47 @@ internal readonly record struct MemoryManagementOperation(int Op, int Difference
 /// <summary>slice_header (7.3.3) for frame (non-field) slices.</summary>
 internal sealed class SliceHeader
 {
-    public int FirstMbInSlice { get; private init; }
+    public int FirstMbInSlice { get; internal init; }
 
-    public SliceType Type { get; private init; }
+    public SliceType Type { get; internal init; }
 
-    public int PpsId { get; private init; }
+    public int PpsId { get; internal init; }
 
-    public int FrameNum { get; private init; }
+    public int FrameNum { get; internal init; }
 
-    public bool IsIdr { get; private init; }
+    public bool IsIdr { get; internal init; }
 
-    public int NalRefIdc { get; private init; }
+    public int NalRefIdc { get; internal init; }
 
-    public int IdrPicId { get; private init; }
+    public int IdrPicId { get; internal init; }
 
-    public int PicOrderCntLsb { get; private init; }
+    public int PicOrderCntLsb { get; internal init; }
 
-    public int DeltaPicOrderCntBottom { get; private init; }
+    public int DeltaPicOrderCntBottom { get; internal init; }
 
-    public int DeltaPicOrderCnt0 { get; private init; }
+    public int DeltaPicOrderCnt0 { get; internal init; }
 
-    public int DeltaPicOrderCnt1 { get; private init; }
+    public int DeltaPicOrderCnt1 { get; internal init; }
 
-    public int NumRefIdxL0Active { get; private init; }
+    public int NumRefIdxL0Active { get; internal init; }
 
-    public IReadOnlyList<RefPicListModification> RefPicListModificationL0 { get; private init; } = [];
+    public IReadOnlyList<RefPicListModification> RefPicListModificationL0 { get; internal init; } = [];
 
-    public bool NoOutputOfPriorPics { get; private init; }
+    public bool NoOutputOfPriorPics { get; internal init; }
 
-    public bool LongTermReference { get; private init; }
+    public bool LongTermReference { get; internal init; }
 
-    public bool AdaptiveRefPicMarking { get; private init; }
+    public bool AdaptiveRefPicMarking { get; internal init; }
 
-    public IReadOnlyList<MemoryManagementOperation> MemoryManagement { get; private init; } = [];
+    public IReadOnlyList<MemoryManagementOperation> MemoryManagement { get; internal init; } = [];
 
-    public int SliceQpDelta { get; private init; }
+    public int SliceQpDelta { get; internal init; }
 
-    public int DisableDeblockingFilterIdc { get; private init; }
+    public int DisableDeblockingFilterIdc { get; internal init; }
 
-    public int SliceAlphaC0Offset { get; private init; }
+    public int SliceAlphaC0Offset { get; internal init; }
 
-    public int SliceBetaOffset { get; private init; }
+    public int SliceBetaOffset { get; internal init; }
 
     public static SliceHeader Parse(
         BitReader r,

@@ -3,50 +3,50 @@ namespace ManagedCodecs.H264;
 /// <summary>seq_parameter_set_rbsp (7.3.2.1.1), with the fields a frame decoder needs.</summary>
 internal sealed class SequenceParameterSet
 {
-    public int ProfileIdc { get; private init; }
+    public int ProfileIdc { get; internal init; }
 
-    public int ConstraintFlags { get; private init; }
+    public int ConstraintFlags { get; internal init; }
 
-    public int LevelIdc { get; private init; }
+    public int LevelIdc { get; internal init; }
 
-    public int Id { get; private init; }
+    public int Id { get; internal init; }
 
-    public int ChromaFormatIdc { get; private init; } = 1;
+    public int ChromaFormatIdc { get; internal init; } = 1;
 
-    public int BitDepthLuma { get; private init; } = 8;
+    public int BitDepthLuma { get; internal init; } = 8;
 
-    public int BitDepthChroma { get; private init; } = 8;
+    public int BitDepthChroma { get; internal init; } = 8;
 
-    public bool HasScalingMatrix { get; private init; }
+    public bool HasScalingMatrix { get; internal init; }
 
-    public int Log2MaxFrameNum { get; private init; }
+    public int Log2MaxFrameNum { get; internal init; }
 
-    public int PicOrderCntType { get; private init; }
+    public int PicOrderCntType { get; internal init; }
 
-    public int Log2MaxPicOrderCntLsb { get; private init; }
+    public int Log2MaxPicOrderCntLsb { get; internal init; }
 
-    public bool DeltaPicOrderAlwaysZero { get; private init; }
+    public bool DeltaPicOrderAlwaysZero { get; internal init; }
 
-    public int OffsetForNonRefPic { get; private init; }
+    public int OffsetForNonRefPic { get; internal init; }
 
-    public int OffsetForTopToBottomField { get; private init; }
+    public int OffsetForTopToBottomField { get; internal init; }
 
-    public int[] OffsetForRefFrame { get; private init; } = [];
+    public int[] OffsetForRefFrame { get; internal init; } = [];
 
-    public int MaxNumRefFrames { get; private init; }
+    public int MaxNumRefFrames { get; internal init; }
 
-    public bool GapsInFrameNumAllowed { get; private init; }
+    public bool GapsInFrameNumAllowed { get; internal init; }
 
-    public int WidthInMbs { get; private init; }
+    public int WidthInMbs { get; internal init; }
 
-    public int HeightInMapUnits { get; private init; }
+    public int HeightInMapUnits { get; internal init; }
 
-    public bool FrameMbsOnly { get; private init; }
+    public bool FrameMbsOnly { get; internal init; }
 
-    public bool Direct8x8Inference { get; private init; }
+    public bool Direct8x8Inference { get; internal init; }
 
     /// <summary>Crop offsets in luma samples (already scaled by CropUnitX/Y).</summary>
-    public (int Left, int Right, int Top, int Bottom) Crop { get; private init; }
+    public (int Left, int Right, int Top, int Bottom) Crop { get; internal init; }
 
     public int HeightInMbs => FrameMbsOnly ? HeightInMapUnits : HeightInMapUnits * 2;
 
@@ -182,39 +182,39 @@ internal sealed class SequenceParameterSet
 /// <summary>pic_parameter_set_rbsp (7.3.2.2).</summary>
 internal sealed class PictureParameterSet
 {
-    public int Id { get; private init; }
+    public int Id { get; internal init; }
 
-    public int SpsId { get; private init; }
+    public int SpsId { get; internal init; }
 
-    public bool EntropyCodingModeCabac { get; private init; }
+    public bool EntropyCodingModeCabac { get; internal init; }
 
-    public bool BottomFieldPicOrderInFramePresent { get; private init; }
+    public bool BottomFieldPicOrderInFramePresent { get; internal init; }
 
-    public int NumSliceGroups { get; private init; }
+    public int NumSliceGroups { get; internal init; }
 
-    public int NumRefIdxL0DefaultActive { get; private init; }
+    public int NumRefIdxL0DefaultActive { get; internal init; }
 
-    public int NumRefIdxL1DefaultActive { get; private init; }
+    public int NumRefIdxL1DefaultActive { get; internal init; }
 
-    public bool WeightedPred { get; private init; }
+    public bool WeightedPred { get; internal init; }
 
-    public int WeightedBipredIdc { get; private init; }
+    public int WeightedBipredIdc { get; internal init; }
 
-    public int PicInitQp { get; private init; }
+    public int PicInitQp { get; internal init; }
 
-    public int ChromaQpIndexOffset { get; private init; }
+    public int ChromaQpIndexOffset { get; internal init; }
 
-    public bool DeblockingFilterControlPresent { get; private init; }
+    public bool DeblockingFilterControlPresent { get; internal init; }
 
-    public bool ConstrainedIntraPred { get; private init; }
+    public bool ConstrainedIntraPred { get; internal init; }
 
-    public bool RedundantPicCntPresent { get; private init; }
+    public bool RedundantPicCntPresent { get; internal init; }
 
-    public bool Transform8x8Mode { get; private init; }
+    public bool Transform8x8Mode { get; internal init; }
 
-    public bool HasScalingMatrix { get; private init; }
+    public bool HasScalingMatrix { get; internal init; }
 
-    public int SecondChromaQpIndexOffset { get; private init; }
+    public int SecondChromaQpIndexOffset { get; internal init; }
 
     public static PictureParameterSet Parse(BitReader r)
     {

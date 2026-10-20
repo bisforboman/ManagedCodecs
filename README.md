@@ -113,9 +113,10 @@ what the two commands above include and are not comparable with FFmpeg's `bench:
 4. ~~H.264 decoder, starting with Constrained Baseline (CAVLC, I/P frames)~~ done: bit-exact with
    FFmpeg on libx264 samples covering intra and inter prediction, all partitions, multiple
    references and slices, cropping and constrained intra, with CAVLC and with CABAC (Main profile).
-   Frames come out in display order. Never produced by libx264, so tested on hand-built streams
-   only: I_PCM, cabac_init_idc 1 and 2 (their tables are checked against libavc), reference list
-   modification and memory management operations. Still open: B frames, the 8x8 transform (High
+   Frames come out in display order. Never produced by libx264, so not checked against FFmpeg:
+   I_PCM (decoded from hand-built streams, CAVLC and CABAC), reference list modification and memory
+   management operations (unit tests), cabac_init_idc 1 and 2 (only their tables are checked, against
+   libavc). Still open: B frames, the 8x8 transform (High
    profile), weighted prediction, error concealment, more speed (about 3x FFmpeg at 720p)
 5. ~~AAC-LC decoder~~ done: channel configurations 1 to 7 and program config elements (1 to 8
    channels), all window sequences and shapes, M/S, intensity, PNS, TNS. Both decoders are floating

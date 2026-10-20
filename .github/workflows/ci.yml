@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]   # drafts run nothing until marked ready
+
+# A new push to a pull request supersedes its running checks; pushes to main all run.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# The token only reads the repository.
+permissions:
+  contents: read
+
+jobs:
+  # Builds, generates the FFmpeg samples and references (tools/make-samples.sh), and runs every test: once as is and
+  # once with hardware intrinsics off, so the scalar fallbacks of the SIMD paths are checked against FFmpeg too.
+  # Ubuntu 24.04's FFmpeg is 6.1, the version the samples, the AAC tolerance and the tool checks were set up with.
+  build:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Install FFmpeg and ImageMagick
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg imagemagick
+          ffmpeg -hide_banner -version | head -1
+
+      - name: Generate samples
+        run: tools/make-samples.sh
+
+      - name: Build
+        run: dotnet build ManagedCodecs.slnx -c Release -warnaserror
+
+      - name: Test
+        run: dotnet test ManagedCodecs.slnx -c Release --no-build
+
+      - name: Test without hardware intrinsics
+        run: dotnet test ManagedCodecs.slnx -c Release --no-build
+        env:
+          DOTNET_EnableHWIntrinsic: 0
+
+      - name: mcdec decodes a file with video and audio
+        run: dotnet tools/ManagedCodecs.Cli/bin/Release/net10.0/mcdec.dll samples/h264-with-audio.mp4

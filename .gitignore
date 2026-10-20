@@ -13,5 +13,5 @@ samples/*.mp4
 samples/*.mjpeg
 samples/*.framemd5
 samples/*.flags
-gray-frames/
 samples/*.f32
+.claude/worktrees/

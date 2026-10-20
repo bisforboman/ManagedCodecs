@@ -205,8 +205,7 @@ public sealed class MjpegDecoder : IVideoDecoder
 
                 if (count == 1)
                 {
-                    DecodeBlock(ref reader, in sc, ref predictors[i], block);
-                    SimpleIdct.Put(block, plane.AsSpan((my * 8 * stride) + (mx * 8)), stride);
+                    DecodeBlock(ref reader, in sc, ref predictors[i], block, plane.AsSpan((my * 8 * stride) + (mx * 8)), stride);
                     continue;
                 }
 
@@ -217,16 +216,18 @@ public sealed class MjpegDecoder : IVideoDecoder
                     {
                         int x = ((mx * component.HorizontalSampling) + h) * 8;
                         int y = ((my * component.VerticalSampling) + v) * 8;
-                        DecodeBlock(ref reader, in sc, ref predictors[i], block);
-                        SimpleIdct.Put(block, plane.AsSpan((y * stride) + x), stride);
+                        DecodeBlock(ref reader, in sc, ref predictors[i], block, plane.AsSpan((y * stride) + x), stride);
                     }
                 }
             }
         }
     }
 
-    /// <summary>Huffman-decodes one block (T.81 F.2.2) and dequantizes it into natural order.</summary>
-    private static void DecodeBlock(ref JpegBitReader reader, in ScanComponent sc, ref int predictor, scoped Span<short> block)
+    /// <summary>
+    /// Huffman-decodes one block (T.81 F.2.2), dequantizes it into natural order and writes
+    /// its inverse DCT to <paramref name="dest"/>.
+    /// </summary>
+    private static void DecodeBlock(ref JpegBitReader reader, in ScanComponent sc, ref int predictor, scoped Span<short> block, Span<byte> dest, int stride)
     {
         block.Clear();
         var quant = sc.Quantization;
@@ -243,6 +244,7 @@ public sealed class MjpegDecoder : IVideoDecoder
         predictor = dc;
         block[0] = (short)dc;
 
+        bool hasAc = false;
         for (int k = 1; k < 64; k++)
         {
             int symbol = sc.Ac.Decode(ref reader);
@@ -267,6 +269,17 @@ public sealed class MjpegDecoder : IVideoDecoder
             }
 
             block[zigZag[k]] = (short)(reader.ReceiveExtend(size) * quant[k]);
+            hasAc = true;
+        }
+
+        // Flat blocks are common and need no transform: every sample has the same value.
+        if (hasAc)
+        {
+            SimpleIdct.Put(block, dest, stride);
+        }
+        else
+        {
+            SimpleIdct.PutDcOnly(block[0], dest, stride);
         }
     }
 

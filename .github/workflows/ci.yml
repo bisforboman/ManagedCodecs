@@ -36,6 +36,11 @@ jobs:
           sudo apt-get install -y --no-install-recommends ffmpeg imagemagick
           ffmpeg -hide_banner -version | head -1
 
+      - name: Format (StyleBro)
+        run: |
+          dotnet tool restore
+          dotnet tool run stylebro-migrate format ManagedCodecs.slnx --verify-no-changes
+
       - name: Generate samples
         run: tools/make-samples.sh
 

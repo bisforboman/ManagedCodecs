@@ -1,11 +1,16 @@
 <Project>
   <PropertyGroup>
+    <StyleBroPreset>1.0</StyleBroPreset>
     <TargetFramework>net10.0</TargetFramework>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="StyleBro.Analyzers" PrivateAssets="all" />
+  </ItemGroup>
 
   <!-- Shared package metadata for the src/ libraries. -->
   <PropertyGroup>

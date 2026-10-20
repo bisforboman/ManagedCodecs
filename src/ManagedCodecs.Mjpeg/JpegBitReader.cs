@@ -1,3 +1,5 @@
+using System.Buffers.Binary;
+
 namespace ManagedCodecs.Mjpeg;
 
 /// <summary>
@@ -49,8 +51,7 @@ internal ref struct JpegBitReader
             return 0;
         }
 
-        int value = ReadBits(n);
-        return value < (1 << (n - 1)) ? value - (1 << n) + 1 : value;
+        return HuffmanTable.Extend(ReadBits(n), n);
     }
 
     /// <summary>
@@ -82,6 +83,23 @@ internal ref struct JpegBitReader
 
     private void Fill()
     {
+        // Fast path: eight bytes with no 0xFF among them hold no stuffing and no marker, so
+        // as many whole bytes as fit can go in at once. The partial byte that also lands in
+        // the low bits is the same byte a later refill puts there, so ORing it twice is fine.
+        if (!_atMarker && _pos + 8 <= _data.Length)
+        {
+            ulong next = BinaryPrimitives.ReadUInt64BigEndian(_data[_pos..]);
+            ulong inverted = ~next;
+            if (((inverted - 0x0101010101010101UL) & ~inverted & 0x8080808080808080UL) == 0)
+            {
+                int bytes = (64 - _count) >> 3;
+                _buffer |= next >> _count;
+                _pos += bytes;
+                _count += bytes * 8;
+                return;
+            }
+        }
+
         while (_count <= 56)
         {
             ulong b = 0;

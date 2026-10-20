@@ -31,14 +31,26 @@ FFmpeg's.
 
 ```
 dotnet run -c Release --project benchmarks/ManagedCodecs.Benchmarks
-ffmpeg -benchmark -i samples/testsrc-420.avi -f null -
+ffmpeg -benchmark -threads 1 -stream_loop 39 -i samples/testsrc-420.avi -f null -
 ```
+
+Divide FFmpeg's `utime` by the number of frames decoded (40 loops of the file). Its figure also
+includes demuxing and passing frames on, so it slightly flatters us. Single-threaded, on an
+AVX2 Xeon cloud VM (µs per frame):
+
+| Sample | ManagedCodecs | FFmpeg 6.1 |
+| --- | ---: | ---: |
+| `testsrc-420` (320x240 4:2:0) | 198 | 292 |
+| `testsrc-444` | 315 | 377 |
+| `noise-q1` (noise, highest quality) | 773 | 1157 |
 
 ## Roadmap
 
 1. ~~MJPEG baseline decoder, bit-exact against FFmpeg (4:2:0, 4:2:2, 4:4:4, gray, restart markers, missing DHT)~~ done;
    still open: interlaced AVI1 frames (two fields per packet), real camera files
-2. SIMD: `Span`, `Vector128`/`Vector256` IDCT and colour paths; measure the ratio to FFmpeg
+2. SIMD: `Span`, `Vector128`/`Vector256` IDCT and colour paths; measure the ratio to FFmpeg.
+   Done so far: AVX2 IDCT, DC-only blocks, single-lookup coefficient decoding, buffer reuse.
+   Still open: an ARM64 (AdvSimd) IDCT, decoding straight into the output frame
 3. MP4 demuxer (ISO BMFF: `moov`, `trak`, `stbl` sample tables)
 4. H.264 decoder, starting with Constrained Baseline (CAVLC, I/P frames)
 5. AAC-LC decoder

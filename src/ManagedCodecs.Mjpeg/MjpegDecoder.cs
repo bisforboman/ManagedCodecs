@@ -17,6 +17,9 @@ public sealed class MjpegDecoder : IVideoDecoder
     private readonly HuffmanTable?[] _dcTables = new HuffmanTable[4];
     private readonly HuffmanTable?[] _acTables = new HuffmanTable[4];
 
+    // Sample buffers of the previous frame, reused while the layout stays the same.
+    private FrameState? _previous;
+
     public MjpegDecoder()
     {
         _dcTables[0] = new HuffmanTable(JpegTables.DcLuminanceBits, JpegTables.DcLuminanceValues);
@@ -57,7 +60,8 @@ public sealed class MjpegDecoder : IVideoDecoder
                         throw new InvalidDataException("More than one SOF segment.");
                     }
 
-                    frame = new FrameState(JpegFrameHeader.Parse(segment.Marker, payload));
+                    frame = new FrameState(JpegFrameHeader.Parse(segment.Marker, payload), _previous);
+                    _previous = frame;
                     break;
                 case JpegMarker.Sos:
                     if (frame is null)
@@ -233,13 +237,7 @@ public sealed class MjpegDecoder : IVideoDecoder
         var quant = sc.Quantization;
         var zigZag = JpegTables.ZigZag;
 
-        int size = sc.Dc.Decode(ref reader);
-        if (size > 11)
-        {
-            throw new InvalidDataException("Invalid DC coefficient size.");
-        }
-
-        int dc = (reader.ReceiveExtend(size) * quant[0]) + predictor;
+        int dc = (sc.Dc.DecodeDc(ref reader) * quant[0]) + predictor;
         dc = Math.Clamp(dc, short.MinValue, short.MaxValue);
         predictor = dc;
         block[0] = (short)dc;
@@ -247,11 +245,11 @@ public sealed class MjpegDecoder : IVideoDecoder
         bool hasAc = false;
         for (int k = 1; k < 64; k++)
         {
-            int symbol = sc.Ac.Decode(ref reader);
-            int run = symbol >> 4;
-            size = symbol & 0x0F;
+            int ac = sc.Ac.DecodeAc(ref reader);
+            int run = ac & 0xFF;
+            int value = ac >> 8;
 
-            if (size == 0)
+            if (value == 0)
             {
                 if (run == 15)
                 {
@@ -268,7 +266,7 @@ public sealed class MjpegDecoder : IVideoDecoder
                 throw new InvalidDataException("AC coefficient index out of range.");
             }
 
-            block[zigZag[k]] = (short)(reader.ReceiveExtend(size) * quant[k]);
+            block[zigZag[k]] = (short)(value * quant[k]);
             hasAc = true;
         }
 
@@ -288,7 +286,7 @@ public sealed class MjpegDecoder : IVideoDecoder
     /// <summary>Per-frame decode target: one MCU-aligned sample buffer per component.</summary>
     private sealed class FrameState
     {
-        public FrameState(JpegFrameHeader header)
+        public FrameState(JpegFrameHeader header, FrameState? previous)
         {
             Header = header;
             Format = header.ToPixelFormat();
@@ -314,7 +312,10 @@ public sealed class MjpegDecoder : IVideoDecoder
             {
                 var c = header.Components[i];
                 BufferStrides[i] = McusX * c.HorizontalSampling * 8;
-                Buffers[i] = new byte[BufferStrides[i] * McusY * c.VerticalSampling * 8];
+                int size = BufferStrides[i] * McusY * c.VerticalSampling * 8;
+                Buffers[i] = previous is not null && i < previous.Buffers.Length && previous.Buffers[i].Length == size && previous.BufferStrides[i] == BufferStrides[i]
+                    ? previous.Buffers[i]
+                    : new byte[size];
             }
         }
 

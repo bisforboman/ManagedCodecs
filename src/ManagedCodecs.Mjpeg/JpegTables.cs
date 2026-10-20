@@ -18,7 +18,6 @@ internal static class JpegTables
 
     // Annex K.3: the "typical" Huffman tables. MJPEG streams often omit DHT and rely on these.
     // Each table is BITS (count of codes per length 1..16) followed by HUFFVAL.
-
     public static ReadOnlySpan<byte> DcLuminanceBits => [0, 1, 5, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0];
 
     public static ReadOnlySpan<byte> DcLuminanceValues => [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];

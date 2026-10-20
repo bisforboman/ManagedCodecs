@@ -85,40 +85,40 @@ public sealed class AacDecoder : IAudioDecoder
                     throw new NotSupportedException("Coupling channel elements are not supported.");
 
                 case DseElement:
-                {
-                    r.Read(4);
-                    bool align = r.ReadFlag();
-                    int count = r.Read(8);
-                    if (count == 255)
                     {
-                        count += r.Read(8);
-                    }
+                        r.Read(4);
+                        bool align = r.ReadFlag();
+                        int count = r.Read(8);
+                        if (count == 255)
+                        {
+                            count += r.Read(8);
+                        }
 
-                    if (align)
-                    {
-                        r.ByteAlign();
-                    }
+                        if (align)
+                        {
+                            r.ByteAlign();
+                        }
 
-                    r.Skip(count * 8);
-                    break;
-                }
+                        r.Skip(count * 8);
+                        break;
+                    }
 
                 case PceElement:
                     ProgramConfigElement.Parse(r);
                     break;
 
                 case FilElement:
-                {
-                    // Extension payloads (SBR, dynamic range, fill) are skipped.
-                    int count = r.Read(4);
-                    if (count == 15)
                     {
-                        count += r.Read(8) - 1;
-                    }
+                        // Extension payloads (SBR, dynamic range, fill) are skipped.
+                        int count = r.Read(4);
+                        if (count == 15)
+                        {
+                            count += r.Read(8) - 1;
+                        }
 
-                    r.Skip(count * 8);
-                    break;
-                }
+                        r.Skip(count * 8);
+                        break;
+                    }
             }
         }
 
@@ -154,6 +154,7 @@ public sealed class AacDecoder : IAudioDecoder
         4 => [1, 2, 0, 3],                // C, L R, Cs -> FL FR FC BC
         5 => [1, 2, 0, 3, 4],             // C, L R, Ls Rs -> FL FR FC BL BR
         6 => [1, 2, 0, 5, 3, 4],          // C, L R, Ls Rs, LFE -> FL FR FC LFE BL BR
+
         // The spec calls configuration 7's second pair "outside front"; FFmpeg reads the pairs as
         // front, side and back and outputs 7.1, and so do we, so FFmpeg's 7.1 files round-trip.
         7 => [1, 2, 0, 7, 5, 6, 3, 4],    // C, L R, Ls Rs, Lb Rb, LFE -> FL FR FC LFE BL BR SL SR
@@ -777,7 +778,6 @@ public sealed class AacDecoder : IAudioDecoder
     }
 
     // ---- State ----
-
     private sealed class IcsInfo
     {
         public WindowSequence WindowSequence { get; set; }

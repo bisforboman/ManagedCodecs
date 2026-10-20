@@ -9,7 +9,7 @@ namespace ManagedCodecs.Tests.H264;
 /// </summary>
 public class CavlcTablesTests
 {
-    public static TheoryData<string> CoeffTokenTables() => new(["0", "2", "4", "8", "ChromaDc"]);
+    public static TheoryData<string> CoeffTokenTables() => new("0", "2", "4", "8", "ChromaDc");
 
     [Theory]
     [MemberData(nameof(CoeffTokenTables))]
@@ -54,7 +54,7 @@ public class CavlcTablesTests
             {
                 // Then exactly the all-zero codeword of maximum length is the unused one.
                 Assert.Equal(Math.Pow(2, -vlc.MaxLength), unused);
-                Assert.DoesNotContain(new string('0', vlc.MaxLength), table.Select(c => c.Replace(" ", string.Empty, StringComparison.Ordinal)));
+                Assert.DoesNotContain(new string('0', vlc.MaxLength), table.Select(c => c.Replace(" ", "", StringComparison.Ordinal)));
             }
         }
 
@@ -73,7 +73,7 @@ public class CavlcTablesTests
     }
 
     private static double KraftSum(IEnumerable<string> codes) =>
-        codes.Select(c => c.Replace(" ", string.Empty, StringComparison.Ordinal))
+        codes.Select(c => c.Replace(" ", "", StringComparison.Ordinal))
             .Where(c => c.Length > 0)
             .Sum(c => Math.Pow(2, -c.Length));
 }

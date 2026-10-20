@@ -79,38 +79,38 @@ public sealed class H264Decoder : IVideoDecoder
         switch (nal.Type)
         {
             case NalUnitType.Sps:
-            {
-                var sps = SequenceParameterSet.Parse(nal.CreateReader());
-                _sps[sps.Id] = sps;
-                break;
-            }
+                {
+                    var sps = SequenceParameterSet.Parse(nal.CreateReader());
+                    _sps[sps.Id] = sps;
+                    break;
+                }
 
             case NalUnitType.Pps:
-            {
-                var pps = PictureParameterSet.Parse(nal.CreateReader());
-                _pps[pps.Id] = pps;
-                break;
-            }
+                {
+                    var pps = PictureParameterSet.Parse(nal.CreateReader());
+                    _pps[pps.Id] = pps;
+                    break;
+                }
 
             case NalUnitType.Slice or NalUnitType.IdrSlice:
-            {
-                var reader = nal.CreateReader();
-                var header = SliceHeader.Parse(reader, nal, _sps, _pps, out var sps, out var pps);
-                CheckSupported(sps, pps);
-
-                if (current is null)
                 {
-                    current = StartPicture(header, sps);
-                }
-                else if (header.FrameNum != current.Header.FrameNum || current.Sps != sps)
-                {
-                    throw new NotSupportedException("A packet holding more than one picture is not supported.");
-                }
+                    var reader = nal.CreateReader();
+                    var header = SliceHeader.Parse(reader, nal, _sps, _pps, out var sps, out var pps);
+                    CheckSupported(sps, pps);
 
-                var refList = header.Type == SliceType.P ? _references.BuildList(header, current.Sps) : [];
-                current.Decoder.DecodeSlice(header, pps, reader, refList);
-                break;
-            }
+                    if (current is null)
+                    {
+                        current = StartPicture(header, sps);
+                    }
+                    else if (header.FrameNum != current.Header.FrameNum || current.Sps != sps)
+                    {
+                        throw new NotSupportedException("A packet holding more than one picture is not supported.");
+                    }
+
+                    var refList = header.Type == SliceType.P ? _references.BuildList(header, current.Sps) : [];
+                    current.Decoder.DecodeSlice(header, pps, reader, refList);
+                    break;
+                }
 
             case >= NalUnitType.SliceDataPartitionA and <= (NalUnitType)4:
                 throw new NotSupportedException("Data partitioning is not supported.");

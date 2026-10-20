@@ -101,16 +101,16 @@ public class ReferenceListTests
         int numRef = 1,
         IReadOnlyList<RefPicListModification>? modifications = null,
         IReadOnlyList<MemoryManagementOperation>? operations = null) => new()
-    {
-        Type = SliceType.P,
-        FrameNum = frameNum,
-        IsIdr = idr,
-        NalRefIdc = 1,
-        NumRefIdxL0Active = numRef,
-        RefPicListModificationL0 = modifications ?? [],
-        AdaptiveRefPicMarking = operations is not null,
-        MemoryManagement = operations ?? [],
-    };
+        {
+            Type = SliceType.P,
+            FrameNum = frameNum,
+            IsIdr = idr,
+            NalRefIdc = 1,
+            NumRefIdxL0Active = numRef,
+            RefPicListModificationL0 = modifications ?? [],
+            AdaptiveRefPicMarking = operations is not null,
+            MemoryManagement = operations ?? [],
+        };
 
     private static int[] FrameNums(IEnumerable<Picture> pictures) => [.. pictures.Select(p => p.FrameNum)];
 }

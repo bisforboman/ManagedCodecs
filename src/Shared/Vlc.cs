@@ -33,7 +33,7 @@ internal sealed class Vlc
         var entries = new List<(string Code, int Value)>();
         for (int value = 0; value < codes.Count; value++)
         {
-            string code = codes[value].Replace(" ", string.Empty, StringComparison.Ordinal);
+            string code = codes[value].Replace(" ", "", StringComparison.Ordinal);
             if (code.Length > 0)
             {
                 entries.Add((code, value));

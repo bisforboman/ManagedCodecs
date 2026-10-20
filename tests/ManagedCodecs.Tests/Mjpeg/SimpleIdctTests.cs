@@ -11,7 +11,7 @@ public class SimpleIdctTests
 {
     private const int Stride = 13; // not a multiple of 8, so row offsets are checked too
 
-    public static TheoryData<string> Distributions() => new(["full-range", "sparse", "dc-rows"]);
+    public static TheoryData<string> Distributions() => new("full-range", "sparse", "dc-rows");
 
     [Theory]
     [MemberData(nameof(Distributions))]

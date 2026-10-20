@@ -131,13 +131,15 @@ internal sealed class SliceHeader
         var modifications = new List<RefPicListModification>();
         if (type == SliceType.P)
         {
-            if (r.ReadFlag()) // num_ref_idx_active_override_flag
+            if (r.ReadFlag())
             {
+                // num_ref_idx_active_override_flag
                 numRefIdxL0 = 1 + r.ReadUe(31, "num_ref_idx_l0_active_minus1");
             }
 
-            if (r.ReadFlag()) // ref_pic_list_modification_flag_l0
+            if (r.ReadFlag())
             {
+                // ref_pic_list_modification_flag_l0
                 while (true)
                 {
                     int idc = r.ReadUe(5, "modification_of_pic_nums_idc");

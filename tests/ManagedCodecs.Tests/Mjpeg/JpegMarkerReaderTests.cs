@@ -81,13 +81,4 @@ public class JpegMarkerReaderTests
 
         Assert.Throws<NotSupportedException>(() => decoder.Decode(TinyGrayJpeg(JpegMarker.Sof2)));
     }
-
-    [Fact]
-    public void Decoder_IsNotImplementedYet()
-    {
-        // Delete this test once entropy decoding and IDCT are in; the conformance tests take over.
-        var decoder = new MjpegDecoder();
-
-        Assert.Throws<NotImplementedException>(() => decoder.Decode(TinyGrayJpeg()));
-    }
 }

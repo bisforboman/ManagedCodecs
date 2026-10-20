@@ -2,47 +2,364 @@ namespace ManagedCodecs.Mjpeg;
 
 /// <summary>Baseline (sequential, Huffman) JPEG decoder for MJPEG frames.</summary>
 /// <remarks>
-/// Implement from the JPEG spec (ITU-T T.81) rather than by copying FFmpeg's mjpegdec.c,
-/// so this package is free to use any license. Remaining steps:
-/// <list type="number">
-/// <item>Parse DQT into 8x8 quantization tables (zig-zag order, 8- and 16-bit entries).</item>
-/// <item>Parse DHT into Huffman lookup tables. Many MJPEG streams omit DHT, so fall back to
-/// the standard tables from T.81 Annex K.3.</item>
-/// <item>Parse DRI (restart interval) and SOS (component order, table selectors).</item>
-/// <item>Bit reader over the entropy data: remove 0xFF00 stuffing, reset DC predictors at RSTn.</item>
-/// <item>Decode DC/AC coefficients per block, MCU by MCU, following the sampling factors.</item>
-/// <item>Dequantize, inverse DCT (start with a scalar float IDCT, then match FFmpeg's integer
-/// IDCT exactly so output is bit-exact), level shift +128, clamp, write into the planes.</item>
-/// <item>Crop edge MCUs to the real image size.</item>
-/// </list>
+/// Implemented from the JPEG spec (ITU-T T.81) rather than by copying FFmpeg's mjpegdec.c.
+/// Only the inverse DCT follows FFmpeg's arithmetic, so output is bit-exact with it.
+/// Quantization and Huffman tables persist from frame to frame, as many MJPEG streams send
+/// them once or not at all; until a DHT arrives the standard tables of T.81 Annex K.3 apply.
 /// </remarks>
 public sealed class MjpegDecoder : IVideoDecoder
 {
+    // The DC predictor works on dequantized values. Starting it at 128 * 8 applies the
+    // level shift of T.81 A.3.1 inside the IDCT, which is what keeps us bit-exact with FFmpeg.
+    private const int DcPredictorReset = 128 * 8;
+
+    private readonly ushort[]?[] _quantTables = new ushort[4][];
+    private readonly HuffmanTable?[] _dcTables = new HuffmanTable[4];
+    private readonly HuffmanTable?[] _acTables = new HuffmanTable[4];
+
+    public MjpegDecoder()
+    {
+        _dcTables[0] = new HuffmanTable(JpegTables.DcLuminanceBits, JpegTables.DcLuminanceValues);
+        _dcTables[1] = new HuffmanTable(JpegTables.DcChrominanceBits, JpegTables.DcChrominanceValues);
+        _acTables[0] = new HuffmanTable(JpegTables.AcLuminanceBits, JpegTables.AcLuminanceValues);
+        _acTables[1] = new HuffmanTable(JpegTables.AcChrominanceBits, JpegTables.AcChrominanceValues);
+    }
+
     public VideoFrame Decode(ReadOnlySpan<byte> packet)
     {
         var segments = JpegMarkerReader.ReadSegments(packet);
-        JpegFrameHeader? header = null;
+        FrameState? frame = null;
+        int restartInterval = 0;
+        bool sawScan = false;
 
         foreach (var segment in segments)
         {
-            if (segment.Marker is JpegMarker.Sof0 or JpegMarker.Sof1)
+            var payload = packet.Slice(segment.PayloadOffset, segment.PayloadLength);
+            switch (segment.Marker)
             {
-                header = JpegFrameHeader.Parse(segment.Marker, packet.Slice(segment.PayloadOffset, segment.PayloadLength));
-            }
-            else if (JpegMarker.IsUnsupportedFrame(segment.Marker))
-            {
-                throw new NotSupportedException($"JPEG frame type 0xFF{segment.Marker:X2} is not supported (only baseline/extended Huffman).");
+                case JpegMarker.Dqt:
+                    ParseQuantizationTables(payload);
+                    break;
+                case JpegMarker.Dht:
+                    ParseHuffmanTables(payload);
+                    break;
+                case JpegMarker.Dri:
+                    if (payload.Length < 2)
+                    {
+                        throw new InvalidDataException("DRI segment too short.");
+                    }
+
+                    restartInterval = (payload[0] << 8) | payload[1];
+                    break;
+                case JpegMarker.Sof0 or JpegMarker.Sof1:
+                    if (frame is not null)
+                    {
+                        throw new InvalidDataException("More than one SOF segment.");
+                    }
+
+                    frame = new FrameState(JpegFrameHeader.Parse(segment.Marker, payload));
+                    break;
+                case JpegMarker.Sos:
+                    if (frame is null)
+                    {
+                        throw new InvalidDataException("SOS before SOF.");
+                    }
+
+                    DecodeScan(frame, payload, packet.Slice(segment.EntropyDataOffset, segment.EntropyDataLength), restartInterval);
+                    sawScan = true;
+                    break;
+                default:
+                    if (JpegMarker.IsUnsupportedFrame(segment.Marker))
+                    {
+                        throw new NotSupportedException($"JPEG frame type 0xFF{segment.Marker:X2} is not supported (only baseline/extended Huffman).");
+                    }
+
+                    break;
             }
         }
 
-        if (header is null)
+        if (frame is null)
         {
             throw new InvalidDataException("No SOF segment found.");
         }
 
-        // Validate early so unsupported layouts fail with a clear message.
-        _ = header.ToPixelFormat();
+        if (!sawScan)
+        {
+            throw new InvalidDataException("No SOS segment found.");
+        }
 
-        throw new NotImplementedException("Entropy decoding and IDCT are not implemented yet. See the remarks on MjpegDecoder.");
+        return frame.ToVideoFrame();
+    }
+
+    private void ParseQuantizationTables(ReadOnlySpan<byte> payload)
+    {
+        while (payload.Length > 0)
+        {
+            int precision = payload[0] >> 4;
+            int id = payload[0] & 0x0F;
+            int size = precision == 0 ? 64 : 128;
+            if (precision > 1 || id > 3 || payload.Length < 1 + size)
+            {
+                throw new InvalidDataException("Invalid DQT segment.");
+            }
+
+            var table = new ushort[64];
+            for (int i = 0; i < 64; i++)
+            {
+                table[i] = precision == 0
+                    ? payload[1 + i]
+                    : (ushort)((payload[1 + (2 * i)] << 8) | payload[2 + (2 * i)]);
+            }
+
+            _quantTables[id] = table;
+            payload = payload[(1 + size)..];
+        }
+    }
+
+    private void ParseHuffmanTables(ReadOnlySpan<byte> payload)
+    {
+        while (payload.Length > 0)
+        {
+            int tableClass = payload[0] >> 4;
+            int id = payload[0] & 0x0F;
+            if (tableClass > 1 || id > 3)
+            {
+                throw new InvalidDataException("Invalid DHT segment.");
+            }
+
+            var table = HuffmanTable.Parse(payload, out int consumed);
+            (tableClass == 0 ? _dcTables : _acTables)[id] = table;
+            payload = payload[consumed..];
+        }
+    }
+
+    private void DecodeScan(FrameState frame, ReadOnlySpan<byte> header, ReadOnlySpan<byte> data, int restartInterval)
+    {
+        int count = header.Length > 0 ? header[0] : 0;
+        if (count is < 1 or > 4 || header.Length < 4 + (2 * count))
+        {
+            throw new InvalidDataException("Invalid SOS segment.");
+        }
+
+        var scan = new ScanComponent[count];
+        for (int i = 0; i < count; i++)
+        {
+            byte id = header[1 + (2 * i)];
+            int index = frame.IndexOf(id);
+            int dc = header[2 + (2 * i)] >> 4;
+            int ac = header[2 + (2 * i)] & 0x0F;
+            var component = frame.Header.Components[index];
+            scan[i] = new ScanComponent(
+                index,
+                (dc < 4 ? _dcTables[dc] : null) ?? throw new InvalidDataException($"Missing DC Huffman table {dc}."),
+                (ac < 4 ? _acTables[ac] : null) ?? throw new InvalidDataException($"Missing AC Huffman table {ac}."),
+                (component.QuantizationTableId < 4 ? _quantTables[component.QuantizationTableId] : null)
+                    ?? throw new InvalidDataException($"Missing quantization table {component.QuantizationTableId}."));
+        }
+
+        int p = 1 + (2 * count);
+        int spectralStart = header[p];
+        int spectralEnd = header[p + 1];
+        int approximation = header[p + 2];
+        if (spectralStart != 0 || spectralEnd != 63 || approximation != 0)
+        {
+            throw new InvalidDataException("Scan parameters are not valid for a sequential JPEG.");
+        }
+
+        // A scan with one component is non-interleaved: its MCU is a single block (T.81 A.2.2).
+        int mcusX;
+        int mcusY;
+        if (count == 1)
+        {
+            (mcusX, mcusY) = frame.BlocksOf(scan[0].FrameIndex);
+        }
+        else
+        {
+            mcusX = frame.McusX;
+            mcusY = frame.McusY;
+        }
+
+        var reader = new JpegBitReader(data);
+        Span<int> predictors = stackalloc int[count];
+        predictors.Fill(DcPredictorReset);
+        Span<short> block = stackalloc short[64];
+
+        int total = mcusX * mcusY;
+        for (int mcu = 0; mcu < total; mcu++)
+        {
+            if (restartInterval > 0 && mcu > 0 && mcu % restartInterval == 0)
+            {
+                // A missing or out-of-order RSTn is tolerated: decoding just carries on.
+                reader.ConsumeRestartMarker(out _);
+                predictors.Fill(DcPredictorReset);
+            }
+
+            int mx = mcu % mcusX;
+            int my = mcu / mcusX;
+
+            for (int i = 0; i < count; i++)
+            {
+                ref readonly var sc = ref scan[i];
+                var plane = frame.Buffers[sc.FrameIndex];
+                int stride = frame.BufferStrides[sc.FrameIndex];
+
+                if (count == 1)
+                {
+                    DecodeBlock(ref reader, in sc, ref predictors[i], block);
+                    SimpleIdct.Put(block, plane.AsSpan((my * 8 * stride) + (mx * 8)), stride);
+                    continue;
+                }
+
+                var component = frame.Header.Components[sc.FrameIndex];
+                for (int v = 0; v < component.VerticalSampling; v++)
+                {
+                    for (int h = 0; h < component.HorizontalSampling; h++)
+                    {
+                        int x = ((mx * component.HorizontalSampling) + h) * 8;
+                        int y = ((my * component.VerticalSampling) + v) * 8;
+                        DecodeBlock(ref reader, in sc, ref predictors[i], block);
+                        SimpleIdct.Put(block, plane.AsSpan((y * stride) + x), stride);
+                    }
+                }
+            }
+        }
+    }
+
+    /// <summary>Huffman-decodes one block (T.81 F.2.2) and dequantizes it into natural order.</summary>
+    private static void DecodeBlock(ref JpegBitReader reader, in ScanComponent sc, ref int predictor, scoped Span<short> block)
+    {
+        block.Clear();
+        var quant = sc.Quantization;
+        var zigZag = JpegTables.ZigZag;
+
+        int size = sc.Dc.Decode(ref reader);
+        if (size > 11)
+        {
+            throw new InvalidDataException("Invalid DC coefficient size.");
+        }
+
+        int dc = (reader.ReceiveExtend(size) * quant[0]) + predictor;
+        dc = Math.Clamp(dc, short.MinValue, short.MaxValue);
+        predictor = dc;
+        block[0] = (short)dc;
+
+        for (int k = 1; k < 64; k++)
+        {
+            int symbol = sc.Ac.Decode(ref reader);
+            int run = symbol >> 4;
+            size = symbol & 0x0F;
+
+            if (size == 0)
+            {
+                if (run == 15)
+                {
+                    k += 15; // ZRL: sixteen zeros
+                    continue;
+                }
+
+                break; // EOB
+            }
+
+            k += run;
+            if (k > 63)
+            {
+                throw new InvalidDataException("AC coefficient index out of range.");
+            }
+
+            block[zigZag[k]] = (short)(reader.ReceiveExtend(size) * quant[k]);
+        }
+    }
+
+    private readonly record struct ScanComponent(int FrameIndex, HuffmanTable Dc, HuffmanTable Ac, ushort[] Quantization);
+
+    /// <summary>Per-frame decode target: one MCU-aligned sample buffer per component.</summary>
+    private sealed class FrameState
+    {
+        public FrameState(JpegFrameHeader header)
+        {
+            Header = header;
+            Format = header.ToPixelFormat();
+
+            foreach (var c in header.Components)
+            {
+                if (c.HorizontalSampling is < 1 or > 4 || c.VerticalSampling is < 1 or > 4)
+                {
+                    throw new InvalidDataException("Invalid sampling factor.");
+                }
+
+                MaxH = Math.Max(MaxH, c.HorizontalSampling);
+                MaxV = Math.Max(MaxV, c.VerticalSampling);
+            }
+
+            McusX = DivUp(header.Width, 8 * MaxH);
+            McusY = DivUp(header.Height, 8 * MaxV);
+
+            int count = header.Components.Count;
+            Buffers = new byte[count][];
+            BufferStrides = new int[count];
+            for (int i = 0; i < count; i++)
+            {
+                var c = header.Components[i];
+                BufferStrides[i] = McusX * c.HorizontalSampling * 8;
+                Buffers[i] = new byte[BufferStrides[i] * McusY * c.VerticalSampling * 8];
+            }
+        }
+
+        public JpegFrameHeader Header { get; }
+
+        public PixelFormat Format { get; }
+
+        public int MaxH { get; }
+
+        public int MaxV { get; }
+
+        public int McusX { get; }
+
+        public int McusY { get; }
+
+        public byte[][] Buffers { get; }
+
+        public int[] BufferStrides { get; }
+
+        public int IndexOf(byte componentId)
+        {
+            var components = Header.Components;
+            for (int i = 0; i < components.Count; i++)
+            {
+                if (components[i].Id == componentId)
+                {
+                    return i;
+                }
+            }
+
+            throw new InvalidDataException($"Scan refers to unknown component {componentId}.");
+        }
+
+        /// <summary>Block grid of one component on its own, used by non-interleaved scans.</summary>
+        public (int X, int Y) BlocksOf(int index)
+        {
+            var c = Header.Components[index];
+            int width = DivUp(Header.Width * c.HorizontalSampling, MaxH);
+            int height = DivUp(Header.Height * c.VerticalSampling, MaxV);
+            return (DivUp(width, 8), DivUp(height, 8));
+        }
+
+        public VideoFrame ToVideoFrame()
+        {
+            var frame = new VideoFrame(Header.Width, Header.Height, Format);
+            for (int plane = 0; plane < Buffers.Length; plane++)
+            {
+                var (width, height) = Format.PlaneSize(plane, Header.Width, Header.Height);
+                int stride = BufferStrides[plane];
+                for (int y = 0; y < height; y++)
+                {
+                    Buffers[plane].AsSpan(y * stride, width).CopyTo(frame.GetRow(plane, y));
+                }
+            }
+
+            return frame;
+        }
+
+        private static int DivUp(int value, int divisor) => (value + divisor - 1) / divisor;
     }
 }

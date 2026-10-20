@@ -18,10 +18,24 @@ public class MjpegDecodeBenchmark
     public void Setup()
     {
         var path = Environment.GetEnvironmentVariable("MANAGEDCODECS_SAMPLE")
-            ?? Path.Combine("samples", "testsrc-420.avi");
+            ?? Path.Combine(FindRepositoryRoot(), "samples", "testsrc-420.avi");
 
         using var demuxer = AviDemuxer.Open(Path.GetFullPath(path));
         _packets = demuxer.ReadPackets().Select(p => p.Data.ToArray()).ToArray();
+    }
+
+    // BenchmarkDotNet runs benchmarks in a child process with its own working directory.
+    private static string FindRepositoryRoot()
+    {
+        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
+        {
+            if (File.Exists(Path.Combine(dir.FullName, "ManagedCodecs.slnx")))
+            {
+                return dir.FullName;
+            }
+        }
+
+        return Directory.GetCurrentDirectory();
     }
 
     [Benchmark]

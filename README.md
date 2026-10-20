@@ -10,7 +10,7 @@ then the same approach for H.264 + AAC in MP4.
 | --- | --- |
 | `src/ManagedCodecs.Core` | `VideoFrame`, `PixelFormat`, `Packet`, `IDemuxer`, `IVideoDecoder` |
 | `src/ManagedCodecs.Containers` | `AviDemuxer` (MP4 to come) |
-| `src/ManagedCodecs.Mjpeg` | JPEG marker reader, SOF parsing, `MjpegDecoder` (entropy decoding + IDCT still TODO) |
+| `src/ManagedCodecs.Mjpeg` | `MjpegDecoder`: baseline/extended Huffman JPEG, bit-exact with FFmpeg |
 | `tests/ManagedCodecs.Tests` | Unit tests and FFmpeg conformance tests (framemd5) |
 | `benchmarks/ManagedCodecs.Benchmarks` | BenchmarkDotNet decode benchmark |
 
@@ -23,10 +23,9 @@ dotnet build
 dotnet test
 ```
 
-Then generate samples (see `samples/README.md`) and work through the steps in the remarks on
-`MjpegDecoder`. When it decodes frames, remove `Decoder_IsNotImplementedYet` and the `Skip` on
-`MjpegConformanceTests`. With the skip removed, the conformance test fails if `samples/` has no
-`.avi` + `.framemd5` pairs, which is intentional.
+The conformance tests need samples (see `samples/README.md`) and fail if `samples/` has no
+`.avi` + `.framemd5` pairs, which is intentional. They decode every frame and compare its MD5 with
+FFmpeg's.
 
 ## Benchmarking
 
@@ -37,7 +36,8 @@ ffmpeg -benchmark -i samples/testsrc-420.avi -f null -
 
 ## Roadmap
 
-1. MJPEG baseline decoder, bit-exact against FFmpeg (4:2:0, 4:2:2, 4:4:4, gray, restart markers, missing DHT)
+1. ~~MJPEG baseline decoder, bit-exact against FFmpeg (4:2:0, 4:2:2, 4:4:4, gray, restart markers, missing DHT)~~ done;
+   still open: interlaced AVI1 frames (two fields per packet), real camera files
 2. SIMD: `Span`, `Vector128`/`Vector256` IDCT and colour paths; measure the ratio to FFmpeg
 3. MP4 demuxer (ISO BMFF: `moov`, `trak`, `stbl` sample tables)
 4. H.264 decoder, starting with Constrained Baseline (CAVLC, I/P frames)

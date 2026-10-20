@@ -81,19 +81,19 @@ internal sealed partial class PictureDecoder
         Array.Clear(_totalCoeffLuma);
         Array.Clear(_totalCoeffChroma);
         Array.Clear(_intra4x4Mode);
-        ResetInter();
+        ResetInter(picture);
         ResetCabacState();
     }
 
     public bool IsComplete => DecodedMbCount == _mbCount;
 
     /// <summary>slice_data (7.3.4).</summary>
-    public void DecodeSlice(SliceHeader header, PictureParameterSet pps, BitReader r, IReadOnlyList<Picture> refList)
+    public void DecodeSlice(SliceHeader header, PictureParameterSet pps, BitReader r, IReadOnlyList<Picture> refList0, IReadOnlyList<Picture> refList1)
     {
         int sliceNum = _slices.Count;
         _slices.Add(new SliceInfo(header.DisableDeblockingFilterIdc, header.SliceAlphaC0Offset, header.SliceBetaOffset, pps.ChromaQpIndexOffset));
 
-        var slice = new SliceState(header, pps, sliceNum, refList)
+        var slice = new SliceState(header, pps, sliceNum, refList0, refList1)
         {
             Qp = pps.PicInitQp + header.SliceQpDelta,
             Cabac = pps.EntropyCodingModeCabac ? _cabac : null,
@@ -155,7 +155,7 @@ internal sealed partial class PictureDecoder
     }
 
     /// <summary>State that lives for one slice.</summary>
-    private sealed class SliceState(SliceHeader header, PictureParameterSet pps, int number, IReadOnlyList<Picture> refList)
+    private sealed class SliceState(SliceHeader header, PictureParameterSet pps, int number, IReadOnlyList<Picture> refList0, IReadOnlyList<Picture> refList1)
     {
         public SliceHeader Header { get; } = header;
 
@@ -163,10 +163,14 @@ internal sealed partial class PictureDecoder
 
         public int Number { get; } = number;
 
-        public IReadOnlyList<Picture> RefList { get; } = refList;
+        public IReadOnlyList<Picture> RefList0 { get; } = refList0;
+
+        public IReadOnlyList<Picture> RefList1 { get; } = refList1;
 
         /// <summary>QP_Y of the previous macroblock in the slice (QP_Y,PRED).</summary>
         public int Qp { get; set; }
+
+        public IReadOnlyList<Picture> RefList(int list) => list == 0 ? RefList0 : RefList1;
 
         /// <summary>The CABAC engine for a CABAC slice, null for CAVLC.</summary>
         public Cabac? Cabac { get; init; }
@@ -254,19 +258,21 @@ internal sealed partial class PictureDecoder
     // ---- Macroblock layer (7.3.5) ----
     private void DecodeMacroblock(SliceState slice, BitReader r, int mbAddr)
     {
+        var type = slice.Header.Type;
         int mbType = slice.Cabac is not { } c ? (int)r.ReadUe()
-            : slice.Header.Type == SliceType.P ? CabacPMbType(c, mbAddr)
+            : type == SliceType.P ? CabacPMbType(c, mbAddr)
+            : type == SliceType.B ? CabacBMbType(c, mbAddr)
             : CabacIntraMbType(c, mbAddr, inPSlice: false);
-        if (slice.Header.Type == SliceType.P)
-        {
-            if (mbType < 5)
-            {
-                DecodeInterMacroblock(slice, r, mbAddr, mbType);
-                return;
-            }
 
-            mbType -= 5;
+        // Inter types come first in P (5, Table 7-13) and B slices (23, Table 7-14), then the intra ones.
+        int interTypes = type switch { SliceType.P => 5, SliceType.B => 23, _ => 0 };
+        if (mbType < interTypes)
+        {
+            DecodeInterMacroblock(slice, r, mbAddr, mbType);
+            return;
         }
+
+        mbType -= interTypes;
 
         DecodeIntraMacroblock(slice, r, mbAddr, mbType);
     }

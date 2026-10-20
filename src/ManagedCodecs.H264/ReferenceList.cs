@@ -37,29 +37,57 @@ internal sealed class ReferenceList
             .Concat(_pictures.Where(p => p.IsLongTermReference).OrderBy(p => p.LongTermFrameIdx))
             .ToList();
 
-        int count = header.NumRefIdxL0Active;
+        return Finish(list, header.NumRefIdxL0Active, header.RefPicListModificationL0, header, maxFrameNum);
+    }
+
+    /// <summary>RefPicList0 and RefPicList1 for a B slice of the current picture, whose order count is <paramref name="currentPoc"/>.</summary>
+    public (List<Picture> L0, List<Picture> L1) BuildLists(SliceHeader header, SequenceParameterSet sps, int currentPoc)
+    {
+        int maxFrameNum = 1 << sps.Log2MaxFrameNum;
+        UpdateFrameNumWrap(header.FrameNum, maxFrameNum);
+
+        // 8.2.4.2.3: short-term pictures before the current one (latest first) and after it
+        // (earliest first), in that order for list 0 and the other way round for list 1, then the
+        // long-term pictures by ascending LongTermPicNum.
+        var before = _pictures.Where(p => p.IsShortTermReference && p.Poc < currentPoc).OrderByDescending(p => p.Poc).ToList();
+        var after = _pictures.Where(p => p.IsShortTermReference && p.Poc > currentPoc).OrderBy(p => p.Poc).ToList();
+        var longTerm = _pictures.Where(p => p.IsLongTermReference).OrderBy(p => p.LongTermFrameIdx).ToList();
+        var l0 = before.Concat(after).Concat(longTerm).ToList();
+        var l1 = after.Concat(before).Concat(longTerm).ToList();
+        if (l1.Count > 1 && l1.SequenceEqual(l0))
+        {
+            (l1[0], l1[1]) = (l1[1], l1[0]);
+        }
+
+        return (
+            Finish(l0, header.NumRefIdxL0Active, header.RefPicListModificationL0, header, maxFrameNum),
+            Finish(l1, header.NumRefIdxL1Active, header.RefPicListModificationL1, header, maxFrameNum));
+    }
+
+    /// <summary>Truncates an initial list to the active count (8.2.4.2) and applies the modifications (8.2.4.3).</summary>
+    private List<Picture> Finish(List<Picture> list, int count, IReadOnlyList<RefPicListModification> modifications, SliceHeader header, int maxFrameNum)
+    {
         if (list.Count > count)
         {
             list.RemoveRange(count, list.Count - count);
         }
 
-        if (header.RefPicListModificationL0.Count > 0)
+        if (modifications.Count > 0)
         {
-            Modify(list, header, maxFrameNum);
+            Modify(list, count, modifications, header, maxFrameNum);
         }
 
         if (list.Count == 0)
         {
-            throw new InvalidDataException("P slice without any reference picture.");
+            throw new InvalidDataException("Inter slice without any reference picture.");
         }
 
         return list;
     }
 
     /// <summary>8.2.4.3: moves the named pictures to the front, in order.</summary>
-    private void Modify(List<Picture> list, SliceHeader header, int maxFrameNum)
+    private void Modify(List<Picture> list, int count, IReadOnlyList<RefPicListModification> modifications, SliceHeader header, int maxFrameNum)
     {
-        int count = header.NumRefIdxL0Active;
         int currPicNum = header.FrameNum;
         int picNumPred = currPicNum;
         int refIdx = 0;
@@ -71,7 +99,7 @@ internal sealed class ReferenceList
             work.Add(null);
         }
 
-        foreach (var modification in header.RefPicListModificationL0)
+        foreach (var modification in modifications)
         {
             Picture picture;
             Func<Picture?, bool> isSame;

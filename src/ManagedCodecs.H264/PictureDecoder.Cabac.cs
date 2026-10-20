@@ -21,9 +21,8 @@ internal sealed partial class PictureDecoder
     private byte[] _chromaPredMode = [];
     private byte[] _dcCoded = [];
 
-    // Per luma 4x4 block: |mvd_l0| per component, capped (only sums up to 33 matter).
-    private byte[] _absMvdX = [];
-    private byte[] _absMvdY = [];
+    // Per list, component and luma 4x4 block: |mvd|, capped (only sums up to 33 matter).
+    private byte[][][] _absMvd = [[[], []], [[], []]];
 
     /// <summary>ctxBlockCat (Table 9-42).</summary>
     private enum BlockCategory
@@ -40,8 +39,7 @@ internal sealed partial class PictureDecoder
         _cbp = new byte[_mbCount];
         _chromaPredMode = new byte[_mbCount];
         _dcCoded = new byte[_mbCount];
-        _absMvdX = new byte[_mbCount * 16];
-        _absMvdY = new byte[_mbCount * 16];
+        _absMvd = [[new byte[_mbCount * 16], new byte[_mbCount * 16]], [new byte[_mbCount * 16], new byte[_mbCount * 16]]];
     }
 
     private void ResetCabacState()
@@ -49,8 +47,11 @@ internal sealed partial class PictureDecoder
         Array.Clear(_cbp);
         Array.Clear(_chromaPredMode);
         Array.Clear(_dcCoded);
-        Array.Clear(_absMvdX);
-        Array.Clear(_absMvdY);
+        foreach (var list in _absMvd)
+        {
+            Array.Clear(list[0]);
+            Array.Clear(list[1]);
+        }
     }
 
     /// <summary>slice_data (7.3.4) for CABAC.</summary>
@@ -161,6 +162,12 @@ internal sealed partial class PictureDecoder
         return 1 + predMode + (4 * chroma) + (12 * luma);
     }
 
+    /// <summary>mb_type of a B slice: 0..22 inter (Table 7-14), 23.. intra (23 + Table 7-11).</summary>
+    private int CabacBMbType(Cabac c, int mbAddr) => throw new NotSupportedException("CABAC B slices are not supported yet.");
+
+    /// <summary>sub_mb_type of a B slice (Table 7-18).</summary>
+    private static int CabacBSubMbType(Cabac c) => throw new NotSupportedException("CABAC B slices are not supported yet.");
+
     /// <summary>sub_mb_type of a P slice: 1 P_L0_8x8, 00 P_L0_8x4, 011 P_L0_4x8, 010 P_L0_4x4.</summary>
     private static int CabacSubMbType(Cabac c)
     {
@@ -179,8 +186,8 @@ internal sealed partial class PictureDecoder
 
     // ---- ref_idx_l0 and mvd_l0 (9.3.3.1.1.6, 9.3.3.1.1.7) ----
 
-    /// <summary>ref_idx_l0 of the partition whose top-left luma sample is (x, y) in the macroblock: unary, ctxIdxOffset 54.</summary>
-    private int CabacRefIdx(Cabac c, int mbAddr, int x, int y, int maxRef)
+    /// <summary>ref_idx_lX of the partition whose top-left luma sample is (x, y) in the macroblock: unary, ctxIdxOffset 54.</summary>
+    private int CabacRefIdx(Cabac c, int list, int mbAddr, int x, int y, int maxRef)
     {
         int RefInc(int nx, int ny)
         {
@@ -190,9 +197,9 @@ internal sealed partial class PictureDecoder
                 return 0;
             }
 
-            int bx = ((nx + 16) % 16) >> 3;
-            int by = ((ny + 16) % 16) >> 3;
-            return _refIdx[(n * 4) + (by * 2) + bx] > 0 ? 1 : 0; // intra blocks have -1
+            // Direct predicted partitions count as 0, as do intra blocks (refIdx -1).
+            int part = (n * 4) + ((((ny + 16) % 16) >> 3) * 2) + (((nx + 16) % 16) >> 3);
+            return !_direct[part] && _refIdx[list][part] > 0 ? 1 : 0;
         }
 
         int inc = RefInc(x - 1, y) + (2 * RefInc(x, y - 1));
@@ -220,9 +227,9 @@ internal sealed partial class PictureDecoder
     /// One component of mvd_l0 for the partition at (x, y): UEG3 with signedValFlag 1 and uCoff 9,
     /// ctxIdxOffset 40 (horizontal) or 47 (vertical).
     /// </summary>
-    private int CabacMvd(Cabac c, int mbAddr, int x, int y, int component)
+    private int CabacMvd(Cabac c, int list, int mbAddr, int x, int y, int component)
     {
-        byte[] absMvd = component == 0 ? _absMvdX : _absMvdY;
+        byte[] absMvd = _absMvd[list][component];
         int AbsMvd(int nx, int ny)
         {
             int n = NeighborMb(mbAddr, nx, ny);
@@ -259,7 +266,7 @@ internal sealed partial class PictureDecoder
     }
 
     /// <summary>Records |mvd| over a partition for the contexts of later partitions.</summary>
-    private void StoreAbsMvd(int mbAddr, int x, int y, int w, int h, int mvdX, int mvdY)
+    private void StoreAbsMvd(int list, int mbAddr, int x, int y, int w, int h, int mvdX, int mvdY)
     {
         byte absX = (byte)Math.Min(Math.Abs(mvdX), 64);
         byte absY = (byte)Math.Min(Math.Abs(mvdY), 64);
@@ -267,8 +274,8 @@ internal sealed partial class PictureDecoder
         {
             for (int bx = x / 4; bx < (x + w) / 4; bx++)
             {
-                _absMvdX[(mbAddr * 16) + (by * 4) + bx] = absX;
-                _absMvdY[(mbAddr * 16) + (by * 4) + bx] = absY;
+                _absMvd[list][0][(mbAddr * 16) + (by * 4) + bx] = absX;
+                _absMvd[list][1][(mbAddr * 16) + (by * 4) + bx] = absY;
             }
         }
     }

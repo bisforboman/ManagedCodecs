@@ -1,13 +1,15 @@
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Running;
 using ManagedCodecs;
+using ManagedCodecs.Aac;
 using ManagedCodecs.Containers;
 using ManagedCodecs.H264;
 using ManagedCodecs.Mjpeg;
 
 // Run in Release: dotnet run -c Release --project benchmarks/ManagedCodecs.Benchmarks
-// Sample files: MANAGEDCODECS_SAMPLE (MJPEG, default samples/testsrc-420.avi) and
-// MANAGEDCODECS_H264_SAMPLE (default samples/h264-bench-720p.mp4).
+// Sample files: MANAGEDCODECS_SAMPLE (MJPEG, default samples/testsrc-420.avi),
+// MANAGEDCODECS_H264_SAMPLE (default samples/h264-bench-720p.mp4) and
+// MANAGEDCODECS_AAC_SAMPLE (default samples/aac-5.1.mp4).
 // Compare with FFmpeg: ffmpeg -benchmark -threads 1 -i <sample> -f null -
 BenchmarkSwitcher.FromAssembly(typeof(MjpegDecodeBenchmark).Assembly).Run(args);
 
@@ -84,5 +86,37 @@ public class H264DecodeBenchmark
         }
 
         return pixels;
+    }
+}
+
+/// <summary>Decodes a whole AAC track per iteration: each frame overlaps the previous one.</summary>
+[MemoryDiagnoser]
+public class AacDecodeBenchmark
+{
+    private byte[][] _packets = [];
+    private AudioStreamInfo? _stream;
+
+    [GlobalSetup]
+    public void Setup()
+    {
+        var path = Environment.GetEnvironmentVariable("MANAGEDCODECS_AAC_SAMPLE")
+            ?? Path.Combine(MjpegDecodeBenchmark.FindRepositoryRoot(), "samples", "aac-5.1.mp4");
+
+        using var demuxer = Demuxer.Open(Path.GetFullPath(path));
+        _stream = demuxer.Audio!;
+        _packets = demuxer.ReadPackets().Where(p => p.StreamIndex == _stream.StreamIndex).Select(p => p.Data.ToArray()).ToArray();
+    }
+
+    [Benchmark]
+    public int DecodeAllFrames()
+    {
+        var decoder = new AacDecoder(_stream!);
+        int samples = 0;
+        foreach (var packet in _packets)
+        {
+            samples += decoder.Decode(packet).SampleCount;
+        }
+
+        return samples;
     }
 }

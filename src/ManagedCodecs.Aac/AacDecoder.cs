@@ -548,7 +548,7 @@ public sealed class AacDecoder : IAudioDecoder
                     continue;
                 }
 
-                double gain = Math.Pow(2, 0.25 * (stream.Scalefactor[index] - 100));
+                double gain = Gains[stream.Scalefactor[index]];
                 for (int w = 0; w < info.GroupLength[g]; w++)
                 {
                     int window = (windowBase + w) * 128;
@@ -568,6 +568,9 @@ public sealed class AacDecoder : IAudioDecoder
     }
 
     private static readonly double[] PowFourThirds = [.. Enumerable.Range(0, 8192).Select(i => Math.Pow(i, 4.0 / 3))];
+
+    // 2^(0.25 (sf - 100)) for scalefactors 0..255.
+    private static readonly double[] Gains = [.. Enumerable.Range(0, 256).Select(sf => Math.Pow(2, 0.25 * (sf - 100)))];
 
     private static double InverseQuantize(int value)
     {

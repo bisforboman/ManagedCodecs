@@ -12,6 +12,8 @@ then the same approach for H.264 + AAC in MP4.
 | `src/ManagedCodecs.Containers` | `AviDemuxer`, `Mp4Demuxer`, and `Demuxer.Open` to pick one by content |
 | `src/ManagedCodecs.Mjpeg` | `MjpegDecoder`: baseline/extended Huffman JPEG, bit-exact with FFmpeg |
 | `src/ManagedCodecs.H264` | `H264Decoder`: Constrained Baseline H.264 (CAVLC, I/P, deblocking), bit-exact |
+| `src/ManagedCodecs.Aac` | `AacDecoder`: AAC LC (mono to 7.1, M/S, intensity, PNS, TNS), within 3e-7 of FFmpeg |
+| `src/Shared` | Source files linked into several codec projects (the VLC decoder) |
 | `tests/ManagedCodecs.Tests` | Unit tests and FFmpeg conformance tests (framemd5 for frames and packets) |
 | `benchmarks/ManagedCodecs.Benchmarks` | BenchmarkDotNet decode benchmark |
 
@@ -37,7 +39,8 @@ ffmpeg -benchmark -threads 1 -stream_loop 39 -i samples/testsrc-420.avi -f null 
 
 Divide FFmpeg's `utime` by the number of frames decoded (40 loops of the file). Its figure also
 includes demuxing and passing frames on, so it slightly flatters us. `--filter *H264*` runs only
-the H.264 benchmark, which decodes `samples/h264-bench-720p.mp4` (50 frames) per iteration. Single-threaded, on an
+the H.264 benchmark, which decodes `samples/h264-bench-720p.mp4` (50 frames) per iteration;
+`--filter *Aac*` decodes `samples/aac-5.1.mp4`. Audio figures are per 1024-sample frame. Single-threaded, on an
 AVX2 Xeon cloud VM (µs per frame):
 
 | Sample | ManagedCodecs | FFmpeg 6.1 |
@@ -47,6 +50,8 @@ AVX2 Xeon cloud VM (µs per frame):
 | `noise-q1` (noise, highest quality) | 773 | 1157 |
 | `h264-p-refs` (320x240 H.264, P frames) | 632 | 154 |
 | `h264-bench-720p` (1280x720 H.264) | 8166 | 2290 |
+| `aac-stereo-48k` (AAC, stereo) | 85 | 25 |
+| `aac-5.1` (AAC, 5.1) | 290 | 67 |
 
 ## Roadmap
 
@@ -61,7 +66,10 @@ AVX2 Xeon cloud VM (µs per frame):
    FFmpeg on libx264 samples covering intra and inter prediction, all partitions, multiple
    references and slices, cropping and constrained intra. Still open: CABAC / Main profile with
    B frames (and output reordering), error concealment, more speed (about 3.6x FFmpeg at 720p)
-5. AAC-LC decoder
+5. ~~AAC-LC decoder~~ done: 1 to 8 channels, all window sequences and shapes, M/S, intensity,
+   PNS (including correlated noise), TNS and pulse data. Output matches FFmpeg within 3e-7 (a
+   tolerance test, since both are floating point). Still open: HE-AAC (SBR, PS), ADTS input,
+   trimming priming and padding (the demuxer's timestamps and durations say how much)
 
 ## License note
 
@@ -73,3 +81,6 @@ license choice open. Codec patents (e.g. H.264, AAC) apply regardless of languag
 Two exceptions to "from the spec only": the MJPEG IDCT reproduces FFmpeg's integer IDCT arithmetic
 (that is what bit-exact JPEG output requires; see `SimpleIdct`), and the H.264 CAVLC tables, kept
 in the spec's own layout, were cross-checked against h264bsd (Apache-2.0) by enumerating its decoder.
+The AAC Huffman codebooks were cross-checked the same way against the PacketVideo AAC decoder
+from Android (Apache-2.0). AAC's noise substitution uses the Numerical Recipes random generator
+with the seed FFmpeg uses (the spec leaves the generator open), so noise bands match FFmpeg too.

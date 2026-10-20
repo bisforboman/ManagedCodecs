@@ -71,9 +71,26 @@ ffmpeg -f lavfi -i "testsrc2=size=176x144:rate=25,scroll=h=0.01" -t 3 $B -refs 4
 ffmpeg -f lavfi -i "testsrc2=size=1280x720:rate=25,scroll=h=0.005,noise=alls=6:allf=t" -t 2 $B -refs 3 samples/h264-bench-720p.mp4
 ```
 
+AAC samples, each aimed at one tool (the conformance test checks that the tool really occurs).
+PNS is off except in the PNS samples:
+
+```
+ffmpeg -f lavfi -i "sine=frequency=440:sample_rate=44100:duration=1" -c:a aac -b:a 96k -aac_pns 0 samples/aac-mono-44k.mp4
+ffmpeg -f lavfi -i "aevalsrc=0.4*sin(2*PI*440*t)+0.1*sin(2*PI*3000*t)|0.4*sin(2*PI*440*t+0.3)+0.08*sin(2*PI*5200*t):s=48000:d=2" -c:a aac -b:a 48k -aac_pns 0 samples/aac-stereo-48k.mp4
+ffmpeg -f lavfi -i "aevalsrc=0.5*sin(2*PI*300*t)*sin(2*PI*2*t)+0.05*sin(2*PI*1700*t):s=8000:d=2" -c:a aac -b:a 16k -aac_pns 0 samples/aac-mono-8k.mp4
+ffmpeg -f lavfi -i "aevalsrc=0.5*sin(2*PI*600*t+4*sin(2*PI*3*t))|0.3*sin(2*PI*900*t):s=22050:d=2" -c:a aac -b:a 40k -aac_pns 0 samples/aac-stereo-22k.mp4
+ffmpeg -f lavfi -i "aevalsrc=0.6*sin(2*PI*440*t)*gt(mod(t\,0.1)\,0.05)+0.5*lt(mod(t\,0.25)\,0.0005):s=44100:d=2" -c:a aac -b:a 128k -aac_pns 0 samples/aac-transients.mp4
+ffmpeg -f lavfi -i "aevalsrc=0.7*(random(0)-0.5)*exp(-60*mod(t\,0.17))+0.2*sin(2*PI*2500*t):s=44100:d=2" -c:a aac -b:a 128k -aac_pns 0 samples/aac-tns.mp4
+ffmpeg -f lavfi -i "aevalsrc=0.3*sin(2*PI*220*t)|0.3*sin(2*PI*330*t)|0.3*sin(2*PI*440*t)|0.3*sin(2*PI*55*t)|0.3*sin(2*PI*660*t)|0.3*sin(2*PI*880*t):s=48000:d=1:c=5.1" -c:a aac -b:a 256k -aac_pns 0 samples/aac-5.1.mp4
+ffmpeg -f lavfi -i "anoisesrc=color=pink:amplitude=0.3:sample_rate=44100:duration=2,highpass=f=4000" -c:a aac -b:a 48k samples/aac-pns.mp4
+ffmpeg -f lavfi -i "anoisesrc=color=pink:amplitude=0.3:sample_rate=44100:duration=2:seed=1,highpass=f=4000[a];anoisesrc=color=pink:amplitude=0.3:sample_rate=44100:duration=2:seed=2,highpass=f=4000[b];[a][b]amerge=inputs=2" -c:a aac -b:a 64k samples/aac-pns-stereo.mp4
+ffmpeg -f lavfi -i "testsrc2=size=320x240:rate=25,scroll=h=0.01" -f lavfi -i "sine=frequency=330:sample_rate=48000:duration=1" -t 1 -c:v libx264 -profile:v baseline -pix_fmt yuv420p -refs 2 -c:a aac -ac 2 -aac_pns 0 samples/h264-with-audio.mp4
+```
+
 Then write the reference hashes for every sample. `name.framemd5` hashes decoded frames;
 `name.packets.framemd5` hashes the demuxed packets and `name.packets.flags` lists their keyframe
-flags. `-copyts` keeps FFmpeg from moving the
+flags. AAC output is compared by value, not hash: `name.f32` is FFmpeg's float PCM with the edit
+list ignored, so it holds 1024 samples for every packet, priming included. `-copyts` keeps FFmpeg from moving the
 timestamps to start at zero, so they are the demuxer's own:
 
 ```
@@ -81,10 +98,12 @@ timestamps to start at zero, so they are the demuxer's own:
 for f in samples/*.avi samples/*.mp4; do ffmpeg -i "$f" -f framemd5 "${f%.*}.framemd5"; done
 for f in samples/*.mp4; do ffmpeg -copyts -i "$f" -c copy -f framemd5 "${f%.mp4}.packets.framemd5"; done
 for f in samples/*.mp4; do ffprobe -v error -select_streams v:0 -show_packets -show_entries packet=flags -of csv=p=0 "$f" > "${f%.mp4}.packets.flags"; done
+for f in samples/aac-*.mp4 samples/h264-with-audio.mp4; do ffmpeg -ignore_editlist 1 -i "$f" -map 0:a:0 -f f32le "${f%.mp4}.f32"; done
 # PowerShell
 Get-ChildItem samples/*.avi, samples/*.mp4 | ForEach-Object { ffmpeg -i $_ -f framemd5 ($_.FullName -replace '\.\w+$', '.framemd5') }
 Get-ChildItem samples/*.mp4 | ForEach-Object { ffmpeg -copyts -i $_ -c copy -f framemd5 ($_.FullName -replace '\.mp4$', '.packets.framemd5') }
 Get-ChildItem samples/*.mp4 | ForEach-Object { ffprobe -v error -select_streams v:0 -show_packets -show_entries packet=flags -of csv=p=0 $_ | Set-Content ($_.FullName -replace '\.mp4$', '.packets.flags') }
+Get-ChildItem samples/aac-*.mp4, samples/h264-with-audio.mp4 | ForEach-Object { ffmpeg -ignore_editlist 1 -i $_ -map 0:a:0 -f f32le ($_.FullName -replace '\.mp4$', '.f32') }
 ```
 
 (ImageMagick 6 calls the command `convert` instead of `magick`.)

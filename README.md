@@ -11,7 +11,7 @@ then the same approach for H.264 + AAC in MP4.
 | `src/ManagedCodecs.Core` | `VideoFrame`, `PixelFormat`, `Packet`, `Rational`, `IDemuxer`, `IVideoDecoder` |
 | `src/ManagedCodecs.Containers` | `AviDemuxer`, `Mp4Demuxer`, and `Demuxer.Open` to pick one by content |
 | `src/ManagedCodecs.Mjpeg` | `MjpegDecoder`: baseline/extended Huffman JPEG, bit-exact with FFmpeg |
-| `src/ManagedCodecs.H264` | `H264Decoder`: Constrained Baseline H.264 (CAVLC, I/P, deblocking), bit-exact |
+| `src/ManagedCodecs.H264` | `H264Decoder`: Constrained Baseline and Main profile H.264 without B frames (CAVLC, CABAC, I/P, deblocking), bit-exact |
 | `src/ManagedCodecs.Aac` | `AacDecoder`: AAC LC (mono to 7.1, M/S, intensity, PNS, TNS), within 3e-7 of FFmpeg's float output |
 | `src/Shared` | Source files linked into several codec projects (the VLC decoder) |
 | `tools/ManagedCodecs.Cli` | `mcdec`: decodes a file and times it, to compare with `ffmpeg -benchmark` |
@@ -90,6 +90,7 @@ line shows the steady speed without them). A snapshot, made that way (2026-10-20
 | `noise-q1.avi` (MJPEG, noise at the highest quality) | 100 | 1133 | 1332 |
 | `h264-p-refs.mp4` (320x240 H.264, P frames) | 40 | 613 | 197 |
 | `h264-bench-720p.mp4` (1280x720 H.264) | 10 | 7066 | 2352 |
+| `h264-main-p-refs.mp4` (320x240 H.264 Main, CABAC) | 40 | 909 | 354 |
 | `aac-stereo-48k.mp4` (AAC, stereo) | 100 | 58 | 65 |
 | `aac-5.1.mp4` (AAC, 5.1) | 100 | 205 | 85 |
 
@@ -111,8 +112,11 @@ what the two commands above include and are not comparable with FFmpeg's `bench:
    codec private data match FFmpeg, for video and audio tracks. Still open: fragmented MP4, multi-edit edit lists
 4. ~~H.264 decoder, starting with Constrained Baseline (CAVLC, I/P frames)~~ done: bit-exact with
    FFmpeg on libx264 samples covering intra and inter prediction, all partitions, multiple
-   references and slices, cropping and constrained intra. Still open: CABAC / Main profile with
-   B frames (and output reordering), error concealment, more speed (about 3x FFmpeg at 720p)
+   references and slices, cropping and constrained intra, with CAVLC and with CABAC (Main profile).
+   Frames come out in display order. Never produced by libx264, so tested on hand-built streams
+   only: I_PCM, cabac_init_idc 1 and 2 (their tables are checked against libavc), reference list
+   modification and memory management operations. Still open: B frames, the 8x8 transform (High
+   profile), weighted prediction, error concealment, more speed (about 3x FFmpeg at 720p)
 5. ~~AAC-LC decoder~~ done: channel configurations 1 to 7 and program config elements (1 to 8
    channels), all window sequences and shapes, M/S, intensity, PNS, TNS. Both decoders are floating
    point, so the tests compare values: they require 2^-17 (about 7.6e-6) and measure at most 3e-7.
@@ -130,6 +134,9 @@ license choice open. Codec patents (e.g. H.264, AAC) apply regardless of languag
 Two exceptions to "from the spec only": the MJPEG IDCT reproduces FFmpeg's integer IDCT arithmetic
 (that is what bit-exact JPEG output requires; see `SimpleIdct`), and the H.264 CAVLC tables, kept
 in the spec's own layout, were cross-checked against h264bsd (Apache-2.0) by enumerating its decoder.
+The CABAC tables (context initialization, rangeTabLPS, state transitions) are the spec's values,
+transcribed from OpenH264 (BSD-2-Clause) and verified against libavc (Apache-2.0): its precomputed
+context states for every QP and initialization table equal the spec's initialization applied to ours.
 The AAC Huffman codebooks were cross-checked the same way against the PacketVideo AAC decoder
 from Android (Apache-2.0). AAC's noise substitution uses the Numerical Recipes random generator
 with the seed FFmpeg uses (the spec leaves the generator open), so noise bands match FFmpeg too.

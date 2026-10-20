@@ -17,7 +17,8 @@ references:
   compared by value, within a tolerance.
 
 The decoder tests pick their samples by content, not by name: the MJPEG test decodes every sample whose demuxed
-codec is MJPEG, and the H.264 test every MP4 whose avcC says Baseline profile (66). The other MP4s
+codec is MJPEG, and the H.264 test every MP4 whose avcC says Baseline (66) or Main profile (77; the Main
+samples have no B frames). The other MP4s
 (`h264-bframes`, `h264-faststart` and `h264-delayed` are High profile, `mpeg4-bframes` is MPEG-4 Part 2) only
 feed the demuxer tests, so their `.framemd5` files are unused.
 

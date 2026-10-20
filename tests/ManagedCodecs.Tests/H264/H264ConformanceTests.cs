@@ -4,13 +4,13 @@ using ManagedCodecs.H264;
 namespace ManagedCodecs.Tests.H264;
 
 /// <summary>
-/// Decodes every Constrained Baseline H.264 sample (samples/*.mp4 with a .framemd5) and
+/// Decodes every Constrained Baseline and Main profile H.264 sample (samples/*.mp4 with a .framemd5) and
 /// compares each frame's MD5 and timestamp, in output order, with FFmpeg's. See samples/README.md.
 /// </summary>
 public class H264ConformanceTests
 {
     public static TheoryData<string> Samples() =>
-        new(TestSamples.WithReference(".framemd5").Where(IsBaseline));
+        new(TestSamples.WithReference(".framemd5").Where(IsSupported));
 
     [Theory]
     [MemberData(nameof(Samples))]
@@ -51,8 +51,8 @@ public class H264ConformanceTests
         Assert.Equal(expected.Count, index);
     }
 
-    /// <summary>H.264 in MP4 whose avcC says profile_idc 66 (Baseline).</summary>
-    private static bool IsBaseline(string name)
+    /// <summary>H.264 in MP4 whose avcC says profile_idc 66 (Baseline) or 77 (Main; the Main samples have no B frames).</summary>
+    private static bool IsSupported(string name)
     {
         if (!name.EndsWith(".mp4", StringComparison.Ordinal))
         {
@@ -66,6 +66,6 @@ public class H264ConformanceTests
         }
 
         var avcC = video.CodecPrivate.Span;
-        return avcC.Length > 1 && avcC[1] == 66;
+        return avcC.Length > 1 && avcC[1] is 66 or 77;
     }
 }

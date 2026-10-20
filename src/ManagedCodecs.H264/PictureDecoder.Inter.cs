@@ -60,6 +60,8 @@ internal sealed partial class PictureDecoder
         _mvY.AsSpan(mbAddr * 16, 16).Clear();
         _refIdx.AsSpan(mbAddr * 4, 4).Fill(-1);
         _refPic.AsSpan(mbAddr * 4, 4).Clear();
+        _absMvdX.AsSpan(mbAddr * 16, 16).Clear();
+        _absMvdY.AsSpan(mbAddr * 16, 16).Clear();
     }
 
     /// <summary>P_Skip (8.4.1.1): reference 0, predicted motion, no residual.</summary>
@@ -68,6 +70,7 @@ internal sealed partial class PictureDecoder
         StartInterMacroblock(slice, mbAddr, MbKind.PSkip);
         ClearCounts(mbAddr);
         _qp[mbAddr] = slice.Qp;
+        slice.LastQpDeltaNonZero = false;
 
         var a = MotionNeighbor(mbAddr, -1, 0, 0);
         var b = MotionNeighbor(mbAddr, 0, -1, 0);
@@ -93,7 +96,8 @@ internal sealed partial class PictureDecoder
             Span<int> refs = stackalloc int[partitions.Length];
             for (int p = 0; p < partitions.Length; p++)
             {
-                refs[p] = ReadRefIdx(r, maxRef);
+                var (x, y, w, h) = partitions[p];
+                refs[p] = ReadRefIdx(slice, r, mbAddr, x, y, w, h, maxRef);
             }
 
             for (int p = 0; p < partitions.Length; p++)
@@ -108,13 +112,13 @@ internal sealed partial class PictureDecoder
             Span<int> subTypes = stackalloc int[4];
             for (int i = 0; i < 4; i++)
             {
-                subTypes[i] = r.ReadUe(3, "sub_mb_type");
+                subTypes[i] = slice.Cabac is { } c ? CabacSubMbType(c) : r.ReadUe(3, "sub_mb_type");
             }
 
             Span<int> refs = stackalloc int[4];
             for (int i = 0; i < 4; i++)
             {
-                refs[i] = mbType == 3 ? ReadRefIdx(r, maxRef) : 0;
+                refs[i] = mbType == 3 ? ReadRefIdx(slice, r, mbAddr, (i & 1) * 8, (i >> 1) * 8, 8, 8, maxRef) : 0;
             }
 
             for (int i = 0; i < 4; i++)
@@ -128,19 +132,21 @@ internal sealed partial class PictureDecoder
             }
         }
 
-        int cbp = CavlcTables.CodedBlockPatternInter[r.ReadUe(47, "coded_block_pattern")];
+        int cbp = slice.Cabac is { } cabac ? CabacCbp(cabac, mbAddr) : CavlcTables.CodedBlockPatternInter[r.ReadUe(47, "coded_block_pattern")];
         int cbpLuma = cbp & 15;
         int cbpChroma = cbp >> 4;
+        _cbp[mbAddr] = (byte)cbp;
 
         var residual = _residual;
         if (cbp != 0)
         {
             UpdateQp(slice, r);
-            ReadResidual(r, mbAddr, residual, is16x16: false, cbpLuma, cbpChroma);
+            ReadResidual(slice, r, mbAddr, residual, is16x16: false, cbpLuma, cbpChroma);
         }
         else
         {
             ClearCounts(mbAddr);
+            slice.LastQpDeltaNonZero = false;
         }
 
         _qp[mbAddr] = slice.Qp;
@@ -172,13 +178,31 @@ internal sealed partial class PictureDecoder
         _kind[mbAddr] = kind;
         _intra4x4Mode.AsSpan(mbAddr * 16, 16).Fill(-1);
         ClearInter(mbAddr);
+        _cbp[mbAddr] = 0;
+        _dcCoded[mbAddr] = 0;
+        _chromaPredMode[mbAddr] = 0;
     }
 
-    private static int ReadRefIdx(BitReader r, int maxRef)
+    /// <summary>ref_idx_l0 of the partition at (x, y), w x h; with CABAC it is stored at once, as later partitions' contexts read it.</summary>
+    private int ReadRefIdx(SliceState slice, BitReader r, int mbAddr, int x, int y, int w, int h, int maxRef)
     {
         if (maxRef == 0)
         {
             return 0;
+        }
+
+        if (slice.Cabac is { } c)
+        {
+            int value = CabacRefIdx(c, mbAddr, x, y, maxRef);
+            for (int by = y / 8; by < (y + h) / 8; by++)
+            {
+                for (int bx = x / 8; bx < (x + w) / 8; bx++)
+                {
+                    _refIdx[(mbAddr * 4) + (by * 2) + bx] = (sbyte)value;
+                }
+            }
+
+            return value;
         }
 
         uint refIdx = r.ReadTe(maxRef);
@@ -193,8 +217,20 @@ internal sealed partial class PictureDecoder
     /// <summary>Reads one mvd pair, adds the prediction, stores the motion and predicts the samples.</summary>
     private void DecodeMotion(SliceState slice, BitReader r, int mbAddr, int x, int y, int w, int h, int refIdx, PartitionShape shape)
     {
-        int mvdX = r.ReadSe();
-        int mvdY = r.ReadSe();
+        int mvdX;
+        int mvdY;
+        if (slice.Cabac is { } c)
+        {
+            mvdX = CabacMvd(c, mbAddr, x, y, 0);
+            mvdY = CabacMvd(c, mbAddr, x, y, 1);
+            StoreAbsMvd(mbAddr, x, y, w, h, mvdX, mvdY);
+        }
+        else
+        {
+            mvdX = r.ReadSe();
+            mvdY = r.ReadSe();
+        }
+
         var (predX, predY) = PredictMv(mbAddr, x, y, w, h, refIdx, shape);
         SetMotion(slice, mbAddr, x, y, w, h, refIdx, predX + mvdX, predY + mvdY);
     }

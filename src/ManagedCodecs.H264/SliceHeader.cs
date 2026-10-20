@@ -52,6 +52,8 @@ internal sealed class SliceHeader
 
     public IReadOnlyList<MemoryManagementOperation> MemoryManagement { get; internal init; } = [];
 
+    public int CabacInitIdc { get; internal init; }
+
     public int SliceQpDelta { get; internal init; }
 
     public int DisableDeblockingFilterIdc { get; internal init; }
@@ -84,12 +86,7 @@ internal sealed class SliceHeader
 
         if (type is SliceType.B or SliceType.SP or SliceType.SI)
         {
-            throw new NotSupportedException($"{type} slices are not supported (Constrained Baseline only).");
-        }
-
-        if (pps.EntropyCodingModeCabac)
-        {
-            throw new NotSupportedException("CABAC is not supported (Constrained Baseline only).");
+            throw new NotSupportedException($"{type} slices are not supported (I and P slices only).");
         }
 
         if (!sps.FrameMbsOnly)
@@ -195,6 +192,7 @@ internal sealed class SliceHeader
             }
         }
 
+        int cabacInitIdc = pps.EntropyCodingModeCabac && type != SliceType.I ? r.ReadUe(2, "cabac_init_idc") : 0;
         int qpDelta = r.ReadSe();
         int disableDeblocking = 0;
         int alpha = 0;
@@ -228,6 +226,7 @@ internal sealed class SliceHeader
             LongTermReference = longTermReference,
             AdaptiveRefPicMarking = adaptive,
             MemoryManagement = operations,
+            CabacInitIdc = cabacInitIdc,
             SliceQpDelta = qpDelta,
             DisableDeblockingFilterIdc = disableDeblocking,
             SliceAlphaC0Offset = alpha,

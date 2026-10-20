@@ -113,6 +113,15 @@ internal sealed class BitReader
     /// <summary>te(v) for a syntax element whose largest value is <paramref name="max"/> (9.1).</summary>
     public uint ReadTe(int max) => max > 1 ? ReadUe() : (ReadFlag() ? 0u : 1u);
 
+    /// <summary>Reads one codeword of <paramref name="vlc"/> and returns its value.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public int Read(Vlc vlc)
+    {
+        int value = vlc.Lookup(Peek(vlc.MaxLength), out int length);
+        Skip(length);
+        return value;
+    }
+
     /// <summary>ue(v) checked against an inclusive upper bound.</summary>
     public int ReadUe(int max, string name)
     {

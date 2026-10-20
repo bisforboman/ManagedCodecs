@@ -34,7 +34,7 @@ internal static class Cavlc
             _ => CoeffToken8,
         };
 
-        int token = coeffTokenTable.Read(r);
+        int token = r.Read(coeffTokenTable);
         int totalCoeff = token >> 2;
         int trailingOnes = token & 3;
         if (totalCoeff == 0)
@@ -99,7 +99,7 @@ internal static class Cavlc
         if (totalCoeff < maxNumCoeff)
         {
             var table = nC == ChromaDcNc ? TotalZerosChromaDc[totalCoeff] : TotalZeros4x4[totalCoeff];
-            zerosLeft = table.Read(r);
+            zerosLeft = r.Read(table);
             if (totalCoeff + zerosLeft > maxNumCoeff)
             {
                 throw new InvalidDataException("total_zeros overruns the block.");
@@ -115,7 +115,7 @@ internal static class Cavlc
             int run = 0;
             if (i < totalCoeff - 1 && zerosLeft > 0)
             {
-                run = RunBefore[Math.Min(zerosLeft, 7)].Read(r);
+                run = r.Read(RunBefore[Math.Min(zerosLeft, 7)]);
                 if (run > zerosLeft)
                 {
                     throw new InvalidDataException("run_before exceeds the zeros left.");

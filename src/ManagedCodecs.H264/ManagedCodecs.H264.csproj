@@ -4,10 +4,15 @@
     <RootNamespace>ManagedCodecs.H264</RootNamespace>
     <PackageId>ManagedCodecs.H264</PackageId>
     <IsAotCompatible>true</IsAotCompatible>
+    <DefineConstants>$(DefineConstants);MANAGEDCODECS_H264</DefineConstants>
   </PropertyGroup>
 
   <ItemGroup>
     <InternalsVisibleTo Include="ManagedCodecs.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\Shared\*.cs" Link="Shared\%(Filename)%(Extension)" />
   </ItemGroup>
 
   <ItemGroup>

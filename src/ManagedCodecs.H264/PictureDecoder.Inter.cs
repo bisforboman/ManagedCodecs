@@ -133,7 +133,6 @@ internal sealed partial class PictureDecoder
         int cbpChroma = cbp >> 4;
 
         var residual = _residual;
-        residual.Clear();
         if (cbp != 0)
         {
             UpdateQp(slice, r);
@@ -153,7 +152,7 @@ internal sealed partial class PictureDecoder
         {
             int x = i & 3;
             int y = i >> 2;
-            if ((cbpLuma & (1 << (((y >> 1) * 2) + (x >> 1)))) == 0)
+            if ((cbpLuma & (1 << (((y >> 1) * 2) + (x >> 1)))) == 0 || _totalCoeffLuma[(mbAddr * 16) + i] == 0)
             {
                 continue;
             }

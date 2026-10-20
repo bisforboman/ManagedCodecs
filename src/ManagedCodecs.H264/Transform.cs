@@ -32,6 +32,9 @@ internal static class Transform
         return 16 * v;
     }
 
+    // LevelScale for every qP % 6 and position: entry qpRem * 16 + index.
+    private static readonly int[] LevelScaleTable = [.. Enumerable.Range(0, 6 * 16).Select(i => LevelScale(i / 16, i % 16))];
+
     /// <summary>
     /// Scales the coefficients of a 4x4 block in place (8.5.12.1). With <paramref name="skipDc"/>
     /// the DC is left alone because it was already produced by a DC transform.
@@ -39,18 +42,24 @@ internal static class Transform
     public static void Dequantize(Span<int> block, int qp, bool skipDc)
     {
         int qpDiv = qp / 6;
-        int qpRem = qp % 6;
-        for (int i = skipDc ? 1 : 0; i < 16; i++)
+        var scale = LevelScaleTable.AsSpan((qp % 6) * 16, 16);
+        int first = skipDc ? 1 : 0;
+        if (qp >= 24)
         {
-            if (block[i] == 0)
+            int shift = qpDiv - 4;
+            for (int i = first; i < 16; i++)
             {
-                continue;
+                block[i] = (block[i] * scale[i]) << shift;
             }
-
-            int scaled = block[i] * LevelScale(qpRem, i);
-            block[i] = qp >= 24
-                ? scaled << (qpDiv - 4)
-                : (scaled + (1 << (3 - qpDiv))) >> (4 - qpDiv);
+        }
+        else
+        {
+            int shift = 4 - qpDiv;
+            int round = 1 << (3 - qpDiv);
+            for (int i = first; i < 16; i++)
+            {
+                block[i] = ((block[i] * scale[i]) + round) >> shift;
+            }
         }
     }
 
@@ -129,6 +138,27 @@ internal static class Transform
             AddClipped(dest, stride + j, (g1 + g2 + 32) >> 6);
             AddClipped(dest, (2 * stride) + j, (g1 - g2 + 32) >> 6);
             AddClipped(dest, (3 * stride) + j, (g0 - g3 + 32) >> 6);
+        }
+    }
+
+    /// <summary>
+    /// <see cref="InverseTransformAdd"/> for a block whose only nonzero coefficient is the DC
+    /// <paramref name="dc"/> (already scaled): every residual sample is then (dc + 32) &gt;&gt; 6.
+    /// </summary>
+    public static void AddDc(int dc, Span<byte> dest, int stride)
+    {
+        int residual = (dc + 32) >> 6;
+        if (residual == 0)
+        {
+            return;
+        }
+
+        for (int y = 0; y < 4; y++)
+        {
+            for (int x = 0; x < 4; x++)
+            {
+                AddClipped(dest, (y * stride) + x, residual);
+            }
         }
     }
 

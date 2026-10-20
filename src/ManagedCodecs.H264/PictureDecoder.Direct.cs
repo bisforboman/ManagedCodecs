@@ -195,12 +195,12 @@ internal sealed partial class PictureDecoder
     }
 
     /// <summary>Motion compensation of direct predicted 8x8 blocks, in the units their motion was derived in.</summary>
-    private void PredictDirect(int mbAddr, int first, int count)
+    private void PredictDirect(SliceState slice, int mbAddr, int first, int count)
     {
         int size = Sps.Direct8x8Inference ? 8 : 4;
         foreach (var (x, y) in DirectBlocks(first, count, size))
         {
-            PredictPartition(mbAddr, x, y, size, size);
+            PredictPartition(slice, mbAddr, x, y, size, size);
         }
     }
 }

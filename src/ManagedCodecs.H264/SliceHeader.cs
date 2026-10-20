@@ -44,6 +44,9 @@ internal sealed class SliceHeader
 
     public IReadOnlyList<RefPicListModification> RefPicListModificationL0 { get; internal init; } = [];
 
+    /// <summary>pred_weight_table, for explicit weighted prediction; null otherwise.</summary>
+    public PredWeightTable? Weights { get; internal init; }
+
     /// <summary>direct_spatial_mv_pred_flag of a B slice: spatial (true) or temporal direct prediction.</summary>
     public bool DirectSpatialMvPred { get; internal init; }
 
@@ -132,6 +135,7 @@ internal sealed class SliceHeader
         }
 
         bool directSpatial = type == SliceType.B && r.ReadFlag(); // direct_spatial_mv_pred_flag
+        PredWeightTable? weights = null;
         int numRefIdxL0 = pps.NumRefIdxL0DefaultActive;
         int numRefIdxL1 = pps.NumRefIdxL1DefaultActive;
         IReadOnlyList<RefPicListModification> modificationsL0 = [];
@@ -154,9 +158,9 @@ internal sealed class SliceHeader
                 modificationsL1 = ReadModifications(r);
             }
 
-            if ((type == SliceType.P && pps.WeightedPred) || (type == SliceType.B && pps.WeightedBipredIdc != 0))
+            if ((type == SliceType.P && pps.WeightedPred) || (type == SliceType.B && pps.WeightedBipredIdc == 1))
             {
-                throw new NotSupportedException("Weighted prediction is not supported.");
+                weights = PredWeightTable.Parse(r, type == SliceType.B ? 2 : 1, numRefIdxL0, numRefIdxL1);
             }
         }
 
@@ -220,6 +224,7 @@ internal sealed class SliceHeader
             DeltaPicOrderCnt0 = delta0,
             DeltaPicOrderCnt1 = delta1,
             DirectSpatialMvPred = directSpatial,
+            Weights = weights,
             NumRefIdxL0Active = numRefIdxL0,
             NumRefIdxL1Active = numRefIdxL1,
             RefPicListModificationL0 = modificationsL0,
@@ -261,5 +266,87 @@ internal sealed class SliceHeader
             // abs_diff_pic_num_minus1 for 0 and 1, long_term_pic_num for 2.
             modifications.Add(new RefPicListModification(idc, (int)r.ReadUe()));
         }
+    }
+}
+
+/// <summary>
+/// pred_weight_table (7.3.3.2): weight and offset per list, reference index and component
+/// (0 luma, 1 Cb, 2 Cr), with the defaults (2^denominator, 0) where a flag leaves them out.
+/// </summary>
+internal sealed class PredWeightTable
+{
+    private readonly int[][] _weights;
+    private readonly int[][] _offsets;
+
+    private PredWeightTable(int lumaLog2Denom, int chromaLog2Denom, int[][] weights, int[][] offsets)
+    {
+        LumaLog2Denom = lumaLog2Denom;
+        ChromaLog2Denom = chromaLog2Denom;
+        _weights = weights;
+        _offsets = offsets;
+    }
+
+    public int LumaLog2Denom { get; }
+
+    public int ChromaLog2Denom { get; }
+
+    /// <summary>Weight for list <paramref name="list"/>, reference <paramref name="refIdx"/>, component <paramref name="component"/>.</summary>
+    public int Weight(int list, int refIdx, int component) => _weights[list][(refIdx * 3) + component];
+
+    public int Offset(int list, int refIdx, int component) => _offsets[list][(refIdx * 3) + component];
+
+    public static PredWeightTable Parse(BitReader r, int lists, int numRefIdxL0, int numRefIdxL1)
+    {
+        int lumaDenom = r.ReadUe(7, "luma_log2_weight_denom");
+        int chromaDenom = r.ReadUe(7, "chroma_log2_weight_denom");
+        var weights = new int[2][];
+        var offsets = new int[2][];
+        for (int list = 0; list < 2; list++)
+        {
+            int count = list == 0 ? numRefIdxL0 : numRefIdxL1;
+            weights[list] = new int[count * 3];
+            offsets[list] = new int[count * 3];
+            for (int i = 0; i < count; i++)
+            {
+                weights[list][i * 3] = 1 << lumaDenom;
+                weights[list][(i * 3) + 1] = 1 << chromaDenom;
+                weights[list][(i * 3) + 2] = 1 << chromaDenom;
+                if (list >= lists)
+                {
+                    continue;
+                }
+
+                if (r.ReadFlag())
+                {
+                    // luma_weight_lX_flag
+                    weights[list][i * 3] = ReadWeight(r, "luma_weight");
+                    offsets[list][i * 3] = ReadWeight(r, "luma_offset");
+                }
+
+                if (r.ReadFlag())
+                {
+                    // chroma_weight_lX_flag
+                    for (int j = 1; j <= 2; j++)
+                    {
+                        weights[list][(i * 3) + j] = ReadWeight(r, "chroma_weight");
+                        offsets[list][(i * 3) + j] = ReadWeight(r, "chroma_offset");
+                    }
+                }
+            }
+        }
+
+        return new PredWeightTable(lumaDenom, chromaDenom, weights, offsets);
+    }
+
+    /// <summary>Weights and offsets are se(v) in -128 .. 127 (8-bit video).</summary>
+    private static int ReadWeight(BitReader r, string name)
+    {
+        int value = r.ReadSe();
+        if (value is < -128 or > 127)
+        {
+            throw new InvalidDataException($"{name} {value} is out of range.");
+        }
+
+        return value;
     }
 }

@@ -39,6 +39,9 @@ internal sealed partial class PictureDecoder
 
     private readonly List<SliceInfo> _slices = [];
 
+    // Coefficients of the macroblock being decoded, reused from one macroblock to the next.
+    private readonly Residual _residual = new();
+
     public PictureDecoder(SequenceParameterSet sps, Picture picture)
     {
         _sps = sps;
@@ -295,7 +298,8 @@ internal sealed partial class PictureDecoder
             cbpChroma = cbp >> 4;
         }
 
-        var residual = new Residual();
+        var residual = _residual;
+        residual.Clear();
         if (cbpLuma > 0 || cbpChroma > 0 || is16x16)
         {
             UpdateQp(slice, r);
@@ -415,6 +419,22 @@ internal sealed partial class PictureDecoder
 
         /// <summary>Chroma levels per component and raster 4x4 block.</summary>
         public int[][] ChromaAc { get; } = [.. Enumerable.Range(0, 8).Select(_ => new int[16])];
+
+        public void Clear()
+        {
+            foreach (var block in Luma)
+            {
+                Array.Clear(block);
+            }
+
+            Array.Clear(LumaDc);
+            Array.Clear(ChromaDc[0]);
+            Array.Clear(ChromaDc[1]);
+            foreach (var block in ChromaAc)
+            {
+                Array.Clear(block);
+            }
+        }
     }
 
     private void ReadResidual(BitReader r, int mbAddr, Residual residual, bool is16x16, int cbpLuma, int cbpChroma)

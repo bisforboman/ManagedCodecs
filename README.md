@@ -11,6 +11,7 @@ then the same approach for H.264 + AAC in MP4.
 | `src/ManagedCodecs.Core` | `VideoFrame`, `PixelFormat`, `Packet`, `Rational`, `IDemuxer`, `IVideoDecoder` |
 | `src/ManagedCodecs.Containers` | `AviDemuxer`, `Mp4Demuxer`, and `Demuxer.Open` to pick one by content |
 | `src/ManagedCodecs.Mjpeg` | `MjpegDecoder`: baseline/extended Huffman JPEG, bit-exact with FFmpeg |
+| `src/ManagedCodecs.H264` | `H264Decoder`: Constrained Baseline H.264 (CAVLC, I/P, deblocking), bit-exact |
 | `tests/ManagedCodecs.Tests` | Unit tests and FFmpeg conformance tests (framemd5 for frames and packets) |
 | `benchmarks/ManagedCodecs.Benchmarks` | BenchmarkDotNet decode benchmark |
 
@@ -35,7 +36,8 @@ ffmpeg -benchmark -threads 1 -stream_loop 39 -i samples/testsrc-420.avi -f null 
 ```
 
 Divide FFmpeg's `utime` by the number of frames decoded (40 loops of the file). Its figure also
-includes demuxing and passing frames on, so it slightly flatters us. Single-threaded, on an
+includes demuxing and passing frames on, so it slightly flatters us. `--filter *H264*` runs only
+the H.264 benchmark, which decodes `samples/h264-bench-720p.mp4` (50 frames) per iteration. Single-threaded, on an
 AVX2 Xeon cloud VM (µs per frame):
 
 | Sample | ManagedCodecs | FFmpeg 6.1 |
@@ -43,6 +45,8 @@ AVX2 Xeon cloud VM (µs per frame):
 | `testsrc-420` (320x240 4:2:0) | 198 | 292 |
 | `testsrc-444` | 315 | 377 |
 | `noise-q1` (noise, highest quality) | 773 | 1157 |
+| `h264-p-refs` (320x240 H.264, P frames) | 632 | 154 |
+| `h264-bench-720p` (1280x720 H.264) | 8166 | 2290 |
 
 ## Roadmap
 
@@ -53,7 +57,10 @@ AVX2 Xeon cloud VM (µs per frame):
    Still open: an ARM64 (AdvSimd) IDCT, decoding straight into the output frame
 3. ~~MP4 demuxer (ISO BMFF: `moov`, `trak`, `stbl` sample tables)~~ done: packets, timestamps and
    codec private data match FFmpeg. Still open: fragmented MP4, multi-edit edit lists, audio tracks
-4. H.264 decoder, starting with Constrained Baseline (CAVLC, I/P frames)
+4. ~~H.264 decoder, starting with Constrained Baseline (CAVLC, I/P frames)~~ done: bit-exact with
+   FFmpeg on libx264 samples covering intra and inter prediction, all partitions, multiple
+   references and slices, cropping and constrained intra. Still open: CABAC / Main profile with
+   B frames (and output reordering), error concealment, more speed (about 3.6x FFmpeg at 720p)
 5. AAC-LC decoder
 
 ## License note
@@ -62,3 +69,7 @@ FFmpeg is LGPL-2.1-or-later (some parts GPL). Code ported from FFmpeg's sources 
 license. Implementing from the public specifications (ITU-T T.81 for JPEG, ITU-T H.264,
 ISO/IEC 14496-12 for MP4) and using FFmpeg only as a reference for test output keeps the
 license choice open. Codec patents (e.g. H.264, AAC) apply regardless of language.
+
+Two exceptions to "from the spec only": the MJPEG IDCT reproduces FFmpeg's integer IDCT arithmetic
+(that is what bit-exact JPEG output requires; see `SimpleIdct`), and the H.264 CAVLC tables, kept
+in the spec's own layout, were cross-checked against h264bsd (Apache-2.0) by enumerating its decoder.

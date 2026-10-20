@@ -4,14 +4,19 @@ namespace ManagedCodecs.H264;
 /// Fractional sample interpolation (H.264 clause 8.4.2.2). Reference samples outside the
 /// picture repeat the nearest edge sample (coordinates are clamped, equations 8-228/8-229).
 /// </summary>
-internal static class InterPrediction
+/// <remarks>
+/// <see cref="PredictLuma"/> and <see cref="PredictChroma"/> copy the reference window once
+/// and filter whole rows; the <c>*Reference</c> versions compute every sample directly from the
+/// equations and are kept as the specification for tests.
+/// </remarks>
+internal static partial class InterPrediction
 {
     /// <summary>
     /// Predicts a <paramref name="width"/> x <paramref name="height"/> luma block whose top-left
     /// is at (<paramref name="x"/>, <paramref name="y"/>) in the picture, with a motion vector in
     /// quarter samples, into <paramref name="dest"/> at the same position.
     /// </summary>
-    public static void PredictLuma(Picture reference, byte[] dest, int stride, int x, int y, int width, int height, int mvX, int mvY)
+    public static void PredictLumaReference(Picture reference, byte[] dest, int stride, int x, int y, int width, int height, int mvX, int mvY)
     {
         int maxX = (reference.WidthInMbs * 16) - 1;
         int maxY = (reference.HeightInMbs * 16) - 1;
@@ -65,7 +70,7 @@ internal static class InterPrediction
     /// Predicts a chroma block (4:2:0) at chroma position (<paramref name="x"/>, <paramref name="y"/>)
     /// with the luma motion vector, which is in eighth chroma samples (8.4.2.2.2).
     /// </summary>
-    public static void PredictChroma(Picture reference, int component, byte[] dest, int stride, int x, int y, int width, int height, int mvX, int mvY)
+    public static void PredictChromaReference(Picture reference, int component, byte[] dest, int stride, int x, int y, int width, int height, int mvX, int mvY)
     {
         int maxX = (reference.WidthInMbs * 8) - 1;
         int maxY = (reference.HeightInMbs * 8) - 1;

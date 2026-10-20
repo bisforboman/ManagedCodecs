@@ -124,7 +124,8 @@ internal sealed partial class PictureDecoder
         int cbpLuma = cbp & 15;
         int cbpChroma = cbp >> 4;
 
-        var residual = new Residual();
+        var residual = _residual;
+        residual.Clear();
         if (cbp != 0)
         {
             UpdateQp(slice, r);

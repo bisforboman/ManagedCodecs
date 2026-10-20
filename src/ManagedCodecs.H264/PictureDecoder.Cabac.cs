@@ -21,9 +21,11 @@ internal sealed partial class PictureDecoder
     private byte[] _chromaPredMode = [];
     private byte[] _dcCoded = [];
 
-    // Per luma 4x4 block: |mvd_l0| per component, capped (only sums up to 33 matter).
-    private byte[] _absMvdX = [];
-    private byte[] _absMvdY = [];
+    // Per macroblock: B_Skip or B_Direct_16x16 (for the contexts of mb_type in B slices).
+    private bool[] _directMb = [];
+
+    // Per list, component and luma 4x4 block: |mvd|, capped (only sums up to 33 matter).
+    private byte[][][] _absMvd = [[[], []], [[], []]];
 
     /// <summary>ctxBlockCat (Table 9-42).</summary>
     private enum BlockCategory
@@ -40,8 +42,8 @@ internal sealed partial class PictureDecoder
         _cbp = new byte[_mbCount];
         _chromaPredMode = new byte[_mbCount];
         _dcCoded = new byte[_mbCount];
-        _absMvdX = new byte[_mbCount * 16];
-        _absMvdY = new byte[_mbCount * 16];
+        _directMb = new bool[_mbCount];
+        _absMvd = [[new byte[_mbCount * 16], new byte[_mbCount * 16]], [new byte[_mbCount * 16], new byte[_mbCount * 16]]];
     }
 
     private void ResetCabacState()
@@ -49,8 +51,12 @@ internal sealed partial class PictureDecoder
         Array.Clear(_cbp);
         Array.Clear(_chromaPredMode);
         Array.Clear(_dcCoded);
-        Array.Clear(_absMvdX);
-        Array.Clear(_absMvdY);
+        Array.Clear(_directMb);
+        foreach (var list in _absMvd)
+        {
+            Array.Clear(list[0]);
+            Array.Clear(list[1]);
+        }
     }
 
     /// <summary>slice_data (7.3.4) for CABAC.</summary>
@@ -76,7 +82,7 @@ internal sealed partial class PictureDecoder
             // The contexts of mb_skip_flag and mb_type already look at the neighbours, which
             // count as available only once this macroblock belongs to the slice.
             _sliceOfMb[mbAddr] = slice.Number;
-            if (slice.Header.Type == SliceType.P && cabac.Decision(11 + SkipFlagInc(mbAddr)) == 1)
+            if (slice.Header.Type != SliceType.I && cabac.Decision((slice.Header.Type == SliceType.B ? 24 : 11) + SkipFlagInc(mbAddr)) == 1)
             {
                 DecodeSkip(slice, mbAddr);
             }
@@ -103,7 +109,7 @@ internal sealed partial class PictureDecoder
     {
         if (c.Decision(14) == 1)
         {
-            return 5 + CabacIntraMbType(c, mbAddr, inPSlice: true);
+            return 5 + CabacIntraMbType(c, mbAddr, suffixOffset: 17);
         }
 
         // Prefix bins 000 P_L0_16x16, 001 P_8x8, 011 P_L0_L0_16x8, 010 P_L0_L0_8x16.
@@ -117,17 +123,18 @@ internal sealed partial class PictureDecoder
 
     /// <summary>
     /// mb_type of an intra macroblock (Table 7-11), as the I-slice element (ctxIdxOffset 3) or as
-    /// the suffix in a P slice (ctxIdxOffset 17). Bins: I_NxN 0; otherwise 1, the terminate bin
-    /// (1 for I_PCM), then for I_16x16 the luma CBP flag, chroma CBP (0, 10, 11) and two
-    /// prediction mode bits.
+    /// the suffix in a P or B slice (<paramref name="suffixOffset"/> 17 or 32; 0 for I slices).
+    /// Bins: I_NxN 0; otherwise 1, the terminate bin (1 for I_PCM), then for I_16x16 the luma CBP
+    /// flag, chroma CBP (0, 10, 11) and two prediction mode bits.
     /// </summary>
-    private int CabacIntraMbType(Cabac c, int mbAddr, bool inPSlice)
+    private int CabacIntraMbType(Cabac c, int mbAddr, int suffixOffset = 0)
     {
-        int offset = inPSlice ? 17 : 3;
+        bool inPSlice = suffixOffset != 0; // P or B: the same bins and increments
+        int offset = inPSlice ? suffixOffset : 3;
         int first;
         if (inPSlice)
         {
-            first = c.Decision(17);
+            first = c.Decision(offset);
         }
         else
         {
@@ -161,6 +168,70 @@ internal sealed partial class PictureDecoder
         return 1 + predMode + (4 * chroma) + (12 * luma);
     }
 
+    /// <summary>
+    /// mb_type of a B slice: 0..22 inter (Table 7-14), 23.. intra (23 + Table 7-11), ctxIdxOffset
+    /// 27. Bin 0 B_Direct_16x16; 10x B_L0 / B_L1_16x16; 11 and four bins for the rest, with 1101 the
+    /// intra prefix, 1110 and 1111 B_L1_L0_8x16 and B_8x8, and a fifth bin for types 12 to 21.
+    /// </summary>
+    private int CabacBMbType(Cabac c, int mbAddr)
+    {
+        int Cond(int n) => n >= 0 && _kind[n] != MbKind.PSkip && !_directMb[n] ? 1 : 0;
+        if (c.Decision(27 + Cond(NeighborMb(mbAddr, -1, 0)) + Cond(NeighborMb(mbAddr, 0, -1))) == 0)
+        {
+            return 0;
+        }
+
+        if (c.Decision(27 + 3) == 0)
+        {
+            return 1 + c.Decision(27 + 5);
+        }
+
+        int bits = c.Decision(27 + 4) << 3;
+        bits |= c.Decision(27 + 5) << 2;
+        bits |= c.Decision(27 + 5) << 1;
+        bits |= c.Decision(27 + 5);
+        return bits switch
+        {
+            < 8 => bits + 3,
+            13 => 23 + CabacIntraMbType(c, mbAddr, suffixOffset: 32),
+            14 => 11,
+            15 => 22,
+            _ => ((bits << 1) | c.Decision(27 + 5)) - 4,
+        };
+    }
+
+    /// <summary>
+    /// sub_mb_type of a B slice (Table 7-18), ctxIdxOffset 36: 0 B_Direct_8x8; 10x B_L0 / B_L1_8x8;
+    /// 111 and two bins for L1 / Bi 4x4, or 11 and three bins for types 3 to 10.
+    /// </summary>
+    private static int CabacBSubMbType(Cabac c)
+    {
+        if (c.Decision(36) == 0)
+        {
+            return 0;
+        }
+
+        if (c.Decision(37) == 0)
+        {
+            return 1 + c.Decision(39);
+        }
+
+        int type = 3;
+        if (c.Decision(38) == 1)
+        {
+            if (c.Decision(39) == 1)
+            {
+                return 11 + c.Decision(39);
+            }
+
+            type += 4;
+        }
+
+        type += 2 * c.Decision(39);
+        type += c.Decision(39);
+        return type;
+    }
+
     /// <summary>sub_mb_type of a P slice: 1 P_L0_8x8, 00 P_L0_8x4, 011 P_L0_4x8, 010 P_L0_4x4.</summary>
     private static int CabacSubMbType(Cabac c)
     {
@@ -179,8 +250,8 @@ internal sealed partial class PictureDecoder
 
     // ---- ref_idx_l0 and mvd_l0 (9.3.3.1.1.6, 9.3.3.1.1.7) ----
 
-    /// <summary>ref_idx_l0 of the partition whose top-left luma sample is (x, y) in the macroblock: unary, ctxIdxOffset 54.</summary>
-    private int CabacRefIdx(Cabac c, int mbAddr, int x, int y, int maxRef)
+    /// <summary>ref_idx_lX of the partition whose top-left luma sample is (x, y) in the macroblock: unary, ctxIdxOffset 54.</summary>
+    private int CabacRefIdx(Cabac c, int list, int mbAddr, int x, int y, int maxRef)
     {
         int RefInc(int nx, int ny)
         {
@@ -190,9 +261,9 @@ internal sealed partial class PictureDecoder
                 return 0;
             }
 
-            int bx = ((nx + 16) % 16) >> 3;
-            int by = ((ny + 16) % 16) >> 3;
-            return _refIdx[(n * 4) + (by * 2) + bx] > 0 ? 1 : 0; // intra blocks have -1
+            // Direct predicted partitions count as 0, as do intra blocks (refIdx -1).
+            int part = (n * 4) + ((((ny + 16) % 16) >> 3) * 2) + (((nx + 16) % 16) >> 3);
+            return !_direct[part] && _refIdx[list][part] > 0 ? 1 : 0;
         }
 
         int inc = RefInc(x - 1, y) + (2 * RefInc(x, y - 1));
@@ -220,9 +291,9 @@ internal sealed partial class PictureDecoder
     /// One component of mvd_l0 for the partition at (x, y): UEG3 with signedValFlag 1 and uCoff 9,
     /// ctxIdxOffset 40 (horizontal) or 47 (vertical).
     /// </summary>
-    private int CabacMvd(Cabac c, int mbAddr, int x, int y, int component)
+    private int CabacMvd(Cabac c, int list, int mbAddr, int x, int y, int component)
     {
-        byte[] absMvd = component == 0 ? _absMvdX : _absMvdY;
+        byte[] absMvd = _absMvd[list][component];
         int AbsMvd(int nx, int ny)
         {
             int n = NeighborMb(mbAddr, nx, ny);
@@ -259,7 +330,7 @@ internal sealed partial class PictureDecoder
     }
 
     /// <summary>Records |mvd| over a partition for the contexts of later partitions.</summary>
-    private void StoreAbsMvd(int mbAddr, int x, int y, int w, int h, int mvdX, int mvdY)
+    private void StoreAbsMvd(int list, int mbAddr, int x, int y, int w, int h, int mvdX, int mvdY)
     {
         byte absX = (byte)Math.Min(Math.Abs(mvdX), 64);
         byte absY = (byte)Math.Min(Math.Abs(mvdY), 64);
@@ -267,8 +338,8 @@ internal sealed partial class PictureDecoder
         {
             for (int bx = x / 4; bx < (x + w) / 4; bx++)
             {
-                _absMvdX[(mbAddr * 16) + (by * 4) + bx] = absX;
-                _absMvdY[(mbAddr * 16) + (by * 4) + bx] = absY;
+                _absMvd[list][0][(mbAddr * 16) + (by * 4) + bx] = absX;
+                _absMvd[list][1][(mbAddr * 16) + (by * 4) + bx] = absY;
             }
         }
     }

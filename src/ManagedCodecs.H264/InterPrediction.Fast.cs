@@ -10,13 +10,18 @@ internal static partial class InterPrediction
     private const int WindowStride = 16 + 5;
 
     /// <summary>Same output as <see cref="PredictLumaReference"/>.</summary>
+    public static void PredictLuma(Picture reference, byte[] dest, int stride, int x, int y, int width, int height, int mvX, int mvY) =>
+        PredictLuma(reference, x, y, width, height, mvX, mvY, dest.AsSpan((y * stride) + x), stride);
+
+    /// <summary>The same, written to <paramref name="output"/> (the block's top-left) with rows <paramref name="outputStride"/> apart.</summary>
     /// <remarks>
     /// The scratch buffers are not zeroed: lanes past the block's width may hold anything, and
     /// only the first <c>width</c> bytes of each row are ever stored.
     /// </remarks>
     [SkipLocalsInit]
-    public static void PredictLuma(Picture reference, byte[] dest, int stride, int x, int y, int width, int height, int mvX, int mvY)
+    public static void PredictLuma(Picture reference, int x, int y, int width, int height, int mvX, int mvY, Span<byte> output, int outputStride)
     {
+        int stride = reference.LumaStride;
         int xFrac = mvX & 3;
         int yFrac = mvY & 3;
 
@@ -45,13 +50,11 @@ internal static partial class InterPrediction
             g = (2 * WindowStride) + 2; // G of output (0, 0) sits at window (2, 2)
         }
 
-        var output = dest.AsSpan((y * stride) + x);
-
         if (xFrac == 0 && yFrac == 0)
         {
             for (int j = 0; j < height; j++)
             {
-                StorePartial(Vector128.Create(window.Slice(g + (j * ws), 16)), output[(j * stride)..], width);
+                StorePartial(Vector128.Create(window.Slice(g + (j * ws), 16)), output[(j * outputStride)..], width);
             }
 
             return;
@@ -67,11 +70,11 @@ internal static partial class InterPrediction
                 HalfHorizontal(window, ws, g, width, height, first);
                 if (xFrac == 2)
                 {
-                    Store(first, width, height, output, stride);
+                    Store(first, width, height, output, outputStride);
                 }
                 else
                 {
-                    AverageWithWindow(first, window, ws, g + (xFrac == 3 ? 1 : 0), width, height, output, stride);
+                    AverageWithWindow(first, window, ws, g + (xFrac == 3 ? 1 : 0), width, height, output, outputStride);
                 }
 
                 break;
@@ -81,47 +84,52 @@ internal static partial class InterPrediction
                 HalfVertical(window, ws, g, width, height, first);
                 if (yFrac == 2)
                 {
-                    Store(first, width, height, output, stride);
+                    Store(first, width, height, output, outputStride);
                 }
                 else
                 {
-                    AverageWithWindow(first, window, ws, g + (yFrac == 3 ? ws : 0), width, height, output, stride);
+                    AverageWithWindow(first, window, ws, g + (yFrac == 3 ? ws : 0), width, height, output, outputStride);
                 }
 
                 break;
 
             case (2, 2):
                 Center(window, ws, g, width, height, first);
-                Store(first, width, height, output, stride);
+                Store(first, width, height, output, outputStride);
                 break;
 
             case (2, _):
                 // f, q: j averaged with b on this row or the next.
                 Center(window, ws, g, width, height, first);
                 HalfHorizontal(window, ws, g + (yFrac == 3 ? ws : 0), width, height, second);
-                Average(first, second, width, height, output, stride);
+                Average(first, second, width, height, output, outputStride);
                 break;
 
             case (_, 2):
                 // i, k: j averaged with h in this column or the next.
                 Center(window, ws, g, width, height, first);
                 HalfVertical(window, ws, g + (xFrac == 3 ? 1 : 0), width, height, second);
-                Average(first, second, width, height, output, stride);
+                Average(first, second, width, height, output, outputStride);
                 break;
 
             default:
                 // e, g, p, r: b (this row or next) averaged with h (this column or next).
                 HalfHorizontal(window, ws, g + (yFrac == 3 ? ws : 0), width, height, first);
                 HalfVertical(window, ws, g + (xFrac == 3 ? 1 : 0), width, height, second);
-                Average(first, second, width, height, output, stride);
+                Average(first, second, width, height, output, outputStride);
                 break;
         }
     }
 
     /// <summary>Same output as <see cref="PredictChromaReference"/>.</summary>
+    public static void PredictChroma(Picture reference, int component, byte[] dest, int stride, int x, int y, int width, int height, int mvX, int mvY) =>
+        PredictChroma(reference, component, x, y, width, height, mvX, mvY, dest.AsSpan((y * stride) + x), stride);
+
+    /// <summary>The same, written to <paramref name="output"/> (the block's top-left) with rows <paramref name="outputStride"/> apart.</summary>
     [SkipLocalsInit]
-    public static void PredictChroma(Picture reference, int component, byte[] dest, int stride, int x, int y, int width, int height, int mvX, int mvY)
+    public static void PredictChroma(Picture reference, int component, int x, int y, int width, int height, int mvX, int mvY, Span<byte> output, int outputStride)
     {
+        int stride = reference.ChromaStride;
         int xFrac = mvX & 7;
         int yFrac = mvY & 7;
 
@@ -154,7 +162,6 @@ internal static partial class InterPrediction
         var wB = Vector128.Create((short)(xFrac * (8 - yFrac)));
         var wC = Vector128.Create((short)((8 - xFrac) * yFrac));
         var wD = Vector128.Create((short)(xFrac * yFrac));
-        var output = dest.AsSpan((y * stride) + x);
 
         for (int j = 0; j < height; j++)
         {
@@ -162,7 +169,7 @@ internal static partial class InterPrediction
             int lower = upper + windowStride;
             var sum = (Widen(window, upper) * wA) + (Widen(window, upper + 1) * wB) + (Widen(window, lower) * wC) + (Widen(window, lower + 1) * wD);
             var rounded = ((sum + Vector128.Create((short)32)) >> 6).AsUInt16();
-            StorePartial(Vector128.Narrow(rounded, rounded), output[(j * stride)..], width);
+            StorePartial(Vector128.Narrow(rounded, rounded), output[(j * outputStride)..], width);
         }
     }
 
@@ -279,6 +286,20 @@ internal static partial class InterPrediction
         {
             var avg = RoundingAverage(Vector128.Create(a.Slice(j * 16, 16)), Vector128.Create(window.Slice(origin + (j * ws), 16)));
             StorePartial(avg, output[(j * stride)..], width);
+        }
+    }
+
+    /// <summary>
+    /// Default weighted bi-prediction (8.4.2.3.1): the rounded average of two predictions of a
+    /// <paramref name="width"/> x <paramref name="height"/> block, rows <paramref name="stride"/>
+    /// apart in both (each buffer needs 16 readable bytes from every row start).
+    /// </summary>
+    public static void Average(ReadOnlySpan<byte> a, ReadOnlySpan<byte> b, int stride, int width, int height, Span<byte> output, int outputStride)
+    {
+        for (int j = 0; j < height; j++)
+        {
+            var avg = RoundingAverage(Vector128.Create(a.Slice(j * stride, 16)), Vector128.Create(b.Slice(j * stride, 16)));
+            StorePartial(avg, output[(j * outputStride)..], width);
         }
     }
 

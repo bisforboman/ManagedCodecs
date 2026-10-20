@@ -1,9 +1,9 @@
 namespace ManagedCodecs.H264;
 
-/// <summary>Inter prediction for P slices (H.264 clause 8.4).</summary>
+/// <summary>Inter prediction for P and B slices (H.264 clause 8.4).</summary>
 internal sealed partial class PictureDecoder
 {
-    // Partitions of P_L0_16x16, P_L0_L0_16x8 and P_L0_L0_8x16 (Table 7-13) as (x, y, width, height).
+    // Partitions of the 16x16, 16x8 and 8x16 macroblock types (Tables 7-13, 7-14) as (x, y, width, height).
     private static readonly (int X, int Y, int W, int H)[][] MbPartitions =
     [
         [(0, 0, 16, 16)],
@@ -11,7 +11,7 @@ internal sealed partial class PictureDecoder
         [(0, 0, 8, 16), (8, 0, 8, 16)],
     ];
 
-    // Sub-macroblock partitions of P_L0_8x8, P_L0_8x4, P_L0_4x8 and P_L0_4x4 (Table 7-17).
+    // Sub-macroblock partitions of the 8x8, 8x4, 4x8 and 4x4 sub-macroblock types (Tables 7-17, 7-18).
     private static readonly (int X, int Y, int W, int H)[][] SubPartitions =
     [
         [(0, 0, 8, 8)],
@@ -20,14 +20,46 @@ internal sealed partial class PictureDecoder
         [(0, 0, 4, 4), (4, 0, 4, 4), (0, 4, 4, 4), (4, 4, 4, 4)],
     ];
 
-    // Per luma 4x4 block: motion vector in quarter samples.
-    private short[] _mvX = [];
-    private short[] _mvY = [];
+    // B macroblock types 0 to 21 (Table 7-14): shape (index into MbPartitions) and the lists each
+    // partition predicts from (bit 0 list 0, bit 1 list 1). Type 0 is B_Direct_16x16.
+    private static readonly (int Shape, int Pred0, int Pred1)[] BMbTypes =
+    [
+        (0, 0, 0),
+        (0, 1, 0), (0, 2, 0), (0, 3, 0),
+        (1, 1, 1), (2, 1, 1), (1, 2, 2), (2, 2, 2),
+        (1, 1, 2), (2, 1, 2), (1, 2, 1), (2, 2, 1),
+        (1, 1, 3), (2, 1, 3), (1, 2, 3), (2, 2, 3),
+        (1, 3, 1), (2, 3, 1), (1, 3, 2), (2, 3, 2),
+        (1, 3, 3), (2, 3, 3),
+    ];
 
-    // Per 8x8 block: reference index into the slice's list (-1 = none) and the picture itself,
-    // which is what the deblocking filter compares.
-    private sbyte[] _refIdx = [];
-    private Picture?[] _refPic = [];
+    // B sub-macroblock types 0 to 12 (Table 7-18): shape (index into SubPartitions) and lists.
+    // Type 0 is B_Direct_8x8.
+    private static readonly (int Shape, int Pred)[] BSubMbTypes =
+    [
+        (0, 0),
+        (0, 1), (0, 2), (0, 3),
+        (1, 1), (2, 1), (1, 2), (2, 2), (1, 3), (2, 3),
+        (3, 1), (3, 2), (3, 3),
+    ];
+
+    // Per list (0, 1) and luma 4x4 block: motion vector in quarter samples; per list and 8x8 block:
+    // reference index (-1 = list not used) and the referenced picture's Id. These are the current
+    // picture's own arrays (Picture.MvX ...), kept for direct prediction of later pictures.
+    private short[][] _mvX = [[], []];
+    private short[][] _mvY = [[], []];
+    private sbyte[][] _refIdx = [[], []];
+    private long[][] _refId = [[], []];
+
+    // Per list and 8x8 block: the referenced picture, for motion compensation and deblocking.
+    private Picture?[][] _refPic = [[], []];
+
+    // Per 8x8 block: predicted in direct mode (B_Skip, B_Direct_16x16, B_Direct_8x8).
+    private bool[] _direct = [];
+
+    // Bi-prediction: each list's prediction of one partition before they are averaged.
+    private readonly byte[] _predictionL0 = new byte[16 * 16];
+    private readonly byte[] _predictionL1 = new byte[16 * 16];
 
     private enum PartitionShape
     {
@@ -38,33 +70,34 @@ internal sealed partial class PictureDecoder
 
     private void InitInter()
     {
-        _mvX = new short[_mbCount * 16];
-        _mvY = new short[_mbCount * 16];
-        _refIdx = new sbyte[_mbCount * 4];
-        _refPic = new Picture?[_mbCount * 4];
-        ResetInter();
+        _refPic = [new Picture?[_mbCount * 4], new Picture?[_mbCount * 4]];
+        _direct = new bool[_mbCount * 4];
     }
 
-    private void ResetInter()
+    /// <summary>
+    /// Takes the picture's motion arrays as the ones to fill, and clears all motion state. Each
+    /// macroblock is decoded once, so a macroblock without motion (intra, or a list it does not
+    /// use) keeps these values: refIdx -1, zero motion, no picture.
+    /// </summary>
+    private void ResetInter(Picture picture)
     {
-        Array.Clear(_mvX);
-        Array.Clear(_mvY);
-        Array.Fill(_refIdx, (sbyte)-1);
-        Array.Clear(_refPic);
+        _mvX = picture.MvX;
+        _mvY = picture.MvY;
+        _refIdx = picture.RefIdx;
+        _refId = picture.RefId;
+        for (int list = 0; list < 2; list++)
+        {
+            Array.Clear(_mvX[list]);
+            Array.Clear(_mvY[list]);
+            Array.Fill(_refIdx[list], (sbyte)-1);
+            Array.Clear(_refId[list]);
+            Array.Clear(_refPic[list]);
+        }
+
+        Array.Clear(_direct);
     }
 
-    /// <summary>Resets the motion data of an intra macroblock.</summary>
-    private void ClearInter(int mbAddr)
-    {
-        _mvX.AsSpan(mbAddr * 16, 16).Clear();
-        _mvY.AsSpan(mbAddr * 16, 16).Clear();
-        _refIdx.AsSpan(mbAddr * 4, 4).Fill(-1);
-        _refPic.AsSpan(mbAddr * 4, 4).Clear();
-        _absMvdX.AsSpan(mbAddr * 16, 16).Clear();
-        _absMvdY.AsSpan(mbAddr * 16, 16).Clear();
-    }
-
-    /// <summary>P_Skip (8.4.1.1): reference 0, predicted motion, no residual.</summary>
+    /// <summary>P_Skip (8.4.1.1: reference 0, predicted motion) or B_Skip (direct prediction); no residual.</summary>
     private void DecodeSkip(SliceState slice, int mbAddr)
     {
         StartInterMacroblock(slice, mbAddr, MbKind.PSkip);
@@ -72,66 +105,160 @@ internal sealed partial class PictureDecoder
         _qp[mbAddr] = slice.Qp;
         slice.LastQpDeltaNonZero = false;
 
-        var a = MotionNeighbor(mbAddr, -1, 0, 0);
-        var b = MotionNeighbor(mbAddr, 0, -1, 0);
+        if (slice.Header.Type == SliceType.B)
+        {
+            DirectMotion(slice, mbAddr, 0, 4);
+            PredictDirect(mbAddr, 0, 4);
+            return;
+        }
+
+        var a = MotionNeighbor(0, mbAddr, -1, 0, 0);
+        var b = MotionNeighbor(0, mbAddr, 0, -1, 0);
         (int X, int Y) mv = (0, 0);
         if (a.Available && b.Available && !(a.RefIdx == 0 && a.MvX == 0 && a.MvY == 0) && !(b.RefIdx == 0 && b.MvX == 0 && b.MvY == 0))
         {
-            mv = PredictMv(mbAddr, 0, 0, 16, 16, 0, PartitionShape.Other);
+            mv = PredictMv(0, mbAddr, 0, 0, 16, 16, 0, PartitionShape.Other);
         }
 
-        SetMotion(slice, mbAddr, 0, 0, 16, 16, 0, mv.X, mv.Y);
+        StoreMotion(slice, 0, mbAddr, 0, 0, 16, 16, 0, mv.X, mv.Y);
+        PredictPartition(mbAddr, 0, 0, 16, 16);
     }
 
-    /// <summary>P macroblock types 0 to 4 (Table 7-13): mb_pred or sub_mb_pred, then residual.</summary>
+    /// <summary>
+    /// An inter macroblock of a P slice (types 0 to 4, Table 7-13) or B slice (0 to 22, Table 7-14):
+    /// mb_pred or sub_mb_pred, the prediction, then the residual.
+    /// </summary>
     private void DecodeInterMacroblock(SliceState slice, BitReader r, int mbAddr, int mbType)
     {
         StartInterMacroblock(slice, mbAddr, MbKind.Inter);
-        int maxRef = slice.Header.NumRefIdxL0Active - 1;
+        bool isB = slice.Header.Type == SliceType.B;
+        int maxRef0 = slice.Header.NumRefIdxL0Active - 1;
+        int maxRef1 = slice.Header.NumRefIdxL1Active - 1;
 
-        if (mbType < 3)
+        if (isB && mbType == 0)
         {
-            var partitions = MbPartitions[mbType];
-            var shape = (PartitionShape)mbType;
-            Span<int> refs = stackalloc int[partitions.Length];
-            for (int p = 0; p < partitions.Length; p++)
+            // B_Direct_16x16.
+            _directMb[mbAddr] = true;
+            DirectMotion(slice, mbAddr, 0, 4);
+            PredictDirect(mbAddr, 0, 4);
+        }
+        else if (isB ? mbType < 22 : mbType < 3)
+        {
+            var (shapeIndex, pred0, pred1) = isB ? BMbTypes[mbType] : (mbType, 1, 1);
+            var partitions = MbPartitions[shapeIndex];
+            var shape = (PartitionShape)shapeIndex;
+            Span<int> preds = [pred0, pred1];
+            Span<int> refs = [-1, -1, -1, -1]; // list * 2 + partition
+
+            // All ref_idx_l0, all ref_idx_l1, all mvd_l0, all mvd_l1 (7.3.5.1).
+            for (int list = 0; list < 2; list++)
             {
-                var (x, y, w, h) = partitions[p];
-                refs[p] = ReadRefIdx(slice, r, mbAddr, x, y, w, h, maxRef);
+                for (int p = 0; p < partitions.Length; p++)
+                {
+                    if ((preds[p] & (1 << list)) != 0)
+                    {
+                        var (x, y, w, h) = partitions[p];
+                        refs[(list * 2) + p] = ReadRefIdx(slice, r, list, mbAddr, x, y, w, h, list == 0 ? maxRef0 : maxRef1);
+                    }
+                }
             }
 
-            for (int p = 0; p < partitions.Length; p++)
+            for (int list = 0; list < 2; list++)
             {
-                var (x, y, w, h) = partitions[p];
-                DecodeMotion(slice, r, mbAddr, x, y, w, h, refs[p], shape);
+                for (int p = 0; p < partitions.Length; p++)
+                {
+                    if ((preds[p] & (1 << list)) != 0)
+                    {
+                        var (x, y, w, h) = partitions[p];
+                        DecodeMotion(slice, r, list, mbAddr, x, y, w, h, refs[(list * 2) + p], shape);
+                    }
+                }
+            }
+
+            foreach (var (x, y, w, h) in partitions)
+            {
+                PredictPartition(mbAddr, x, y, w, h);
             }
         }
         else
         {
-            // P_8x8 and P_8x8ref0 (where every ref_idx is inferred to be 0).
-            Span<int> subTypes = stackalloc int[4];
-            for (int i = 0; i < 4; i++)
-            {
-                subTypes[i] = slice.Cabac is { } c ? CabacSubMbType(c) : r.ReadUe(3, "sub_mb_type");
-            }
+            DecodeSubMacroblocks(slice, r, mbAddr, isB, refIdxZero: !isB && mbType == 4, maxRef0, maxRef1);
+        }
 
-            Span<int> refs = stackalloc int[4];
-            for (int i = 0; i < 4; i++)
-            {
-                refs[i] = mbType == 3 ? ReadRefIdx(slice, r, mbAddr, (i & 1) * 8, (i >> 1) * 8, 8, 8, maxRef) : 0;
-            }
+        DecodeInterResidual(slice, r, mbAddr);
+    }
 
+    /// <summary>
+    /// P_8x8 / P_8x8ref0 / B_8x8: four sub_mb_types, then ref_idx_l0, ref_idx_l1, mvd_l0 and mvd_l1
+    /// for the sub-macroblocks that use each list. B_Direct_8x8 sub-macroblocks are direct predicted.
+    /// </summary>
+    private void DecodeSubMacroblocks(SliceState slice, BitReader r, int mbAddr, bool isB, bool refIdxZero, int maxRef0, int maxRef1)
+    {
+        Span<int> subTypes = stackalloc int[4];
+        for (int i = 0; i < 4; i++)
+        {
+            subTypes[i] = slice.Cabac is not { } c ? r.ReadUe(isB ? 12 : 3, "sub_mb_type")
+                : isB ? CabacBSubMbType(c)
+                : CabacSubMbType(c);
+        }
+
+        // Shape and lists per sub-macroblock; shape -1 marks B_Direct_8x8.
+        Span<int> shapes = stackalloc int[4];
+        Span<int> preds = stackalloc int[4];
+        for (int i = 0; i < 4; i++)
+        {
+            (shapes[i], preds[i]) = !isB ? (subTypes[i], 1) : subTypes[i] == 0 ? (-1, 0) : BSubMbTypes[subTypes[i]];
+            if (shapes[i] < 0)
+            {
+                // Known before any other partition's motion vector prediction can look at it.
+                DirectMotion(slice, mbAddr, i, 1);
+            }
+        }
+
+        Span<int> refs = [-1, -1, -1, -1, -1, -1, -1, -1]; // list * 4 + sub-macroblock
+        for (int list = 0; list < 2; list++)
+        {
             for (int i = 0; i < 4; i++)
             {
-                int x8 = (i & 1) * 8;
-                int y8 = (i >> 1) * 8;
-                foreach (var (x, y, w, h) in SubPartitions[subTypes[i]])
+                if ((preds[i] & (1 << list)) != 0)
                 {
-                    DecodeMotion(slice, r, mbAddr, x8 + x, y8 + y, w, h, refs[i], PartitionShape.Other);
+                    refs[(list * 4) + i] = refIdxZero ? 0 : ReadRefIdx(slice, r, list, mbAddr, (i & 1) * 8, (i >> 1) * 8, 8, 8, list == 0 ? maxRef0 : maxRef1);
                 }
             }
         }
 
+        for (int list = 0; list < 2; list++)
+        {
+            for (int i = 0; i < 4; i++)
+            {
+                if ((preds[i] & (1 << list)) != 0)
+                {
+                    foreach (var (x, y, w, h) in SubPartitions[shapes[i]])
+                    {
+                        DecodeMotion(slice, r, list, mbAddr, ((i & 1) * 8) + x, ((i >> 1) * 8) + y, w, h, refs[(list * 4) + i], PartitionShape.Other);
+                    }
+                }
+            }
+        }
+
+        for (int i = 0; i < 4; i++)
+        {
+            if (shapes[i] < 0)
+            {
+                PredictDirect(mbAddr, i, 1);
+                continue;
+            }
+
+            foreach (var (x, y, w, h) in SubPartitions[shapes[i]])
+            {
+                PredictPartition(mbAddr, ((i & 1) * 8) + x, ((i >> 1) * 8) + y, w, h);
+            }
+        }
+    }
+
+    /// <summary>coded_block_pattern, mb_qp_delta and the residual of an inter macroblock, added to its prediction.</summary>
+    private void DecodeInterResidual(SliceState slice, BitReader r, int mbAddr)
+    {
         int cbp = slice.Cabac is { } cabac ? CabacCbp(cabac, mbAddr) : CavlcTables.CodedBlockPatternInter[r.ReadUe(47, "coded_block_pattern")];
         int cbpLuma = cbp & 15;
         int cbpChroma = cbp >> 4;
@@ -151,7 +278,6 @@ internal sealed partial class PictureDecoder
 
         _qp[mbAddr] = slice.Qp;
 
-        // The prediction is already in the picture; add the residual.
         var (origin, _) = Origins(mbAddr);
         int stride = Picture.LumaStride;
         for (int i = 0; i < 16; i++)
@@ -177,14 +303,14 @@ internal sealed partial class PictureDecoder
         DecodedMbCount++;
         _kind[mbAddr] = kind;
         _intra4x4Mode.AsSpan(mbAddr * 16, 16).Fill(-1);
-        ClearInter(mbAddr);
         _cbp[mbAddr] = 0;
         _dcCoded[mbAddr] = 0;
         _chromaPredMode[mbAddr] = 0;
+        _directMb[mbAddr] = kind == MbKind.PSkip && slice.Header.Type == SliceType.B;
     }
 
-    /// <summary>ref_idx_l0 of the partition at (x, y), w x h; with CABAC it is stored at once, as later partitions' contexts read it.</summary>
-    private int ReadRefIdx(SliceState slice, BitReader r, int mbAddr, int x, int y, int w, int h, int maxRef)
+    /// <summary>ref_idx_lX of the partition at (x, y), w x h; with CABAC it is stored at once, as later partitions' contexts read it.</summary>
+    private int ReadRefIdx(SliceState slice, BitReader r, int list, int mbAddr, int x, int y, int w, int h, int maxRef)
     {
         if (maxRef == 0)
         {
@@ -193,12 +319,12 @@ internal sealed partial class PictureDecoder
 
         if (slice.Cabac is { } c)
         {
-            int value = CabacRefIdx(c, mbAddr, x, y, maxRef);
+            int value = CabacRefIdx(c, list, mbAddr, x, y, maxRef);
             for (int by = y / 8; by < (y + h) / 8; by++)
             {
                 for (int bx = x / 8; bx < (x + w) / 8; bx++)
                 {
-                    _refIdx[(mbAddr * 4) + (by * 2) + bx] = (sbyte)value;
+                    _refIdx[list][(mbAddr * 4) + (by * 2) + bx] = (sbyte)value;
                 }
             }
 
@@ -208,22 +334,22 @@ internal sealed partial class PictureDecoder
         uint refIdx = r.ReadTe(maxRef);
         if (refIdx > (uint)maxRef)
         {
-            throw new InvalidDataException($"ref_idx_l0 {refIdx} is out of range.");
+            throw new InvalidDataException($"ref_idx_l{list} {refIdx} is out of range.");
         }
 
         return (int)refIdx;
     }
 
-    /// <summary>Reads one mvd pair, adds the prediction, stores the motion and predicts the samples.</summary>
-    private void DecodeMotion(SliceState slice, BitReader r, int mbAddr, int x, int y, int w, int h, int refIdx, PartitionShape shape)
+    /// <summary>Reads one mvd pair of list <paramref name="list"/>, adds the prediction and stores the motion.</summary>
+    private void DecodeMotion(SliceState slice, BitReader r, int list, int mbAddr, int x, int y, int w, int h, int refIdx, PartitionShape shape)
     {
         int mvdX;
         int mvdY;
         if (slice.Cabac is { } c)
         {
-            mvdX = CabacMvd(c, mbAddr, x, y, 0);
-            mvdY = CabacMvd(c, mbAddr, x, y, 1);
-            StoreAbsMvd(mbAddr, x, y, w, h, mvdX, mvdY);
+            mvdX = CabacMvd(c, list, mbAddr, x, y, 0);
+            mvdY = CabacMvd(c, list, mbAddr, x, y, 1);
+            StoreAbsMvd(list, mbAddr, x, y, w, h, mvdX, mvdY);
         }
         else
         {
@@ -231,16 +357,17 @@ internal sealed partial class PictureDecoder
             mvdY = r.ReadSe();
         }
 
-        var (predX, predY) = PredictMv(mbAddr, x, y, w, h, refIdx, shape);
-        SetMotion(slice, mbAddr, x, y, w, h, refIdx, predX + mvdX, predY + mvdY);
+        var (predX, predY) = PredictMv(list, mbAddr, x, y, w, h, refIdx, shape);
+        StoreMotion(slice, list, mbAddr, x, y, w, h, refIdx, predX + mvdX, predY + mvdY);
     }
 
-    /// <summary>Stores a partition's motion for later neighbours and the deblocking filter, then predicts it.</summary>
-    private void SetMotion(SliceState slice, int mbAddr, int x, int y, int w, int h, int refIdx, int mvX, int mvY)
+    /// <summary>Stores one list's motion of a partition, for later neighbours, deblocking and later pictures.</summary>
+    private void StoreMotion(SliceState slice, int list, int mbAddr, int x, int y, int w, int h, int refIdx, int mvX, int mvY)
     {
-        if (refIdx >= slice.RefList.Count)
+        var refList = slice.RefList(list);
+        if (refIdx >= refList.Count)
         {
-            throw new InvalidDataException($"ref_idx_l0 {refIdx} names no reference picture.");
+            throw new InvalidDataException($"ref_idx_l{list} {refIdx} names no reference picture.");
         }
 
         if (mvX is < short.MinValue or > short.MaxValue || mvY is < short.MinValue or > short.MaxValue)
@@ -248,37 +375,71 @@ internal sealed partial class PictureDecoder
             throw new InvalidDataException("Motion vector out of range.");
         }
 
-        var reference = slice.RefList[refIdx];
+        var reference = refList[refIdx];
         for (int by = y / 4; by < (y + h) / 4; by++)
         {
             for (int bx = x / 4; bx < (x + w) / 4; bx++)
             {
-                _mvX[(mbAddr * 16) + (by * 4) + bx] = (short)mvX;
-                _mvY[(mbAddr * 16) + (by * 4) + bx] = (short)mvY;
+                _mvX[list][(mbAddr * 16) + (by * 4) + bx] = (short)mvX;
+                _mvY[list][(mbAddr * 16) + (by * 4) + bx] = (short)mvY;
                 int part = (mbAddr * 4) + ((by >> 1) * 2) + (bx >> 1);
-                _refIdx[part] = (sbyte)refIdx;
-                _refPic[part] = reference;
+                _refIdx[list][part] = (sbyte)refIdx;
+                _refId[list][part] = reference.Id;
+                _refPic[list][part] = reference;
             }
         }
+    }
 
-        int mbX = mbAddr % _widthInMbs;
-        int mbY = mbAddr / _widthInMbs;
-        int lumaX = (mbX * 16) + x;
-        int lumaY = (mbY * 16) + y;
-        InterPrediction.PredictLuma(reference, Picture.Y, Picture.LumaStride, lumaX, lumaY, w, h, mvX, mvY);
-        InterPrediction.PredictChroma(reference, 1, Picture.Cb, Picture.ChromaStride, lumaX / 2, lumaY / 2, w / 2, h / 2, mvX, mvY);
-        InterPrediction.PredictChroma(reference, 2, Picture.Cr, Picture.ChromaStride, lumaX / 2, lumaY / 2, w / 2, h / 2, mvX, mvY);
+    /// <summary>
+    /// Motion compensation of a partition from its stored motion (8.4.2): from one list, or the
+    /// rounded average of both (default weighted sample prediction, 8.4.2.3.1).
+    /// </summary>
+    private void PredictPartition(int mbAddr, int x, int y, int w, int h)
+    {
+        int part = (mbAddr * 4) + ((y >> 3) * 2) + (x >> 3);
+        int block = (mbAddr * 16) + ((y >> 2) * 4) + (x >> 2);
+        var ref0 = _refPic[0][part];
+        var ref1 = _refPic[1][part];
+        int lumaX = ((mbAddr % _widthInMbs) * 16) + x;
+        int lumaY = ((mbAddr / _widthInMbs) * 16) + y;
+        int lumaStride = Picture.LumaStride;
+        int chromaStride = Picture.ChromaStride;
+
+        if (ref0 is null || ref1 is null)
+        {
+            int list = ref0 is null ? 1 : 0;
+            var reference = (ref0 ?? ref1)!;
+            int mvX = _mvX[list][block];
+            int mvY = _mvY[list][block];
+            InterPrediction.PredictLuma(reference, Picture.Y, lumaStride, lumaX, lumaY, w, h, mvX, mvY);
+            InterPrediction.PredictChroma(reference, 1, Picture.Cb, chromaStride, lumaX / 2, lumaY / 2, w / 2, h / 2, mvX, mvY);
+            InterPrediction.PredictChroma(reference, 2, Picture.Cr, chromaStride, lumaX / 2, lumaY / 2, w / 2, h / 2, mvX, mvY);
+            return;
+        }
+
+        InterPrediction.PredictLuma(ref0, lumaX, lumaY, w, h, _mvX[0][block], _mvY[0][block], _predictionL0, 16);
+        InterPrediction.PredictLuma(ref1, lumaX, lumaY, w, h, _mvX[1][block], _mvY[1][block], _predictionL1, 16);
+        InterPrediction.Average(_predictionL0, _predictionL1, 16, w, h, Picture.Y.AsSpan((lumaY * lumaStride) + lumaX), lumaStride);
+
+        int chromaOffset = (lumaY / 2 * chromaStride) + (lumaX / 2);
+        for (int c = 1; c <= 2; c++)
+        {
+            InterPrediction.PredictChroma(ref0, c, lumaX / 2, lumaY / 2, w / 2, h / 2, _mvX[0][block], _mvY[0][block], _predictionL0, 8);
+            InterPrediction.PredictChroma(ref1, c, lumaX / 2, lumaY / 2, w / 2, h / 2, _mvX[1][block], _mvY[1][block], _predictionL1, 8);
+            InterPrediction.Average(_predictionL0, _predictionL1, 8, w / 2, h / 2, Picture.Plane(c).AsSpan(chromaOffset), chromaStride);
+        }
     }
 
     private readonly record struct Motion(bool Available, int RefIdx, int MvX, int MvY);
 
     /// <summary>
-    /// Motion of the partition covering luma location (x, y) relative to the current macroblock
-    /// (6.4.11.7). Inside the current macroblock a block is only available when it comes before
-    /// <paramref name="currentBlock"/> (the decoding index of the current partition's first 4x4
-    /// block). Intra macroblocks are available but have no reference (refIdx -1, zero motion).
+    /// List <paramref name="list"/> motion of the partition covering luma location (x, y)
+    /// relative to the current macroblock (6.4.11.7). Inside the current macroblock a block is
+    /// only available when it comes before <paramref name="currentBlock"/> (the decoding index of
+    /// the current partition's first 4x4 block). Intra macroblocks, and partitions that do not use
+    /// the list, are available with refIdx -1 and zero motion.
     /// </summary>
-    private Motion MotionNeighbor(int mbAddr, int x, int y, int currentBlock)
+    private Motion MotionNeighbor(int list, int mbAddr, int x, int y, int currentBlock)
     {
         int n = NeighborMb(mbAddr, x, y);
         if (n < 0)
@@ -294,19 +455,19 @@ internal sealed partial class PictureDecoder
         }
 
         int block = (n * 16) + (by * 4) + bx;
-        return new Motion(true, _refIdx[(n * 4) + ((by >> 1) * 2) + (bx >> 1)], _mvX[block], _mvY[block]);
+        return new Motion(true, _refIdx[list][(n * 4) + ((by >> 1) * 2) + (bx >> 1)], _mvX[list][block], _mvY[list][block]);
     }
 
-    /// <summary>Luma motion vector prediction (8.4.1.3).</summary>
-    private (int X, int Y) PredictMv(int mbAddr, int x, int y, int w, int h, int refIdx, PartitionShape shape)
+    /// <summary>Luma motion vector prediction for list <paramref name="list"/> (8.4.1.3).</summary>
+    private (int X, int Y) PredictMv(int list, int mbAddr, int x, int y, int w, int h, int refIdx, PartitionShape shape)
     {
         int current = BlockIndex(x / 4, y / 4);
-        var a = MotionNeighbor(mbAddr, x - 1, y, current);
-        var b = MotionNeighbor(mbAddr, x, y - 1, current);
-        var c = MotionNeighbor(mbAddr, x + w, y - 1, current);
+        var a = MotionNeighbor(list, mbAddr, x - 1, y, current);
+        var b = MotionNeighbor(list, mbAddr, x, y - 1, current);
+        var c = MotionNeighbor(list, mbAddr, x + w, y - 1, current);
         if (!c.Available)
         {
-            c = MotionNeighbor(mbAddr, x - 1, y - 1, current); // D replaces C
+            c = MotionNeighbor(list, mbAddr, x - 1, y - 1, current); // D replaces C
         }
 
         // Directional prediction for 16x8 and 8x16 partitions (8.4.1.3).

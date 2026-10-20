@@ -51,7 +51,7 @@ public class H264ConformanceTests
         Assert.Equal(expected.Count, index);
     }
 
-    /// <summary>H.264 in MP4 whose avcC says profile_idc 66 (Baseline) or 77 (Main; the Main samples have no B frames).</summary>
+    /// <summary>H.264 in MP4 whose avcC says profile_idc 66 (Baseline) or 77 (Main).</summary>
     private static bool IsSupported(string name)
     {
         if (!name.EndsWith(".mp4", StringComparison.Ordinal))

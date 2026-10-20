@@ -129,58 +129,86 @@ internal sealed partial class PictureDecoder
             return 2;
         }
 
-        int partP = (mbP * 4) + ((blockP >> 3) * 2) + ((blockP & 3) >> 1);
-        int partQ = (mbQ * 4) + ((blockQ >> 3) * 2) + ((blockQ & 3) >> 1);
-        if (_refPic[partP] != _refPic[partQ])
+        return MotionStrength((mbP * 16) + blockP, (mbQ * 16) + blockQ);
+    }
+
+    /// <summary>
+    /// bS 1 or 0 of an edge between inter blocks p and q without coefficients (8.7.2.1), from their
+    /// motion; the blocks are picture-wide 4x4 block indices (macroblock * 16 + raster index). The
+    /// reference pictures are compared as pictures, whichever list they came from.
+    /// </summary>
+    private int MotionStrength(int p, int q)
+    {
+        int partP = ((p >> 4) * 4) + ((p & 15) >> 3 << 1) + ((p & 3) >> 1);
+        int partQ = ((q >> 4) * 4) + ((q & 15) >> 3 << 1) + ((q & 3) >> 1);
+        var p0 = _refPic[0][partP];
+        var p1 = _refPic[1][partP];
+        var q0 = _refPic[0][partQ];
+        var q1 = _refPic[1][partQ];
+
+        bool Far(int listA, int a, int listB, int b) =>
+            Math.Abs(_mvX[listA][a] - _mvX[listB][b]) >= 4 || Math.Abs(_mvY[listA][a] - _mvY[listB][b]) >= 4;
+
+        if (p1 is null && q1 is null)
+        {
+            // One motion vector each from list 0 (all of P slices).
+            return p0 != q0 || Far(0, p, 0, q) ? 1 : 0;
+        }
+
+        int countP = (p0 is null ? 0 : 1) + (p1 is null ? 0 : 1);
+        int countQ = (q0 is null ? 0 : 1) + (q1 is null ? 0 : 1);
+        if (countP != countQ)
         {
             return 1;
         }
 
-        int mvP = (mbP * 16) + blockP;
-        int mvQ = (mbQ * 16) + blockQ;
-        return Math.Abs(_mvX[mvP] - _mvX[mvQ]) >= 4 || Math.Abs(_mvY[mvP] - _mvY[mvQ]) >= 4 ? 1 : 0;
+        if (countP == 1)
+        {
+            int listP = p0 is null ? 1 : 0;
+            int listQ = q0 is null ? 1 : 0;
+            return (p0 ?? p1) != (q0 ?? q1) || Far(listP, p, listQ, q) ? 1 : 0;
+        }
+
+        if (!((p0 == q0 && p1 == q1) || (p0 == q1 && p1 == q0)))
+        {
+            return 1; // not the same two reference pictures
+        }
+
+        if (p0 != p1)
+        {
+            // Two different pictures: compare the motion vectors that refer to the same picture.
+            return p0 == q0 ? (Far(0, p, 0, q) || Far(1, p, 1, q) ? 1 : 0) : (Far(0, p, 1, q) || Far(1, p, 0, q) ? 1 : 0);
+        }
+
+        // Both vectors of each block refer to the same picture: either pairing may match.
+        return (Far(0, p, 0, q) || Far(1, p, 1, q)) && (Far(0, p, 1, q) || Far(1, p, 0, q)) ? 1 : 0;
     }
 
     /// <summary>
     /// bS of the internal edges (1..3) of an inter macroblock: <see cref="BoundaryStrength"/> with
-    /// both blocks in the same macroblock, so neither is intra and one reference list applies.
+    /// both blocks in the same macroblock, so neither is intra.
     /// </summary>
     private void InternalStrengths(int mbAddr, Span<byte> vertical, Span<byte> horizontal)
     {
         var coefficients = _totalCoeffLuma.AsSpan(mbAddr * 16, 16);
-        var mvX = _mvX.AsSpan(mbAddr * 16, 16);
-        var mvY = _mvY.AsSpan(mbAddr * 16, 16);
-        var refs = _refPic.AsSpan(mbAddr * 4, 4);
-
-        int Strength(int p, int q, Span<byte> coefficients, Span<short> mvX, Span<short> mvY, Span<Picture?> refs)
-        {
-            if ((coefficients[p] | coefficients[q]) != 0)
-            {
-                return 2;
-            }
-
-            // The 8x8 partition of 4x4 block b is (b >> 3) * 2 + ((b & 3) >> 1).
-            if (refs[((p >> 3) * 2) + ((p & 3) >> 1)] != refs[((q >> 3) * 2) + ((q & 3) >> 1)])
-            {
-                return 1;
-            }
-
-            return Math.Abs(mvX[p] - mvX[q]) >= 4 || Math.Abs(mvY[p] - mvY[q]) >= 4 ? 1 : 0;
-        }
+        int base4x4 = mbAddr * 16;
+        int Strength(int p, int q, Span<byte> coefficients) =>
+            (coefficients[p] | coefficients[q]) != 0 ? 2 : MotionStrength(base4x4 + p, base4x4 + q);
 
         for (int edge = 1; edge < 4; edge++)
         {
             for (int k = 0; k < 4; k++)
             {
-                vertical[(edge * 4) + k] = (byte)Strength((k * 4) + edge - 1, (k * 4) + edge, coefficients, mvX, mvY, refs);
-                horizontal[(edge * 4) + k] = (byte)Strength(((edge - 1) * 4) + k, (edge * 4) + k, coefficients, mvX, mvY, refs);
+                vertical[(edge * 4) + k] = (byte)Strength((k * 4) + edge - 1, (k * 4) + edge, coefficients);
+                horizontal[(edge * 4) + k] = (byte)Strength(((edge - 1) * 4) + k, (edge * 4) + k, coefficients);
             }
         }
     }
 
     /// <summary>
-    /// True when every internal edge of an inter macroblock has bS 0: no luma coefficients and
-    /// the same reference picture and motion vector in all 16 blocks (P_Skip, uncoded 16x16).
+    /// True when every internal edge of an inter macroblock has bS 0: no luma coefficients and,
+    /// in each list, the same reference picture and motion vector in all 16 blocks (P_Skip,
+    /// uncoded 16x16).
     /// </summary>
     private bool HasUniformMotionWithoutCoefficients(int mbAddr)
     {
@@ -189,18 +217,25 @@ internal sealed partial class PictureDecoder
             return false;
         }
 
-        var refs = _refPic.AsSpan(mbAddr * 4, 4);
-        if (refs[1] != refs[0] || refs[2] != refs[0] || refs[3] != refs[0])
+        for (int list = 0; list < 2; list++)
         {
-            return false;
+            var refs = _refPic[list].AsSpan(mbAddr * 4, 4);
+            if (refs[1] != refs[0] || refs[2] != refs[0] || refs[3] != refs[0])
+            {
+                return false;
+            }
+
+            var mvX = _mvX[list].AsSpan(mbAddr * 16, 16);
+            var mvY = _mvY[list].AsSpan(mbAddr * 16, 16);
+            var x0 = Vector128.Create(mvX[0]);
+            var y0 = Vector128.Create(mvY[0]);
+            if (Vector128.Create(mvX) != x0 || Vector128.Create(mvX[8..]) != x0 || Vector128.Create(mvY) != y0 || Vector128.Create(mvY[8..]) != y0)
+            {
+                return false;
+            }
         }
 
-        var mvX = _mvX.AsSpan(mbAddr * 16, 16);
-        var mvY = _mvY.AsSpan(mbAddr * 16, 16);
-        var x0 = Vector128.Create(mvX[0]);
-        var y0 = Vector128.Create(mvY[0]);
-        return Vector128.Create(mvX) == x0 && Vector128.Create(mvX[8..]) == x0
-            && Vector128.Create(mvY) == y0 && Vector128.Create(mvY[8..]) == y0;
+        return true;
     }
 
     private bool IsIntra(int mbAddr) => _kind[mbAddr] is MbKind.Intra4x4 or MbKind.Intra16x16 or MbKind.IPcm;

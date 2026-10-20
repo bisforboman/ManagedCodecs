@@ -85,15 +85,68 @@ public class ReferenceListTests
         return refs;
     }
 
-    private static void Decode(ReferenceList refs, int frameNum, bool idr = false)
+    [Fact]
+    public void BLists_OrderByPictureOrderCountAroundTheCurrentPicture()
+    {
+        // References at order counts 0, 8, 4 and 16 (decoding order); the B picture is at 6.
+        var refs = new ReferenceList();
+        Decode(refs, 0, idr: true, poc: 0);
+        Decode(refs, 1, poc: 8);
+        Decode(refs, 2, poc: 4);
+        var sps = new SequenceParameterSet { Log2MaxFrameNum = 4, MaxNumRefFrames = 4, WidthInMbs = 1, HeightInMapUnits = 1, FrameMbsOnly = true };
+        refs.Mark(Header(3), new Picture(1, 1) { FrameNum = 3, Poc = 16 }, sps);
+
+        var (l0, l1) = refs.BuildLists(BHeader(4, numRef0: 4, numRef1: 4), sps, currentPoc: 6);
+
+        // List 0: before the current picture, latest first, then after it, earliest first.
+        Assert.Equal([4, 0, 8, 16], Pocs(l0));
+
+        // List 1: the other way round.
+        Assert.Equal([8, 16, 4, 0], Pocs(l1));
+
+        // Truncation to the active counts.
+        (l0, l1) = refs.BuildLists(BHeader(4, numRef0: 2, numRef1: 1), sps, currentPoc: 6);
+        Assert.Equal([4, 0], Pocs(l0));
+        Assert.Equal([8], Pocs(l1));
+    }
+
+    [Fact]
+    public void BLists_SwapTheFirstTwoOfList1WhenBothListsAreEqual()
+    {
+        // Every reference precedes the current picture, so both initial lists would be 4, 0.
+        var refs = new ReferenceList();
+        Decode(refs, 0, idr: true, poc: 0);
+        Decode(refs, 1, poc: 4);
+
+        var (l0, l1) = refs.BuildLists(BHeader(2, numRef0: 2, numRef1: 2), Sps, currentPoc: 6);
+        Assert.Equal([4, 0], Pocs(l0));
+        Assert.Equal([0, 4], Pocs(l1));
+
+        // The rule looks at the whole initial list: with one active entry list 1 starts with the swapped one.
+        (_, l1) = refs.BuildLists(BHeader(2, numRef0: 1, numRef1: 1), Sps, currentPoc: 6);
+        Assert.Equal([0], Pocs(l1));
+    }
+
+    private static void Decode(ReferenceList refs, int frameNum, bool idr = false, int poc = 0)
     {
         if (idr)
         {
             refs.Clear();
         }
 
-        refs.Mark(Header(frameNum, idr: idr), new Picture(1, 1) { FrameNum = frameNum }, Sps);
+        refs.Mark(Header(frameNum, idr: idr), new Picture(1, 1) { FrameNum = frameNum, Poc = poc }, Sps);
     }
+
+    private static SliceHeader BHeader(int frameNum, int numRef0, int numRef1) => new()
+    {
+        Type = SliceType.B,
+        FrameNum = frameNum,
+        NalRefIdc = 0,
+        NumRefIdxL0Active = numRef0,
+        NumRefIdxL1Active = numRef1,
+    };
+
+    private static int[] Pocs(IEnumerable<Picture> pictures) => [.. pictures.Select(p => p.Poc)];
 
     private static SliceHeader Header(
         int frameNum,

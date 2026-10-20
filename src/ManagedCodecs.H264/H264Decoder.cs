@@ -1,14 +1,14 @@
 namespace ManagedCodecs.H264;
 
 /// <summary>
-/// H.264 decoder for Constrained Baseline and Main profile streams without B slices (CAVLC or
-/// CABAC, I and P slices, 4:2:0, 8-bit, progressive), taking MP4-style samples: length-prefixed
-/// NAL units, one picture per sample.
+/// H.264 decoder for Constrained Baseline and Main profile streams (CAVLC or CABAC; I, P and B
+/// slices; 4:2:0, 8-bit, progressive), taking MP4-style samples: length-prefixed NAL units, one
+/// picture per sample.
 /// </summary>
 /// <remarks>
 /// Implemented from ITU-T H.264; output is bit-exact with any conforming decoder. Streams that
-/// use other features (B slices, interlacing, 8x8 transforms, scaling matrices, weighted
-/// prediction, FMO, other chroma formats or bit depths) are rejected with
+/// use other features (weighted prediction, interlacing, 8x8 transforms, scaling matrices, FMO,
+/// other chroma formats or bit depths) are rejected with
 /// <see cref="NotSupportedException"/>. Frames come out in display order (picture order
 /// count, 8.2.1), held back as far as the stream's max_num_reorder_frames says reordering can
 /// reach; <see cref="Flush"/> returns the rest at the end.
@@ -24,6 +24,7 @@ public sealed class H264Decoder : IVideoDecoder
     // is the per-macroblock state, as long as the picture size stays the same.
     private readonly List<Picture> _pictures = [];
     private PictureDecoder? _decoder;
+    private long _pictureCount;
 
     private readonly PictureOrder _order = new();
     private readonly OutputQueue _output = new();
@@ -170,8 +171,13 @@ public sealed class H264Decoder : IVideoDecoder
                         throw new NotSupportedException("A packet holding more than one picture is not supported.");
                     }
 
-                    var refList = header.Type == SliceType.P ? _references.BuildList(header, current.Sps) : [];
-                    current.Decoder.DecodeSlice(header, pps, reader, refList);
+                    var (list0, list1) = header.Type switch
+                    {
+                        SliceType.P => (_references.BuildList(header, current.Sps), []),
+                        SliceType.B => _references.BuildLists(header, current.Sps, current.Poc),
+                        _ => (new List<Picture>(), new List<Picture>()),
+                    };
+                    current.Decoder.DecodeSlice(header, pps, reader, list0, list1);
                     break;
                 }
 
@@ -197,12 +203,13 @@ public sealed class H264Decoder : IVideoDecoder
             _decoder = new PictureDecoder(sps);
         }
 
-        _decoder.Begin(TakePicture(sps, header.FrameNum));
-        return new PictureState(header, sps, _decoder, _order.Next(header, sps));
+        int poc = _order.Next(header, sps);
+        _decoder.Begin(TakePicture(sps, header.FrameNum, poc));
+        return new PictureState(header, sps, _decoder, poc);
     }
 
     /// <summary>A picture of the stream's size that is not a reference, reused when one is free.</summary>
-    private Picture TakePicture(SequenceParameterSet sps, int frameNum)
+    private Picture TakePicture(SequenceParameterSet sps, int frameNum, int poc)
     {
         _pictures.RemoveAll(p => (p.WidthInMbs != sps.WidthInMbs || p.HeightInMbs != sps.HeightInMbs) && !_references.Contains(p));
         var picture = _pictures.Find(p => p.WidthInMbs == sps.WidthInMbs && p.HeightInMbs == sps.HeightInMbs && !_references.Contains(p));
@@ -213,6 +220,8 @@ public sealed class H264Decoder : IVideoDecoder
         }
 
         // Every macroblock of a complete picture is written, so the old samples need no clearing.
+        picture.Id = ++_pictureCount;
+        picture.Poc = poc;
         picture.FrameNum = frameNum;
         picture.FrameNumWrap = 0;
         picture.IsShortTermReference = false;

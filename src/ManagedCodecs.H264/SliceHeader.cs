@@ -44,6 +44,13 @@ internal sealed class SliceHeader
 
     public IReadOnlyList<RefPicListModification> RefPicListModificationL0 { get; internal init; } = [];
 
+    /// <summary>direct_spatial_mv_pred_flag of a B slice: spatial (true) or temporal direct prediction.</summary>
+    public bool DirectSpatialMvPred { get; internal init; }
+
+    public int NumRefIdxL1Active { get; internal init; }
+
+    public IReadOnlyList<RefPicListModification> RefPicListModificationL1 { get; internal init; } = [];
+
     public bool NoOutputOfPriorPics { get; internal init; }
 
     public bool LongTermReference { get; internal init; }
@@ -84,9 +91,9 @@ internal sealed class SliceHeader
             throw new InvalidDataException($"PPS {ppsId} refers to missing SPS {pps.SpsId}.");
         }
 
-        if (type is SliceType.B or SliceType.SP or SliceType.SI)
+        if (type is SliceType.SP or SliceType.SI)
         {
-            throw new NotSupportedException($"{type} slices are not supported (I and P slices only).");
+            throw new NotSupportedException($"{type} slices are not supported (Extended profile).");
         }
 
         if (!sps.FrameMbsOnly)
@@ -124,38 +131,30 @@ internal sealed class SliceHeader
             throw new NotSupportedException("Redundant pictures are not supported.");
         }
 
+        bool directSpatial = type == SliceType.B && r.ReadFlag(); // direct_spatial_mv_pred_flag
         int numRefIdxL0 = pps.NumRefIdxL0DefaultActive;
-        var modifications = new List<RefPicListModification>();
-        if (type == SliceType.P)
+        int numRefIdxL1 = pps.NumRefIdxL1DefaultActive;
+        IReadOnlyList<RefPicListModification> modificationsL0 = [];
+        IReadOnlyList<RefPicListModification> modificationsL1 = [];
+        if (type is SliceType.P or SliceType.B)
         {
             if (r.ReadFlag())
             {
                 // num_ref_idx_active_override_flag
                 numRefIdxL0 = 1 + r.ReadUe(31, "num_ref_idx_l0_active_minus1");
-            }
-
-            if (r.ReadFlag())
-            {
-                // ref_pic_list_modification_flag_l0
-                while (true)
+                if (type == SliceType.B)
                 {
-                    int idc = r.ReadUe(5, "modification_of_pic_nums_idc");
-                    if (idc == 3)
-                    {
-                        break;
-                    }
-
-                    if (idc > 2)
-                    {
-                        throw new InvalidDataException($"Invalid modification_of_pic_nums_idc {idc}.");
-                    }
-
-                    // abs_diff_pic_num_minus1 for 0 and 1, long_term_pic_num for 2.
-                    modifications.Add(new RefPicListModification(idc, (int)r.ReadUe()));
+                    numRefIdxL1 = 1 + r.ReadUe(31, "num_ref_idx_l1_active_minus1");
                 }
             }
 
-            if (pps.WeightedPred)
+            modificationsL0 = ReadModifications(r); // ref_pic_list_modification_flag_l0 and its loop
+            if (type == SliceType.B)
+            {
+                modificationsL1 = ReadModifications(r);
+            }
+
+            if ((type == SliceType.P && pps.WeightedPred) || (type == SliceType.B && pps.WeightedBipredIdc != 0))
             {
                 throw new NotSupportedException("Weighted prediction is not supported.");
             }
@@ -220,8 +219,11 @@ internal sealed class SliceHeader
             DeltaPicOrderCntBottom = deltaBottom,
             DeltaPicOrderCnt0 = delta0,
             DeltaPicOrderCnt1 = delta1,
+            DirectSpatialMvPred = directSpatial,
             NumRefIdxL0Active = numRefIdxL0,
-            RefPicListModificationL0 = modifications,
+            NumRefIdxL1Active = numRefIdxL1,
+            RefPicListModificationL0 = modificationsL0,
+            RefPicListModificationL1 = modificationsL1,
             NoOutputOfPriorPics = noOutputOfPriorPics,
             LongTermReference = longTermReference,
             AdaptiveRefPicMarking = adaptive,
@@ -232,5 +234,32 @@ internal sealed class SliceHeader
             SliceAlphaC0Offset = alpha,
             SliceBetaOffset = beta,
         };
+    }
+
+    /// <summary>ref_pic_list_modification for one list (7.3.3.1): the flag, then operations up to idc 3.</summary>
+    private static List<RefPicListModification> ReadModifications(BitReader r)
+    {
+        var modifications = new List<RefPicListModification>();
+        if (!r.ReadFlag())
+        {
+            return modifications;
+        }
+
+        while (true)
+        {
+            int idc = r.ReadUe(5, "modification_of_pic_nums_idc");
+            if (idc == 3)
+            {
+                return modifications;
+            }
+
+            if (idc > 2)
+            {
+                throw new InvalidDataException($"Invalid modification_of_pic_nums_idc {idc}.");
+            }
+
+            // abs_diff_pic_num_minus1 for 0 and 1, long_term_pic_num for 2.
+            modifications.Add(new RefPicListModification(idc, (int)r.ReadUe()));
+        }
     }
 }

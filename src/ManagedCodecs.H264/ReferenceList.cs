@@ -23,6 +23,9 @@ internal sealed class ReferenceList
         _maxLongTermFrameIdx = -1;
     }
 
+    /// <summary>True while <paramref name="picture"/> is marked as a reference, short or long term.</summary>
+    public bool Contains(Picture picture) => _pictures.Contains(picture);
+
     /// <summary>RefPicList0 for a P slice of the current picture.</summary>
     public List<Picture> BuildList(SliceHeader header, SequenceParameterSet sps)
     {

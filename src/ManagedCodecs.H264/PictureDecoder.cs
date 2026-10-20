@@ -15,7 +15,8 @@ internal sealed record SliceInfo(int DisableDeblockingFilterIdc, int AlphaOffset
 
 /// <summary>
 /// Decodes the slices of one picture into a <see cref="Picture"/> and keeps the per-macroblock
-/// state that neighbouring macroblocks and the deblocking filter read.
+/// state that neighbouring macroblocks and the deblocking filter read. One instance serves every
+/// picture of a sequence: <see cref="Begin"/> resets it for the next.
 /// </summary>
 /// <remarks>
 /// Block arrays use raster order inside the macroblock: luma 4x4 block (x, y) is y * 4 + x,
@@ -23,7 +24,6 @@ internal sealed record SliceInfo(int DisableDeblockingFilterIdc, int AlphaOffset
 /// </remarks>
 internal sealed partial class PictureDecoder
 {
-    private readonly SequenceParameterSet _sps;
     private readonly int _widthInMbs;
     private readonly int _mbCount;
 
@@ -42,10 +42,9 @@ internal sealed partial class PictureDecoder
     // Coefficients of the macroblock being decoded, reused from one macroblock to the next.
     private readonly Residual _residual = new();
 
-    public PictureDecoder(SequenceParameterSet sps, Picture picture)
+    public PictureDecoder(SequenceParameterSet sps)
     {
-        _sps = sps;
-        Picture = picture;
+        Sps = sps;
         _widthInMbs = sps.WidthInMbs;
         _mbCount = sps.WidthInMbs * sps.HeightInMbs;
 
@@ -60,9 +59,26 @@ internal sealed partial class PictureDecoder
         InitInter();
     }
 
-    public Picture Picture { get; }
+    public SequenceParameterSet Sps { get; }
+
+    public Picture Picture { get; private set; } = null!;
 
     public int DecodedMbCount { get; private set; }
+
+    /// <summary>Starts decoding into <paramref name="picture"/>, forgetting the previous picture's state.</summary>
+    public void Begin(Picture picture)
+    {
+        Picture = picture;
+        DecodedMbCount = 0;
+        _slices.Clear();
+        Array.Fill(_sliceOfMb, -1);
+        Array.Clear(_kind);
+        Array.Clear(_qp);
+        Array.Clear(_totalCoeffLuma);
+        Array.Clear(_totalCoeffChroma);
+        Array.Clear(_intra4x4Mode);
+        ResetInter();
+    }
 
     public bool IsComplete => DecodedMbCount == _mbCount;
 

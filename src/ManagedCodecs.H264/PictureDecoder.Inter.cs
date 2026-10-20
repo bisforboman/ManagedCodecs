@@ -42,7 +42,15 @@ internal sealed partial class PictureDecoder
         _mvY = new short[_mbCount * 16];
         _refIdx = new sbyte[_mbCount * 4];
         _refPic = new Picture?[_mbCount * 4];
+        ResetInter();
+    }
+
+    private void ResetInter()
+    {
+        Array.Clear(_mvX);
+        Array.Clear(_mvY);
         Array.Fill(_refIdx, (sbyte)-1);
+        Array.Clear(_refPic);
     }
 
     /// <summary>Resets the motion data of an intra macroblock.</summary>

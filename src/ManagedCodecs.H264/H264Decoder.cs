@@ -18,6 +18,11 @@ public sealed class H264Decoder : IVideoDecoder
     private readonly ReferenceList _references = new();
     private readonly int _lengthSize;
 
+    // Pictures are reused once they are no longer references (output is a copy, see Crop), and so
+    // is the per-macroblock state, as long as the picture size stays the same.
+    private readonly List<Picture> _pictures = [];
+    private PictureDecoder? _decoder;
+
     /// <param name="codecPrivate">The AVCDecoderConfigurationRecord ('avcC') from the container.</param>
     public H264Decoder(ReadOnlySpan<byte> codecPrivate)
     {
@@ -129,8 +134,33 @@ public sealed class H264Decoder : IVideoDecoder
             _references.Clear();
         }
 
-        var picture = new Picture(sps.WidthInMbs, sps.HeightInMbs) { FrameNum = header.FrameNum };
-        return new PictureState(header, sps, new PictureDecoder(sps, picture));
+        if (_decoder is null || _decoder.Sps.WidthInMbs != sps.WidthInMbs || _decoder.Sps.HeightInMbs != sps.HeightInMbs)
+        {
+            _decoder = new PictureDecoder(sps);
+        }
+
+        _decoder.Begin(TakePicture(sps, header.FrameNum));
+        return new PictureState(header, sps, _decoder);
+    }
+
+    /// <summary>A picture of the stream's size that is not a reference, reused when one is free.</summary>
+    private Picture TakePicture(SequenceParameterSet sps, int frameNum)
+    {
+        _pictures.RemoveAll(p => (p.WidthInMbs != sps.WidthInMbs || p.HeightInMbs != sps.HeightInMbs) && !_references.Contains(p));
+        var picture = _pictures.Find(p => p.WidthInMbs == sps.WidthInMbs && p.HeightInMbs == sps.HeightInMbs && !_references.Contains(p));
+        if (picture is null)
+        {
+            picture = new Picture(sps.WidthInMbs, sps.HeightInMbs);
+            _pictures.Add(picture);
+        }
+
+        // Every macroblock of a complete picture is written, so the old samples need no clearing.
+        picture.FrameNum = frameNum;
+        picture.FrameNumWrap = 0;
+        picture.IsShortTermReference = false;
+        picture.IsLongTermReference = false;
+        picture.LongTermFrameIdx = 0;
+        return picture;
     }
 
     private VideoFrame FinishPicture(PictureState state)

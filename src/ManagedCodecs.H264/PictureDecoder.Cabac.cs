@@ -21,6 +21,9 @@ internal sealed partial class PictureDecoder
     private byte[] _chromaPredMode = [];
     private byte[] _dcCoded = [];
 
+    // Per macroblock: B_Skip or B_Direct_16x16 (for the contexts of mb_type in B slices).
+    private bool[] _directMb = [];
+
     // Per list, component and luma 4x4 block: |mvd|, capped (only sums up to 33 matter).
     private byte[][][] _absMvd = [[[], []], [[], []]];
 
@@ -39,6 +42,7 @@ internal sealed partial class PictureDecoder
         _cbp = new byte[_mbCount];
         _chromaPredMode = new byte[_mbCount];
         _dcCoded = new byte[_mbCount];
+        _directMb = new bool[_mbCount];
         _absMvd = [[new byte[_mbCount * 16], new byte[_mbCount * 16]], [new byte[_mbCount * 16], new byte[_mbCount * 16]]];
     }
 
@@ -47,6 +51,7 @@ internal sealed partial class PictureDecoder
         Array.Clear(_cbp);
         Array.Clear(_chromaPredMode);
         Array.Clear(_dcCoded);
+        Array.Clear(_directMb);
         foreach (var list in _absMvd)
         {
             Array.Clear(list[0]);
@@ -77,7 +82,7 @@ internal sealed partial class PictureDecoder
             // The contexts of mb_skip_flag and mb_type already look at the neighbours, which
             // count as available only once this macroblock belongs to the slice.
             _sliceOfMb[mbAddr] = slice.Number;
-            if (slice.Header.Type == SliceType.P && cabac.Decision(11 + SkipFlagInc(mbAddr)) == 1)
+            if (slice.Header.Type != SliceType.I && cabac.Decision((slice.Header.Type == SliceType.B ? 24 : 11) + SkipFlagInc(mbAddr)) == 1)
             {
                 DecodeSkip(slice, mbAddr);
             }
@@ -104,7 +109,7 @@ internal sealed partial class PictureDecoder
     {
         if (c.Decision(14) == 1)
         {
-            return 5 + CabacIntraMbType(c, mbAddr, inPSlice: true);
+            return 5 + CabacIntraMbType(c, mbAddr, suffixOffset: 17);
         }
 
         // Prefix bins 000 P_L0_16x16, 001 P_8x8, 011 P_L0_L0_16x8, 010 P_L0_L0_8x16.
@@ -118,17 +123,18 @@ internal sealed partial class PictureDecoder
 
     /// <summary>
     /// mb_type of an intra macroblock (Table 7-11), as the I-slice element (ctxIdxOffset 3) or as
-    /// the suffix in a P slice (ctxIdxOffset 17). Bins: I_NxN 0; otherwise 1, the terminate bin
-    /// (1 for I_PCM), then for I_16x16 the luma CBP flag, chroma CBP (0, 10, 11) and two
-    /// prediction mode bits.
+    /// the suffix in a P or B slice (<paramref name="suffixOffset"/> 17 or 32; 0 for I slices).
+    /// Bins: I_NxN 0; otherwise 1, the terminate bin (1 for I_PCM), then for I_16x16 the luma CBP
+    /// flag, chroma CBP (0, 10, 11) and two prediction mode bits.
     /// </summary>
-    private int CabacIntraMbType(Cabac c, int mbAddr, bool inPSlice)
+    private int CabacIntraMbType(Cabac c, int mbAddr, int suffixOffset = 0)
     {
-        int offset = inPSlice ? 17 : 3;
+        bool inPSlice = suffixOffset != 0; // P or B: the same bins and increments
+        int offset = inPSlice ? suffixOffset : 3;
         int first;
         if (inPSlice)
         {
-            first = c.Decision(17);
+            first = c.Decision(offset);
         }
         else
         {
@@ -162,11 +168,69 @@ internal sealed partial class PictureDecoder
         return 1 + predMode + (4 * chroma) + (12 * luma);
     }
 
-    /// <summary>mb_type of a B slice: 0..22 inter (Table 7-14), 23.. intra (23 + Table 7-11).</summary>
-    private int CabacBMbType(Cabac c, int mbAddr) => throw new NotSupportedException("CABAC B slices are not supported yet.");
+    /// <summary>
+    /// mb_type of a B slice: 0..22 inter (Table 7-14), 23.. intra (23 + Table 7-11), ctxIdxOffset
+    /// 27. Bin 0 B_Direct_16x16; 10x B_L0 / B_L1_16x16; 11 and four bins for the rest, with 1101 the
+    /// intra prefix, 1110 and 1111 B_L1_L0_8x16 and B_8x8, and a fifth bin for types 12 to 21.
+    /// </summary>
+    private int CabacBMbType(Cabac c, int mbAddr)
+    {
+        int Cond(int n) => n >= 0 && _kind[n] != MbKind.PSkip && !_directMb[n] ? 1 : 0;
+        if (c.Decision(27 + Cond(NeighborMb(mbAddr, -1, 0)) + Cond(NeighborMb(mbAddr, 0, -1))) == 0)
+        {
+            return 0;
+        }
 
-    /// <summary>sub_mb_type of a B slice (Table 7-18).</summary>
-    private static int CabacBSubMbType(Cabac c) => throw new NotSupportedException("CABAC B slices are not supported yet.");
+        if (c.Decision(27 + 3) == 0)
+        {
+            return 1 + c.Decision(27 + 5);
+        }
+
+        int bits = c.Decision(27 + 4) << 3;
+        bits |= c.Decision(27 + 5) << 2;
+        bits |= c.Decision(27 + 5) << 1;
+        bits |= c.Decision(27 + 5);
+        return bits switch
+        {
+            < 8 => bits + 3,
+            13 => 23 + CabacIntraMbType(c, mbAddr, suffixOffset: 32),
+            14 => 11,
+            15 => 22,
+            _ => ((bits << 1) | c.Decision(27 + 5)) - 4,
+        };
+    }
+
+    /// <summary>
+    /// sub_mb_type of a B slice (Table 7-18), ctxIdxOffset 36: 0 B_Direct_8x8; 10x B_L0 / B_L1_8x8;
+    /// 111 and two bins for L1 / Bi 4x4, or 11 and three bins for types 3 to 10.
+    /// </summary>
+    private static int CabacBSubMbType(Cabac c)
+    {
+        if (c.Decision(36) == 0)
+        {
+            return 0;
+        }
+
+        if (c.Decision(37) == 0)
+        {
+            return 1 + c.Decision(39);
+        }
+
+        int type = 3;
+        if (c.Decision(38) == 1)
+        {
+            if (c.Decision(39) == 1)
+            {
+                return 11 + c.Decision(39);
+            }
+
+            type += 4;
+        }
+
+        type += 2 * c.Decision(39);
+        type += c.Decision(39);
+        return type;
+    }
 
     /// <summary>sub_mb_type of a P slice: 1 P_L0_8x8, 00 P_L0_8x4, 011 P_L0_4x8, 010 P_L0_4x4.</summary>
     private static int CabacSubMbType(Cabac c)

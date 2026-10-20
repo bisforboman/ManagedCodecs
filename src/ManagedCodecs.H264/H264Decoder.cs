@@ -1,14 +1,14 @@
 namespace ManagedCodecs.H264;
 
 /// <summary>
-/// H.264 decoder for Constrained Baseline and Main profile streams without B slices (CAVLC or
-/// CABAC, I and P slices, 4:2:0, 8-bit, progressive), taking MP4-style samples: length-prefixed
-/// NAL units, one picture per sample.
+/// H.264 decoder for Constrained Baseline and Main profile streams (CAVLC or CABAC; I, P and B
+/// slices; 4:2:0, 8-bit, progressive), taking MP4-style samples: length-prefixed NAL units, one
+/// picture per sample.
 /// </summary>
 /// <remarks>
 /// Implemented from ITU-T H.264; output is bit-exact with any conforming decoder. Streams that
-/// use other features (B slices, interlacing, 8x8 transforms, scaling matrices, weighted
-/// prediction, FMO, other chroma formats or bit depths) are rejected with
+/// use other features (weighted prediction, interlacing, 8x8 transforms, scaling matrices, FMO,
+/// other chroma formats or bit depths) are rejected with
 /// <see cref="NotSupportedException"/>. Frames come out in display order (picture order
 /// count, 8.2.1), held back as far as the stream's max_num_reorder_frames says reordering can
 /// reach; <see cref="Flush"/> returns the rest at the end.

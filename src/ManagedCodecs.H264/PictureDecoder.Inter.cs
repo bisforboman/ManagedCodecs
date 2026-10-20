@@ -74,7 +74,11 @@ internal sealed partial class PictureDecoder
         _direct = new bool[_mbCount * 4];
     }
 
-    /// <summary>Takes the picture's motion arrays as the ones to fill, and clears all motion state.</summary>
+    /// <summary>
+    /// Takes the picture's motion arrays as the ones to fill, and clears all motion state. Each
+    /// macroblock is decoded once, so a macroblock without motion (intra, or a list it does not
+    /// use) keeps these values: refIdx -1, zero motion, no picture.
+    /// </summary>
     private void ResetInter(Picture picture)
     {
         _mvX = picture.MvX;
@@ -91,22 +95,6 @@ internal sealed partial class PictureDecoder
         }
 
         Array.Clear(_direct);
-    }
-
-    /// <summary>Resets the motion data of a macroblock (intra ones keep it that way).</summary>
-    private void ClearInter(int mbAddr)
-    {
-        for (int list = 0; list < 2; list++)
-        {
-            _mvX[list].AsSpan(mbAddr * 16, 16).Clear();
-            _mvY[list].AsSpan(mbAddr * 16, 16).Clear();
-            _refIdx[list].AsSpan(mbAddr * 4, 4).Fill(-1);
-            _refPic[list].AsSpan(mbAddr * 4, 4).Clear();
-            _absMvd[list][0].AsSpan(mbAddr * 16, 16).Clear();
-            _absMvd[list][1].AsSpan(mbAddr * 16, 16).Clear();
-        }
-
-        _direct.AsSpan(mbAddr * 4, 4).Clear();
     }
 
     /// <summary>P_Skip (8.4.1.1: reference 0, predicted motion) or B_Skip (direct prediction); no residual.</summary>
@@ -150,6 +138,7 @@ internal sealed partial class PictureDecoder
         if (isB && mbType == 0)
         {
             // B_Direct_16x16.
+            _directMb[mbAddr] = true;
             DirectMotion(slice, mbAddr, 0, 4);
             PredictDirect(mbAddr, 0, 4);
         }
@@ -314,10 +303,10 @@ internal sealed partial class PictureDecoder
         DecodedMbCount++;
         _kind[mbAddr] = kind;
         _intra4x4Mode.AsSpan(mbAddr * 16, 16).Fill(-1);
-        ClearInter(mbAddr);
         _cbp[mbAddr] = 0;
         _dcCoded[mbAddr] = 0;
         _chromaPredMode[mbAddr] = 0;
+        _directMb[mbAddr] = kind == MbKind.PSkip && slice.Header.Type == SliceType.B;
     }
 
     /// <summary>ref_idx_lX of the partition at (x, y), w x h; with CABAC it is stored at once, as later partitions' contexts read it.</summary>

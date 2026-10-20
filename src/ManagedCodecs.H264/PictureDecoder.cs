@@ -262,7 +262,7 @@ internal sealed partial class PictureDecoder
         int mbType = slice.Cabac is not { } c ? (int)r.ReadUe()
             : type == SliceType.P ? CabacPMbType(c, mbAddr)
             : type == SliceType.B ? CabacBMbType(c, mbAddr)
-            : CabacIntraMbType(c, mbAddr, inPSlice: false);
+            : CabacIntraMbType(c, mbAddr);
 
         // Inter types come first in P (5, Table 7-13) and B slices (23, Table 7-14), then the intra ones.
         int interTypes = type switch { SliceType.P => 5, SliceType.B => 23, _ => 0 };
@@ -286,7 +286,6 @@ internal sealed partial class PictureDecoder
 
         _sliceOfMb[mbAddr] = slice.Number;
         DecodedMbCount++;
-        ClearInter(mbAddr);
         _dcCoded[mbAddr] = 0;
 
         if (mbType == 25)

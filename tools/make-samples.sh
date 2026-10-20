@@ -80,6 +80,17 @@ ff -f lavfi -i "testsrc2=size=320x240:rate=25,scroll=h=0.01" -t 1 "${BM[@]}" -bf
 for d in spatial temporal; do
   ff -f lavfi -i "testsrc2=size=320x240:rate=25,scroll=h=0.01:v=0.005" -t 1 "${BM[@]}" -bf 3 -refs 3 -x264-params cabac=0:direct=$d:weightb=0:b-pyramid=none:partitions=all samples/h264-b-$d-cavlc.mp4
 done
+# The same three with CABAC.
+for d in none spatial temporal; do
+  ff -f lavfi -i "testsrc2=size=320x240:rate=25,scroll=h=0.01:v=0.005" -t 1 "${BM[@]}" -bf 3 -refs 3 -x264-params direct=$d:weightb=0:b-pyramid=none:partitions=all samples/h264-b-$d.mp4
+done
+# B pictures as references (b-pyramid, which also brings memory management operation 1), fast motion with
+# noise and direct=auto, slices, an odd size and a long GOP.
+ff -f lavfi -i "testsrc2=size=320x240:rate=25,scroll=h=0.012:v=-0.007" -t 2 "${BM[@]}" -bf 3 -refs 4 -x264-params weightb=0:b-pyramid=normal:partitions=all samples/h264-b-pyramid.mp4
+ff -f lavfi -i "testsrc2=size=320x240:rate=25,scroll=h=0.013:v=-0.021,noise=alls=12:allf=t" -t 2 "${BM[@]}" -bf 3 -refs 3 -qp 22 -x264-params weightb=0:partitions=all:me=umh:merange=32:direct=auto samples/h264-b-motion.mp4
+ff -f lavfi -i "testsrc2=size=320x240:rate=25,scroll=h=0.01" -t 1 "${BM[@]}" -bf 2 -refs 2 -x264-params weightb=0:slices=4 samples/h264-b-slices.mp4
+ff -f lavfi -i "testsrc2=size=321x239:rate=25,scroll=v=0.02" -t 1 "${BM[@]}" -bf 2 -refs 2 -x264-params weightb=0 samples/h264-b-odd-size.mp4
+ff -f lavfi -i "testsrc2=size=176x144:rate=25,scroll=h=0.01" -t 3 "${BM[@]}" -bf 3 -refs 4 -g 1000 -x264-params weightb=0:b-pyramid=normal samples/h264-b-long-gop.mp4
 
 # ---- AAC LC ----
 # Each aimed at one tool; the conformance test checks the tool really occurs. PNS is off except in the PNS samples.

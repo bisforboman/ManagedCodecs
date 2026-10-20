@@ -1,7 +1,7 @@
 # ManagedCodecs
 
 Pure managed C# media decoders: no native binaries, Native AOT friendly. MJPEG (bit-exact with FFmpeg), H.264
-Constrained Baseline and Main without B frames (CAVLC and CABAC, bit-exact), AAC LC (within 2^-17 of FFmpeg's float output, measured 3e-7), AVI and MP4
+Constrained Baseline and Main without weighted prediction (CAVLC and CABAC, I/P/B, bit-exact), AAC LC (within 2^-17 of FFmpeg's float output, measured 3e-7), AVI and MP4
 demuxing. README.md has the layout, the roadmap and what is not supported yet.
 
 ## Core idea
@@ -30,8 +30,9 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
   `dotnet test ManagedCodecs.slnx`; for SIMD changes also with `DOTNET_EnableHWIntrinsic=0` (CI runs both).
 - **New feature, new sample**: add it to tools/make-samples.sh with a comment saying what it isolates, and check
   that it really exercises the feature (the AAC decoder's `Statistics`, `ffmpeg -bsf:v trace_headers` for H.264)
-  before relying on it. Encoders often never emit a tool (libx264: no ref list modification, MMCO, I_PCM or
-  cabac_init_idc other than 0; FFmpeg's AAC: no pulse data); cover those with unit tests and say so in the docs.
+  before relying on it. Encoders often never emit a tool (libx264: no ref list modification, I_PCM, B partitions
+  below 8x8, MMCO other than 1 (which needs b-pyramid) or cabac_init_idc other than 0; FFmpeg's AAC: no pulse
+  data); cover those with unit tests and say so in the docs.
   `tests/ManagedCodecs.Tests/H264/CabacEncoder.cs` (a CABAC encoder and bit writer) builds such H.264 streams.
 - **Code style**: StyleBro (analyzers on build; rules in `.editorconfig`, chosen by `stylebro-migrate init` from this
   code's own conventions). The pre-commit hook formats the staged .cs files (`git config core.hooksPath .githooks`
@@ -43,6 +44,11 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
   on one machine, repeat runs, and don't trust one number.
 
 ## Gotchas (each cost time once)
+
+- Reverting temporary instrumentation with `git checkout <file>` also throws away that file's other uncommitted
+  work; save the instrumentation as a patch and reverse it (`git apply -R`) instead.
+- Comparing CABAC with a reference decoder: OpenH264 builds in scratch (`make USE_ASM=No h264dec`), and a trace of
+  every bin as (state, MPS, value) in both decoders, diffed, shows the first syntax element that differs.
 
 - `ffmpeg ... -f framemd5` moves timestamps to start at 0; packet references need `-copyts`. Decoded-frame
   references are in the encoder's time base (1/25 for MJPEG), not the stream's: compare times as rationals.

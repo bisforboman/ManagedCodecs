@@ -80,8 +80,12 @@ internal sealed class PictureOrder
         }
 
         int poc = Math.Min(top, bottom);
+        Fields = mmco5 ? (top - poc, bottom - poc) : (top, bottom);
         return mmco5 ? poc - Math.Min(top, bottom) : poc;
     }
+
+    /// <summary>TopFieldOrderCnt and BottomFieldOrderCnt of the frame <see cref="Next"/> last returned PicOrderCnt for.</summary>
+    public (int Top, int Bottom) Fields { get; private set; }
 
     /// <summary>
     /// PicOrderCnt of a frame inferred for a gap in frame_num (8.2.5.2), a reference frame without

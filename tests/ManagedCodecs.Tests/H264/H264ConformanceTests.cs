@@ -68,6 +68,13 @@ public class H264ConformanceTests
                 Assert.True(stats.SkippedPairs > 0 && stats.TopOnlySkipped > 0, $"{stats.SkippedPairs} skipped pairs, {stats.TopOnlySkipped} with only the top skipped.");
                 Assert.True(stats.OppositeParity > 0, "No field macroblock predicts from the other field.");
             }
+
+            if (sampleName.Contains("mbaff-b", StringComparison.Ordinal))
+            {
+                Assert.True(stats.DirectField > 0 && stats.MixedCoLocated > 0, $"{stats.DirectField} direct blocks in field macroblocks, {stats.MixedCoLocated} co-located in a pair of the other kind.");
+                Assert.True(stats.ImplicitField > 0, "No implicitly weighted field macroblock partitions.");
+                Assert.True(!sampleName.Contains("temporal", StringComparison.Ordinal) || stats.TemporalField > 0, "No temporal direct field macroblocks.");
+            }
         }
     }
 

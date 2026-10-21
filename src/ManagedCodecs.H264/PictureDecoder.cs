@@ -65,7 +65,6 @@ internal sealed partial class PictureDecoder
         _totalCoeffLuma = new byte[_mbCount * 16];
         _totalCoeffChroma = new byte[_mbCount * 8];
         _intra4x4Mode = new sbyte[_mbCount * 16];
-        _fieldMb = new bool[_mbCount];
 
         InitInter();
         InitCabacState();
@@ -92,6 +91,7 @@ internal sealed partial class PictureDecoder
         Array.Clear(_totalCoeffLuma);
         Array.Clear(_totalCoeffChroma);
         Array.Clear(_intra4x4Mode);
+        _fieldMb = picture.FieldMb;
         Array.Clear(_fieldMb);
         _mbaff = false;
         ResetInter(picture);
@@ -105,6 +105,7 @@ internal sealed partial class PictureDecoder
     {
         int sliceNum = _slices.Count;
         _mbaff = header.Mbaff;
+        Picture.Mbaff = header.Mbaff;
         _slices.Add(new SliceInfo(header.DisableDeblockingFilterIdc, header.SliceAlphaC0Offset, header.SliceBetaOffset, pps.ChromaQpIndexOffset, pps.SecondChromaQpIndexOffset));
 
         if (_scaling.Sps != Sps || _scaling.Pps != pps)

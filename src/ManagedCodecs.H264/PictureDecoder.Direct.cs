@@ -19,6 +19,12 @@ internal sealed partial class PictureDecoder
             _direct[(mbAddr * 4) + i] = true;
         }
 
+        if (IsFieldMb(mbAddr))
+        {
+            Statistics.DirectField++;
+            Statistics.TemporalField += slice.Header.DirectSpatialMvPred ? 0 : 1;
+        }
+
         if (slice.Header.DirectSpatialMvPred)
         {
             SpatialDirect(slice, mbAddr, first, count);
@@ -66,6 +72,7 @@ internal sealed partial class PictureDecoder
             bool colZero = false;
             if (!zero && colPic.IsShortTermReference && (ref0 == 0 || ref1 == 0))
             {
+                // The co-located motion as stored, not rescaled between frame and field.
                 var col = CoLocated(colPic, mbAddr, x / 4, y / 4);
                 colZero = col.RefIdx == 0 && col.MvX is >= -1 and <= 1 && col.MvY is >= -1 and <= 1;
             }
@@ -102,55 +109,70 @@ internal sealed partial class PictureDecoder
 
     /// <summary>
     /// 8.4.1.2.3: the co-located block's motion vector, scaled by the order count distances, gives
-    /// both lists; list 0 refers to the picture the co-located block referred to.
+    /// both lists; list 0 refers to the picture the co-located block referred to. In MBAFF frames
+    /// a field macroblock works with fields (its reference indices, the order counts of its
+    /// parity), and the co-located motion is rescaled where it is of the other kind.
     /// </summary>
     private void TemporalDirect(SliceState slice, int mbAddr, int first, int count)
     {
-        var colPic = slice.RefList1[0];
+        var colFrame = slice.RefList1[0];
         var refList0 = slice.RefList0;
         int size = Sps.Direct8x8Inference ? 8 : 4;
+        bool field = IsFieldMb(mbAddr);
+        int parity = mbAddr & 1;
+        int currentPoc = !field ? Picture.Poc : parity == 0 ? Picture.TopPoc : Picture.BottomPoc;
         foreach (var (x, y) in DirectBlocks(first, count, size))
         {
-            var col = CoLocated(colPic, mbAddr, x / 4, y / 4);
-            int ref0 = 0;
+            var col = CoLocated(colFrame, mbAddr, x / 4, y / 4);
+            int frameIdx = 0;
             if (col.RefIdx >= 0)
             {
                 // The lowest index in list 0 of the picture the co-located block referred to.
-                ref0 = -1;
-                for (int i = 0; i < refList0.Count && ref0 < 0; i++)
+                frameIdx = -1;
+                for (int i = 0; i < refList0.Count && frameIdx < 0; i++)
                 {
                     if (refList0[i].Id == col.RefId)
                     {
-                        ref0 = i;
+                        frameIdx = i;
                     }
                 }
 
-                if (ref0 < 0)
+                if (frameIdx < 0)
                 {
                     throw new InvalidDataException("Temporal direct: the co-located block's reference is not in list 0.");
                 }
             }
 
-            var pic0 = refList0[ref0];
-            var pic1 = colPic;
+            // A field macroblock names the field: the co-located field reference itself, or for
+            // a frame one its field of the macroblock's parity (the lowest index of the frame's).
+            int ref0 = !field ? frameIdx : (2 * frameIdx) + (col.RefParity >= 0 && col.RefParity != parity ? 1 : 0);
+            int colMvY = col.Scale switch
+            {
+                VerticalScale.FrameToField => col.MvY / 2,
+                VerticalScale.FieldToFrame => col.MvY * 2,
+                _ => col.MvY,
+            };
+
+            var pic0 = field ? refList0[frameIdx].Field(parity ^ (ref0 & 1)) : refList0[frameIdx];
+            var pic1 = field ? colFrame.Field(parity) : colFrame;
             int mv0X;
             int mv0Y;
             int mv1X;
             int mv1Y;
             if (pic0.IsLongTermReference || pic1.Poc - pic0.Poc == 0)
             {
-                (mv0X, mv0Y, mv1X, mv1Y) = (col.MvX, col.MvY, 0, 0);
+                (mv0X, mv0Y, mv1X, mv1Y) = (col.MvX, colMvY, 0, 0);
             }
             else
             {
-                int tb = Math.Clamp(Picture.Poc - pic0.Poc, -128, 127);
+                int tb = Math.Clamp(currentPoc - pic0.Poc, -128, 127);
                 int td = Math.Clamp(pic1.Poc - pic0.Poc, -128, 127);
                 int tx = (16384 + Math.Abs(td / 2)) / td;
                 int distScaleFactor = Math.Clamp(((tb * tx) + 32) >> 6, -1024, 1023);
                 mv0X = ((distScaleFactor * col.MvX) + 128) >> 8;
-                mv0Y = ((distScaleFactor * col.MvY) + 128) >> 8;
+                mv0Y = ((distScaleFactor * colMvY) + 128) >> 8;
                 mv1X = mv0X - col.MvX;
-                mv1Y = mv0Y - col.MvY;
+                mv1Y = mv0Y - colMvY;
             }
 
             StoreMotion(slice, 0, mbAddr, x, y, size, size, ref0, mv0X, mv0Y);
@@ -158,13 +180,31 @@ internal sealed partial class PictureDecoder
         }
     }
 
-    private readonly record struct CoLocatedMotion(int RefIdx, int MvX, int MvY, long RefId);
+    /// <summary>vertMvScale (Table 8-8): how the co-located vertical motion relates to the current macroblock's.</summary>
+    private enum VerticalScale
+    {
+        OneToOne,
+        FrameToField,
+        FieldToFrame,
+    }
+
+    /// <summary>
+    /// The co-located block's list 0 motion (or list 1 where it uses only that): reference index,
+    /// vector, the referenced frame's Id and, for a field macroblock's reference, the field's parity.
+    /// </summary>
+    private readonly record struct CoLocatedMotion(int RefIdx, int MvX, int MvY, long RefId, int RefParity, VerticalScale Scale);
 
     /// <summary>
     /// The co-located block of 4x4 block (bx, by) in the first list 1 picture (8.4.1.2.1): its
     /// list 0 motion, or list 1 where it does not use list 0; refIdx -1 in intra macroblocks. With
     /// direct_8x8_inference_flag each 8x8 block takes the motion of its corner 4x4 block.
     /// </summary>
+    /// <remarks>
+    /// In MBAFF frames (Tables 8-6 and 8-8) a field macroblock looks at the co-located pair's
+    /// macroblock of its parity if that pair is a field pair, else at the frame macroblock holding
+    /// the corner's rows (Frm_To_Fld); a frame macroblock over a field pair looks at the field
+    /// nearer in order count (Fld_To_Frm), at the rows of its own half.
+    /// </remarks>
     private CoLocatedMotion CoLocated(Picture colPic, int mbAddr, int bx, int by)
     {
         if (Sps.Direct8x8Inference)
@@ -173,13 +213,42 @@ internal sealed partial class PictureDecoder
             by = (by >> 1) * 3;
         }
 
-        int part = (mbAddr * 4) + ((by >> 1) * 2) + (bx >> 1);
-        int block = (mbAddr * 16) + (by * 4) + bx;
+        int colMb = mbAddr;
+        var scale = VerticalScale.OneToOne;
+        bool colField = false;
+        if (_mbaff && colPic.Mbaff)
+        {
+            int top = mbAddr & ~1;
+            colField = colPic.FieldMb[top];
+            if (colField != _fieldMb[mbAddr])
+            {
+                int yCol = by * 4;
+                if (colField)
+                {
+                    // The field nearer in order count to the current frame; ties go to the bottom one.
+                    int parity = Math.Abs(Picture.Poc - colPic.BottomPoc) > Math.Abs(Picture.Poc - colPic.TopPoc) ? 0 : 1;
+                    colMb = top + parity;
+                    by = (2 * (mbAddr & 1)) + (yCol >> 3);
+                    scale = VerticalScale.FieldToFrame;
+                }
+                else
+                {
+                    colMb = top + (yCol >> 3);
+                    by = ((2 * yCol) % 16) >> 2;
+                    scale = VerticalScale.FrameToField;
+                }
+
+                Statistics.MixedCoLocated++;
+            }
+        }
+
+        int part = (colMb * 4) + ((by >> 1) * 2) + (bx >> 1);
+        int block = (colMb * 16) + (by * 4) + bx;
         int list = colPic.RefIdx[0][part] >= 0 ? 0 : 1;
         int refIdx = colPic.RefIdx[list][part];
         return refIdx < 0
-            ? new CoLocatedMotion(-1, 0, 0, -1)
-            : new CoLocatedMotion(refIdx, colPic.MvX[list][block], colPic.MvY[list][block], colPic.RefId[list][part]);
+            ? new CoLocatedMotion(-1, 0, 0, -1, -1, scale)
+            : new CoLocatedMotion(refIdx, colPic.MvX[list][block], colPic.MvY[list][block], colPic.RefId[list][part], colField ? (colMb & 1) ^ (refIdx & 1) : -1, scale);
     }
 
     /// <summary>Top-left luma positions in the macroblock of the size x size blocks of 8x8 blocks first .. first + count - 1.</summary>

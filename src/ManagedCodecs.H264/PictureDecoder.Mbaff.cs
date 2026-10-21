@@ -658,4 +658,15 @@ internal sealed class MbaffStatistics
 
     /// <summary>Field macroblock partitions predicted from the field of the other parity.</summary>
     public int OppositeParity { get; set; }
+
+    /// <summary>Direct predicted 8x8 blocks of field macroblocks, and how many of them temporal.</summary>
+    public int DirectField { get; set; }
+
+    public int TemporalField { get; set; }
+
+    /// <summary>Co-located blocks in a pair of the other kind (Frm_To_Fld or Fld_To_Frm).</summary>
+    public int MixedCoLocated { get; set; }
+
+    /// <summary>Bi-predicted field macroblock partitions with implicit weights.</summary>
+    public int ImplicitField { get; set; }
 }

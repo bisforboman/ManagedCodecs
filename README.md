@@ -60,7 +60,9 @@ foreach (var frame in decoder.Flush())
 }
 ```
 
-`AacDecoder.Decode` takes a packet's data and returns one `AudioFrame` (1024 samples per channel).
+`AacDecoder.Decode(packet)` returns one `AudioFrame`: the packet's 1024 samples per channel, less the
+`packet.SkipSamples` at its start. The MP4 demuxer sets those from the edit list, so encoder priming is dropped and the
+output matches FFmpeg's default (`Decode(packet.Data.Span)` gives all 1024).
 
 ## Benchmarking
 
@@ -112,8 +114,9 @@ what the two commands above include and are not comparable with FFmpeg's `bench:
    Done so far: AVX2 IDCT, DC-only blocks, single-lookup coefficient decoding, buffer reuse.
    Still open: an ARM64 (AdvSimd) IDCT, decoding straight into the output frame
 3. ~~MP4 demuxer (ISO BMFF: `moov`, `trak`, `stbl` sample tables)~~ done: packets, timestamps and
-   codec private data match FFmpeg, for video and audio tracks, fragmented files (moof) included. Still
-   open: multi-edit edit lists
+   codec private data match FFmpeg, for video and audio tracks, fragmented files (moof) included. Audio is trimmed by the edit list as FFmpeg trims it: priming
+   skipped sample by sample, packets after the edit's end left out. Still open: multi-edit edit lists, trimming
+   video at the edit's end
 4. ~~H.264 decoder, starting with Constrained Baseline (CAVLC, I/P frames)~~ done: bit-exact with
    FFmpeg on libx264 samples covering intra and inter prediction, all partitions, multiple
    references and slices, cropping and constrained intra, with CAVLC and with CABAC (Main profile),
@@ -143,8 +146,8 @@ what the two commands above include and are not comparable with FFmpeg's `bench:
    channels), all window sequences and shapes, M/S, intensity, PNS, TNS. Both decoders are floating
    point, so the tests compare values: they require 2^-17 (about 7.6e-6) and measure at most 3e-7.
    Implemented but never produced by FFmpeg's encoder, so untested against it: pulse data and
-   correlated noise. Still open: HE-AAC (SBR, PS), ADTS input, trimming priming and padding (the
-   demuxer's timestamps and durations say how much)
+   correlated noise. Priming before the edit list's start is trimmed (`Packet.SkipSamples`); like FFmpeg, the
+   padding in the last packet is not. Still open: HE-AAC (SBR, PS), ADTS input
 
 ## License note
 

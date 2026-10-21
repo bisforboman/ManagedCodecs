@@ -39,6 +39,10 @@ public static class CodecIds
 /// <param name="Dts">Decode timestamp in the stream's <see cref="VideoStreamInfo.TimeBase"/>.</param>
 /// <param name="Pts">Presentation timestamp in the stream's time base; equals <paramref name="Dts"/> without frame reordering.</param>
 /// <param name="Duration">Duration in the stream's time base.</param>
+/// <param name="SkipSamples">
+/// Audio: how many decoded samples (per channel) at the start of this packet come before the
+/// presentation starts, such as encoder priming that an edit list cuts off; the decoder drops them.
+/// </param>
 public readonly record struct Packet(
     int StreamIndex,
     long Sequence,
@@ -46,7 +50,8 @@ public readonly record struct Packet(
     bool IsKeyframe,
     long Dts,
     long Pts,
-    long Duration);
+    long Duration,
+    int SkipSamples = 0);
 
 /// <summary>Basic facts about a container's video stream.</summary>
 /// <param name="Codec">
@@ -120,5 +125,12 @@ public interface IVideoDecoder
 /// <summary>Turns one compressed packet into one block of audio samples.</summary>
 public interface IAudioDecoder
 {
+    /// <summary>Decodes one packet's data into every sample it codes.</summary>
     AudioFrame Decode(ReadOnlySpan<byte> packet);
+
+    /// <summary>
+    /// Decodes one packet and drops its first <see cref="Packet.SkipSamples"/> samples, so the
+    /// output starts where the container says presentation starts. A packet can come out empty.
+    /// </summary>
+    AudioFrame Decode(Packet packet);
 }

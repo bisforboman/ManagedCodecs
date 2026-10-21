@@ -168,6 +168,18 @@ ff -f lavfi -i "aevalsrc=$eight:s=48000:d=1:c=7.1(wide)" -c:a aac -b:a 320k -aac
 ff -f lavfi -i "anoisesrc=color=pink:amplitude=0.3:sample_rate=44100:duration=2,highpass=f=4000" -c:a aac -b:a 48k samples/aac-pns.mp4
 ff -f lavfi -i "anoisesrc=color=pink:amplitude=0.3:sample_rate=44100:duration=2:seed=1,highpass=f=4000[a];anoisesrc=color=pink:amplitude=0.3:sample_rate=44100:duration=2:seed=2,highpass=f=4000[b];[a][b]amerge=inputs=2" -c:a aac -b:a 64k samples/aac-pns-stereo.mp4
 ff -f lavfi -i "testsrc2=size=320x240:rate=25,scroll=h=0.01" -f lavfi -i "sine=frequency=330:sample_rate=48000:duration=1" -t 1 -c:v libx264 -profile:v baseline -pix_fmt yuv420p -refs 2 -c:a aac -ac 2 -aac_pns 0 samples/h264-with-audio.mp4
+# An edit list that trims more than FFmpeg's muxer writes (it only cuts the 1024 samples of priming): media time 2500,
+# so two whole packets and part of a third come before the start, and 335 ms, which ends mid-packet and leaves whole
+# packets after the end (335 ms is 14773.5 samples, so the end also shows how the movie timescale is rounded).
+ff -f lavfi -i "sine=frequency=440:sample_rate=44100:duration=1" -c:a aac -b:a 96k -aac_pns 0 samples/aac-edit-trim.mp4
+python3 -I - samples/aac-edit-trim.mp4 <<'PY'
+import struct, sys
+data = bytearray(open(sys.argv[1], 'rb').read())
+at = data.find(b'elst')
+assert at > 0 and data[at + 4] == 0 and struct.unpack_from('>I', data, at + 8)[0] == 1  # version 0, one entry
+struct.pack_into('>Ii', data, at + 12, 335, 2500)  # segment_duration (movie timescale 1000), media_time
+open(sys.argv[1], 'wb').write(data)
+PY
 
 # ---- H.264 from OpenH264 ----
 # Committed in samples/openh264/ (CI has no OpenH264): long-term references and the list modification and memory
@@ -177,12 +189,17 @@ cp samples/openh264/*.mp4 samples/
 
 # ---- FFmpeg's references ----
 # name.framemd5: decoded frames. name.packets.framemd5: demuxed packets (-copyts keeps the demuxer's own timestamps).
-# name.packets.flags: keyframe flags (framemd5 has no flags column). name.f32: decoded audio, edit list ignored.
+# name.packets.flags: keyframe flags (framemd5 has no flags column). name.f32: decoded audio, edit list ignored (every
+# packet, whole; not for aac-edit-trim, whose packets after the edit are not demuxed). name.trim.f32: decoded audio as
+# FFmpeg gives it by default, trimmed by the edit list.
 for f in samples/*.avi samples/*.mp4; do ff -i "$f" -f framemd5 "${f%.*}.framemd5"; done
 for f in samples/*.mp4; do
   ff -copyts -i "$f" -c copy -f framemd5 "${f%.mp4}.packets.framemd5"
   ffprobe -v error -select_streams v:0 -show_packets -show_entries packet=flags -of csv=p=0 "$f" > "${f%.mp4}.packets.flags"
 done
-for f in samples/aac-*.mp4 samples/h264-with-audio.mp4 samples/fmp4-*.mp4; do ff -ignore_editlist 1 -i "$f" -map 0:a:0 -f f32le "${f%.mp4}.f32"; done
+for f in samples/aac-*.mp4 samples/h264-with-audio.mp4 samples/fmp4-*.mp4; do
+  [[ $f == samples/aac-edit-trim.mp4 ]] || ff -ignore_editlist 1 -i "$f" -map 0:a:0 -f f32le "${f%.mp4}.f32"
+  ff -i "$f" -map 0:a:0 -f f32le "${f%.mp4}.trim.f32"
+done
 
 echo "Samples and references written to samples/."

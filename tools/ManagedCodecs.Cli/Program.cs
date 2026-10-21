@@ -64,7 +64,7 @@ for (int loop = 0; loop < loops; loop++)
         }
         else if (packet.StreamIndex == audio?.StreamIndex && audioDecoder is not null)
         {
-            audioDecoder.Decode(packet.Data.Span);
+            audioDecoder.Decode(packet);
             audioFrames++;
         }
     }

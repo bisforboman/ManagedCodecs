@@ -26,4 +26,23 @@ public sealed class AudioFrame
 
     /// <summary>Samples[channel][index].</summary>
     public float[][] Samples { get; }
+
+    /// <summary>This frame without its first <paramref name="count"/> samples (all of them if it has fewer).</summary>
+    public AudioFrame DropStart(int count)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(count);
+        if (count == 0)
+        {
+            return this;
+        }
+
+        int start = Math.Min(count, SampleCount);
+        var trimmed = new AudioFrame(SampleRate, Channels, SampleCount - start);
+        for (int c = 0; c < Channels; c++)
+        {
+            Samples[c].AsSpan(start).CopyTo(trimmed.Samples[c]);
+        }
+
+        return trimmed;
+    }
 }

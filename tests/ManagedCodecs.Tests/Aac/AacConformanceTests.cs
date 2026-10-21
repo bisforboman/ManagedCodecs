@@ -18,6 +18,45 @@ public class AacConformanceTests
 
     public static TheoryData<string> Samples() => new(TestSamples.WithReference(".f32"));
 
+    public static TheoryData<string> TrimmedSamples() => new(TestSamples.WithReference(".trim.f32"));
+
+    /// <summary>
+    /// The audio FFmpeg gives by default (name.trim.f32), with the edit list applied: the priming
+    /// before its media time skipped and the packets after its end left out. Every sample must
+    /// come out, no more and no fewer.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(TrimmedSamples))]
+    public void MatchesFfmpegTrimmed(string sampleName)
+    {
+        var reference = File.ReadAllBytes(TestSamples.ReferenceOf(sampleName, ".trim.f32"));
+        using var demuxer = Mp4Demuxer.Open(TestSamples.PathOf(sampleName));
+        var audio = demuxer.Audio!;
+        var decoder = new AacDecoder(audio);
+        int channels = decoder.Channels;
+
+        int position = 0;
+        foreach (var packet in demuxer.ReadPackets().Where(p => p.StreamIndex == audio.StreamIndex))
+        {
+            var decoded = decoder.Decode(packet);
+            Assert.Equal(Math.Max(0, 1024 - packet.SkipSamples), decoded.SampleCount);
+            for (int i = 0; i < decoded.SampleCount; i++)
+            {
+                for (int c = 0; c < channels; c++)
+                {
+                    int offset = (((position + i) * channels) + c) * 4;
+                    Assert.True(offset < reference.Length, $"More samples than FFmpeg's {reference.Length / 4 / channels}.");
+                    double diff = Math.Abs(BitConverter.ToSingle(reference, offset) - decoded.Samples[c][i]);
+                    Assert.True(diff <= Tolerance, $"Sample {position + i}, channel {c}: off by {diff:E3}.");
+                }
+            }
+
+            position += decoded.SampleCount;
+        }
+
+        Assert.Equal(reference.Length / 4 / channels, position);
+    }
+
     [Theory]
     [MemberData(nameof(Samples))]
     public void MatchesFfmpeg(string sampleName)

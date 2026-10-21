@@ -53,6 +53,9 @@ public sealed class AacDecoder : IAudioDecoder
     /// <summary>How often each coding tool was used, so tests can check samples exercise them.</summary>
     internal AacStatistics Statistics { get; } = new();
 
+    /// <inheritdoc/>
+    public AudioFrame Decode(Packet packet) => Decode(packet.Data.Span).DropStart(packet.SkipSamples);
+
     public AudioFrame Decode(ReadOnlySpan<byte> packet)
     {
         var r = new AacBitReader(packet);

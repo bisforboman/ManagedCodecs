@@ -56,6 +56,14 @@ public class H264ConformanceTests
         }
 
         Assert.Equal(expected.Count, index);
+
+        // MBAFF samples must mix field and frame pairs every way they can meet.
+        if (sampleName.Contains("mbaff", StringComparison.Ordinal))
+        {
+            var stats = decoder.MbaffStatistics;
+            Assert.True(stats.FieldPairs > 0 && stats.FramePairs > 0, $"{stats.FieldPairs} field and {stats.FramePairs} frame pairs.");
+            Assert.True(stats.MixedLeft > 0 && stats.FrameBelowField > 0 && stats.FieldBelowFrame > 0, "Not every mixture of field and frame pairs occurs.");
+        }
     }
 
     /// <summary>H.264 in MP4 whose avcC says profile_idc 66 (Baseline), 77 (Main) or 100 (High).</summary>

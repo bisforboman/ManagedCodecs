@@ -1,7 +1,8 @@
 # ManagedCodecs
 
 Pure managed C# media decoders: no native binaries, Native AOT friendly. MJPEG (bit-exact with FFmpeg), H.264
-Constrained Baseline, Main and High (CAVLC and CABAC, I/P/B, weighted prediction, 8x8 transform, scaling matrices, bit-exact), AAC LC (within 2^-17 of FFmpeg's float output, measured 3e-7), AVI and MP4
+Constrained Baseline, Main and High (CAVLC and CABAC, I/P/B, weighted prediction, 8x8 transform, scaling matrices,
+MBAFF intra, bit-exact), AAC LC (within 2^-17 of FFmpeg's float output, measured 3e-7), AVI and MP4
 demuxing. README.md has the layout, the roadmap and what is not supported yet.
 
 ## Core idea
@@ -74,5 +75,10 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
 - FFmpeg trims MP4 audio by the edit list asymmetrically: exactly media_time samples at the start (skip-samples side
   data, across packets), but at the end it drops whole packets that start past the edit, cuts the last one's
   duration (rounded to nearest) and still decodes all its samples.
+- MBAFF: with CABAC, end_of_slice_flag comes only after the bottom macroblock of a pair (7.3.4). `ffmpeg -debug
+  mb_type` marks field pairs with '=': the oracle for whether a sample mixes field and frame pairs (scrolling
+  content comes out all field). The ITU PDF is not reachable from the cloud sandbox; JM (the ITU reference software,
+  on GitHub) is, builds with `make -C ldecod CFLAGS="-fcommon -O2"`, and traces every syntax element; printing each
+  CABAC bin's (state, MPS, range) in both decoders finds the first divergence.
 - In fragmented MP4, FFmpeg's packet durations are not the file's: its demuxer leaves them unset and libavformat
   fills in the codec frame size (1024 for AAC). Compare with FFmpeg's next dts instead (Mp4ConformanceTests does).

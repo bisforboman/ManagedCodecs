@@ -65,30 +65,51 @@ internal sealed partial class PictureDecoder
             }
         }
 
+        // colZeroFlag of each block: a short-term co-located picture whose block barely moves,
+        // from its own reference 0 (its motion as stored, not rescaled between frame and field).
         var colPic = slice.RefList1[0];
         int size = Sps.Direct8x8Inference ? 8 : 4;
+        bool checkStill = !zero && colPic.IsShortTermReference && (ref0 == 0 || ref1 == 0);
+        uint colZero = 0;
+        int blocks = 0;
         foreach (var (x, y) in DirectBlocks(first, count, size))
         {
-            // colZeroFlag: a short-term co-located picture whose block barely moves, from its own reference 0.
-            bool colZero = false;
-            if (!zero && colPic.IsShortTermReference && (ref0 == 0 || ref1 == 0))
+            if (checkStill)
             {
-                // The co-located motion as stored, not rescaled between frame and field.
                 var col = CoLocated(colPic, mbAddr, x / 4, y / 4);
-                colZero = col.RefIdx == 0 && col.MvX is >= -1 and <= 1 && col.MvY is >= -1 and <= 1;
+                colZero |= col.RefIdx == 0 && col.MvX is >= -1 and <= 1 && col.MvY is >= -1 and <= 1 ? 1u << blocks : 0;
             }
 
-            if (ref0 >= 0)
-            {
-                bool still = ref0 == 0 && colZero;
-                StoreMotion(slice, 0, mbAddr, x, y, size, size, ref0, still ? 0 : mv0.X, still ? 0 : mv0.Y);
-            }
+            blocks++;
+        }
 
-            if (ref1 >= 0)
-            {
-                bool still = ref1 == 0 && colZero;
-                StoreMotion(slice, 1, mbAddr, x, y, size, size, ref1, still ? 0 : mv1.X, still ? 0 : mv1.Y);
-            }
+        // A whole macroblock whose blocks are all still or all not takes one motion a list.
+        if (count == 4 && (colZero == 0 || colZero == (1u << blocks) - 1))
+        {
+            StoreSpatialMotion(slice, mbAddr, 0, 0, 16, ref0, ref1, mv0, mv1, colZero != 0);
+            return;
+        }
+
+        int block = 0;
+        foreach (var (x, y) in DirectBlocks(first, count, size))
+        {
+            StoreSpatialMotion(slice, mbAddr, x, y, size, ref0, ref1, mv0, mv1, ((colZero >> block++) & 1) != 0);
+        }
+    }
+
+    /// <summary>Spatial direct motion of a size x size area: zero in a list whose reference is 0 where the co-located block is still.</summary>
+    private void StoreSpatialMotion(SliceState slice, int mbAddr, int x, int y, int size, int ref0, int ref1, (int X, int Y) mv0, (int X, int Y) mv1, bool colZero)
+    {
+        if (ref0 >= 0)
+        {
+            bool still = ref0 == 0 && colZero;
+            StoreMotion(slice, 0, mbAddr, x, y, size, size, ref0, still ? 0 : mv0.X, still ? 0 : mv0.Y);
+        }
+
+        if (ref1 >= 0)
+        {
+            bool still = ref1 == 0 && colZero;
+            StoreMotion(slice, 1, mbAddr, x, y, size, size, ref1, still ? 0 : mv1.X, still ? 0 : mv1.Y);
         }
     }
 

@@ -4,8 +4,9 @@ namespace ManagedCodecs.H264;
 
 /// <summary>Scaling (dequantization) and inverse transforms for 4x4 and 8x8 blocks (H.264 clause 8.5).</summary>
 /// <remarks>
-/// Only flat scaling matrices are supported, so LevelScale4x4 and LevelScale8x8 are 16 times the
-/// normAdjust values v of equations 8-315 and 8-318. Matrices are row-major: index = row * size + column.
+/// LevelScale4x4 and LevelScale8x8 are the scaling list's weights times the normAdjust values v of
+/// equations 8-315 and 8-318; <see cref="ScalingMatrix"/> holds them per list. Blocks are row-major:
+/// index = row * size + column.
 /// </remarks>
 internal static class Transform
 {
@@ -19,7 +20,7 @@ internal static class Transform
 
     private static ReadOnlySpan<byte> NormMixed => [13, 14, 16, 18, 20, 23];
 
-    /// <summary>LevelScale4x4(qP % 6, row, column) for flat matrices.</summary>
+    /// <summary>LevelScale4x4(qP % 6, row, column) for a flat matrix (weights 16): 16 times normAdjust4x4.</summary>
     public static int LevelScale(int qpRem, int index)
     {
         int row = index >> 2;
@@ -34,17 +35,34 @@ internal static class Transform
         return 16 * v;
     }
 
-    // LevelScale for every qP % 6 and position: entry qpRem * 16 + index.
-    private static readonly int[] LevelScaleTable = [.. Enumerable.Range(0, 6 * 16).Select(i => LevelScale(i / 16, i % 16))];
+    /// <summary>
+    /// LevelScale4x4 for every qP % 6 and position (entry qpRem * 16 + index) of a scaling list given
+    /// in zig-zag order (8-315).
+    /// </summary>
+    public static int[] LevelScale4x4Table(ReadOnlySpan<byte> list)
+    {
+        var table = new int[6 * 16];
+        for (int k = 0; k < 16; k++)
+        {
+            int index = ZigZag4x4[k];
+            for (int m = 0; m < 6; m++)
+            {
+                table[(m * 16) + index] = list[k] * LevelScale(m, index) / 16;
+            }
+        }
+
+        return table;
+    }
 
     /// <summary>
-    /// Scales the coefficients of a 4x4 block in place (8.5.12.1). With <paramref name="skipDc"/>
-    /// the DC is left alone because it was already produced by a DC transform.
+    /// Scales the coefficients of a 4x4 block in place (8.5.12.1), with the LevelScale4x4 table of
+    /// its scaling list. With <paramref name="skipDc"/> the DC is left alone because it was already
+    /// produced by a DC transform.
     /// </summary>
-    public static void Dequantize(Span<int> block, int qp, bool skipDc)
+    public static void Dequantize(Span<int> block, int qp, bool skipDc, ReadOnlySpan<int> levelScale)
     {
         int qpDiv = qp / 6;
-        var scale = LevelScaleTable.AsSpan((qp % 6) * 16, 16);
+        var scale = levelScale.Slice((qp % 6) * 16, 16);
         int first = skipDc ? 1 : 0;
         if (qp >= 24)
         {
@@ -94,17 +112,30 @@ internal static class Transform
         : ((i % 4 == 0 && j % 4 == 2) || (i % 4 == 2 && j % 4 == 0)) ? 4
         : 5;
 
-    /// <summary>LevelScale8x8(qP % 6, row, column) for flat matrices.</summary>
-    public static int LevelScale8x8(int qpRem, int index) => 16 * Norm8x8[(qpRem * 6) + Class8x8(index >> 3, index & 7)];
+    /// <summary>
+    /// LevelScale8x8 for every qP % 6 and position (entry qpRem * 64 + index) of a scaling list given
+    /// in zig-zag order (8-318).
+    /// </summary>
+    public static int[] LevelScale8x8Table(ReadOnlySpan<byte> list)
+    {
+        var table = new int[6 * 64];
+        for (int k = 0; k < 64; k++)
+        {
+            int index = ZigZag8x8[k];
+            for (int m = 0; m < 6; m++)
+            {
+                table[(m * 64) + index] = list[k] * Norm8x8[(m * 6) + Class8x8(index >> 3, index & 7)];
+            }
+        }
 
-    // LevelScale8x8 for every qP % 6 and position: entry qpRem * 64 + index.
-    private static readonly int[] LevelScale8x8Table = [.. Enumerable.Range(0, 6 * 64).Select(i => LevelScale8x8(i / 64, i % 64))];
+        return table;
+    }
 
-    /// <summary>Scales the coefficients of an 8x8 block in place (8.5.13.1).</summary>
-    public static void Dequantize8x8(Span<int> block, int qp)
+    /// <summary>Scales the coefficients of an 8x8 block in place (8.5.13.1), with the LevelScale8x8 table of its scaling list.</summary>
+    public static void Dequantize8x8(Span<int> block, int qp, ReadOnlySpan<int> levelScale)
     {
         int qpDiv = qp / 6;
-        var scale = LevelScale8x8Table.AsSpan((qp % 6) * 64, 64);
+        var scale = levelScale.Slice((qp % 6) * 64, 64);
         if (qp >= 36)
         {
             int shift = qpDiv - 6;
@@ -196,15 +227,16 @@ internal static class Transform
 
     /// <summary>
     /// Intra 16x16 luma DC (8.5.10): inverse Hadamard of the 4x4 DC levels, then scaling.
-    /// Input and output are row-major in the block layout of the macroblock.
+    /// Input and output are row-major in the block layout of the macroblock; the scale is
+    /// LevelScale4x4(qP % 6, 0, 0) of the Intra Y list.
     /// </summary>
-    public static void InverseLumaDc(Span<int> c, int qp)
+    public static void InverseLumaDc(Span<int> c, int qp, ReadOnlySpan<int> levelScale)
     {
         Span<int> f = stackalloc int[16];
         Hadamard4x4(c, f);
 
         int qpDiv = qp / 6;
-        int scale = LevelScale(qp % 6, 0);
+        int scale = levelScale[(qp % 6) * 16];
         for (int i = 0; i < 16; i++)
         {
             c[i] = qp >= 36
@@ -213,15 +245,18 @@ internal static class Transform
         }
     }
 
-    /// <summary>4:2:0 chroma DC (8.5.11): 2x2 transform, then scaling. c = [c00, c01, c10, c11].</summary>
-    public static void InverseChromaDc(Span<int> c, int qp)
+    /// <summary>
+    /// 4:2:0 chroma DC (8.5.11): 2x2 transform, then scaling with LevelScale4x4(qP % 6, 0, 0) of
+    /// the component's list. c = [c00, c01, c10, c11].
+    /// </summary>
+    public static void InverseChromaDc(Span<int> c, int qp, ReadOnlySpan<int> levelScale)
     {
         int f0 = c[0] + c[1] + c[2] + c[3];
         int f1 = c[0] - c[1] + c[2] - c[3];
         int f2 = c[0] + c[1] - c[2] - c[3];
         int f3 = c[0] - c[1] - c[2] + c[3];
 
-        int scale = LevelScale(qp % 6, 0);
+        int scale = levelScale[(qp % 6) * 16];
         int qpDiv = qp / 6;
         c[0] = ((f0 * scale) << qpDiv) >> 5;
         c[1] = ((f1 * scale) << qpDiv) >> 5;

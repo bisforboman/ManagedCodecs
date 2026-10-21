@@ -17,7 +17,8 @@ internal sealed class SequenceParameterSet
 
     public int BitDepthChroma { get; internal init; } = 8;
 
-    public bool HasScalingMatrix { get; internal init; }
+    /// <summary>The sequence's scaling matrix, or null for flat scaling (no seq_scaling_matrix_present_flag).</summary>
+    public ScalingMatrix? Scaling { get; internal init; }
 
     public int Log2MaxFrameNum { get; internal init; }
 
@@ -70,7 +71,7 @@ internal sealed class SequenceParameterSet
         int chromaFormat = 1;
         int bitDepthLuma = 8;
         int bitDepthChroma = 8;
-        bool scaling = false;
+        ScalingMatrix? scaling = null;
         if (profile is 100 or 110 or 122 or 244 or 44 or 83 or 86 or 118 or 128 or 138 or 139 or 134 or 135)
         {
             chromaFormat = r.ReadUe(3, "chroma_format_idc");
@@ -82,16 +83,10 @@ internal sealed class SequenceParameterSet
             bitDepthLuma = 8 + r.ReadUe(6, "bit_depth_luma_minus8");
             bitDepthChroma = 8 + r.ReadUe(6, "bit_depth_chroma_minus8");
             r.ReadFlag(); // qpprime_y_zero_transform_bypass_flag
-            scaling = r.ReadFlag();
-            if (scaling)
+            if (r.ReadFlag())
             {
-                for (int i = 0; i < (chromaFormat != 3 ? 8 : 12); i++)
-                {
-                    if (r.ReadFlag())
-                    {
-                        SkipScalingList(r, i < 6 ? 16 : 64);
-                    }
-                }
+                // Lists the SPS leaves out fall back by rule A (Table 7-2).
+                scaling = ScalingMatrix.Resolve(ScalingMatrix.ParseLists(r, chromaFormat != 3 ? 8 : 12), sequence: null);
             }
         }
 
@@ -150,7 +145,7 @@ internal sealed class SequenceParameterSet
             ChromaFormatIdc = chromaFormat,
             BitDepthLuma = bitDepthLuma,
             BitDepthChroma = bitDepthChroma,
-            HasScalingMatrix = scaling,
+            Scaling = scaling,
             Log2MaxFrameNum = log2MaxFrameNum,
             PicOrderCntType = pocType,
             Log2MaxPicOrderCntLsb = log2MaxPocLsb,
@@ -259,17 +254,6 @@ internal sealed class SequenceParameterSet
 
         r.ReadBits(20); // initial_cpb_removal_delay_length_minus1 .. time_offset_length
     }
-
-    private static void SkipScalingList(BitReader r, int size)
-    {
-        int last = 8;
-        int next = 8;
-        for (int j = 0; j < size && next != 0; j++)
-        {
-            next = (last + r.ReadSe() + 256) % 256;
-            last = next == 0 ? last : next;
-        }
-    }
 }
 
 /// <summary>pic_parameter_set_rbsp (7.3.2.2).</summary>
@@ -305,7 +289,11 @@ internal sealed class PictureParameterSet
 
     public bool Transform8x8Mode { get; internal init; }
 
-    public bool HasScalingMatrix { get; internal init; }
+    /// <summary>
+    /// The picture-level scaling lists (null entries absent, filled in by <see cref="ScalingMatrix.For"/>),
+    /// or null without pic_scaling_matrix_present_flag.
+    /// </summary>
+    public byte[]?[]? ScalingLists { get; internal init; }
 
     public int SecondChromaQpIndexOffset { get; internal init; }
 
@@ -333,16 +321,19 @@ internal sealed class PictureParameterSet
         bool redundant = r.ReadFlag();
 
         bool transform8x8 = false;
-        bool scaling = false;
+        byte[]?[]? scaling = null;
         int secondChromaOffset = chromaOffset;
         if (r.MoreRbspData())
         {
             transform8x8 = r.ReadFlag();
-            scaling = r.ReadFlag(); // the lists themselves are not parsed; such streams are rejected
-            if (!scaling)
+            if (r.ReadFlag())
             {
-                secondChromaOffset = r.ReadSe();
+                // 6 + 2 * transform_8x8_mode_flag lists for 4:2:0; 4:4:4 would have 6 8x8 lists, but
+                // it is rejected before any slice is decoded.
+                scaling = ScalingMatrix.ParseLists(r, 6 + (transform8x8 ? 2 : 0));
             }
+
+            secondChromaOffset = r.ReadSe();
         }
 
         return new PictureParameterSet
@@ -362,7 +353,7 @@ internal sealed class PictureParameterSet
             ConstrainedIntraPred = constrainedIntra,
             RedundantPicCntPresent = redundant,
             Transform8x8Mode = transform8x8,
-            HasScalingMatrix = scaling,
+            ScalingLists = scaling,
             SecondChromaQpIndexOffset = secondChromaOffset,
         };
     }

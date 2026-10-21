@@ -48,6 +48,9 @@ internal sealed partial class PictureDecoder
     // The CABAC engine and contexts, reinitialized for every CABAC slice.
     private readonly Cabac _cabac = new();
 
+    // The scaling matrix of the last slice's parameter sets.
+    private (SequenceParameterSet? Sps, PictureParameterSet? Pps, ScalingMatrix Matrix) _scaling = (null, null, ScalingMatrix.Flat);
+
     public PictureDecoder(SequenceParameterSet sps)
     {
         Sps = sps;
@@ -67,15 +70,17 @@ internal sealed partial class PictureDecoder
         InitCabacState();
     }
 
-    public SequenceParameterSet Sps { get; }
+    /// <summary>The current picture's SPS; another one of the same size may follow, so <see cref="Begin"/> sets it.</summary>
+    public SequenceParameterSet Sps { get; private set; }
 
     public Picture Picture { get; private set; } = null!;
 
     public int DecodedMbCount { get; private set; }
 
     /// <summary>Starts decoding into <paramref name="picture"/>, forgetting the previous picture's state.</summary>
-    public void Begin(Picture picture)
+    public void Begin(Picture picture, SequenceParameterSet sps)
     {
+        Sps = sps;
         Picture = picture;
         DecodedMbCount = 0;
         _slices.Clear();
@@ -98,8 +103,14 @@ internal sealed partial class PictureDecoder
         int sliceNum = _slices.Count;
         _slices.Add(new SliceInfo(header.DisableDeblockingFilterIdc, header.SliceAlphaC0Offset, header.SliceBetaOffset, pps.ChromaQpIndexOffset, pps.SecondChromaQpIndexOffset));
 
+        if (_scaling.Sps != Sps || _scaling.Pps != pps)
+        {
+            _scaling = (Sps, pps, ScalingMatrix.For(Sps, pps));
+        }
+
         var slice = new SliceState(header, pps, sliceNum, refList0, refList1)
         {
+            Scaling = _scaling.Matrix,
             Qp = pps.PicInitQp + header.SliceQpDelta,
             Cabac = pps.EntropyCodingModeCabac ? _cabac : null,
         };
@@ -176,6 +187,9 @@ internal sealed partial class PictureDecoder
         public int Qp { get; set; }
 
         public IReadOnlyList<Picture> RefList(int list) => list == 0 ? RefList0 : RefList1;
+
+        /// <summary>The scaling matrix of the slice's SPS and PPS.</summary>
+        public ScalingMatrix Scaling { get; init; } = ScalingMatrix.Flat;
 
         /// <summary>The CABAC engine for a CABAC slice, null for CAVLC.</summary>
         public Cabac? Cabac { get; init; }
@@ -377,7 +391,7 @@ internal sealed partial class PictureDecoder
 
         var neighbors = IntraMbNeighbors(slice, mbAddr);
         ReconstructIntraLuma(slice, mbAddr, residual, is16x16, predMode16x16, cbpLuma, neighbors);
-        ReconstructChroma(mbAddr, residual, cbpChroma, slice.Pps, intraMode: chromaPredMode, neighbors);
+        ReconstructChroma(slice, mbAddr, residual, cbpChroma, intraMode: chromaPredMode, neighbors);
     }
 
     /// <summary>transform_size_8x8_flag: one bit, or with CABAC ctxIdx 399 + the flags of macroblocks A and B.</summary>
@@ -686,7 +700,7 @@ internal sealed partial class PictureDecoder
     }
 
     /// <summary>Adds the residual of each coded 8x8 block to the luma prediction.</summary>
-    private void AddLuma8x8Residual(int mbAddr, Residual residual, int cbpLuma, int b8, int qp)
+    private void AddLuma8x8Residual(SliceState slice, int mbAddr, Residual residual, int cbpLuma, int b8, int qp)
     {
         if ((cbpLuma & (1 << b8)) == 0 || !Has8x8Coefficients(mbAddr, b8))
         {
@@ -696,7 +710,7 @@ internal sealed partial class PictureDecoder
         var (origin, _) = Origins(mbAddr);
         int stride = Picture.LumaStride;
         var block = residual.Luma8x8[b8];
-        Transform.Dequantize8x8(block, qp);
+        Transform.Dequantize8x8(block, qp, slice.Scaling.LevelScale8x8(IsInter(mbAddr) ? 1 : 0));
         Transform.InverseTransform8x8Add(block, Picture.Y.AsSpan(origin + ((b8 >> 1) * 8 * stride) + ((b8 & 1) * 8)), stride);
     }
 
@@ -713,7 +727,7 @@ internal sealed partial class PictureDecoder
             IntraPrediction.Predict16x16(predMode16x16, plane, origin, stride, new IntraNeighbors(mbs.A, mbs.B, mbs.C, mbs.D));
             Span<int> dc = stackalloc int[16];
             residual.LumaDc.CopyTo(dc);
-            Transform.InverseLumaDc(dc, qp);
+            Transform.InverseLumaDc(dc, qp, slice.Scaling.LevelScale4x4(0));
 
             for (int i = 0; i < 16; i++)
             {
@@ -726,7 +740,7 @@ internal sealed partial class PictureDecoder
 
                 var block = residual.Luma[i];
                 block[0] = dc[i];
-                Transform.Dequantize(block, qp, skipDc: true);
+                Transform.Dequantize(block, qp, skipDc: true, slice.Scaling.LevelScale4x4(0));
                 Transform.InverseTransformAdd(block, dest, stride);
             }
 
@@ -749,7 +763,7 @@ internal sealed partial class PictureDecoder
                 };
                 int offset8 = origin + (y * 4 * stride) + (x * 4);
                 IntraPrediction.Predict8x8(_intra4x4Mode[(mbAddr * 16) + (y * 4) + x], plane, offset8, stride, n);
-                AddLuma8x8Residual(mbAddr, residual, cbpLuma, b8, qp);
+                AddLuma8x8Residual(slice, mbAddr, residual, cbpLuma, b8, qp);
             }
 
             return;
@@ -778,7 +792,7 @@ internal sealed partial class PictureDecoder
             if ((cbpLuma & (1 << (idx >> 2))) != 0 && _totalCoeffLuma[(mbAddr * 16) + (y * 4) + x] != 0)
             {
                 var block = residual.Luma[(y * 4) + x];
-                Transform.Dequantize(block, qp, skipDc: false);
+                Transform.Dequantize(block, qp, skipDc: false, slice.Scaling.LevelScale4x4(0));
                 Transform.InverseTransformAdd(block, plane.AsSpan(offset), stride);
             }
         }
@@ -788,7 +802,7 @@ internal sealed partial class PictureDecoder
     /// Chroma prediction (intra only; inter prediction is done before) and residual for both
     /// components. <paramref name="intraMode"/> is -1 for inter macroblocks.
     /// </summary>
-    private void ReconstructChroma(int mbAddr, Residual residual, int cbpChroma, PictureParameterSet pps, int intraMode, (bool A, bool B, bool C, bool D) mbs)
+    private void ReconstructChroma(SliceState slice, int mbAddr, Residual residual, int cbpChroma, int intraMode, (bool A, bool B, bool C, bool D) mbs)
     {
         var (_, origin) = Origins(mbAddr);
         int stride = Picture.ChromaStride;
@@ -796,7 +810,8 @@ internal sealed partial class PictureDecoder
 
         for (int c = 0; c < 2; c++)
         {
-            int qpc = ChromaQp(_qp[mbAddr], c == 0 ? pps.ChromaQpIndexOffset : pps.SecondChromaQpIndexOffset);
+            int qpc = ChromaQp(_qp[mbAddr], c == 0 ? slice.Pps.ChromaQpIndexOffset : slice.Pps.SecondChromaQpIndexOffset);
+            var levelScale = slice.Scaling.LevelScale4x4((intraMode >= 0 ? 1 : 4) + c); // Intra or Inter Cb, Cr
             byte[] plane = c == 0 ? Picture.Cb : Picture.Cr;
             if (intraMode >= 0)
             {
@@ -809,7 +824,7 @@ internal sealed partial class PictureDecoder
             }
 
             residual.ChromaDc[c].CopyTo(dc);
-            Transform.InverseChromaDc(dc, qpc);
+            Transform.InverseChromaDc(dc, qpc, levelScale);
 
             for (int b = 0; b < 4; b++)
             {
@@ -822,7 +837,7 @@ internal sealed partial class PictureDecoder
 
                 var block = residual.ChromaAc[(c * 4) + b];
                 block[0] = dc[b];
-                Transform.Dequantize(block, qpc, skipDc: true);
+                Transform.Dequantize(block, qpc, skipDc: true, levelScale);
                 Transform.InverseTransformAdd(block, dest, stride);
             }
         }

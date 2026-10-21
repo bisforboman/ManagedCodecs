@@ -121,6 +121,26 @@ ff -f lavfi -i "testsrc2=size=321x239:rate=25,scroll=v=0.02" -t 1 "${H[@]}" -bf 
 ff -f lavfi -i "testsrc2=size=320x240:rate=25,scroll=h=0.02,noise=alls=10:allf=t" -t 1 "${H[@]}" -bf 2 -refs 2 -x264-params constrained-intra=1:chroma-qp-offset=4 samples/h264-high-constrained-intra.mp4
 ff -f lavfi -i "testsrc2=size=320x240:rate=25,fade=in:0:20,fade=out:30:20" -t 2 "${H[@]}" samples/h264-high-default.mp4
 
+# ---- H.264 scaling matrices (High profile) ----
+# libx264 writes them in the PPS only, so absent lists fall back by rule A (Table 7-2). cqm=jvt sends no lists at all:
+# every list is the default one. The custom set gives every list its own values (libx264 has one chroma list per
+# intra and inter, so Cr copies Cb: an absent list falls back to the one before it); with CAVLC; with large weights at
+# a low QP for wide products; and without the 8x8 transform, where the PPS has 6 lists instead of 8. SPS lists, fall-back
+# rule B and useDefaultScalingMatrixFlag never come from libx264; H264ScalingMatrixTests covers them.
+C4I=6,12,14,20,22,24,26,30,32,34,36,40,42,46,50,60
+C4P=12,14,16,18,20,22,24,26,28,30,32,34,36,38,40,44
+C4IC=9,11,13,17,19,21,25,27,29,33,35,37,41,43,47,51
+C4PC=20,19,18,17,16,16,15,15,14,14,13,13,12,12,11,10
+C8I=$(seq -s, 8 2 134)
+C8P=$(seq -s, 70 -1 7)
+CQM="cqm4iy=$C4I:cqm4py=$C4P:cqm4ic=$C4IC:cqm4pc=$C4PC:cqm8iy=$C8I:cqm8py=$C8P"
+S="testsrc2=size=320x240:rate=25,scroll=h=0.01:v=0.005"
+ff -f lavfi -i "$S" -t 1 "${H[@]}" -bf 2 -refs 2 -x264-params cqm=jvt samples/h264-cqm-jvt.mp4
+ff -f lavfi -i "$S" -t 1 "${H[@]}" -bf 2 -refs 2 -x264-params "$CQM:partitions=all" samples/h264-cqm-custom.mp4
+ff -f lavfi -i "$S" -t 1 "${H[@]}" -bf 2 -refs 2 -x264-params "$CQM:partitions=all:cabac=0" samples/h264-cqm-custom-cavlc.mp4
+ff -f lavfi -i "$S,noise=alls=40:allf=t" -t 0.4 "${H[@]}" -bf 2 -qp 4 -x264-params "cqm4iy=$(seq -s, 255 -1 240):cqm4py=$(seq -s, 200 3 245):cqm8iy=$(seq -s, 255 -2 130):cqm8py=$(seq -s, 128 2 254)" samples/h264-cqm-large.mp4
+ff -f lavfi -i "$S" -t 1 "${H[@]}" -bf 2 -refs 2 -x264-params "$CQM:8x8dct=0" samples/h264-cqm-no8x8.mp4
+
 # ---- AAC LC ----
 # Each aimed at one tool; the conformance test checks the tool really occurs. PNS is off except in the PNS samples.
 ff -f lavfi -i "sine=frequency=440:sample_rate=44100:duration=1" -c:a aac -b:a 96k -aac_pns 0 samples/aac-mono-44k.mp4

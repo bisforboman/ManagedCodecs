@@ -1,13 +1,13 @@
 namespace ManagedCodecs.H264;
 
 /// <summary>
-/// H.264 decoder for Constrained Baseline and Main profile streams (CAVLC or CABAC; I, P and B
+/// H.264 decoder for Constrained Baseline, Main and High profile streams (CAVLC or CABAC; I, P and B
 /// slices; 4:2:0, 8-bit, progressive), taking MP4-style samples: length-prefixed NAL units, one
 /// picture per sample.
 /// </summary>
 /// <remarks>
 /// Implemented from ITU-T H.264; output is bit-exact with any conforming decoder. Streams that
-/// use other features (interlacing, 8x8 transforms, scaling matrices, FMO, other chroma formats
+/// use other features (interlacing, FMO, other chroma formats
 /// or bit depths) are rejected with
 /// <see cref="NotSupportedException"/>. Frames come out in display order (picture order
 /// count, 8.2.1), held back as far as the stream's max_num_reorder_frames says reordering can
@@ -160,7 +160,7 @@ public sealed class H264Decoder : IVideoDecoder
                 {
                     var reader = nal.CreateReader();
                     var header = SliceHeader.Parse(reader, nal, _sps, _pps, out var sps, out var pps);
-                    CheckSupported(sps, pps);
+                    CheckSupported(sps);
 
                     if (current is null)
                     {
@@ -204,7 +204,7 @@ public sealed class H264Decoder : IVideoDecoder
         }
 
         int poc = _order.Next(header, sps);
-        _decoder.Begin(TakePicture(sps, header.FrameNum, poc));
+        _decoder.Begin(TakePicture(sps, header.FrameNum, poc), sps);
         return new PictureState(header, sps, _decoder, poc);
     }
 
@@ -271,7 +271,7 @@ public sealed class H264Decoder : IVideoDecoder
     /// <summary>The picture being decoded: its first slice header, its SPS, its decoder and its order count.</summary>
     private sealed record PictureState(SliceHeader Header, SequenceParameterSet Sps, PictureDecoder Decoder, int Poc);
 
-    private static void CheckSupported(SequenceParameterSet sps, PictureParameterSet pps)
+    private static void CheckSupported(SequenceParameterSet sps)
     {
         if (sps.ChromaFormatIdc != 1)
         {
@@ -281,11 +281,6 @@ public sealed class H264Decoder : IVideoDecoder
         if (sps.BitDepthLuma != 8 || sps.BitDepthChroma != 8)
         {
             throw new NotSupportedException("Only 8-bit video is supported.");
-        }
-
-        if (sps.HasScalingMatrix || pps.HasScalingMatrix)
-        {
-            throw new NotSupportedException("Scaling matrices are not supported.");
         }
     }
 }

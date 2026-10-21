@@ -1,7 +1,7 @@
 # ManagedCodecs
 
 Pure managed C# media decoders: no native binaries, Native AOT friendly. MJPEG (bit-exact with FFmpeg), H.264
-Constrained Baseline and Main (CAVLC and CABAC, I/P/B, weighted prediction, bit-exact), AAC LC (within 2^-17 of FFmpeg's float output, measured 3e-7), AVI and MP4
+Constrained Baseline, Main and High (CAVLC and CABAC, I/P/B, weighted prediction, 8x8 transform, bit-exact), AAC LC (within 2^-17 of FFmpeg's float output, measured 3e-7), AVI and MP4
 demuxing. README.md has the layout, the roadmap and what is not supported yet.
 
 ## Core idea
@@ -31,8 +31,8 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
 - **New feature, new sample**: add it to tools/make-samples.sh with a comment saying what it isolates, and check
   that it really exercises the feature (the AAC decoder's `Statistics`, `ffmpeg -bsf:v trace_headers` for H.264)
   before relying on it. Encoders often never emit a tool (libx264: no ref list modification, I_PCM, B partitions
-  below 8x8, MMCO other than 1 (which needs b-pyramid), explicit weights in B slices or cabac_init_idc other
-  than 0; FFmpeg's AAC: no pulse data); cover those with unit tests and say so in the docs.
+  below 8x8, MMCO other than 1 (which needs b-pyramid), explicit weights in B slices, cabac_init_idc other
+  than 0 or a second_chroma_qp_index_offset other than the first; FFmpeg's AAC: no pulse data); cover those with unit tests and say so in the docs.
   `tests/ManagedCodecs.Tests/H264/CabacEncoder.cs` (a CABAC encoder and bit writer) builds such H.264 streams.
 - **Code style**: StyleBro (analyzers on build; rules in `.editorconfig`, chosen by `stylebro-migrate init` from this
   code's own conventions). The pre-commit hook formats the staged .cs files (`git config core.hooksPath .githooks`

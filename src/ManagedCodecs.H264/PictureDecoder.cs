@@ -1,3 +1,5 @@
+using System.Runtime.CompilerServices;
+
 namespace ManagedCodecs.H264;
 
 internal enum MbKind : byte
@@ -528,6 +530,7 @@ internal sealed partial class PictureDecoder
         return Cavlc.ReadResidualBlock(r, nC, maxNumCoeff, levels);
     }
 
+    [SkipLocalsInit]
     private void ReadResidual(SliceState slice, BitReader r, int mbAddr, Residual residual, bool is16x16, int cbpLuma, int cbpChroma)
     {
         Span<int> levels = stackalloc int[64];

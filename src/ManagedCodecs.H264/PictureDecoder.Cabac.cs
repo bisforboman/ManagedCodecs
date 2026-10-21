@@ -1,3 +1,5 @@
+using System.Runtime.CompilerServices;
+
 namespace ManagedCodecs.H264;
 
 /// <summary>
@@ -527,6 +529,7 @@ internal sealed partial class PictureDecoder
     /// Returns the number of nonzero coefficients. 8x8 blocks have no coded_block_flag in 4:2:0:
     /// it is inferred to be 1.
     /// </summary>
+    [SkipLocalsInit]
     private static int CabacResidualBlock(Cabac c, BlockCategory category, int codedBlockFlagInc, int maxNumCoeff, Span<int> levels)
     {
         bool is8x8 = category == BlockCategory.Luma8x8;

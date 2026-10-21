@@ -1,7 +1,7 @@
 # ManagedCodecs
 
 Pure managed C# media decoders: no native binaries, Native AOT friendly. MJPEG (bit-exact with FFmpeg), H.264
-Constrained Baseline, Main and High (CAVLC and CABAC, I/P/B, weighted prediction, 8x8 transform, bit-exact), AAC LC (within 2^-17 of FFmpeg's float output, measured 3e-7), AVI and MP4
+Constrained Baseline, Main and High (CAVLC and CABAC, I/P/B, weighted prediction, 8x8 transform, scaling matrices, bit-exact), AAC LC (within 2^-17 of FFmpeg's float output, measured 3e-7), AVI and MP4
 demuxing. README.md has the layout, the roadmap and what is not supported yet.
 
 ## Core idea
@@ -32,7 +32,9 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
   that it really exercises the feature (the AAC decoder's `Statistics`, `ffmpeg -bsf:v trace_headers` for H.264)
   before relying on it. Encoders often never emit a tool (libx264: no ref list modification, I_PCM, B partitions
   below 8x8, MMCO other than 1 (which needs b-pyramid), explicit weights in B slices, cabac_init_idc other
-  than 0 or a second_chroma_qp_index_offset other than the first; FFmpeg's AAC: no pulse data); cover those with unit tests and say so in the docs.
+  than 0, a second_chroma_qp_index_offset other than the first, scaling lists in the SPS or a Cr list of its own;
+  FFmpeg's AAC: no pulse data); cover those with unit tests and say so in the docs.
+  `tests/ManagedCodecs.Tests/H264/ParameterSetRewriter.cs` rewrites a sample's SPS and PPS for such tests.
   `tests/ManagedCodecs.Tests/H264/CabacEncoder.cs` (a CABAC encoder and bit writer) builds such H.264 streams.
 - **Code style**: StyleBro (analyzers on build; rules in `.editorconfig`, chosen by `stylebro-migrate init` from this
   code's own conventions). The pre-commit hook formats the staged .cs files (`git config core.hooksPath .githooks`
@@ -62,3 +64,5 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
   initializer can't later hold stack memory: initialize it from the stack buffer.
 - Whole-vector loads read past the last needed byte: give buffers slack, and check bounds against the furthest load
   (a chroma row read from x + 1 needs 17 bytes, not 16).
+- libx264 (core 164) fails to parse `cqm8iy`/`cqm8py` in `-x264-params` ("Error parsing option", and encodes on
+  with flat 8x8 lists); give scaling lists in a `cqmfile` instead, and check what was really sent.

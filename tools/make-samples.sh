@@ -123,23 +123,24 @@ ff -f lavfi -i "testsrc2=size=320x240:rate=25,fade=in:0:20,fade=out:30:20" -t 2 
 
 # ---- H.264 scaling matrices (High profile) ----
 # libx264 writes them in the PPS only, so absent lists fall back by rule A (Table 7-2). cqm=jvt sends no lists at all:
-# every list is the default one. The custom set gives every list its own values (libx264 has one chroma list per
-# intra and inter, so Cr copies Cb: an absent list falls back to the one before it); with CAVLC; with large weights at
-# a low QP for wide products; and without the 8x8 transform, where the PPS has 6 lists instead of 8. SPS lists, fall-back
-# rule B and useDefaultScalingMatrixFlag never come from libx264; H264ScalingMatrixTests covers them.
-C4I=6,12,14,20,22,24,26,30,32,34,36,40,42,46,50,60
-C4P=12,14,16,18,20,22,24,26,28,30,32,34,36,38,40,44
-C4IC=9,11,13,17,19,21,25,27,29,33,35,37,41,43,47,51
-C4PC=20,19,18,17,16,16,15,15,14,14,13,13,12,12,11,10
-C8I=$(seq -s, 8 2 134)
-C8P=$(seq -s, 70 -1 7)
-CQM="cqm4iy=$C4I:cqm4py=$C4P:cqm4ic=$C4IC:cqm4pc=$C4PC:cqm8iy=$C8I:cqm8py=$C8P"
+# every list is the default one. The custom files give each list its own values (libx264 reads one chroma list per
+# intra and inter, so Cr's list is absent and falls back to Cb's); with CABAC and CAVLC, with large weights at a low
+# QP for wide products, and without the 8x8 transform, where the PPS has 6 lists instead of 8. (This libx264 fails to
+# parse cqm8iy and cqm8py, hence the files.) SPS lists, fall-back rule B, useDefaultScalingMatrixFlag and a Cr list
+# of its own never come from libx264; H264ScalingMatrixTests covers them.
+cqm=$(mktemp -d)
+list() { printf '%s =\n' "$1"; seq -s, "$2" "$3" "$4"; }
+{ list INTRA4X4_LUMA 6 3 51; list INTRA4X4_CHROMAU 9 2 39; list INTER4X4_LUMA 12 2 42; list INTER4X4_CHROMAU 30 -1 15
+  list INTRA8X8_LUMA 8 2 134; list INTER8X8_LUMA 70 -1 7; } > "$cqm/custom.cfg"
+{ list INTRA4X4_LUMA 255 -1 240; list INTRA4X4_CHROMAU 240 1 255; list INTER4X4_LUMA 200 3 245; list INTER4X4_CHROMAU 250 -2 220
+  list INTRA8X8_LUMA 255 -2 129; list INTER8X8_LUMA 128 2 254; } > "$cqm/large.cfg"
 S="testsrc2=size=320x240:rate=25,scroll=h=0.01:v=0.005"
 ff -f lavfi -i "$S" -t 1 "${H[@]}" -bf 2 -refs 2 -x264-params cqm=jvt samples/h264-cqm-jvt.mp4
-ff -f lavfi -i "$S" -t 1 "${H[@]}" -bf 2 -refs 2 -x264-params "$CQM:partitions=all" samples/h264-cqm-custom.mp4
-ff -f lavfi -i "$S" -t 1 "${H[@]}" -bf 2 -refs 2 -x264-params "$CQM:partitions=all:cabac=0" samples/h264-cqm-custom-cavlc.mp4
-ff -f lavfi -i "$S,noise=alls=40:allf=t" -t 0.4 "${H[@]}" -bf 2 -qp 4 -x264-params "cqm4iy=$(seq -s, 255 -1 240):cqm4py=$(seq -s, 200 3 245):cqm8iy=$(seq -s, 255 -2 130):cqm8py=$(seq -s, 128 2 254)" samples/h264-cqm-large.mp4
-ff -f lavfi -i "$S" -t 1 "${H[@]}" -bf 2 -refs 2 -x264-params "$CQM:8x8dct=0" samples/h264-cqm-no8x8.mp4
+ff -f lavfi -i "$S" -t 1 "${H[@]}" -bf 2 -refs 2 -x264-params "cqmfile=$cqm/custom.cfg:partitions=all" samples/h264-cqm-custom.mp4
+ff -f lavfi -i "$S" -t 1 "${H[@]}" -bf 2 -refs 2 -x264-params "cqmfile=$cqm/custom.cfg:partitions=all:cabac=0" samples/h264-cqm-custom-cavlc.mp4
+ff -f lavfi -i "$S,noise=alls=40:allf=t" -t 0.4 "${H[@]}" -bf 2 -qp 4 -x264-params "cqmfile=$cqm/large.cfg" samples/h264-cqm-large.mp4
+ff -f lavfi -i "$S" -t 1 "${H[@]}" -bf 2 -refs 2 -x264-params "cqmfile=$cqm/custom.cfg:8x8dct=0" samples/h264-cqm-no8x8.mp4
+rm -rf "$cqm"
 
 # ---- AAC LC ----
 # Each aimed at one tool; the conformance test checks the tool really occurs. PNS is off except in the PNS samples.

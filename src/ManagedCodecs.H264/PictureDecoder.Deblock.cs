@@ -235,21 +235,28 @@ internal sealed partial class PictureDecoder
     }
 
     /// <summary>
-    /// True when every internal edge of an inter macroblock has bS 0: no luma coefficients and,
-    /// in each list, the same reference picture and motion vector in all 16 blocks (P_Skip,
-    /// uncoded 16x16).
+    /// True when every internal edge of an inter macroblock has bS 0: no luma coefficients and
+    /// uniform motion (P_Skip, uncoded 16x16).
     /// </summary>
-    private bool HasUniformMotionWithoutCoefficients(int mbAddr)
-    {
-        if (Vector128.Create(_totalCoeffLuma.AsSpan(mbAddr * 16, 16)) != Vector128<byte>.Zero)
-        {
-            return false;
-        }
+    private bool HasUniformMotionWithoutCoefficients(int mbAddr) =>
+        Vector128.Create(_totalCoeffLuma.AsSpan(mbAddr * 16, 16)) == Vector128<byte>.Zero && HasUniformMotion(mbAddr);
 
+    /// <summary>
+    /// Whether, in each list, all 16 blocks of an inter macroblock have the same reference
+    /// picture and index and the same motion vector: then it predicts as one 16x16 partition.
+    /// </summary>
+    private bool HasUniformMotion(int mbAddr)
+    {
         for (int list = 0; list < 2; list++)
         {
             var refs = _refPic[list].AsSpan(mbAddr * 4, 4);
             if (refs[1] != refs[0] || refs[2] != refs[0] || refs[3] != refs[0])
+            {
+                return false;
+            }
+
+            // The index too, as explicit weights go by index and two can name one picture.
+            if (MemoryMarshal.Read<uint>(MemoryMarshal.AsBytes(_refIdx[list].AsSpan(mbAddr * 4, 4))) != (byte)_refIdx[list][mbAddr * 4] * 0x01010101u)
             {
                 return false;
             }

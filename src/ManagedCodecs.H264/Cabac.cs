@@ -60,7 +60,7 @@ internal sealed class Cabac
             throw new InvalidDataException("CABAC offset out of range.");
         }
 
-        Refill();
+        Refill(ref _value, ref _bits);
     }
 
     /// <summary>DecodeDecision (9.3.3.2.1) with context variable <paramref name="ctxIdx"/>.</summary>
@@ -185,7 +185,16 @@ internal sealed class Cabac
             return 1;
         }
 
-        Renormalize();
+        // RenormD: the range is at least 254 here, so at most one doubling.
+        if (_range < 256)
+        {
+            _range <<= 1;
+            if (--_bits < 0)
+            {
+                Refill(ref _value, ref _bits);
+            }
+        }
+
         return 0;
     }
 
@@ -205,7 +214,7 @@ internal sealed class Cabac
         int bin = ctx >> 6;
         if (value < scaledRange)
         {
-            context = MpsNext[ctx];
+            context = Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(MpsNext), ctx); // ctx < 128
             if (range >= 256)
             {
                 return bin;
@@ -216,7 +225,7 @@ internal sealed class Cabac
             value -= scaledRange;
             range = lps;
             bin ^= 1;
-            context = LpsNext[ctx];
+            context = Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(LpsNext), ctx);
         }
 
         int shift = BitOperations.LeadingZeroCount((uint)range) - 23;
@@ -273,41 +282,13 @@ internal sealed class Cabac
     }
 
     /// <summary>
-    /// Takes 32 more bits into the read-ahead, after <paramref name="bits"/> went negative: codIOffset
-    /// then needs bits the read-ahead did not hold yet.
+    /// Takes 32 more bits into the read-ahead: at initialization, and whenever <paramref name="bits"/>
+    /// went negative because codIOffset needs bits the read-ahead did not hold yet.
     /// </summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
     private void Refill(ref ulong value, ref int bits)
     {
         value = (value << 32) | _reader.ReadBits(32);
         bits += 32;
-    }
-
-    /// <summary>
-    /// RenormD (9.3.3.2.2): doubles the range until it is at least 256, taking one more bit of the
-    /// read-ahead into codIOffset per doubling.
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void Renormalize()
-    {
-        if (_range < 256)
-        {
-            int shift = BitOperations.LeadingZeroCount((uint)_range) - 23;
-            _range <<= shift;
-            _bits -= shift;
-            if (_bits < 0)
-            {
-                _bits += shift;
-                Refill();
-                _bits -= shift;
-            }
-        }
-    }
-
-    /// <summary>Reads 32 more bits ahead.</summary>
-    private void Refill()
-    {
-        _value = (_value << 32) | _reader.ReadBits(32);
-        _bits += 32;
     }
 }

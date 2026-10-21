@@ -13,22 +13,24 @@ internal readonly record struct IntraNeighbors(bool Left, bool Top, bool TopRigh
 internal static class IntraPrediction
 {
     /// <summary>Intra_4x4 prediction (8.3.1.2) for the block at <paramref name="offset"/>.</summary>
+    [SkipLocalsInit]
     public static void Predict4x4(int mode, byte[] plane, int offset, int stride, IntraNeighbors n)
     {
-        // p[x, -1] for x = -1..7 as top[x + 1]; p[-1, y] for y = 0..3 as left[y].
-        int[] top = new int[9];
-        int[] left = new int[4];
+        // The edge layout of PredictBlock: p[-1, y] for y = 3..0 at e[4..7], p[-1, -1] at e[8],
+        // p[x, -1] for x = 0..7 at e[9..16].
+        Span<int> e = stackalloc int[25];
+        e.Clear();
         if (n.Top)
         {
             for (int x = 0; x < 4; x++)
             {
-                top[x + 1] = plane[offset - stride + x];
+                e[9 + x] = plane[offset - stride + x];
             }
 
             // Missing top-right samples are replaced by p[3, -1] (8.3.1.2).
             for (int x = 4; x < 8; x++)
             {
-                top[x + 1] = n.TopRight ? plane[offset - stride + x] : top[4];
+                e[9 + x] = n.TopRight ? plane[offset - stride + x] : e[12];
             }
         }
 
@@ -36,115 +38,16 @@ internal static class IntraPrediction
         {
             for (int y = 0; y < 4; y++)
             {
-                left[y] = plane[offset + (y * stride) - 1];
+                e[7 - y] = plane[offset + (y * stride) - 1];
             }
         }
 
         if (n.TopLeft)
         {
-            top[0] = plane[offset - stride - 1];
+            e[8] = plane[offset - stride - 1];
         }
 
-        int T(int x) => top[x + 1];              // p[x, -1], x >= -1
-        int L(int y) => y < 0 ? top[0] : left[y]; // p[-1, y], y >= -1
-
-        for (int y = 0; y < 4; y++)
-        {
-            for (int x = 0; x < 4; x++)
-            {
-                int value;
-                switch (mode)
-                {
-                    case 0: // Vertical
-                        Require(n.Top, mode);
-                        value = T(x);
-                        break;
-
-                    case 1: // Horizontal
-                        Require(n.Left, mode);
-                        value = L(y);
-                        break;
-
-                    case 2: // DC
-                        value = (n.Left, n.Top) switch
-                        {
-                            (true, true) => (T(0) + T(1) + T(2) + T(3) + L(0) + L(1) + L(2) + L(3) + 4) >> 3,
-                            (true, false) => (L(0) + L(1) + L(2) + L(3) + 2) >> 2,
-                            (false, true) => (T(0) + T(1) + T(2) + T(3) + 2) >> 2,
-                            _ => 128,
-                        };
-                        break;
-
-                    case 3: // Diagonal_Down_Left
-                        Require(n.Top, mode);
-                        value = x == 3 && y == 3
-                            ? (T(6) + (3 * T(7)) + 2) >> 2
-                            : (T(x + y) + (2 * T(x + y + 1)) + T(x + y + 2) + 2) >> 2;
-                        break;
-
-                    case 4: // Diagonal_Down_Right
-                        Require(n.Top && n.Left && n.TopLeft, mode);
-                        value = x > y ? (T(x - y - 2) + (2 * T(x - y - 1)) + T(x - y) + 2) >> 2
-                            : x < y ? (L(y - x - 2) + (2 * L(y - x - 1)) + L(y - x) + 2) >> 2
-                            : (T(0) + (2 * T(-1)) + L(0) + 2) >> 2;
-                        break;
-
-                    case 5: // Vertical_Right
-                        {
-                            Require(n.Top && n.Left && n.TopLeft, mode);
-                            int z = (2 * x) - y;
-                            value = z switch
-                            {
-                                >= 0 when (z & 1) == 0 => (T(x - (y >> 1) - 1) + T(x - (y >> 1)) + 1) >> 1,
-                                >= 0 => (T(x - (y >> 1) - 2) + (2 * T(x - (y >> 1) - 1)) + T(x - (y >> 1)) + 2) >> 2,
-                                -1 => (L(0) + (2 * L(-1)) + T(0) + 2) >> 2,
-                                _ => (L(y - 1) + (2 * L(y - 2)) + L(y - 3) + 2) >> 2,
-                            };
-                            break;
-                        }
-
-                    case 6: // Horizontal_Down
-                        {
-                            Require(n.Top && n.Left && n.TopLeft, mode);
-                            int z = (2 * y) - x;
-                            value = z switch
-                            {
-                                >= 0 when (z & 1) == 0 => (L(y - (x >> 1) - 1) + L(y - (x >> 1)) + 1) >> 1,
-                                >= 0 => (L(y - (x >> 1) - 2) + (2 * L(y - (x >> 1) - 1)) + L(y - (x >> 1)) + 2) >> 2,
-                                -1 => (L(0) + (2 * L(-1)) + T(0) + 2) >> 2,
-                                _ => (T(x - 1) + (2 * T(x - 2)) + T(x - 3) + 2) >> 2,
-                            };
-                            break;
-                        }
-
-                    case 7: // Vertical_Left
-                        Require(n.Top, mode);
-                        value = (y & 1) == 0
-                            ? (T(x + (y >> 1)) + T(x + (y >> 1) + 1) + 1) >> 1
-                            : (T(x + (y >> 1)) + (2 * T(x + (y >> 1) + 1)) + T(x + (y >> 1) + 2) + 2) >> 2;
-                        break;
-
-                    case 8: // Horizontal_Up
-                        {
-                            Require(n.Left, mode);
-                            int z = x + (2 * y);
-                            value = z switch
-                            {
-                                < 5 when (z & 1) == 0 => (L(y + (x >> 1)) + L(y + (x >> 1) + 1) + 1) >> 1,
-                                < 5 => (L(y + (x >> 1)) + (2 * L(y + (x >> 1) + 1)) + L(y + (x >> 1) + 2) + 2) >> 2,
-                                5 => (L(2) + (3 * L(3)) + 2) >> 2,
-                                _ => L(3),
-                            };
-                            break;
-                        }
-
-                    default:
-                        throw new InvalidDataException($"Invalid Intra4x4 prediction mode {mode}.");
-                }
-
-                plane[offset + (y * stride) + x] = (byte)value;
-            }
-        }
+        PredictBlock(4, mode, e, plane, offset, stride, n);
     }
 
     /// <summary>
@@ -220,68 +123,140 @@ internal static class IntraPrediction
             e[0] = (p[1] + (3 * p[0]) + 2) >> 2;
         }
 
-        int dc = 128;
+        PredictBlock(8, mode, e, plane, offset, stride, n);
+    }
+
+    /// <summary>
+    /// Intra_4x4 or Intra_8x8 prediction of an <paramref name="size"/> x <paramref name="size"/>
+    /// block from its neighbouring samples (8.3.1.2.1 to .9, 8.3.2.2.2 to .10, the same equations at
+    /// either size): p[-1, y] at e[7 - y] for y = -1..size - 1 and p[x, -1] at e[9 + x] for
+    /// x = 0..2 * size - 1. The mode is chosen once for the whole block.
+    /// </summary>
+    private static void PredictBlock(int size, int mode, ReadOnlySpan<int> e, byte[] plane, int offset, int stride, IntraNeighbors n)
+    {
+        int last = size - 1;
         switch (mode)
         {
-            case 0 or 3 or 7:
+            case 0: // Vertical
                 Require(n.Top, mode);
-                break;
-            case 1 or 8:
-                Require(n.Left, mode);
-                break;
-            case 2:
-                int sumTop = 0;
-                int sumLeft = 0;
-                for (int i = 0; i < 8; i++)
+                for (int y = 0; y < size; y++)
                 {
-                    sumTop += e[9 + i];
-                    sumLeft += e[i];
+                    for (int x = 0; x < size; x++)
+                    {
+                        plane[offset + (y * stride) + x] = (byte)T(e, x);
+                    }
                 }
 
-                dc = (n.Left, n.Top) switch
-                {
-                    (true, true) => (sumTop + sumLeft + 8) >> 4,
-                    (true, false) => (sumLeft + 4) >> 3,
-                    (false, true) => (sumTop + 4) >> 3,
-                    _ => 128,
-                };
                 break;
-            case 4 or 5 or 6:
+
+            case 1: // Horizontal
+                Require(n.Left, mode);
+                for (int y = 0; y < size; y++)
+                {
+                    plane.AsSpan(offset + (y * stride), size).Fill((byte)L(e, y));
+                }
+
+                break;
+
+            case 2: // DC
+                {
+                    int sumTop = 0;
+                    int sumLeft = 0;
+                    for (int i = 0; i < size; i++)
+                    {
+                        sumTop += T(e, i);
+                        sumLeft += L(e, i);
+                    }
+
+                    int log2 = size == 4 ? 2 : 3;
+                    int dc = (n.Left, n.Top) switch
+                    {
+                        (true, true) => (sumTop + sumLeft + size) >> (log2 + 1),
+                        (true, false) => (sumLeft + (size >> 1)) >> log2,
+                        (false, true) => (sumTop + (size >> 1)) >> log2,
+                        _ => 128,
+                    };
+
+                    for (int y = 0; y < size; y++)
+                    {
+                        plane.AsSpan(offset + (y * stride), size).Fill((byte)dc);
+                    }
+
+                    break;
+                }
+
+            case 3: // Diagonal_Down_Left
+                Require(n.Top, mode);
+                for (int y = 0; y < size; y++)
+                {
+                    for (int x = 0; x < size; x++)
+                    {
+                        plane[offset + (y * stride) + x] = (byte)(x == last && y == last
+                            ? (T(e, (2 * size) - 2) + (3 * T(e, (2 * size) - 1)) + 2) >> 2
+                            : Filter3(T(e, x + y), T(e, x + y + 1), T(e, x + y + 2)));
+                    }
+                }
+
+                break;
+
+            case 4: // Diagonal_Down_Right
                 Require(n.Top && n.Left && n.TopLeft, mode);
-                break;
-            default:
-                throw new InvalidDataException($"Invalid Intra8x8 prediction mode {mode}.");
-        }
-
-        for (int y = 0; y < 8; y++)
-        {
-            for (int x = 0; x < 8; x++)
-            {
-                int value = mode switch
+                for (int y = 0; y < size; y++)
                 {
-                    0 => T(e, x),
-                    1 => L(e, y),
-                    2 => dc,
-                    3 => x == 7 && y == 7
-                        ? (T(e, 14) + (3 * T(e, 15)) + 2) >> 2
-                        : Filter3(T(e, x + y), T(e, x + y + 1), T(e, x + y + 2)),
-                    4 => x > y ? Filter3(T(e, x - y - 2), T(e, x - y - 1), T(e, x - y))
-                        : x < y ? Filter3(L(e, y - x - 2), L(e, y - x - 1), L(e, y - x))
-                        : Filter3(T(e, 0), T(e, -1), L(e, 0)),
-                    5 => VerticalRight(e, x, y),
-                    6 => HorizontalDown(e, x, y),
-                    7 => (y & 1) == 0
-                        ? (T(e, x + (y >> 1)) + T(e, x + (y >> 1) + 1) + 1) >> 1
-                        : Filter3(T(e, x + (y >> 1)), T(e, x + (y >> 1) + 1), T(e, x + (y >> 1) + 2)),
-                    _ => HorizontalUp(e, x, y),
-                };
+                    for (int x = 0; x < size; x++)
+                    {
+                        plane[offset + (y * stride) + x] = (byte)(x > y ? Filter3(T(e, x - y - 2), T(e, x - y - 1), T(e, x - y))
+                            : x < y ? Filter3(L(e, y - x - 2), L(e, y - x - 1), L(e, y - x))
+                            : Filter3(T(e, 0), T(e, -1), L(e, 0)));
+                    }
+                }
 
-                plane[offset + (y * stride) + x] = (byte)value;
-            }
+                break;
+
+            case 5 or 6: // Vertical_Right, Horizontal_Down
+                Require(n.Top && n.Left && n.TopLeft, mode);
+                for (int y = 0; y < size; y++)
+                {
+                    for (int x = 0; x < size; x++)
+                    {
+                        plane[offset + (y * stride) + x] = (byte)(mode == 5 ? VerticalRight(e, x, y) : HorizontalDown(e, x, y));
+                    }
+                }
+
+                break;
+
+            case 7: // Vertical_Left
+                Require(n.Top, mode);
+                for (int y = 0; y < size; y++)
+                {
+                    for (int x = 0; x < size; x++)
+                    {
+                        plane[offset + (y * stride) + x] = (byte)((y & 1) == 0
+                            ? (T(e, x + (y >> 1)) + T(e, x + (y >> 1) + 1) + 1) >> 1
+                            : Filter3(T(e, x + (y >> 1)), T(e, x + (y >> 1) + 1), T(e, x + (y >> 1) + 2)));
+                    }
+                }
+
+                break;
+
+            case 8: // Horizontal_Up
+                Require(n.Left, mode);
+                for (int y = 0; y < size; y++)
+                {
+                    for (int x = 0; x < size; x++)
+                    {
+                        plane[offset + (y * stride) + x] = (byte)HorizontalUp(e, x, y, last);
+                    }
+                }
+
+                break;
+
+            default:
+                throw new InvalidDataException($"Invalid intra NxN prediction mode {mode}.");
         }
     }
 
-    // Filtered neighbours of Predict8x8: p'[x, -1] for x >= -1 and p'[-1, y] for y >= -1.
+    // Neighbours in PredictBlock's layout: p[x, -1] for x >= -1 and p[-1, y] for y >= -1.
     private static int T(ReadOnlySpan<int> e, int x) => e[9 + x];
 
     private static int L(ReadOnlySpan<int> e, int y) => e[7 - y];
@@ -312,15 +287,17 @@ internal static class IntraPrediction
         };
     }
 
-    private static int HorizontalUp(ReadOnlySpan<int> e, int x, int y)
+    /// <summary>Horizontal_Up; <paramref name="last"/> is the block size minus 1, so zHU runs to 2 * last + last.</summary>
+    private static int HorizontalUp(ReadOnlySpan<int> e, int x, int y, int last)
     {
         int z = x + (2 * y);
+        int edge = (2 * last) - 1; // 5 for 4x4, 13 for 8x8
         return z switch
         {
-            < 13 when (z & 1) == 0 => (L(e, y + (x >> 1)) + L(e, y + (x >> 1) + 1) + 1) >> 1,
-            < 13 => Filter3(L(e, y + (x >> 1)), L(e, y + (x >> 1) + 1), L(e, y + (x >> 1) + 2)),
-            13 => (L(e, 6) + (3 * L(e, 7)) + 2) >> 2,
-            _ => L(e, 7),
+            _ when z < edge && (z & 1) == 0 => (L(e, y + (x >> 1)) + L(e, y + (x >> 1) + 1) + 1) >> 1,
+            _ when z < edge => Filter3(L(e, y + (x >> 1)), L(e, y + (x >> 1) + 1), L(e, y + (x >> 1) + 2)),
+            _ when z == edge => (L(e, last - 1) + (3 * L(e, last)) + 2) >> 2,
+            _ => L(e, last),
         };
     }
 

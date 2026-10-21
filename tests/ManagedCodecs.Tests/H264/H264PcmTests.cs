@@ -21,7 +21,7 @@ public class H264PcmTests
     {
         var decoder = new H264Decoder(AvcC(Sps(), Pps(cabac)));
         var slice = cabac ? CabacSlice() : CavlcSlice();
-        var nal = Nal(3, 5, slice);
+        var nal = slice.ToNal(3, 5);
         var packet = new byte[4 + nal.Length];
         System.Buffers.Binary.BinaryPrimitives.WriteInt32BigEndian(packet, nal.Length);
         nal.CopyTo(packet, 4);
@@ -148,28 +148,8 @@ public class H264PcmTests
 
     private static byte[] AvcC(BitWriter sps, BitWriter pps)
     {
-        var spsNal = Nal(3, 7, sps);
-        var ppsNal = Nal(3, 8, pps);
+        var spsNal = sps.ToNal(3, 7);
+        var ppsNal = pps.ToNal(3, 8);
         return [1, 77, 0, 30, 0xFF, 0xE1, 0, (byte)spsNal.Length, .. spsNal, 1, 0, (byte)ppsNal.Length, .. ppsNal];
-    }
-
-    /// <summary>A NAL unit with emulation prevention bytes inserted (7.4.1).</summary>
-    private static byte[] Nal(int refIdc, int type, BitWriter payload)
-    {
-        var nal = new List<byte> { (byte)((refIdc << 5) | type) };
-        int zeros = 0;
-        foreach (byte b in payload.ToBytes())
-        {
-            if (zeros >= 2 && b <= 3)
-            {
-                nal.Add(3);
-                zeros = 0;
-            }
-
-            nal.Add(b);
-            zeros = b == 0 ? zeros + 1 : 0;
-        }
-
-        return [.. nal];
     }
 }

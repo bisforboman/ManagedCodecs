@@ -143,8 +143,9 @@ what the two commands above include and are not comparable with FFmpeg's `bench:
    POC types 0, 1 and 2, constrained intra prediction and the 8x8 transform, and frames switching
    between frame and field coding. Field marking that JM's streams never reach (the second field
    of a frame not sliding the window, memory management operation 1 by field PicNum) has unit
-   tests; B field pictures, other memory management operations in field pictures and a field
-   without its pair throw NotSupportedException.
+   tests; B field pictures, B frames whose first list 1 reference was coded as fields, other
+   memory management operations in field pictures and a field without its pair throw
+   NotSupportedException.
    Streams from a second encoder, OpenH264, are checked against FFmpeg too: long-term references
    with reference list modification and memory management operations 1, 4 and 6, POC type 2,
    non-reference P frames, slices by size, deblocking that stops at slice edges, changing and

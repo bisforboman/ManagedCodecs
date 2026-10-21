@@ -202,6 +202,12 @@ public sealed class H264Decoder : IVideoDecoder
                         SliceType.B => _references.BuildLists(header, current.Sps, current.Poc),
                         _ => (new List<Picture>(), new List<Picture>()),
                     };
+                    if (list1.Count > 0 && list1[0].Frame.CodedAsFields)
+                    {
+                        // Its co-located motion is stored by field (8.4.1.2.1), which direct prediction does not read yet.
+                        throw new NotSupportedException("B pictures whose first list 1 reference was coded as two field pictures are not supported.");
+                    }
+
                     current.Decoder.DecodeSlice(header, pps, reader, list0, list1);
                     break;
                 }

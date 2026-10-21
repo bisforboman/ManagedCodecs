@@ -557,27 +557,29 @@ internal sealed partial class PictureDecoder
         {
             ReadResidual8x8(slice, r, mbAddr, residual, cbpLuma, levels);
         }
-
-        for (int idx = 0; idx < 16 && !_transform8x8[mbAddr]; idx++)
+        else
         {
-            if ((cbpLuma & (1 << (idx >> 2))) == 0)
+            for (int idx = 0; idx < 16; idx++)
             {
-                continue;
-            }
+                if ((cbpLuma & (1 << (idx >> 2))) == 0)
+                {
+                    continue;
+                }
 
-            var (x, y) = BlockPosition(idx);
-            var block = residual.Luma[(y * 4) + x];
-            int first = is16x16 ? 1 : 0;
-            int count = ReadBlock(slice, r, mbAddr, is16x16 ? BlockCategory.LumaAc : BlockCategory.Luma4x4, x, y, 0, 16 - first, levels);
-            lumaCounts[(y * 4) + x] = (byte)count;
-            if (count == 0)
-            {
-                continue; // reconstruction reads the counts and leaves this block alone
-            }
+                var (x, y) = BlockPosition(idx);
+                var block = residual.Luma[(y * 4) + x];
+                int first = is16x16 ? 1 : 0;
+                int count = ReadBlock(slice, r, mbAddr, is16x16 ? BlockCategory.LumaAc : BlockCategory.Luma4x4, x, y, 0, 16 - first, levels);
+                lumaCounts[(y * 4) + x] = (byte)count;
+                if (count == 0)
+                {
+                    continue; // reconstruction reads the counts and leaves this block alone
+                }
 
-            for (int k = first; k < 16; k++)
-            {
-                block[zigZag[k]] = levels[k - first];
+                for (int k = first; k < 16; k++)
+                {
+                    block[zigZag[k]] = levels[k - first];
+                }
             }
         }
 

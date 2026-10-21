@@ -131,7 +131,7 @@ ff -f lavfi -i "testsrc2=size=321x239:rate=25,scroll=v=0.02" -t 1 "${H[@]}" -bf 
 ff -f lavfi -i "testsrc2=size=320x240:rate=25,scroll=h=0.02,noise=alls=10:allf=t" -t 1 "${H[@]}" -bf 2 -refs 2 -x264-params constrained-intra=1:chroma-qp-offset=4 samples/h264-high-constrained-intra.mp4
 ff -f lavfi -i "testsrc2=size=320x240:rate=25,fade=in:0:20,fade=out:30:20" -t 2 "${H[@]}" samples/h264-high-default.mp4
 
-# ---- H.264 interlaced: MBAFF (I and P slices so far) ----
+# ---- H.264 interlaced: MBAFF ----
 # Interlaced content (two moving frames woven into one) with libx264's macroblock-adaptive frame/field coding: each
 # macroblock pair is coded as a frame or a field pair, and testsrc2's still background next to its moving parts gives
 # both kinds side by side and above one another (the conformance test checks every mixture occurs). CABAC with the 8x8
@@ -149,6 +149,14 @@ ff -f lavfi -i testsrc2=size=320x240:rate=50 -t 0.6 "${I[@]}" -bf 0 -refs 3 samp
 ff -f lavfi -i testsrc2=size=320x256:rate=50 -t 0.6 "${I[@]}" -bf 0 -refs 3 -x264-params cabac=0 samples/h264-mbaff-p-cavlc.mp4
 ff -f lavfi -i testsrc2=size=320x240:rate=50,noise=alls=8:allf=t -t 1 "${I[@]}" -bf 0 -refs 4 -x264-params partitions=all:me=umh:merange=32 samples/h264-mbaff-p-motion.mp4
 ff -f lavfi -i testsrc2=size=320x256:rate=50 -t 0.6 "${I[@]}" -bf 0 -refs 2 -x264-params slices=4:8x8dct=0 samples/h264-mbaff-p-slices.mp4
+# B slices: temporal and spatial direct prediction in field and frame macroblocks, with co-located pairs of the
+# other kind (the conformance test checks both occur), implicit weights from field order counts, B-pyramid on noisy
+# motion, slices, and libx264's stock interlaced settings.
+ff -f lavfi -i testsrc2=size=320x240:rate=50 -t 1 "${I[@]}" -bf 3 -refs 3 -x264-params direct=temporal samples/h264-mbaff-b-temporal.mp4
+ff -f lavfi -i testsrc2=size=320x256:rate=50 -t 1 "${I[@]}" -bf 3 -refs 3 -x264-params direct=spatial:cabac=0 samples/h264-mbaff-b-spatial-cavlc.mp4
+ff -f lavfi -i testsrc2=size=320x240:rate=50,noise=alls=8:allf=t -t 2 "${I[@]}" -bf 3 -refs 4 -x264-params b-pyramid=normal:partitions=all:me=umh:direct=auto samples/h264-mbaff-b-pyramid.mp4
+ff -f lavfi -i testsrc2=size=320x256:rate=50 -t 1 "${I[@]}" -bf 2 -refs 2 -x264-params slices=4:direct=temporal:cabac=0 samples/h264-mbaff-b-slices-temporal.mp4
+ff -f lavfi -i testsrc2=size=320x240:rate=50,fade=in:0:40 -t 2 "${I[@]}" samples/h264-mbaff-default.mp4
 # Interlaced-capable parameter sets (frame_mbs_only_flag 0) on progressive frames, with P and B frames.
 ff -f lavfi -i "testsrc2=size=320x240:rate=25,scroll=h=0.01" -t 1 "${H[@]}" -bf 2 -x264-params fake-interlaced=1 samples/h264-fake-interlaced.mp4
 

@@ -21,6 +21,7 @@ internal sealed class Picture
         MvY = [new short[mbCount * 16], new short[mbCount * 16]];
         RefIdx = [new sbyte[mbCount * 4], new sbyte[mbCount * 4]];
         RefId = [new long[mbCount * 4], new long[mbCount * 4]];
+        FieldMb = new bool[mbCount];
         Frame = this;
         Parity = -1;
     }
@@ -39,6 +40,7 @@ internal sealed class Picture
         MvY = frame.MvY;
         RefIdx = frame.RefIdx;
         RefId = frame.RefId;
+        FieldMb = frame.FieldMb;
         Frame = frame;
         Parity = parity;
     }
@@ -57,6 +59,9 @@ internal sealed class Picture
 
     private Picture? _top;
     private Picture? _bottom;
+    private int _poc;
+    private bool _shortTerm;
+    private bool _longTerm;
 
     public int WidthInMbs { get; }
 
@@ -78,8 +83,23 @@ internal sealed class Picture
     /// </summary>
     public long Id { get; set; }
 
-    /// <summary>PicOrderCnt (8.2.1).</summary>
-    public int Poc { get; set; }
+    /// <summary>PicOrderCnt (8.2.1): of the frame, the smaller of its fields'; of a field view, that field's.</summary>
+    public int Poc
+    {
+        get => Parity < 0 ? _poc : Parity == 0 ? Frame.TopPoc : Frame.BottomPoc;
+        set => _poc = value;
+    }
+
+    /// <summary>TopFieldOrderCnt and BottomFieldOrderCnt of the frame.</summary>
+    public int TopPoc { get; set; }
+
+    public int BottomPoc { get; set; }
+
+    /// <summary>Per macroblock (MBAFF addresses): coded as a field macroblock; all false outside MBAFF frames.</summary>
+    public bool[] FieldMb { get; }
+
+    /// <summary>Whether the frame was coded with macroblock-adaptive frame/field coding (its <see cref="FieldMb"/> and motion are in MBAFF addresses).</summary>
+    public bool Mbaff { get; set; }
 
     /// <summary>Motion vector per list (0, 1) and luma 4x4 block, in quarter samples.</summary>
     public short[][] MvX { get; }
@@ -97,9 +117,17 @@ internal sealed class Picture
     /// <summary>FrameNumWrap (8.2.4.1), updated whenever reference lists are built.</summary>
     public int FrameNumWrap { get; set; }
 
-    public bool IsShortTermReference { get; set; }
+    public bool IsShortTermReference
+    {
+        get => Parity < 0 ? _shortTerm : Frame.IsShortTermReference;
+        set => _shortTerm = value;
+    }
 
-    public bool IsLongTermReference { get; set; }
+    public bool IsLongTermReference
+    {
+        get => Parity < 0 ? _longTerm : Frame.IsLongTermReference;
+        set => _longTerm = value;
+    }
 
     public int LongTermFrameIdx { get; set; }
 

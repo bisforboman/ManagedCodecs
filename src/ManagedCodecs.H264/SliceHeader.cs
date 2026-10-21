@@ -114,10 +114,6 @@ internal sealed class SliceHeader
         }
 
         bool mbaff = sps.MbAdaptiveFrameField;
-        if (mbaff && type == SliceType.B)
-        {
-            throw new NotSupportedException("B slices in MBAFF frames are not supported.");
-        }
 
         int idrPicId = isIdr ? (int)r.ReadUe() : 0;
 

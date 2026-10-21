@@ -459,7 +459,7 @@ internal sealed partial class PictureDecoder
         bool field = IsFieldMb(mbAddr);
         int refIdx0 = _refIdx[0][part];
         int refIdx1 = _refIdx[1][part];
-        var weighting = Weighting(slice, field ? refIdx0 >> 1 : refIdx0, field ? refIdx1 >> 1 : refIdx1, bi);
+        var weighting = Weighting(slice, field ? refIdx0 >> 1 : refIdx0, field ? refIdx1 >> 1 : refIdx1, bi, mbAddr, ref0, ref1);
 
         if (!bi)
         {
@@ -571,7 +571,11 @@ internal sealed partial class PictureDecoder
 
     private static readonly PartitionWeights DefaultWeights = new(true, 0, 0, null, 0, 0, 0, 0);
 
-    private PartitionWeights Weighting(SliceState slice, int refIdx0, int refIdx1, bool bi)
+    /// <remarks>
+    /// Implicit weights come from the order counts of the partition's references: for a field
+    /// macroblock of an MBAFF frame its fields', and the current picture's field of its parity.
+    /// </remarks>
+    private PartitionWeights Weighting(SliceState slice, int refIdx0, int refIdx1, bool bi, int mbAddr, Picture? ref0, Picture? ref1)
     {
         var header = slice.Header;
         if (header.Weights is { } table)
@@ -603,13 +607,19 @@ internal sealed partial class PictureDecoder
 
         // Implicit (8.4.3): weights 64 - DistScaleFactor / 4 and DistScaleFactor / 4 out of 64,
         // from the order count distances, unless the references are long-term, coincide or too far.
-        var pic0 = slice.RefList0[refIdx0];
-        var pic1 = slice.RefList1[refIdx1];
+        var pic0 = ref0!;
+        var pic1 = ref1!;
+        int currentPoc = !IsFieldMb(mbAddr) ? Picture.Poc : (mbAddr & 1) == 0 ? Picture.TopPoc : Picture.BottomPoc;
+        if (IsFieldMb(mbAddr))
+        {
+            Statistics.ImplicitField++;
+        }
+
         int w0 = 32;
         int w1 = 32;
         if (pic1.Poc != pic0.Poc && !pic0.IsLongTermReference && !pic1.IsLongTermReference)
         {
-            int tb = Math.Clamp(Picture.Poc - pic0.Poc, -128, 127);
+            int tb = Math.Clamp(currentPoc - pic0.Poc, -128, 127);
             int td = Math.Clamp(pic1.Poc - pic0.Poc, -128, 127);
             int tx = (16384 + Math.Abs(td / 2)) / td;
             int distScaleFactor = Math.Clamp(((tb * tx) + 32) >> 6, -1024, 1023);

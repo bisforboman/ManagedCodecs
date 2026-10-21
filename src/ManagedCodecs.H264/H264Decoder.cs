@@ -214,7 +214,9 @@ public sealed class H264Decoder : IVideoDecoder
         }
 
         int poc = _order.Next(header, sps);
-        _decoder.Begin(TakePicture(sps, header.FrameNum, poc), sps);
+        var picture = TakePicture(sps, header.FrameNum, poc);
+        (picture.TopPoc, picture.BottomPoc) = _order.Fields;
+        _decoder.Begin(picture, sps);
         return new PictureState(header, sps, _decoder, poc);
     }
 
@@ -257,6 +259,9 @@ public sealed class H264Decoder : IVideoDecoder
         // Every macroblock of a complete picture is written, so the old samples need no clearing.
         picture.Id = ++_pictureCount;
         picture.Poc = poc;
+        picture.TopPoc = poc;
+        picture.BottomPoc = poc;
+        picture.Mbaff = false;
         picture.FrameNum = frameNum;
         picture.FrameNumWrap = 0;
         picture.IsShortTermReference = false;

@@ -231,12 +231,7 @@ internal sealed class ReferenceList
         }
         else
         {
-            // Sliding window (8.2.5.3): drop the oldest short-term picture when the DPB is full.
-            if (_pictures.Count >= Math.Max(sps.MaxNumRefFrames, 1))
-            {
-                var oldest = _pictures.Where(p => p.IsShortTermReference).MinBy(p => p.FrameNumWrap);
-                Unmark(oldest);
-            }
+            SlidingWindow(sps);
         }
 
         if (!currentIsLongTerm)
@@ -245,6 +240,28 @@ internal sealed class ReferenceList
         }
 
         _pictures.Add(current);
+    }
+
+    /// <summary>
+    /// Marks a frame inferred for a gap in frame_num (8.2.5.2) as a short-term reference, after
+    /// the sliding window made room for it.
+    /// </summary>
+    public void MarkNonExisting(Picture picture, SequenceParameterSet sps)
+    {
+        UpdateFrameNumWrap(picture.FrameNum, 1 << sps.Log2MaxFrameNum);
+        SlidingWindow(sps);
+        picture.IsShortTermReference = true;
+        _pictures.Add(picture);
+    }
+
+    /// <summary>Sliding window (8.2.5.3): drops the oldest short-term picture when the DPB is full.</summary>
+    private void SlidingWindow(SequenceParameterSet sps)
+    {
+        if (_pictures.Count >= Math.Max(sps.MaxNumRefFrames, 1))
+        {
+            var oldest = _pictures.Where(p => p.IsShortTermReference).MinBy(p => p.FrameNumWrap);
+            Unmark(oldest);
+        }
     }
 
     private Picture? ShortTerm(int picNum) =>

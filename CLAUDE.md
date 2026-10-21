@@ -34,7 +34,8 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
   below 8x8, MMCO other than 1 (which needs b-pyramid), explicit weights in B slices, cabac_init_idc other
   than 0, a second_chroma_qp_index_offset other than the first, scaling lists in the SPS or a Cr list of its own;
   FFmpeg's AAC: no pulse data). A second encoder covers some: OpenH264 (`tools/make-openh264-samples.sh`, its
-  streams committed in `samples/openh264/`) writes long-term references, MMCO 4 and 6, POC type 2 and SVC. Cover
+  streams committed in `samples/openh264/`) writes long-term references, MMCO 4 and 6, POC type 2, SVC, and
+  frame_num gaps once temporal layers are dropped. Cover
   the rest with unit tests and say so in the docs.
   `tests/ManagedCodecs.Tests/H264/ParameterSetRewriter.cs` rewrites a sample's SPS and PPS for such tests.
   `tests/ManagedCodecs.Tests/H264/CabacEncoder.cs` (a CABAC encoder and bit writer) builds such H.264 streams.

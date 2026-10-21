@@ -83,12 +83,37 @@ internal sealed class PictureOrder
         return mmco5 ? poc - Math.Min(top, bottom) : poc;
     }
 
+    /// <summary>
+    /// PicOrderCnt of a frame inferred for a gap in frame_num (8.2.5.2), a reference frame without
+    /// order count deltas. Types 1 and 2 derive it from <paramref name="frameNum"/> and move their
+    /// state on, as for a decoded frame; type 0 has nothing to derive it from, so the frame gets 0
+    /// and the state stays.
+    /// </summary>
+    public int NextInferred(int frameNum, SequenceParameterSet sps)
+    {
+        if (sps.PicOrderCntType == 0)
+        {
+            return 0;
+        }
+
+        int frameNumOffset = _prevFrameNum > frameNum ? _prevFrameNumOffset + (1 << sps.Log2MaxFrameNum) : _prevFrameNumOffset;
+        int poc = sps.PicOrderCntType == 1
+            ? Type1(frameNum, isReference: true, 0, 0, sps, frameNumOffset).Top
+            : 2 * (frameNumOffset + frameNum);
+        _prevFrameNumOffset = frameNumOffset;
+        _prevFrameNum = frameNum;
+        return poc;
+    }
+
     /// <summary>8-6 to 8-11.</summary>
-    private static (int Top, int Bottom) Type1(SliceHeader header, SequenceParameterSet sps, int frameNumOffset)
+    private static (int Top, int Bottom) Type1(SliceHeader header, SequenceParameterSet sps, int frameNumOffset) =>
+        Type1(header.FrameNum, header.NalRefIdc != 0, header.DeltaPicOrderCnt0, header.DeltaPicOrderCnt1, sps, frameNumOffset);
+
+    private static (int Top, int Bottom) Type1(int frameNum, bool isReference, int delta0, int delta1, SequenceParameterSet sps, int frameNumOffset)
     {
         var offsets = sps.OffsetForRefFrame;
-        int absFrameNum = offsets.Length != 0 ? frameNumOffset + header.FrameNum : 0;
-        if (header.NalRefIdc == 0 && absFrameNum > 0)
+        int absFrameNum = offsets.Length != 0 ? frameNumOffset + frameNum : 0;
+        if (!isReference && absFrameNum > 0)
         {
             absFrameNum--;
         }
@@ -105,13 +130,13 @@ internal sealed class PictureOrder
             }
         }
 
-        if (header.NalRefIdc == 0)
+        if (!isReference)
         {
             expected += sps.OffsetForNonRefPic;
         }
 
-        int top = expected + header.DeltaPicOrderCnt0;
-        int bottom = top + sps.OffsetForTopToBottomField + header.DeltaPicOrderCnt1;
+        int top = expected + delta0;
+        int bottom = top + sps.OffsetForTopToBottomField + delta1;
         return (top, bottom);
     }
 }

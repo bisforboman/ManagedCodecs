@@ -38,13 +38,20 @@ internal static partial class InterPrediction
 
         int xFrac = mvX & 3;
         int yFrac = mvY & 3;
+        int maxX = (reference.WidthInMbs * 16) - 1;
+
+        // Full sample motion inside the picture: a plain copy, which needs no margin for the
+        // filter taps (blocks at the picture's edges, or still ones).
+        if (xFrac == 0 && yFrac == 0 && CopyInside(plane, stride, maxX, maxY, x + (mvX >> 2), y + (mvY >> 2), width, height, output, outputStride))
+        {
+            return;
+        }
 
         // Samples -2 .. size + 2 around the integer position. Read them straight from the
         // reference when they are inside it (with room for 16-byte loads), else from a copy
         // with the coordinates clamped.
         int left = x + (mvX >> 2) - 2;
         int top = y + (mvY >> 2) - 2;
-        int maxX = (reference.WidthInMbs * 16) - 1;
         Span<byte> copy = stackalloc byte[(WindowStride * WindowStride) + 32]; // slack for 16-byte loads
         ReadOnlySpan<byte> window = copy;
         int ws;
@@ -154,12 +161,16 @@ internal static partial class InterPrediction
 
         int xFrac = mvX & 7;
         int yFrac = mvY & 7;
-
-        // As for luma: read the reference directly when the (width + 1) x (height + 1) area is
-        // inside it with room for 16-byte loads, else a clamped copy.
         int left = x + (mvX >> 3);
         int top = y + (mvY >> 3);
         int maxX = (reference.WidthInMbs * 8) - 1;
+        if (xFrac == 0 && yFrac == 0 && CopyInside(plane, stride, maxX, maxY, left, top, width, height, output, outputStride))
+        {
+            return;
+        }
+
+        // As for luma: read the reference directly when the (width + 1) x (height + 1) area is
+        // inside it with room for 16-byte loads, else a clamped copy.
         Span<byte> copy = stackalloc byte[(9 * 9) + 32];
         ReadOnlySpan<byte> window = copy;
         int windowStride = 9;
@@ -191,6 +202,26 @@ internal static partial class InterPrediction
             var rounded = ((sum + Vector128.Create((short)32)) >> 6).AsUInt16();
             StorePartial(Vector128.Narrow(rounded, rounded), output[(j * outputStride)..], width);
         }
+    }
+
+    /// <summary>
+    /// Copies the <paramref name="width"/> x <paramref name="height"/> block at (<paramref name="x"/>,
+    /// <paramref name="y"/>) to the output if it lies inside the picture (with room for a 16-byte
+    /// load from its last row); false, and nothing written, if not.
+    /// </summary>
+    private static bool CopyInside(ReadOnlySpan<byte> plane, int stride, int maxX, int maxY, int x, int y, int width, int height, Span<byte> output, int outputStride)
+    {
+        if (x < 0 || y < 0 || x + width - 1 > maxX || y + height - 1 > maxY || ((y + height - 1) * stride) + x + 16 > plane.Length)
+        {
+            return false;
+        }
+
+        for (int j = 0; j < height; j++)
+        {
+            StorePartial(Vector128.Create(plane.Slice(((y + j) * stride) + x, 16)), output[(j * outputStride)..], width);
+        }
+
+        return true;
     }
 
     /// <summary>

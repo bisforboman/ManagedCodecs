@@ -71,5 +71,8 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
   with flat 8x8 lists); give scaling lists in a `cqmfile` instead, and check what was really sent.
 - OpenH264's `h264enc` ignores `-cabac 1` in its default Baseline layer config (add `-dprofile 0 77`), takes
   bitrates in kbit/s, and skips frames under a tight bitrate without leaving frame_num gaps.
+- FFmpeg trims MP4 audio by the edit list asymmetrically: exactly media_time samples at the start (skip-samples side
+  data, across packets), but at the end it drops whole packets that start past the edit, cuts the last one's
+  duration (rounded to nearest) and still decodes all its samples.
 - In fragmented MP4, FFmpeg's packet durations are not the file's: its demuxer leaves them unset and libavformat
   fills in the codec frame size (1024 for AAC). Compare with FFmpeg's next dts instead (Mp4ConformanceTests does).

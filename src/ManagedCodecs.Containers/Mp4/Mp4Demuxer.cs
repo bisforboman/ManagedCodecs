@@ -14,8 +14,11 @@ namespace ManagedCodecs.Containers.Mp4;
 /// priming has negative timestamps), and leading empty edits delay them. A fragment's samples
 /// start at its 'tfdt' decode time, or right after the track's previous sample without one.
 /// Negative composition offsets move every pts of their track forward by the largest of them, as
-/// FFmpeg does (which, for 'ctts', looks at all entries but the last two). Not yet supported: edit lists with more than one non-empty edit (only the first is honoured,
-/// nothing is trimmed), compressed 'cmov' headers, and further tracks.
+/// FFmpeg does (which, for 'ctts', looks at all entries but the last two). In audio tracks, the edit also trims: the
+/// priming before its media time is marked in <see cref="Packet.SkipSamples"/>, and packets that
+/// start after its end are left out (the last one's duration is cut, its samples are not), again
+/// as FFmpeg does. Not yet supported: edit lists with more than one non-empty edit (only the first is honoured),
+/// trimming video at the edit's end, compressed 'cmov' headers, and further tracks.
 /// </remarks>
 public sealed class Mp4Demuxer : IDemuxer
 {
@@ -157,7 +160,7 @@ public sealed class Mp4Demuxer : IDemuxer
             _stream.ReadExactly(data);
             long sequence = sequences.GetValueOrDefault(sample.StreamIndex);
             sequences[sample.StreamIndex] = sequence + 1;
-            yield return new Packet(sample.StreamIndex, sequence, data, sample.IsKeyframe, sample.Dts, sample.Pts, sample.Duration);
+            yield return new Packet(sample.StreamIndex, sequence, data, sample.IsKeyframe, sample.Dts, sample.Pts, sample.Duration, sample.SkipSamples);
         }
     }
 
@@ -398,7 +401,7 @@ public sealed class Mp4Demuxer : IDemuxer
         return data;
     }
 
-    private readonly record struct Sample(int StreamIndex, long Offset, int Size, long Dts, long Pts, int Duration, bool IsKeyframe);
+    private readonly record struct Sample(int StreamIndex, long Offset, int Size, long Dts, long Pts, int Duration, bool IsKeyframe, int SkipSamples = 0);
 
     /// <summary>The parts of one 'trak' needed to build its sample list.</summary>
     private sealed class Track
@@ -610,7 +613,7 @@ public sealed class Mp4Demuxer : IDemuxer
             var durations = new int[count];
             ReadTimes(dts, durations);
 
-            long shift = EditListShift(movieTimescale);
+            var (shift, mediaTime, end) = EditList(movieTimescale);
             var keyframes = ReadKeyframes(count);
             var compositionOffsets = ReadCompositionOffsets(count);
 
@@ -644,7 +647,36 @@ public sealed class Mp4Demuxer : IDemuxer
                 next = time + shift + duration;
             }
 
-            return samples;
+            return _isAudio ? TrimAudio(samples, shift, mediaTime, end) : samples;
+        }
+
+        /// <summary>
+        /// Applies the edit to audio as FFmpeg does: the first <paramref name="mediaTime"/> ticks of
+        /// samples (encoder priming) are marked to be skipped, across packets if they span several;
+        /// packets that start at or after the edit's <paramref name="end"/> are dropped (one starting
+        /// exactly at the end too, as in FFmpeg), and the last
+        /// one's duration is cut to the end (its samples are not: FFmpeg decodes it whole).
+        /// </summary>
+        private Sample[] TrimAudio(Sample[] samples, long shift, long mediaTime, long end)
+        {
+            var kept = new List<Sample>(samples.Length);
+            foreach (var sample in samples)
+            {
+                long start = sample.Dts + shift; // media time
+                if (start >= end)
+                {
+                    continue;
+                }
+
+                long skip = Math.Clamp(mediaTime - start, 0, sample.Duration);
+                kept.Add(sample with
+                {
+                    Duration = (int)Math.Min(sample.Duration, end - start),
+                    SkipSamples = checked((int)(SampleRate > 0 && SampleRate != Timescale ? skip * SampleRate / Timescale : skip)),
+                });
+            }
+
+            return [.. kept];
         }
 
         private int[] ReadSizes(int count)
@@ -801,14 +833,16 @@ public sealed class Mp4Demuxer : IDemuxer
         }
 
         /// <summary>
-        /// How far to move timestamps back: the media time of the first non-empty edit, minus
-        /// the length of any empty edits before it (converted from the movie timescale).
+        /// The first non-empty edit: how far to move timestamps back (its media time, minus the
+        /// length of any empty edits before it), its media time, and where it ends in media time
+        /// (durations converted from the movie timescale, rounded to nearest as FFmpeg does;
+        /// <see cref="long.MaxValue"/> for a zero duration or no edit list).
         /// </summary>
-        private long EditListShift(uint movieTimescale)
+        private (long Shift, long MediaTime, long End) EditList(uint movieTimescale)
         {
             if (_elst is null || _elst.Length < 8)
             {
-                return 0;
+                return (0, 0, long.MaxValue);
             }
 
             bool v1 = _elst[0] == 1;
@@ -829,10 +863,13 @@ public sealed class Mp4Demuxer : IDemuxer
                 }
 
                 long delay = movieTimescale > 0 ? (long)((Int128)empty * Timescale / movieTimescale) : 0;
-                return mediaTime - delay;
+                long end = duration > 0 && movieTimescale > 0
+                    ? mediaTime + (long)((((Int128)duration * Timescale) + (movieTimescale / 2)) / movieTimescale)
+                    : long.MaxValue;
+                return (mediaTime - delay, Math.Max(mediaTime, 0), end);
             }
 
-            return 0;
+            return (0, 0, long.MaxValue);
         }
 
         private void ParseSampleDescription(ReadOnlySpan<byte> stsd)

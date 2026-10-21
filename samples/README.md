@@ -19,6 +19,8 @@ references:
   (keyframe flags, from ffprobe): every demuxed MP4 packet.
 - `name.f32`: decoded AAC as 32-bit floats, edit list ignored so it holds 1024 samples for every packet; AAC is
   compared by value, within a tolerance.
+- `name.trim.f32`: the same as FFmpeg decodes it by default, trimmed by the edit list (`aac-edit-trim` has an edit
+  list that cuts more than priming, and only this reference, since its packets after the edit are not demuxed).
 
 The decoder tests pick their samples by content, not by name: the MJPEG test decodes every sample whose demuxed
 codec is MJPEG, and the H.264 test every MP4 whose avcC says Baseline (66), Main (77) or High profile (100). It

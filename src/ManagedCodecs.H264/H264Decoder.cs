@@ -202,12 +202,6 @@ public sealed class H264Decoder : IVideoDecoder
                         SliceType.B => _references.BuildLists(header, current.Sps, current.Poc),
                         _ => (new List<Picture>(), new List<Picture>()),
                     };
-                    if (list1.Count > 0 && list1[0].Frame.CodedAsFields)
-                    {
-                        // Its co-located motion is stored by field (8.4.1.2.1), which direct prediction does not read yet.
-                        throw new NotSupportedException("B pictures whose first list 1 reference was coded as two field pictures are not supported.");
-                    }
-
                     current.Decoder.DecodeSlice(header, pps, reader, list0, list1);
                     break;
                 }
@@ -410,4 +404,13 @@ internal sealed class FieldStatistics
 
     /// <summary>Frame pictures in streams that may code frames as fields (frame_mbs_only_flag 0).</summary>
     public int FramePictures { get; set; }
+
+    /// <summary>Direct blocks of field pictures whose co-located block is in a frame macroblock (Frm_To_Fld).</summary>
+    public int FieldOverFrame { get; set; }
+
+    /// <summary>Direct blocks of frame pictures whose co-located block is in a frame coded as fields (Fld_To_Frm).</summary>
+    public int FrameOverFields { get; set; }
+
+    /// <summary>Direct blocks of field pictures, by temporal direct prediction.</summary>
+    public int TemporalDirect { get; set; }
 }

@@ -2,7 +2,7 @@
 
 Pure managed C# media decoders: no native binaries, Native AOT friendly. MJPEG (bit-exact with FFmpeg), H.264
 Constrained Baseline, Main and High (CAVLC and CABAC, I/P/B, weighted prediction, 8x8 transform, scaling matrices,
-MBAFF, field pictures of I and P slices, bit-exact), AAC LC (within 2^-17 of FFmpeg's float output, measured 3e-7), AVI and MP4
+MBAFF, field pictures, bit-exact), AAC LC (within 2^-17 of FFmpeg's float output, measured 3e-7), AVI and MP4
 demuxing. README.md has the layout, the roadmap and what is not supported yet.
 
 ## Core idea
@@ -88,6 +88,8 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
 - Field pictures in MP4 are one packet a field: FFmpeg's `-f rawvideo` output from such a file repeats frames to keep
   the packet rate (compare with `-f framemd5` or add `-fps_mode passthrough`); its frame takes the first field's pts.
   JM's encoder: `make -C lencod CFLAGS="-fcommon -O2"`, `PicInterlace=1` (fields) or `2` (adaptive), about a minute
-  for 10 frames at 320x256; it crashes with `WeightedPrediction=1` and field pictures.
+  for 10 frames at 320x256; it crashes with `WeightedPrediction=1` or `WeightedBiprediction=2` and field pictures,
+  and refuses `PicInterlace=2` with `MbInterlace=2`. Remuxing a raw stream with B pictures gives pts = dts in
+  decoding order (FFmpeg then drops frames): `make-jm-samples.sh` sets pts from pic_order_cnt_lsb with `setts`.
 - In fragmented MP4, FFmpeg's packet durations are not the file's: its demuxer leaves them unset and libavformat
   fills in the codec frame size (1024 for AAC). Compare with FFmpeg's next dts instead (Mp4ConformanceTests does).

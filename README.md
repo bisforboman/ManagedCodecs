@@ -131,21 +131,27 @@ what the two commands above include and are not comparable with FFmpeg's `bench:
    co-located pairs of either kind, and implicit weights, with field order counts), with CAVLC
    and CABAC, 4x4 and 8x8 transforms, slices and the deblocking filter, so libx264's interlaced
    output decodes; and progressive frames from interlaced-capable parameter sets. Field pictures
-   (PAFF) of I and P slices: each field coded as a picture of its own, paired into a frame (the
-   second field predicting from the first), with field reference lists, field order counts and
-   field marking, and mixed with frame pictures from one frame to the next.
+   (PAFF) of I, P and B slices: each field coded as a picture of its own, paired into a frame
+   (the second field predicting from the first), with field reference lists, field order counts
+   and field marking, mixed with frame pictures from one frame to the next, and direct prediction
+   from a co-located field, from the frame macroblocks over a field's rows, or for a frame from
+   the nearer field of a frame coded as fields.
    Not checked against FFmpeg there: explicit weighted prediction (libx264 writes none for
-   interlaced video, and JM's encoder crashes when asked to for field pictures) and constrained intra prediction next to a left pair of the other kind with
+   interlaced video, and JM's encoder crashes when asked for it, or for implicit weights, in
+   field pictures), field pictures next to MBAFF frames (JM refuses to mix them), and
+   constrained intra prediction next to a left pair of the other kind with
    one intra and one inter macroblock (libx264's output for it is not conforming: FFmpeg and JM
    both reject the prediction modes it uses), and a frame macroblock over a co-located field pair
    whose two fields are equally far in order count (the bottom one is taken, as in JM).
    Field pictures come from JM, the ITU reference encoder: field pairs with CABAC and CAVLC, slices,
-   POC types 0, 1 and 2, constrained intra prediction and the 8x8 transform, and frames switching
-   between frame and field coding. Field marking that JM's streams never reach (the second field
-   of a frame not sliding the window, memory management operation 1 by field PicNum) has unit
-   tests; B field pictures, B frames whose first list 1 reference was coded as fields, other
-   memory management operations in field pictures and a field without its pair throw
-   NotSupportedException.
+   POC types 0, 1 and 2, constrained intra prediction and the 8x8 transform, B field pairs with
+   spatial and temporal direct prediction, and frames switching between frame and field coding
+   (B fields over frames and B frames over fields). Not reached by JM's streams: a B frame after
+   its co-located field pair in display order (so the bottom field is the nearer one), and a B
+   frame over a field pair partitioned below 16x16. Field marking that JM's streams never reach
+   (the second field of a frame not sliding the window, memory management operation 1 by field
+   PicNum) and the field B lists' list 1 swap have unit tests; other memory management operations
+   in field pictures and a field without its pair throw NotSupportedException.
    Streams from a second encoder, OpenH264, are checked against FFmpeg too: long-term references
    with reference list modification and memory management operations 1, 4 and 6, POC type 2,
    non-reference P frames, slices by size, deblocking that stops at slice edges, changing and
@@ -161,7 +167,7 @@ what the two commands above include and are not comparable with FFmpeg's `bench:
    offset other than Cb's (second_chroma_qp_index_offset), and of scaling matrices: lists in the
    SPS, fall-back rule B, useDefaultScalingMatrixFlag and a Cr list of its own (unit tests decode
    samples with rewritten parameter sets). Still open: 4:2:2 and 4:4:4, more than 8 bits,
-   B field pictures, error concealment, more speed (about 3x FFmpeg's time at 720p, also with
+   error concealment, more speed (about 3x FFmpeg's time at 720p, also with
    libx264's default High output; 2x on high-bitrate intra content)
 5. ~~AAC-LC decoder~~ done: channel configurations 1 to 7 and program config elements (1 to 8
    channels), all window sequences and shapes, M/S, intensity, PNS, TNS. Both decoders are floating

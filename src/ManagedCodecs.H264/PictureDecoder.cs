@@ -94,7 +94,7 @@ internal sealed partial class PictureDecoder
         _fieldMb = picture.FieldMb;
         if (secondField)
         {
-            (_mvX, _mvY, _refIdx, _refId) = (picture.MvX, picture.MvY, picture.RefIdx, picture.RefId);
+            (_mvX, _mvY, _refIdx, _refId, _refParity) = (picture.MvX, picture.MvY, picture.RefIdx, picture.RefId, picture.RefParity);
             ClearSlots(fieldParity);
             return;
         }

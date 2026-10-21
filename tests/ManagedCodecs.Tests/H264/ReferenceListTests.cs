@@ -176,14 +176,72 @@ public class ReferenceListTests
         Assert.Equal(["0b", "2t", "1t", "0t"], Fields(refs.BuildList(FieldHeader(2, bottom: true, numRef: 4), sps)));
     }
 
-    private static void DecodeFields(ReferenceList refs, int frameNum, bool idr = false, SequenceParameterSet? sps = null)
+    [Fact]
+    public void FieldBLists_OrderFramesByOrderCountThenAlternateParity()
+    {
+        // Frames with fields at order counts 0 and 1, and 8 and 9; the B field is the top one at 4.
+        var refs = new ReferenceList();
+        DecodeFields(refs, 0, idr: true, FieldSps3, topPoc: 0);
+        DecodeFields(refs, 1, sps: FieldSps3, topPoc: 8);
+
+        var (l0, l1) = refs.BuildLists(FieldBHeader(2, bottom: false, numRef: 4), FieldSps3, currentPoc: 4);
+
+        // List 0: the frame before first, list 1: the one after; each frame's top field before its bottom one.
+        Assert.Equal(["0t", "0b", "1t", "1b"], Fields(l0));
+        Assert.Equal(["1t", "1b", "0t", "0b"], Fields(l1));
+
+        // A bottom field starts each frame with the bottom field.
+        (l0, _) = refs.BuildLists(FieldBHeader(2, bottom: true, numRef: 4), FieldSps3, currentPoc: 5);
+        Assert.Equal(["0b", "0t", "1b", "1t"], Fields(l0));
+    }
+
+    [Fact]
+    public void FieldBLists_PutAFrameAtTheCurrentOrderCountBeforeIt()
+    {
+        // 8.2.4.2.4 splits at PicOrderCnt(f) <= PicOrderCnt(CurrPic): a frame at the current field's order count
+        // counts as before it, so it leads list 0 and follows the later frame in list 1.
+        var refs = new ReferenceList();
+        DecodeFields(refs, 0, idr: true, FieldSps3, topPoc: 4);
+        DecodeFields(refs, 1, sps: FieldSps3, topPoc: 8);
+
+        var (l0, l1) = refs.BuildLists(FieldBHeader(2, bottom: false, numRef: 4), FieldSps3, currentPoc: 4);
+        Assert.Equal(["0t", "0b", "1t", "1b"], Fields(l0));
+        Assert.Equal(["1t", "1b", "0t", "0b"], Fields(l1));
+    }
+
+    [Fact]
+    public void FieldBLists_SwapTheFirstTwoOfList1WhenBothListsAreEqual()
+    {
+        // One reference frame, before the B field: both lists would be its two fields in the same order.
+        var refs = new ReferenceList();
+        DecodeFields(refs, 0, idr: true, topPoc: 0);
+
+        var (l0, l1) = refs.BuildLists(FieldBHeader(1, bottom: false, numRef: 2), FieldSps, currentPoc: 4);
+        Assert.Equal(["0t", "0b"], Fields(l0));
+        Assert.Equal(["0b", "0t"], Fields(l1));
+    }
+
+    private static SliceHeader FieldBHeader(int frameNum, bool bottom, int numRef) => new()
+    {
+        Type = SliceType.B,
+        FrameNum = frameNum,
+        FieldPic = true,
+        BottomField = bottom,
+        NalRefIdc = 0,
+        NumRefIdxL0Active = numRef,
+        NumRefIdxL1Active = numRef,
+        RefPicListModificationL0 = [],
+        RefPicListModificationL1 = [],
+    };
+
+    private static void DecodeFields(ReferenceList refs, int frameNum, bool idr = false, SequenceParameterSet? sps = null, int topPoc = 0)
     {
         if (idr)
         {
             refs.Clear();
         }
 
-        var frame = new Picture(1, 1) { FrameNum = frameNum };
+        var frame = new Picture(1, 1) { FrameNum = frameNum, Poc = topPoc, TopPoc = topPoc, BottomPoc = topPoc + 1 };
         refs.MarkField(FieldHeader(frameNum, bottom: false, idr: idr), frame, sps ?? FieldSps, secondField: false);
         refs.MarkField(FieldHeader(frameNum, bottom: true), frame, sps ?? FieldSps, secondField: true);
     }

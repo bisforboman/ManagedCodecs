@@ -63,6 +63,11 @@ public class H264ConformanceTests
             var stats = decoder.MbaffStatistics;
             Assert.True(stats.FieldPairs > 0 && stats.FramePairs > 0, $"{stats.FieldPairs} field and {stats.FramePairs} frame pairs.");
             Assert.True(stats.MixedLeft > 0 && stats.FrameBelowField > 0 && stats.FieldBelowFrame > 0, "Not every mixture of field and frame pairs occurs.");
+            if (sampleName.Contains("mbaff-p", StringComparison.Ordinal))
+            {
+                Assert.True(stats.SkippedPairs > 0 && stats.TopOnlySkipped > 0, $"{stats.SkippedPairs} skipped pairs, {stats.TopOnlySkipped} with only the top skipped.");
+                Assert.True(stats.OppositeParity > 0, "No field macroblock predicts from the other field.");
+            }
         }
     }
 

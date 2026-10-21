@@ -137,21 +137,38 @@ internal sealed partial class PictureDecoder
             if (header.Type != SliceType.I)
             {
                 int skipRun = (int)r.ReadUe();
-                for (int i = 0; i < skipRun; i++)
-                {
-                    DecodeSkip(slice, CheckAddress(mbAddr));
-                    mbAddr++;
-                }
-
                 if (skipRun > 0)
                 {
                     moreData = r.MoreRbspData();
+                }
+
+                for (int i = 0; i < skipRun; i++)
+                {
+                    // A skipped top macroblock takes its pair's kind from the bottom one's
+                    // mb_field_decoding_flag, the next bit, when the run ends with it; else it is inferred.
+                    CheckAddress(mbAddr);
+                    if (_mbaff && (mbAddr & 1) == 0)
+                    {
+                        _sliceOfMb[mbAddr] = slice.Number; // for the neighbours' availability
+                        SetPairField(mbAddr, i == skipRun - 1 && moreData ? r.Peek(1) != 0 : InferPairField(mbAddr));
+                    }
+
+                    DecodeSkip(slice, mbAddr);
+                    PairDone(mbAddr);
+                    mbAddr++;
                 }
             }
 
             if (moreData)
             {
-                DecodeMacroblock(slice, r, CheckAddress(mbAddr));
+                CheckAddress(mbAddr);
+                if (_mbaff && ((mbAddr & 1) == 0 || _kind[mbAddr - 1] == MbKind.PSkip))
+                {
+                    SetPairField(mbAddr, ReadFieldDecodingFlag(slice, r, mbAddr));
+                }
+
+                DecodeMacroblock(slice, r, mbAddr);
+                PairDone(mbAddr);
                 mbAddr++;
                 moreData = r.MoreRbspData();
             }
@@ -286,7 +303,6 @@ internal sealed partial class PictureDecoder
     // ---- Macroblock layer (7.3.5) ----
     private void DecodeMacroblock(SliceState slice, BitReader r, int mbAddr)
     {
-        StartPair(slice, r, mbAddr);
         var type = slice.Header.Type;
         int mbType = slice.Cabac is not { } c ? (int)r.ReadUe()
             : type == SliceType.P ? CabacPMbType(c, mbAddr)
@@ -400,6 +416,7 @@ internal sealed partial class PictureDecoder
         _qp[mbAddr] = slice.Qp;
 
         var neighbors = IntraMbNeighbors(slice, mbAddr);
+        SetLeftRows(slice, mbAddr, neighbors.A);
         var target = _mbaff ? GatherMbaffNeighbors(mbAddr) : PictureTarget(mbAddr);
         ReconstructIntraLuma(slice, mbAddr, target, residual, is16x16, predMode16x16, cbpLuma, neighbors);
         ReconstructChroma(slice, mbAddr, target, residual, cbpChroma, intraMode: chromaPredMode, neighbors);
@@ -703,7 +720,7 @@ internal sealed partial class PictureDecoder
 
         if (is16x16)
         {
-            IntraPrediction.Predict16x16(predMode16x16, plane, origin, stride, new IntraNeighbors(mbs.A, mbs.B, mbs.C, mbs.D));
+            IntraPrediction.Predict16x16(predMode16x16, plane, origin, stride, new IntraNeighbors(LeftRows(0, 16), mbs.B, mbs.C, mbs.D));
             Span<int> dc = stackalloc int[16];
             residual.LumaDc.CopyTo(dc);
             Transform.InverseLumaDc(dc, qp, slice.Scaling.LevelScale4x4(0));
@@ -735,9 +752,9 @@ internal sealed partial class PictureDecoder
                 int y = (b8 >> 1) * 2;
                 var n = b8 switch
                 {
-                    0 => new IntraNeighbors(mbs.A, mbs.B, mbs.B, mbs.D),
+                    0 => new IntraNeighbors(LeftRows(0, 8), mbs.B, mbs.B, mbs.D),
                     1 => new IntraNeighbors(true, mbs.B, mbs.C, mbs.B),
-                    2 => new IntraNeighbors(mbs.A, true, true, mbs.A),
+                    2 => new IntraNeighbors(LeftRows(8, 8), true, true, LeftRows(7, 1)),
                     _ => new IntraNeighbors(true, true, false, true),
                 };
                 int offset8 = origin + (y * 4 * stride) + (x * 4);
@@ -753,12 +770,12 @@ internal sealed partial class PictureDecoder
             var (x, y) = BlockPosition(idx);
             int offset = origin + (y * 4 * stride) + (x * 4);
 
-            bool left = x > 0 || mbs.A;
+            bool left = x > 0 || LeftRows(y * 4, 4);
             bool top = y > 0 || mbs.B;
             bool topLeft = (x > 0, y > 0) switch
             {
                 (true, true) => true,
-                (false, true) => mbs.A,
+                (false, true) => LeftRows((y * 4) - 1, 1),
                 (true, false) => mbs.B,
                 _ => mbs.D,
             };
@@ -794,7 +811,7 @@ internal sealed partial class PictureDecoder
             byte[] plane = c == 0 ? target.Cb : target.Cr;
             if (intraMode >= 0)
             {
-                IntraPrediction.PredictChroma(intraMode, plane, origin, stride, new IntraNeighbors(mbs.A, mbs.B, mbs.C, mbs.D));
+                IntraPrediction.PredictChroma(intraMode, plane, origin, stride, new IntraNeighbors(LeftChromaRows(0), mbs.B, mbs.C, mbs.D), LeftChromaRows(4));
             }
 
             if (cbpChroma == 0)

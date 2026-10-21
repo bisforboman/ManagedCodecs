@@ -1,3 +1,5 @@
+using System.Runtime.CompilerServices;
+
 namespace ManagedCodecs.H264;
 
 /// <summary>
@@ -39,6 +41,13 @@ internal sealed partial class PictureDecoder
     ];
 
     private static readonly byte[] CavlcField8x8Scan = [.. Enumerable.Range(0, 64).Select(i => Field8x8[(4 * (i % 16)) + (i / 16)])];
+
+    // Which rows of the current intra macroblock's left neighbouring samples intra prediction may
+    // use (bit y: luma row y; chroma rows in their own mask). The same for every row, except in
+    // MBAFF frames with constrained intra prediction, where the rows can come from two macroblocks
+    // of a left pair of the other kind, one intra and one inter.
+    private int _leftRows;
+    private int _leftChromaRows;
 
     /// <summary>Counts of MBAFF pair kinds (shared by every picture of an <see cref="H264Decoder"/>).</summary>
     public MbaffStatistics Statistics { get; init; } = new();
@@ -245,24 +254,80 @@ internal sealed partial class PictureDecoder
         return c.Decision(70 + inc) == 1;
     }
 
-    /// <summary>
-    /// At the top macroblock of a pair in an MBAFF frame, reads whether the pair is a field pair;
-    /// the bottom macroblock is the same kind. (Only I slices so far, where the flag is always sent.)
-    /// </summary>
-    private void StartPair(SliceState slice, BitReader r, int mbAddr)
+    private void SetLeftRows(SliceState slice, int mbAddr, bool left)
     {
-        if (!_mbaff || (mbAddr & 1) != 0)
+        if (!_mbaff || !slice.Pps.ConstrainedIntraPred)
         {
+            _leftRows = left ? 0xFFFF : 0;
+            _leftChromaRows = left ? 0xFF : 0;
             return;
         }
 
-        bool field = ReadFieldDecodingFlag(slice, r, mbAddr);
-        _fieldMb[mbAddr] = field;
-        _fieldMb[mbAddr + 1] = field;
+        _leftRows = 0;
+        _leftChromaRows = 0;
+        for (int y = 0; y < 16; y++)
+        {
+            int n = AffNeighbor(mbAddr, -1, y, 16, 16).Mb;
+            _leftRows |= n >= 0 && !IsInter(n) ? 1 << y : 0;
+        }
 
+        for (int y = 0; y < 8; y++)
+        {
+            int n = AffNeighbor(mbAddr, -1, y, 8, 8).Mb;
+            _leftChromaRows |= n >= 0 && !IsInter(n) ? 1 << y : 0;
+        }
+    }
+
+    /// <summary>Whether luma rows <paramref name="first"/> .. first + count - 1 of the left neighbouring samples may be used (8.3.1.2: all of a block's, or none).</summary>
+    private bool LeftRows(int first, int count)
+    {
+        int mask = ((1 << count) - 1) << first;
+        return (_leftRows & mask) == mask;
+    }
+
+    /// <summary>Whether the four chroma rows from <paramref name="first"/> of the left neighbouring samples may be used.</summary>
+    private bool LeftChromaRows(int first) => ((_leftChromaRows >> first) & 15) == 15;
+
+    /// <summary>Sets whether the pair holding <paramref name="mbAddr"/> is a field pair.</summary>
+    private void SetPairField(int mbAddr, bool field)
+    {
+        int top = mbAddr & ~1;
+        _fieldMb[top] = field;
+        _fieldMb[top + 1] = field;
+    }
+
+    /// <summary>
+    /// The kind a pair is inferred to be while its mb_field_decoding_flag has not come (7.4.4):
+    /// the left pair's, else the upper pair's (in the same slice), else a frame pair.
+    /// </summary>
+    private bool InferPairField(int mbAddr)
+    {
         int pair = mbAddr >> 1;
-        int left = PairIfAvailable(mbAddr, (pair % _widthInMbs) - 1, pair / _widthInMbs, anySlice: true);
-        int above = PairIfAvailable(mbAddr, pair % _widthInMbs, (pair / _widthInMbs) - 1, anySlice: true);
+        int left = PairIfAvailable(mbAddr, (pair % _widthInMbs) - 1, pair / _widthInMbs);
+        if (left >= 0)
+        {
+            return _fieldMb[left];
+        }
+
+        int above = PairIfAvailable(mbAddr, pair % _widthInMbs, (pair / _widthInMbs) - 1);
+        return above >= 0 && _fieldMb[above];
+    }
+
+    /// <summary>After a bottom macroblock of an MBAFF frame: counts the pair's kind and how it meets its neighbours.</summary>
+    private void PairDone(int mbAddr)
+    {
+        if (_mbaff && (mbAddr & 1) != 0)
+        {
+            CountPair(mbAddr);
+        }
+    }
+
+    private void CountPair(int bottom)
+    {
+        int pair = bottom >> 1;
+        bool field = _fieldMb[bottom];
+        int left = PairIfAvailable(bottom, (pair % _widthInMbs) - 1, pair / _widthInMbs, anySlice: true);
+        int above = PairIfAvailable(bottom, pair % _widthInMbs, (pair / _widthInMbs) - 1, anySlice: true);
         var stats = Statistics;
         if (field)
         {
@@ -286,6 +351,17 @@ internal sealed partial class PictureDecoder
         if (above >= 0 && !_fieldMb[above] && field)
         {
             stats.FieldBelowFrame++;
+        }
+
+        bool topSkipped = _kind[bottom - 1] == MbKind.PSkip;
+        bool bottomSkipped = _kind[bottom] == MbKind.PSkip;
+        if (topSkipped && bottomSkipped)
+        {
+            stats.SkippedPairs++;
+        }
+        else if (topSkipped)
+        {
+            stats.TopOnlySkipped++;
         }
     }
 
@@ -344,13 +420,16 @@ internal sealed partial class PictureDecoder
 
     /// <summary>
     /// The deblocking filter of an MBAFF frame (8.7), macroblock by macroblock in address order,
-    /// sample line by sample line where the two sides of a macroblock edge differ in field/frame
-    /// mode. Only intra macroblocks so far: bS is 4 on macroblock edges, except 3 on horizontal
-    /// ones that touch a field macroblock, and 3 inside.
+    /// sample line by sample line across macroblock edges, where the two sides may differ in
+    /// field/frame mode and so each line can meet another macroblock and another bS.
     /// </summary>
+    [SkipLocalsInit]
     private void DeblockMbaff()
     {
-        ReadOnlySpan<byte> internalStrengths = [3, 3, 3, 3];
+        Span<byte> vertical = stackalloc byte[16];
+        Span<byte> horizontal = stackalloc byte[16];
+        Span<byte> leftLines = stackalloc byte[16];
+        Span<byte> topSegments = stackalloc byte[4];
         int lumaRow = Picture.LumaStride;
         int chromaRow = Picture.ChromaStride;
         for (int mbAddr = 0; mbAddr < _mbCount; mbAddr++)
@@ -381,33 +460,33 @@ internal sealed partial class PictureDecoder
             var (chroma, chromaStride) = ChromaPlace(mbAddr);
             bool transform8x8 = _transform8x8[mbAddr];
 
+            // Internal edges as in frames, with field macroblocks' vertical motion in field units.
+            if (IsIntra(mbAddr))
+            {
+                vertical.Fill(3);
+                horizontal.Fill(3);
+            }
+            else if (HasUniformMotionWithoutCoefficients(mbAddr))
+            {
+                vertical.Clear();
+                horizontal.Clear();
+            }
+            else
+            {
+                InternalStrengths(mbAddr, vertical, horizontal, field ? 2 : 4);
+            }
+
             // Luma: vertical edges, then horizontal ones.
             if (left)
             {
                 for (int y = 0; y < 16; y++)
                 {
                     var (p, xP, yP) = AffNeighbor(mbAddr, -1, y, 16, 16, anySlice: true);
-                    var (pOrigin, pStride) = LumaPlace(p);
-                    FilterMbaffLine(Picture.Y, pOrigin + (yP * pStride) + xP, 1, luma + (y * lumaStride), 1, 4, _qp[p], qp, slice, chroma: false);
-                }
-            }
-
-            for (int edge = 1; edge < 4; edge++)
-            {
-                if ((edge & 1) == 0 || !transform8x8)
-                {
-                    FilterEdge(Picture.Y, luma + (edge * 4), 1, lumaStride, 16, internalStrengths, qp, qp, slice.AlphaOffset, slice.BetaOffset, chroma: false);
-                }
-            }
-
-            if (top)
-            {
-                foreach (var (p, pRow, pStep, qOffset, qStep, bS) in TopEdges(mbAddr, 16))
-                {
-                    var (pOrigin, pStride) = LumaPlace(p);
-                    for (int x = 0; x < 16; x++)
+                    leftLines[y] = (byte)MbaffStrength(p, ((yP >> 2) * 4) + 3, mbAddr, (y >> 2) * 4, horizontalEdge: false);
+                    if (leftLines[y] != 0)
                     {
-                        FilterMbaffLine(Picture.Y, pOrigin + (pRow * pStride) + x, pStep * lumaRow, luma + (qOffset * lumaRow) + x, qStep * lumaRow, bS, _qp[p], qp, slice, chroma: false);
+                        var (pOrigin, pStride) = LumaPlace(p);
+                        FilterMbaffLine(Picture.Y, pOrigin + (yP * pStride) + xP, 1, luma + (y * lumaStride), 1, leftLines[y], _qp[p], qp, slice, chroma: false);
                     }
                 }
             }
@@ -416,47 +495,108 @@ internal sealed partial class PictureDecoder
             {
                 if ((edge & 1) == 0 || !transform8x8)
                 {
-                    FilterEdge(Picture.Y, luma + (edge * 4 * lumaStride), lumaStride, 1, 16, internalStrengths, qp, qp, slice.AlphaOffset, slice.BetaOffset, chroma: false);
+                    FilterEdge(Picture.Y, luma + (edge * 4), 1, lumaStride, 16, vertical.Slice(edge * 4, 4), qp, qp, slice.AlphaOffset, slice.BetaOffset, chroma: false);
                 }
             }
 
-            // Chroma (4:2:0): the macroblock edges and the edge in the middle.
+            var topEdges = top ? TopEdges(mbAddr, 16) : [];
+            foreach (var (p, pRow, pStep, qOffset, qStep) in topEdges)
+            {
+                for (int k = 0; k < 4; k++)
+                {
+                    topSegments[k] = (byte)MbaffStrength(p, ((pRow >> 2) * 4) + k, mbAddr, ((qOffset >> 2) * 4) + k, horizontalEdge: true);
+                }
+
+                var (pOrigin, pStride) = LumaPlace(p);
+                for (int x = 0; x < 16; x++)
+                {
+                    if (topSegments[x >> 2] != 0)
+                    {
+                        FilterMbaffLine(Picture.Y, pOrigin + (pRow * pStride) + x, pStep * lumaRow, luma + (qOffset * lumaRow) + x, qStep * lumaRow, topSegments[x >> 2], _qp[p], qp, slice, chroma: false);
+                    }
+                }
+            }
+
+            for (int edge = 1; edge < 4; edge++)
+            {
+                if ((edge & 1) == 0 || !transform8x8)
+                {
+                    FilterEdge(Picture.Y, luma + (edge * 4 * lumaStride), lumaStride, 1, 16, horizontal.Slice(edge * 4, 4), qp, qp, slice.AlphaOffset, slice.BetaOffset, chroma: false);
+                }
+            }
+
+            // Chroma (4:2:0): the macroblock edges, with the bS of luma lines of the same parity
+            // as each chroma line, and the edge in the middle.
             if (left)
             {
                 for (int y = 0; y < 8; y++)
                 {
                     var (p, xP, yP) = AffNeighbor(mbAddr, -1, y, 8, 8, anySlice: true);
-                    var (pOrigin, pStride) = ChromaPlace(p);
-                    FilterMbaffChromaLine(pOrigin + (yP * pStride) + xP, 1, chroma + (y * chromaStride), 1, 4, _qp[p], qp, slice);
-                }
-            }
-
-            FilterChromaEdge(Picture.Cb, Picture.Cr, chroma + 4, 1, chromaStride, internalStrengths, qpCb, qpCb, qpCr, qpCr, slice.AlphaOffset, slice.BetaOffset);
-
-            if (top)
-            {
-                foreach (var (p, pRow, pStep, qOffset, qStep, bS) in TopEdges(mbAddr, 8))
-                {
-                    var (pOrigin, pStride) = ChromaPlace(p);
-                    for (int x = 0; x < 8; x++)
+                    int bS = leftLines[field && !_fieldMb[p] ? y << 1 : ((y >> 1) << 2) + (y & 1)];
+                    if (bS != 0)
                     {
-                        FilterMbaffChromaLine(pOrigin + (pRow * pStride) + x, pStep * chromaRow, chroma + (qOffset * chromaRow) + x, qStep * chromaRow, bS, _qp[p], qp, slice);
+                        var (pOrigin, pStride) = ChromaPlace(p);
+                        FilterMbaffChromaLine(pOrigin + (yP * pStride) + xP, 1, chroma + (y * chromaStride), 1, bS, _qp[p], qp, slice);
                     }
                 }
             }
 
-            FilterChromaEdge(Picture.Cb, Picture.Cr, chroma + (4 * chromaStride), chromaStride, 1, internalStrengths, qpCb, qpCb, qpCr, qpCr, slice.AlphaOffset, slice.BetaOffset);
+            FilterChromaEdge(Picture.Cb, Picture.Cr, chroma + 4, 1, chromaStride, vertical.Slice(8, 4), qpCb, qpCb, qpCr, qpCr, slice.AlphaOffset, slice.BetaOffset);
+
+            foreach (var (p, pRow, pStep, qOffset, qStep) in top ? TopEdges(mbAddr, 8) : [])
+            {
+                for (int k = 0; k < 4; k++)
+                {
+                    // The luma segments of the same pass: chroma pRow is in chroma rows.
+                    var (pLuma, pLumaRow, _, qLumaOffset, _) = topEdges[qOffset];
+                    topSegments[k] = (byte)MbaffStrength(pLuma, ((pLumaRow >> 2) * 4) + k, mbAddr, ((qLumaOffset >> 2) * 4) + k, horizontalEdge: true);
+                }
+
+                var (pOrigin, pStride) = ChromaPlace(p);
+                for (int x = 0; x < 8; x++)
+                {
+                    if (topSegments[x >> 1] != 0)
+                    {
+                        FilterMbaffChromaLine(pOrigin + (pRow * pStride) + x, pStep * chromaRow, chroma + (qOffset * chromaRow) + x, qStep * chromaRow, topSegments[x >> 1], _qp[p], qp, slice);
+                    }
+                }
+            }
+
+            FilterChromaEdge(Picture.Cb, Picture.Cr, chroma + (4 * chromaStride), chromaStride, 1, horizontal.Slice(8, 4), qpCb, qpCb, qpCr, qpCr, slice.AlphaOffset, slice.BetaOffset);
         }
+    }
+
+    /// <summary>
+    /// bS across a macroblock edge of an MBAFF frame between luma 4x4 blocks p and q (raster
+    /// indices): 4 for intra on vertical edges and on horizontal ones between frame macroblocks,
+    /// else 3 for intra; 2 for coefficients; 1 where a frame and a field macroblock meet (their
+    /// references and motion are not comparable); else from the motion, with a field
+    /// macroblock's vertical motion compared in field units.
+    /// </summary>
+    private int MbaffStrength(int mbP, int blockP, int mbQ, int blockQ, bool horizontalEdge)
+    {
+        bool mixed = _fieldMb[mbP] != _fieldMb[mbQ];
+        if (IsIntra(mbP) || IsIntra(mbQ))
+        {
+            return horizontalEdge && (_fieldMb[mbP] || _fieldMb[mbQ]) ? 3 : 4;
+        }
+
+        if (HasCoefficients(mbP, blockP) || HasCoefficients(mbQ, blockQ))
+        {
+            return 2;
+        }
+
+        return mixed ? 1 : MotionStrength((mbP * 16) + blockP, (mbQ * 16) + blockQ, _fieldMb[mbQ] ? 2 : 4);
     }
 
     /// <summary>
     /// The top macroblock edge of an MBAFF macroblock as one or two sets of sample lines (8.7.1):
     /// the macroblock p above, its row holding p0 (in p's own rows), the steps from p0 to p1 and
-    /// from q0 to q1 in picture rows, q0's picture row below the macroblock's first, and bS. A frame
+    /// from q0 to q1 in picture rows, and q0's picture row below the macroblock's first. A frame
     /// macroblock at the top of its pair under a field pair is filtered twice, as two field edges:
     /// its even rows against the top field macroblock above, its odd rows against the bottom one.
     /// </summary>
-    private (int P, int PRow, int PStep, int QOffset, int QStep, int BS)[] TopEdges(int mbAddr, int size)
+    private (int P, int PRow, int PStep, int QOffset, int QStep)[] TopEdges(int mbAddr, int size)
     {
         bool field = _fieldMb[mbAddr];
         bool isTop = (mbAddr & 1) == 0;
@@ -466,13 +606,13 @@ internal sealed partial class PictureDecoder
             int above = (pair - _widthInMbs) * 2;
             if (_fieldMb[above])
             {
-                return [(above, size - 1, 2, 0, 2, 3), (above + 1, size - 1, 2, 1, 2, 3)];
+                return [(above, size - 1, 2, 0, 2), (above + 1, size - 1, 2, 1, 2)];
             }
         }
 
         var (p, _, pRow) = AffNeighbor(mbAddr, 0, -1, size, size, anySlice: true);
         bool fieldEdge = field || _fieldMb[p];
-        return [(p, pRow, fieldEdge ? 2 : 1, 0, field ? 2 : 1, fieldEdge ? 3 : 4)];
+        return [(p, pRow, fieldEdge ? 2 : 1, 0, field ? 2 : 1)];
     }
 
     /// <summary>One luma line across an MBAFF macroblock edge, with the QPs of its two macroblocks.</summary>
@@ -510,4 +650,12 @@ internal sealed class MbaffStatistics
     public int FrameBelowField { get; set; }
 
     public int FieldBelowFrame { get; set; }
+
+    /// <summary>Pairs with both macroblocks skipped (the kind inferred) and with only the top one skipped (the kind sent with the bottom one).</summary>
+    public int SkippedPairs { get; set; }
+
+    public int TopOnlySkipped { get; set; }
+
+    /// <summary>Field macroblock partitions predicted from the field of the other parity.</summary>
+    public int OppositeParity { get; set; }
 }

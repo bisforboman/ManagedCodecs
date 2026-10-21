@@ -125,9 +125,14 @@ what the two commands above include and are not comparable with FFmpeg's `bench:
    prediction, so libx264's default Main profile output decodes; and High profile's 8x8 transform
    with Intra 8x8 prediction, so libx264's default output decodes too, and scaling matrices (the
    default ones and custom lists). Frames come out in display order.
-   Interlaced video, first part: MBAFF frames of I slices (macroblock pairs coded as frame or
-   field pairs, mixed in any way), with CAVLC and CABAC, 4x4 and 8x8 transforms, slices and the
-   deblocking filter, and progressive frames from interlaced-capable parameter sets.
+   Interlaced video: MBAFF frames of I and P slices (macroblock pairs coded as frame or field
+   pairs, mixed in any way; skipped pairs whose kind is inferred; field macroblocks predicting
+   from either field of a reference frame), with CAVLC and CABAC, 4x4 and 8x8 transforms, slices
+   and the deblocking filter, and progressive frames from interlaced-capable parameter sets.
+   Not checked against FFmpeg there: explicit weighted prediction (libx264 writes none for
+   interlaced video) and constrained intra prediction next to a left pair of the other kind with
+   one intra and one inter macroblock (libx264's output for it is not conforming: FFmpeg and JM
+   both reject the prediction modes it uses).
    Streams from a second encoder, OpenH264, are checked against FFmpeg too: long-term references
    with reference list modification and memory management operations 1, 4 and 6, POC type 2,
    non-reference P frames, slices by size, deblocking that stops at slice edges, changing and
@@ -143,7 +148,7 @@ what the two commands above include and are not comparable with FFmpeg's `bench:
    offset other than Cb's (second_chroma_qp_index_offset), and of scaling matrices: lists in the
    SPS, fall-back rule B, useDefaultScalingMatrixFlag and a Cr list of its own (unit tests decode
    samples with rewritten parameter sets). Still open: 4:2:2 and 4:4:4, more than 8 bits,
-   P and B slices in MBAFF frames, field pictures (PAFF), error concealment, more speed (about 3x FFmpeg's time at 720p, also with
+   B slices in MBAFF frames, field pictures (PAFF), error concealment, more speed (about 3x FFmpeg's time at 720p, also with
    libx264's default High output; 2x on high-bitrate intra content)
 5. ~~AAC-LC decoder~~ done: channel configurations 1 to 7 and program config elements (1 to 8
    channels), all window sequences and shapes, M/S, intensity, PNS, TNS. Both decoders are floating

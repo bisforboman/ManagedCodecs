@@ -9,6 +9,11 @@ internal sealed partial class PictureDecoder
     /// </summary>
     private void DirectMotion(SliceState slice, int mbAddr, int first, int count)
     {
+        if (slice.RefList1[0].IsNonExisting)
+        {
+            throw new InvalidDataException("The co-located picture is a frame inferred for a gap in frame_num (8.2.5.2).");
+        }
+
         for (int i = first; i < first + count; i++)
         {
             _direct[(mbAddr * 4) + i] = true;

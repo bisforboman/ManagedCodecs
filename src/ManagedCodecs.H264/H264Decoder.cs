@@ -26,6 +26,9 @@ public sealed class H264Decoder : IVideoDecoder
     private PictureDecoder? _decoder;
     private long _pictureCount;
 
+    // frame_num of the last reference picture (PrevRefFrameNum, 7.4.3); -1 before the first.
+    private int _prevRefFrameNum = -1;
+
     private readonly PictureOrder _order = new();
     private readonly OutputQueue _output = new();
 
@@ -197,6 +200,10 @@ public sealed class H264Decoder : IVideoDecoder
         {
             _references.Clear();
         }
+        else
+        {
+            InferGapFrames(header, sps);
+        }
 
         if (_decoder is null || _decoder.Sps.WidthInMbs != sps.WidthInMbs || _decoder.Sps.HeightInMbs != sps.HeightInMbs)
         {
@@ -206,6 +213,31 @@ public sealed class H264Decoder : IVideoDecoder
         int poc = _order.Next(header, sps);
         _decoder.Begin(TakePicture(sps, header.FrameNum, poc), sps);
         return new PictureState(header, sps, _decoder, poc);
+    }
+
+    /// <summary>
+    /// Decoding process for gaps in frame_num (8.2.5.2): a frame_num more than one past the
+    /// previous reference picture's means reference frames are missing (dropped temporal layers,
+    /// or lost). Each missing frame_num gets a "non-existing" frame, marked as a short-term
+    /// reference by the sliding window, so that later list positions and the window come out as
+    /// the encoder had them.
+    /// </summary>
+    private void InferGapFrames(SliceHeader header, SequenceParameterSet sps)
+    {
+        int maxFrameNum = 1 << sps.Log2MaxFrameNum;
+        if (_prevRefFrameNum < 0 || header.FrameNum == _prevRefFrameNum || header.FrameNum == (_prevRefFrameNum + 1) % maxFrameNum)
+        {
+            return;
+        }
+
+        for (int frameNum = (_prevRefFrameNum + 1) % maxFrameNum; frameNum != header.FrameNum; frameNum = (frameNum + 1) % maxFrameNum)
+        {
+            var picture = TakePicture(sps, frameNum, _order.NextInferred(frameNum, sps));
+            picture.IsNonExisting = true;
+            _references.MarkNonExisting(picture, sps);
+        }
+
+        _prevRefFrameNum = (header.FrameNum + maxFrameNum - 1) % maxFrameNum;
     }
 
     /// <summary>A picture of the stream's size that is not a reference, reused when one is free.</summary>
@@ -227,6 +259,7 @@ public sealed class H264Decoder : IVideoDecoder
         picture.IsShortTermReference = false;
         picture.IsLongTermReference = false;
         picture.LongTermFrameIdx = 0;
+        picture.IsNonExisting = false;
         return picture;
     }
 
@@ -243,6 +276,9 @@ public sealed class H264Decoder : IVideoDecoder
         if (state.Header.NalRefIdc != 0)
         {
             _references.Mark(state.Header, picture, state.Sps);
+
+            // PrevRefFrameNum (7.4.3); after memory_management_control_operation 5 it is 0.
+            _prevRefFrameNum = state.Header.MemoryManagement.Any(op => op.Op == 5) ? 0 : state.Header.FrameNum;
         }
 
         return Crop(picture, state.Sps);

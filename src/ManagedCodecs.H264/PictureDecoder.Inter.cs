@@ -405,6 +405,11 @@ internal sealed partial class PictureDecoder
         }
 
         var reference = refList[refIdx];
+        if (reference.IsNonExisting)
+        {
+            throw new InvalidDataException($"ref_idx_l{list} {refIdx} names a frame inferred for a gap in frame_num (8.2.5.2).");
+        }
+
         for (int by = y / 4; by < (y + h) / 4; by++)
         {
             for (int bx = x / 4; bx < (x + w) / 4; bx++)

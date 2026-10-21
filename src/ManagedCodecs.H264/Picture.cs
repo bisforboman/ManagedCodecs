@@ -68,6 +68,12 @@ internal sealed class Picture
 
     public int LongTermFrameIdx { get; set; }
 
+    /// <summary>
+    /// A frame inferred for a gap in frame_num (8.2.5.2): it holds a place among the short-term
+    /// references but has no samples, is never output and must not be predicted from.
+    /// </summary>
+    public bool IsNonExisting { get; set; }
+
     public bool IsReference => IsShortTermReference || IsLongTermReference;
 
     public byte[] Plane(int component) => component switch

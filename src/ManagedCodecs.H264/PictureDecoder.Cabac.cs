@@ -25,6 +25,13 @@ internal sealed partial class PictureDecoder
         7, 6, 11, 12, 13, 11, 6, 7, 8, 9, 14, 10, 9, 8, 6, 11, 12, 13, 11, 6, 9, 14, 10, 9, 11, 12, 13, 11, 14, 10, 12,
     ];
 
+    // The same for field macroblocks (Table 9-43, field column); last_significant_coeff_flag uses Last8x8Inc for both.
+    private static ReadOnlySpan<byte> Significant8x8FieldInc =>
+    [
+        0, 1, 1, 2, 2, 3, 3, 4, 5, 6, 7, 7, 7, 8, 4, 5, 6, 9, 10, 10, 8, 11, 12, 11, 9, 9, 10, 10, 8, 11, 12, 11,
+        9, 9, 10, 10, 8, 11, 12, 11, 9, 9, 10, 10, 8, 13, 13, 9, 9, 10, 10, 8, 13, 13, 9, 9, 10, 10, 14, 14, 14, 14, 14,
+    ];
+
     private static ReadOnlySpan<byte> Last8x8Inc =>
     [
         0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
@@ -91,7 +98,7 @@ internal sealed partial class PictureDecoder
         cabac.InitContexts(slice.Header.Type == SliceType.I ? 0 : 1 + slice.Header.CabacInitIdc, slice.Qp);
         cabac.InitEngine(r);
 
-        int mbAddr = slice.Header.FirstMbInSlice;
+        int mbAddr = slice.Header.FirstMbAddr;
         do
         {
             CheckAddress(mbAddr);
@@ -110,7 +117,7 @@ internal sealed partial class PictureDecoder
 
             mbAddr++;
         }
-        while (cabac.Terminate() == 0); // end_of_slice_flag
+        while ((_mbaff && (mbAddr & 1) != 0) || cabac.Terminate() == 0); // end_of_slice_flag, in MBAFF frames only after a pair
     }
 
     // ---- mb_skip_flag, mb_type, sub_mb_type (9.3.3.1.1.1, 9.3.3.1.1.3, 9.3.3.1.2) ----
@@ -447,13 +454,13 @@ internal sealed partial class PictureDecoder
             int y = (b8 >> 1) * 8;
             int LumaCond(int nx, int ny)
             {
-                int n = NeighborMb(mbAddr, nx, ny);
+                var (n, xW, yW) = Neighbor(mbAddr, nx, ny);
                 if (n < 0 || _kind[n] == MbKind.IPcm)
                 {
                     return 0;
                 }
 
-                int b8N = ((((ny + 16) % 16) >> 3) * 2) + (((nx + 16) % 16) >> 3);
+                int b8N = ((yW >> 3) * 2) + (xW >> 3);
                 int coded = n == mbAddr ? luma : _kind[n] == MbKind.PSkip ? 0 : _cbp[n] & 15;
                 return ((coded >> b8N) & 1) != 0 ? 0 : 1;
             }
@@ -496,7 +503,7 @@ internal sealed partial class PictureDecoder
 
         int Cond(int px, int py)
         {
-            int n = NeighborMb(mbAddr, px, py, size);
+            var (n, xW, yW) = Neighbor(mbAddr, px, py, size, size);
             if (n < 0)
             {
                 return currentIntra ? 1 : 0;
@@ -507,8 +514,8 @@ internal sealed partial class PictureDecoder
                 return 1;
             }
 
-            int bx = ((px + size) % size) >> 2;
-            int by = ((py + size) % size) >> 2;
+            int bx = xW >> 2;
+            int by = yW >> 2;
             return category switch
             {
                 BlockCategory.LumaDc => _kind[n] == MbKind.Intra16x16 ? _dcCoded[n] & 1 : 0,
@@ -527,13 +534,15 @@ internal sealed partial class PictureDecoder
     /// residual_block_cabac: coded_block_flag, the significance map and the levels, into
     /// <paramref name="block"/> through <paramref name="scan"/> (the caller clears it). Returns the
     /// number of nonzero coefficients. 8x8 blocks have no coded_block_flag in 4:2:0: it is
-    /// inferred to be 1.
+    /// inferred to be 1. Field macroblocks code the significance map with contexts of their own.
     /// </summary>
-    private static int CabacResidualBlock(Cabac c, BlockCategory category, int codedBlockFlagInc, int maxNumCoeff, Span<int> block, ReadOnlySpan<byte> scan)
+    private static int CabacResidualBlock(Cabac c, BlockCategory category, int codedBlockFlagInc, bool field, int maxNumCoeff, Span<int> block, ReadOnlySpan<byte> scan)
     {
         if (category == BlockCategory.Luma8x8)
         {
-            return c.ResidualBlock(-1, 402, 417, Significant8x8Inc, Last8x8Inc, 426, 4, maxNumCoeff, block, scan);
+            return field
+                ? c.ResidualBlock(-1, 436, 451, Significant8x8FieldInc, Last8x8Inc, 426, 4, maxNumCoeff, block, scan)
+                : c.ResidualBlock(-1, 402, 417, Significant8x8Inc, Last8x8Inc, 426, 4, maxNumCoeff, block, scan);
         }
 
         int cat = (int)category;
@@ -541,8 +550,8 @@ internal sealed partial class PictureDecoder
         var inc = chromaDc ? ChromaDcInc : ScanPositionInc; // NumC8x8 is 1 for 4:2:0
         return c.ResidualBlock(
             85 + CodedBlockFlagCatOffset[cat] + codedBlockFlagInc,
-            105 + SignificantCatOffset[cat],
-            166 + SignificantCatOffset[cat],
+            (field ? 277 : 105) + SignificantCatOffset[cat],
+            (field ? 338 : 166) + SignificantCatOffset[cat],
             inc,
             inc,
             227 + AbsLevelCatOffset[cat],

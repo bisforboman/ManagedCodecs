@@ -15,10 +15,17 @@ internal readonly record struct RefPicListModification(int Idc, int Value);
 /// <summary>One memory_management_control_operation (7.3.3.3).</summary>
 internal readonly record struct MemoryManagementOperation(int Op, int DifferenceOfPicNums, int LongTermPicNum, int LongTermFrameIdx, int MaxLongTermFrameIdxPlus1);
 
-/// <summary>slice_header (7.3.3) for frame (non-field) slices.</summary>
+/// <summary>slice_header (7.3.3) for frame slices (field_pic_flag 0), MBAFF frames included.</summary>
 internal sealed class SliceHeader
 {
+    /// <summary>first_mb_in_slice: in MBAFF frames it counts macroblock pairs (see <see cref="FirstMbAddr"/>).</summary>
     public int FirstMbInSlice { get; internal init; }
+
+    /// <summary>MbaffFrameFlag (7-25): the frame codes macroblock pairs, each as a frame or a field pair.</summary>
+    public bool Mbaff { get; internal init; }
+
+    /// <summary>The address of the slice's first macroblock: first_mb_in_slice * (1 + MbaffFrameFlag).</summary>
+    public int FirstMbAddr => Mbaff ? FirstMbInSlice * 2 : FirstMbInSlice;
 
     public SliceType Type { get; internal init; }
 
@@ -99,13 +106,19 @@ internal sealed class SliceHeader
             throw new NotSupportedException($"{type} slices are not supported (Extended profile).");
         }
 
-        if (!sps.FrameMbsOnly)
-        {
-            throw new NotSupportedException("Interlaced (field / MBAFF) coding is not supported.");
-        }
-
         bool isIdr = nal.Type == NalUnitType.IdrSlice;
         int frameNum = (int)r.ReadBits(sps.Log2MaxFrameNum);
+        if (!sps.FrameMbsOnly && r.ReadFlag())
+        {
+            throw new NotSupportedException("Field pictures (field_pic_flag) are not supported.");
+        }
+
+        bool mbaff = sps.MbAdaptiveFrameField;
+        if (mbaff && type != SliceType.I)
+        {
+            throw new NotSupportedException("Only I slices are supported in MBAFF frames.");
+        }
+
         int idrPicId = isIdr ? (int)r.ReadUe() : 0;
 
         int pocLsb = 0;
@@ -213,6 +226,7 @@ internal sealed class SliceHeader
         return new SliceHeader
         {
             FirstMbInSlice = firstMb,
+            Mbaff = mbaff,
             Type = type,
             PpsId = ppsId,
             FrameNum = frameNum,

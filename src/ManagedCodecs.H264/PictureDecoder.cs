@@ -65,6 +65,7 @@ internal sealed partial class PictureDecoder
         _totalCoeffLuma = new byte[_mbCount * 16];
         _totalCoeffChroma = new byte[_mbCount * 8];
         _intra4x4Mode = new sbyte[_mbCount * 16];
+        _fieldMb = new bool[_mbCount];
 
         InitInter();
         InitCabacState();
@@ -91,6 +92,8 @@ internal sealed partial class PictureDecoder
         Array.Clear(_totalCoeffLuma);
         Array.Clear(_totalCoeffChroma);
         Array.Clear(_intra4x4Mode);
+        Array.Clear(_fieldMb);
+        _mbaff = false;
         ResetInter(picture);
         ResetCabacState();
     }
@@ -101,6 +104,7 @@ internal sealed partial class PictureDecoder
     public void DecodeSlice(SliceHeader header, PictureParameterSet pps, BitReader r, IReadOnlyList<Picture> refList0, IReadOnlyList<Picture> refList1)
     {
         int sliceNum = _slices.Count;
+        _mbaff = header.Mbaff;
         _slices.Add(new SliceInfo(header.DisableDeblockingFilterIdc, header.SliceAlphaC0Offset, header.SliceBetaOffset, pps.ChromaQpIndexOffset, pps.SecondChromaQpIndexOffset));
 
         if (_scaling.Sps != Sps || _scaling.Pps != pps)
@@ -126,7 +130,7 @@ internal sealed partial class PictureDecoder
             return;
         }
 
-        int mbAddr = header.FirstMbInSlice;
+        int mbAddr = header.FirstMbAddr;
         bool moreData = true;
         do
         {
@@ -208,6 +212,11 @@ internal sealed partial class PictureDecoder
     /// </summary>
     private int NeighborMb(int mbAddr, int x, int y, int size = 16)
     {
+        if (_mbaff)
+        {
+            return AffNeighbor(mbAddr, x, y, size, size).Mb;
+        }
+
         if (y >= size || (x >= size && y >= 0))
         {
             return -1;
@@ -261,14 +270,14 @@ internal sealed partial class PictureDecoder
     /// <summary>TotalCoeff of the 4x4 block covering a location, or -1 when unavailable.</summary>
     private int NeighborTotalCoeff(int mbAddr, int x, int y, byte[] counts, int size, int component)
     {
-        int n = NeighborMb(mbAddr, x, y, size);
+        var (n, xW, yW) = Neighbor(mbAddr, x, y, size, size);
         if (n < 0)
         {
             return -1;
         }
 
-        int bx = ((x + size) % size) / 4;
-        int by = ((y + size) % size) / 4;
+        int bx = xW / 4;
+        int by = yW / 4;
         return size == 16
             ? counts[(n * 16) + (by * 4) + bx]
             : counts[(n * 8) + (component * 4) + (by * 2) + bx];
@@ -277,6 +286,7 @@ internal sealed partial class PictureDecoder
     // ---- Macroblock layer (7.3.5) ----
     private void DecodeMacroblock(SliceState slice, BitReader r, int mbAddr)
     {
+        StartPair(slice, r, mbAddr);
         var type = slice.Header.Type;
         int mbType = slice.Cabac is not { } c ? (int)r.ReadUe()
             : type == SliceType.P ? CabacPMbType(c, mbAddr)
@@ -390,8 +400,13 @@ internal sealed partial class PictureDecoder
         _qp[mbAddr] = slice.Qp;
 
         var neighbors = IntraMbNeighbors(slice, mbAddr);
-        ReconstructIntraLuma(slice, mbAddr, residual, is16x16, predMode16x16, cbpLuma, neighbors);
-        ReconstructChroma(slice, mbAddr, residual, cbpChroma, intraMode: chromaPredMode, neighbors);
+        var target = _mbaff ? GatherMbaffNeighbors(mbAddr) : PictureTarget(mbAddr);
+        ReconstructIntraLuma(slice, mbAddr, target, residual, is16x16, predMode16x16, cbpLuma, neighbors);
+        ReconstructChroma(slice, mbAddr, target, residual, cbpChroma, intraMode: chromaPredMode, neighbors);
+        if (_mbaff)
+        {
+            ScatterMbaff(mbAddr, target);
+        }
     }
 
     /// <summary>transform_size_8x8_flag: one bit, or with CABAC ctxIdx 399 + the flags of macroblocks A and B.</summary>
@@ -428,22 +443,23 @@ internal sealed partial class PictureDecoder
             r.Skip(1); // pcm_alignment_zero_bit
         }
 
-        var (lumaOrigin, chromaOrigin) = Origins(mbAddr);
+        var (lumaOrigin, lumaStride) = LumaPlace(mbAddr);
         for (int y = 0; y < 16; y++)
         {
             for (int x = 0; x < 16; x++)
             {
-                Picture.Y[lumaOrigin + (y * Picture.LumaStride) + x] = (byte)r.ReadBits(8);
+                Picture.Y[lumaOrigin + (y * lumaStride) + x] = (byte)r.ReadBits(8);
             }
         }
 
+        var (chromaOrigin, chromaStride) = ChromaPlace(mbAddr);
         foreach (var plane in new[] { Picture.Cb, Picture.Cr })
         {
             for (int y = 0; y < 8; y++)
             {
                 for (int x = 0; x < 8; x++)
                 {
-                    plane[chromaOrigin + (y * Picture.ChromaStride) + x] = (byte)r.ReadBits(8);
+                    plane[chromaOrigin + (y * chromaStride) + x] = (byte)r.ReadBits(8);
                 }
             }
         }
@@ -473,16 +489,18 @@ internal sealed partial class PictureDecoder
     /// <summary>Intra4x4PredMode prediction (8.3.1.1).</summary>
     private int PredictIntra4x4Mode(SliceState slice, int mbAddr, int x, int y)
     {
-        int a = NeighborMb(mbAddr, (x * 4) - 1, y * 4);
-        int b = NeighborMb(mbAddr, x * 4, (y * 4) - 1);
+        var (a, xA, yA) = Neighbor(mbAddr, (x * 4) - 1, y * 4);
+        var (b, xB, yB) = Neighbor(mbAddr, x * 4, (y * 4) - 1);
         bool constrained = slice.Pps.ConstrainedIntraPred;
         if (a < 0 || b < 0 || (constrained && (IsInter(a) || IsInter(b))))
         {
             return 2;
         }
 
-        int modeA = NeighborIntraMode(a, x == 0 ? 3 : x - 1, y);
-        int modeB = NeighborIntraMode(b, x, y == 0 ? 3 : y - 1);
+        // For 8x8 blocks this reads the neighbouring 4x4 block at the same location, which is the
+        // 4x4 block 8.3.2.1 picks (n = 1 or 3 for A, 2 for B), MBAFF field/frame mixtures included.
+        int modeA = NeighborIntraMode(a, xA / 4, yA / 4);
+        int modeB = NeighborIntraMode(b, xB / 4, yB / 4);
         return Math.Min(modeA, modeB);
     }
 
@@ -497,13 +515,6 @@ internal sealed partial class PictureDecoder
     {
         bool Usable(int n) => n >= 0 && !(slice.Pps.ConstrainedIntraPred && IsInter(n));
         return (Usable(NeighborMb(mbAddr, -1, 0)), Usable(NeighborMb(mbAddr, 0, -1)), Usable(NeighborMb(mbAddr, 16, -1)), Usable(NeighborMb(mbAddr, -1, -1)));
-    }
-
-    private (int Luma, int Chroma) Origins(int mbAddr)
-    {
-        int mbX = mbAddr % _widthInMbs;
-        int mbY = mbAddr / _widthInMbs;
-        return ((mbY * 16 * Picture.LumaStride) + (mbX * 16), (mbY * 8 * Picture.ChromaStride) + (mbX * 8));
     }
 
     // ---- Residual (7.3.5.3) ----
@@ -536,7 +547,7 @@ internal sealed partial class PictureDecoder
         if (slice.Cabac is { } c)
         {
             int inc = category == BlockCategory.Luma8x8 ? 0 : CodedBlockFlagInc(mbAddr, category, x, y, component);
-            return CabacResidualBlock(c, category, inc, maxNumCoeff, block, scan);
+            return CabacResidualBlock(c, category, inc, IsFieldMb(mbAddr), maxNumCoeff, block, scan);
         }
 
         int nC = category switch
@@ -564,7 +575,11 @@ internal sealed partial class PictureDecoder
         lumaCounts.Clear();
         chromaCounts.Clear();
 
-        if (is16x16 && ReadBlock(slice, r, mbAddr, BlockCategory.LumaDc, 0, 0, 0, 16, residual.LumaDc, Transform.ZigZag4x4) != 0)
+        // Field macroblocks use the field scans (8.5.6).
+        bool field = IsFieldMb(mbAddr);
+        var scan4x4 = field ? Field4x4 : Transform.ZigZag4x4;
+        var scanAc = field ? Field4x4Ac : ZigZag4x4Ac;
+        if (is16x16 && ReadBlock(slice, r, mbAddr, BlockCategory.LumaDc, 0, 0, 0, 16, residual.LumaDc, scan4x4) != 0)
         {
             _dcCoded[mbAddr] |= 1;
         }
@@ -575,7 +590,7 @@ internal sealed partial class PictureDecoder
         }
         else
         {
-            var scan = is16x16 ? ZigZag4x4Ac : Transform.ZigZag4x4;
+            var scan = is16x16 ? scanAc : scan4x4;
             for (int idx = 0; idx < 16; idx++)
             {
                 if ((cbpLuma & (1 << (idx >> 2))) == 0)
@@ -612,7 +627,7 @@ internal sealed partial class PictureDecoder
         {
             for (int b = 0; b < 4; b++)
             {
-                chromaCounts[(c * 4) + b] = (byte)ReadBlock(slice, r, mbAddr, BlockCategory.ChromaAc, b & 1, b >> 1, c, 15, residual.ChromaAc[(c * 4) + b], ZigZag4x4Ac);
+                chromaCounts[(c * 4) + b] = (byte)ReadBlock(slice, r, mbAddr, BlockCategory.ChromaAc, b & 1, b >> 1, c, 15, residual.ChromaAc[(c * 4) + b], scanAc);
             }
         }
     }
@@ -625,6 +640,7 @@ internal sealed partial class PictureDecoder
     private void ReadResidual8x8(SliceState slice, BitReader r, int mbAddr, Residual residual, int cbpLuma)
     {
         Span<byte> counts = _totalCoeffLuma.AsSpan(mbAddr * 16, 16);
+        bool field = IsFieldMb(mbAddr);
         for (int b8 = 0; b8 < 4; b8++)
         {
             if ((cbpLuma & (1 << b8)) == 0)
@@ -637,7 +653,7 @@ internal sealed partial class PictureDecoder
             int y8 = (b8 >> 1) * 2;
             if (slice.Cabac is not null)
             {
-                byte count = (byte)ReadBlock(slice, r, mbAddr, BlockCategory.Luma8x8, x8, y8, 0, 64, block, Transform.ZigZag8x8);
+                byte count = (byte)ReadBlock(slice, r, mbAddr, BlockCategory.Luma8x8, x8, y8, 0, 64, block, field ? Field8x8 : Transform.ZigZag8x8);
                 counts[(y8 * 4) + x8] = count;
                 counts[(y8 * 4) + x8 + 1] = count;
                 counts[((y8 + 1) * 4) + x8] = count;
@@ -651,7 +667,7 @@ internal sealed partial class PictureDecoder
                 // Each 4x4 read clears nothing: it fills its own quarter of the 8x8 positions.
                 var (x, y) = BlockPosition((b8 * 4) + i4);
                 int nC = LumaNc(mbAddr, x, y);
-                counts[(y * 4) + x] = (byte)Cavlc.ReadResidualBlock(r, nC, 16, block, Cavlc8x8Scan.AsSpan(i4 * 16, 16));
+                counts[(y * 4) + x] = (byte)Cavlc.ReadResidualBlock(r, nC, 16, block, (field ? CavlcField8x8Scan : Cavlc8x8Scan).AsSpan(i4 * 16, 16));
             }
         }
     }
@@ -664,26 +680,25 @@ internal sealed partial class PictureDecoder
     }
 
     /// <summary>Adds the residual of each coded 8x8 block to the luma prediction.</summary>
-    private void AddLuma8x8Residual(SliceState slice, int mbAddr, Residual residual, int cbpLuma, int b8, int qp)
+    private void AddLuma8x8Residual(SliceState slice, int mbAddr, MbTarget target, Residual residual, int cbpLuma, int b8, int qp)
     {
         if ((cbpLuma & (1 << b8)) == 0 || !Has8x8Coefficients(mbAddr, b8))
         {
             return;
         }
 
-        var (origin, _) = Origins(mbAddr);
-        int stride = Picture.LumaStride;
+        int stride = target.YStride;
         var block = residual.Luma8x8[b8];
         Transform.Dequantize8x8(block, qp, slice.Scaling.LevelScale8x8(IsInter(mbAddr) ? 1 : 0));
-        Transform.InverseTransform8x8Add(block, Picture.Y.AsSpan(origin + ((b8 >> 1) * 8 * stride) + ((b8 & 1) * 8)), stride);
+        Transform.InverseTransform8x8Add(block, target.Y.AsSpan(target.YOrigin + ((b8 >> 1) * 8 * stride) + ((b8 & 1) * 8)), stride);
     }
 
     // ---- Reconstruction ----
-    private void ReconstructIntraLuma(SliceState slice, int mbAddr, Residual residual, bool is16x16, int predMode16x16, int cbpLuma, (bool A, bool B, bool C, bool D) mbs)
+    private void ReconstructIntraLuma(SliceState slice, int mbAddr, MbTarget target, Residual residual, bool is16x16, int predMode16x16, int cbpLuma, (bool A, bool B, bool C, bool D) mbs)
     {
-        var (origin, _) = Origins(mbAddr);
-        int stride = Picture.LumaStride;
-        byte[] plane = Picture.Y;
+        int origin = target.YOrigin;
+        int stride = target.YStride;
+        byte[] plane = target.Y;
         int qp = _qp[mbAddr];
 
         if (is16x16)
@@ -727,7 +742,7 @@ internal sealed partial class PictureDecoder
                 };
                 int offset8 = origin + (y * 4 * stride) + (x * 4);
                 IntraPrediction.Predict8x8(_intra4x4Mode[(mbAddr * 16) + (y * 4) + x], plane, offset8, stride, n);
-                AddLuma8x8Residual(slice, mbAddr, residual, cbpLuma, b8, qp);
+                AddLuma8x8Residual(slice, mbAddr, target, residual, cbpLuma, b8, qp);
             }
 
             return;
@@ -766,17 +781,17 @@ internal sealed partial class PictureDecoder
     /// Chroma prediction (intra only; inter prediction is done before) and residual for both
     /// components. <paramref name="intraMode"/> is -1 for inter macroblocks.
     /// </summary>
-    private void ReconstructChroma(SliceState slice, int mbAddr, Residual residual, int cbpChroma, int intraMode, (bool A, bool B, bool C, bool D) mbs)
+    private void ReconstructChroma(SliceState slice, int mbAddr, MbTarget target, Residual residual, int cbpChroma, int intraMode, (bool A, bool B, bool C, bool D) mbs)
     {
-        var (_, origin) = Origins(mbAddr);
-        int stride = Picture.ChromaStride;
+        int origin = target.COrigin;
+        int stride = target.CStride;
         Span<int> dc = stackalloc int[4];
 
         for (int c = 0; c < 2; c++)
         {
             int qpc = ChromaQp(_qp[mbAddr], c == 0 ? slice.Pps.ChromaQpIndexOffset : slice.Pps.SecondChromaQpIndexOffset);
             var levelScale = slice.Scaling.LevelScale4x4((intraMode >= 0 ? 1 : 4) + c); // Intra or Inter Cb, Cr
-            byte[] plane = c == 0 ? Picture.Cb : Picture.Cr;
+            byte[] plane = c == 0 ? target.Cb : target.Cr;
             if (intraMode >= 0)
             {
                 IntraPrediction.PredictChroma(intraMode, plane, origin, stride, new IntraNeighbors(mbs.A, mbs.B, mbs.C, mbs.D));

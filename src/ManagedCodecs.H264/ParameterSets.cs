@@ -44,6 +44,9 @@ internal sealed class SequenceParameterSet
 
     public bool FrameMbsOnly { get; internal init; }
 
+    /// <summary>mb_adaptive_frame_field_flag: frames may code each macroblock pair as two fields (MBAFF).</summary>
+    public bool MbAdaptiveFrameField { get; internal init; }
+
     public bool Direct8x8Inference { get; internal init; }
 
     /// <summary>max_num_reorder_frames from the VUI's bitstream restriction, if it has one.</summary>
@@ -118,10 +121,7 @@ internal sealed class SequenceParameterSet
         int widthInMbs = 1 + r.ReadUe(1023, "pic_width_in_mbs_minus1");
         int heightInMapUnits = 1 + r.ReadUe(1023, "pic_height_in_map_units_minus1");
         bool frameMbsOnly = r.ReadFlag();
-        if (!frameMbsOnly)
-        {
-            r.ReadFlag(); // mb_adaptive_frame_field_flag
-        }
+        bool mbAdaptive = !frameMbsOnly && r.ReadFlag(); // mb_adaptive_frame_field_flag
 
         bool direct8x8 = r.ReadFlag();
         var crop = (0, 0, 0, 0);
@@ -158,6 +158,7 @@ internal sealed class SequenceParameterSet
             WidthInMbs = widthInMbs,
             HeightInMapUnits = heightInMapUnits,
             FrameMbsOnly = frameMbsOnly,
+            MbAdaptiveFrameField = mbAdaptive,
             Direct8x8Inference = direct8x8,
             Crop = crop,
             MaxNumReorderFrames = restriction?.Reorder,

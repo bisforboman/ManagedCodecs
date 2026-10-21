@@ -131,6 +131,20 @@ ff -f lavfi -i "testsrc2=size=321x239:rate=25,scroll=v=0.02" -t 1 "${H[@]}" -bf 
 ff -f lavfi -i "testsrc2=size=320x240:rate=25,scroll=h=0.02,noise=alls=10:allf=t" -t 1 "${H[@]}" -bf 2 -refs 2 -x264-params constrained-intra=1:chroma-qp-offset=4 samples/h264-high-constrained-intra.mp4
 ff -f lavfi -i "testsrc2=size=320x240:rate=25,fade=in:0:20,fade=out:30:20" -t 2 "${H[@]}" samples/h264-high-default.mp4
 
+# ---- H.264 interlaced: MBAFF (intra only so far) ----
+# Interlaced content (two moving frames woven into one) with libx264's macroblock-adaptive frame/field coding: each
+# macroblock pair is coded as a frame or a field pair, and testsrc2's still background next to its moving parts gives
+# both kinds side by side and above one another (the conformance test checks every mixture occurs). CABAC with the 8x8
+# transform and a 240-line picture cropped from 256 (crop units of 4 lines), CAVLC, CABAC with 4x4 blocks only, and
+# slices with filter offsets on noise. -debug mb_type shows which pairs are field pairs ('=').
+I=(-vf "tinterlace=interleave_top,setfield=tff" -c:v libx264 -profile:v high -pix_fmt yuv420p -flags +ildct+ilme)
+ff -f lavfi -i testsrc2=size=320x240:rate=50 -t 0.4 "${I[@]}" -g 1 samples/h264-mbaff-intra.mp4
+ff -f lavfi -i testsrc2=size=320x256:rate=50 -t 0.4 "${I[@]}" -g 1 -x264-params cabac=0 samples/h264-mbaff-intra-cavlc.mp4
+ff -f lavfi -i testsrc2=size=320x256:rate=50 -t 0.4 "${I[@]}" -g 1 -x264-params 8x8dct=0 samples/h264-mbaff-intra-4x4.mp4
+ff -f lavfi -i testsrc2=size=320x256:rate=50,noise=alls=10:allf=t -t 0.4 "${I[@]}" -g 1 -x264-params slices=4:deblock=2,-1 samples/h264-mbaff-intra-slices.mp4
+# Interlaced-capable parameter sets (frame_mbs_only_flag 0) on progressive frames, with P and B frames.
+ff -f lavfi -i "testsrc2=size=320x240:rate=25,scroll=h=0.01" -t 1 "${H[@]}" -bf 2 -x264-params fake-interlaced=1 samples/h264-fake-interlaced.mp4
+
 # ---- H.264 scaling matrices (High profile) ----
 # libx264 writes them in the PPS only, so absent lists fall back by rule A (Table 7-2). cqm=jvt sends no lists at all:
 # every list is the default one. The custom files give each list its own values (libx264 reads one chroma list per

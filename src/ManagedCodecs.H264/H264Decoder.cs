@@ -194,6 +194,9 @@ public sealed class H264Decoder : IVideoDecoder
         return current;
     }
 
+    /// <summary>How often MBAFF frames used field and frame pairs and mixed them, so tests can check samples exercise them.</summary>
+    internal MbaffStatistics MbaffStatistics { get; } = new();
+
     private PictureState StartPicture(SliceHeader header, SequenceParameterSet sps)
     {
         if (header.IsIdr)
@@ -207,7 +210,7 @@ public sealed class H264Decoder : IVideoDecoder
 
         if (_decoder is null || _decoder.Sps.WidthInMbs != sps.WidthInMbs || _decoder.Sps.HeightInMbs != sps.HeightInMbs)
         {
-            _decoder = new PictureDecoder(sps);
+            _decoder = new PictureDecoder(sps) { Statistics = MbaffStatistics };
         }
 
         int poc = _order.Next(header, sps);

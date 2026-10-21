@@ -36,6 +36,12 @@ internal sealed partial class PictureDecoder
     [SkipLocalsInit]
     public void Deblock()
     {
+        if (_mbaff)
+        {
+            DeblockMbaff();
+            return;
+        }
+
         // bS per edge (0..3) and per 4-sample segment along it, for vertical and horizontal edges.
         Span<byte> vertical = stackalloc byte[16];
         Span<byte> horizontal = stackalloc byte[16];
@@ -88,9 +94,8 @@ internal sealed partial class PictureDecoder
                 horizontal.Slice(12, 4).Clear();
             }
 
-            var (lumaOrigin, chromaOrigin) = Origins(mbAddr);
-            int lumaStride = Picture.LumaStride;
-            int chromaStride = Picture.ChromaStride;
+            var (lumaOrigin, lumaStride) = LumaPlace(mbAddr);
+            var (chromaOrigin, chromaStride) = ChromaPlace(mbAddr);
             int qp = _qp[mbAddr];
 
             // Luma: all vertical edges, then all horizontal ones.
@@ -310,90 +315,99 @@ internal sealed partial class PictureDecoder
         for (int i = 0; i < length; i++)
         {
             int bS = strengths[i >> segmentShift];
-            if (bS == 0)
+            if (bS != 0)
             {
-                continue;
+                int pos = q0 + (i * along);
+                FilterSamples(plane, pos - across, across, pos, across, bS, indexA, alpha, beta, chroma);
             }
+        }
+    }
 
-            int pos = q0 + (i * along);
-            int p0 = plane[pos - across];
-            int p1 = plane[pos - (2 * across)];
-            int q0v = plane[pos];
-            int q1 = plane[pos + across];
+    /// <summary>
+    /// The filter across one line of samples: p0 at <paramref name="p0"/>, p1, p2, p3 each
+    /// <paramref name="pStep"/> further away from the edge, and q0, q1, q2, q3 from <paramref name="q0"/>
+    /// on in steps of <paramref name="qStep"/> (the two sides differ where an MBAFF frame macroblock
+    /// meets a field macroblock).
+    /// </summary>
+    private static void FilterSamples(byte[] plane, int p0, int pStep, int q0, int qStep, int bS, int indexA, int alpha, int beta, bool chroma)
+    {
+        int p0v = plane[p0];
+        int p1 = plane[p0 - pStep];
+        int q0v = plane[q0];
+        int q1 = plane[q0 + qStep];
 
-            if (Math.Abs(p0 - q0v) >= alpha || Math.Abs(p1 - p0) >= beta || Math.Abs(q1 - q0v) >= beta)
-            {
-                continue;
-            }
+        if (Math.Abs(p0v - q0v) >= alpha || Math.Abs(p1 - p0v) >= beta || Math.Abs(q1 - q0v) >= beta)
+        {
+            return;
+        }
 
-            if (chroma)
-            {
-                if (bS < 4)
-                {
-                    int tc = Tc0[(indexA * 3) + bS - 1] + 1;
-                    int delta = Math.Clamp((((q0v - p0) << 2) + (p1 - q1) + 4) >> 3, -tc, tc);
-                    plane[pos - across] = Clip(p0 + delta);
-                    plane[pos] = Clip(q0v - delta);
-                }
-                else
-                {
-                    plane[pos - across] = (byte)(((2 * p1) + p0 + q1 + 2) >> 2);
-                    plane[pos] = (byte)(((2 * q1) + q0v + p1 + 2) >> 2);
-                }
-
-                continue;
-            }
-
-            int p2 = plane[pos - (3 * across)];
-            int q2 = plane[pos + (2 * across)];
-            bool ap = Math.Abs(p2 - p0) < beta;
-            bool aq = Math.Abs(q2 - q0v) < beta;
-
+        if (chroma)
+        {
             if (bS < 4)
             {
-                int tc0 = Tc0[(indexA * 3) + bS - 1];
-                int tc = tc0 + (ap ? 1 : 0) + (aq ? 1 : 0);
-                int delta = Math.Clamp((((q0v - p0) << 2) + (p1 - q1) + 4) >> 3, -tc, tc);
-                plane[pos - across] = Clip(p0 + delta);
-                plane[pos] = Clip(q0v - delta);
-                if (ap)
-                {
-                    plane[pos - (2 * across)] = (byte)(p1 + Math.Clamp((p2 + ((p0 + q0v + 1) >> 1) - (p1 << 1)) >> 1, -tc0, tc0));
-                }
-
-                if (aq)
-                {
-                    plane[pos + across] = (byte)(q1 + Math.Clamp((q2 + ((p0 + q0v + 1) >> 1) - (q1 << 1)) >> 1, -tc0, tc0));
-                }
-
-                continue;
-            }
-
-            // bS == 4: the strong filter where the edge is smooth enough.
-            bool small = Math.Abs(p0 - q0v) < ((alpha >> 2) + 2);
-            if (ap && small)
-            {
-                int p3 = plane[pos - (4 * across)];
-                plane[pos - across] = (byte)((p2 + (2 * p1) + (2 * p0) + (2 * q0v) + q1 + 4) >> 3);
-                plane[pos - (2 * across)] = (byte)((p2 + p1 + p0 + q0v + 2) >> 2);
-                plane[pos - (3 * across)] = (byte)(((2 * p3) + (3 * p2) + p1 + p0 + q0v + 4) >> 3);
+                int tc = Tc0[(indexA * 3) + bS - 1] + 1;
+                int delta = Math.Clamp((((q0v - p0v) << 2) + (p1 - q1) + 4) >> 3, -tc, tc);
+                plane[p0] = Clip(p0v + delta);
+                plane[q0] = Clip(q0v - delta);
             }
             else
             {
-                plane[pos - across] = (byte)(((2 * p1) + p0 + q1 + 2) >> 2);
+                plane[p0] = (byte)(((2 * p1) + p0v + q1 + 2) >> 2);
+                plane[q0] = (byte)(((2 * q1) + q0v + p1 + 2) >> 2);
             }
 
-            if (aq && small)
+            return;
+        }
+
+        int p2 = plane[p0 - (2 * pStep)];
+        int q2 = plane[q0 + (2 * qStep)];
+        bool ap = Math.Abs(p2 - p0v) < beta;
+        bool aq = Math.Abs(q2 - q0v) < beta;
+
+        if (bS < 4)
+        {
+            int tc0 = Tc0[(indexA * 3) + bS - 1];
+            int tc = tc0 + (ap ? 1 : 0) + (aq ? 1 : 0);
+            int delta = Math.Clamp((((q0v - p0v) << 2) + (p1 - q1) + 4) >> 3, -tc, tc);
+            plane[p0] = Clip(p0v + delta);
+            plane[q0] = Clip(q0v - delta);
+            if (ap)
             {
-                int q3 = plane[pos + (3 * across)];
-                plane[pos] = (byte)((p1 + (2 * p0) + (2 * q0v) + (2 * q1) + q2 + 4) >> 3);
-                plane[pos + across] = (byte)((p0 + q0v + q1 + q2 + 2) >> 2);
-                plane[pos + (2 * across)] = (byte)(((2 * q3) + (3 * q2) + q1 + q0v + p0 + 4) >> 3);
+                plane[p0 - pStep] = (byte)(p1 + Math.Clamp((p2 + ((p0v + q0v + 1) >> 1) - (p1 << 1)) >> 1, -tc0, tc0));
             }
-            else
+
+            if (aq)
             {
-                plane[pos] = (byte)(((2 * q1) + q0v + p1 + 2) >> 2);
+                plane[q0 + qStep] = (byte)(q1 + Math.Clamp((q2 + ((p0v + q0v + 1) >> 1) - (q1 << 1)) >> 1, -tc0, tc0));
             }
+
+            return;
+        }
+
+        // bS == 4: the strong filter where the edge is smooth enough.
+        bool small = Math.Abs(p0v - q0v) < ((alpha >> 2) + 2);
+        if (ap && small)
+        {
+            int p3 = plane[p0 - (3 * pStep)];
+            plane[p0] = (byte)((p2 + (2 * p1) + (2 * p0v) + (2 * q0v) + q1 + 4) >> 3);
+            plane[p0 - pStep] = (byte)((p2 + p1 + p0v + q0v + 2) >> 2);
+            plane[p0 - (2 * pStep)] = (byte)(((2 * p3) + (3 * p2) + p1 + p0v + q0v + 4) >> 3);
+        }
+        else
+        {
+            plane[p0] = (byte)(((2 * p1) + p0v + q1 + 2) >> 2);
+        }
+
+        if (aq && small)
+        {
+            int q3 = plane[q0 + (3 * qStep)];
+            plane[q0] = (byte)((p1 + (2 * p0v) + (2 * q0v) + (2 * q1) + q2 + 4) >> 3);
+            plane[q0 + qStep] = (byte)((p0v + q0v + q1 + q2 + 2) >> 2);
+            plane[q0 + (2 * qStep)] = (byte)(((2 * q3) + (3 * q2) + q1 + q0v + p0v + 4) >> 3);
+        }
+        else
+        {
+            plane[q0] = (byte)(((2 * q1) + q0v + p1 + 2) >> 2);
         }
     }
 

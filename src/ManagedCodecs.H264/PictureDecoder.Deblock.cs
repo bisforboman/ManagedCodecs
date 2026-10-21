@@ -107,22 +107,21 @@ internal sealed partial class PictureDecoder
             }
 
             // Chroma (4:2:0): edges 0 and 4 use the bS of luma edges 0 and 8; QP_C per component.
-            for (int c = 0; c < 2; c++)
+            // Cb and Cr are filtered together, all vertical edges first.
+            int qpCb = ChromaQp(qp, slice.CbQpOffset);
+            int qpCr = ChromaQp(qp, slice.CrQpOffset);
+            int qpLeft = mbX > 0 ? _qp[mbAddr - 1] : qp;
+            int qpAbove = mbY > 0 ? _qp[mbAddr - _widthInMbs] : qp;
+            for (int edge = 0; edge < 2; edge++)
             {
-                byte[] plane = c == 0 ? Picture.Cb : Picture.Cr;
-                int qpOffset = c == 0 ? slice.CbQpOffset : slice.CrQpOffset;
-                int qpc = ChromaQp(qp, qpOffset);
-                for (int edge = 0; edge < 2; edge++)
-                {
-                    int qpcP = edge == 0 && mbX > 0 ? ChromaQp(_qp[mbAddr - 1], qpOffset) : qpc;
-                    FilterEdge(plane, chromaOrigin + (edge * 4), 1, chromaStride, 8, vertical.Slice(edge * 8, 4), qpcP, qpc, slice.AlphaOffset, slice.BetaOffset, chroma: true);
-                }
+                int qpP = edge == 0 ? qpLeft : qp;
+                FilterChromaEdge(Picture.Cb, Picture.Cr, chromaOrigin + (edge * 4), 1, chromaStride, vertical.Slice(edge * 8, 4), ChromaQp(qpP, slice.CbQpOffset), qpCb, ChromaQp(qpP, slice.CrQpOffset), qpCr, slice.AlphaOffset, slice.BetaOffset);
+            }
 
-                for (int edge = 0; edge < 2; edge++)
-                {
-                    int qpcP = edge == 0 && mbY > 0 ? ChromaQp(_qp[mbAddr - _widthInMbs], qpOffset) : qpc;
-                    FilterEdge(plane, chromaOrigin + (edge * 4 * chromaStride), chromaStride, 1, 8, horizontal.Slice(edge * 8, 4), qpcP, qpc, slice.AlphaOffset, slice.BetaOffset, chroma: true);
-                }
+            for (int edge = 0; edge < 2; edge++)
+            {
+                int qpP = edge == 0 ? qpAbove : qp;
+                FilterChromaEdge(Picture.Cb, Picture.Cr, chromaOrigin + (edge * 4 * chromaStride), chromaStride, 1, horizontal.Slice(edge * 8, 4), ChromaQp(qpP, slice.CbQpOffset), qpCb, ChromaQp(qpP, slice.CrQpOffset), qpCr, slice.AlphaOffset, slice.BetaOffset);
             }
         }
     }
@@ -411,28 +410,113 @@ internal sealed partial class PictureDecoder
         int lastTap = chroma ? 5 : 7;
         Gather(plane, q0, across, along, length, taps, firstTap, lastTap);
 
-        int segmentShift = chroma ? 1 : 2; // 2 or 4 samples per segment
-        Span<short> tc0OfSegment = stackalloc short[4];
-        for (int s = 0; s < 4; s++)
+        Span<short> lanes = stackalloc short[4 * 16];
+        SetLanes(lanes, 0, length, strengths, chroma ? 1 : 2, indexA, alpha, beta);
+        FilterTaps(taps, length, lanes, chroma);
+
+        // Only p2 .. q2 (luma) or p0, q0 (chroma) can change.
+        Scatter(plane, q0, across, along, length, taps, chroma ? 3 : 1, chroma ? 4 : 6);
+    }
+
+    /// <summary>
+    /// Both chroma components' edge at once: Cb in lanes 0-7, Cr in lanes 8-15, each with its own
+    /// QP (so its own alpha, beta and tC0) and the same bS. The same result as
+    /// <see cref="FilterEdge"/> on each component.
+    /// </summary>
+    [SkipLocalsInit]
+    internal static void FilterChromaEdge(byte[] cb, byte[] cr, int q0, int across, int along, ReadOnlySpan<byte> strengths, int qpPCb, int qpQCb, int qpPCr, int qpQCr, int alphaOffset, int betaOffset, bool vectorized = true)
+    {
+        if (MemoryMarshal.Read<uint>(strengths) == 0)
         {
-            int bS = strengths[s];
-            tc0OfSegment[s] = bS is > 0 and < 4 ? Tc0[(indexA * 3) + bS - 1] : (short)0;
+            return;
         }
 
-        Span<short> bsLanes = stackalloc short[16];
-        Span<short> tc0Lanes = stackalloc short[16];
-        for (int i = 0; i < length; i++)
+        if (!vectorized || !Vector128.IsHardwareAccelerated)
         {
-            bsLanes[i] = strengths[i >> segmentShift];
-            tc0Lanes[i] = tc0OfSegment[i >> segmentShift];
+            FilterEdge(cb, q0, across, along, 8, strengths, qpPCb, qpQCb, alphaOffset, betaOffset, chroma: true, vectorized);
+            FilterEdge(cr, q0, across, along, 8, strengths, qpPCr, qpQCr, alphaOffset, betaOffset, chroma: true, vectorized);
+            return;
         }
 
-        var alphaV = Vector128.Create((short)alpha);
-        var betaV = Vector128.Create((short)beta);
+        Span<short> lanes = stackalloc short[4 * 16];
+        bool any = false;
+        for (int c = 0; c < 2; c++)
+        {
+            int qpAv = c == 0 ? (qpPCb + qpQCb + 1) >> 1 : (qpPCr + qpQCr + 1) >> 1;
+            int indexA = Math.Clamp(qpAv + alphaOffset, 0, 51);
+            int alpha = Alpha[indexA];
+            int beta = Beta[Math.Clamp(qpAv + betaOffset, 0, 51)];
+            any |= alpha != 0 && beta != 0;
+
+            // alpha 0 (or beta 0) lets no sample of the component pass the filter's test.
+            SetLanes(lanes, c * 8, 8, strengths, 1, indexA, beta == 0 ? 0 : alpha, beta);
+        }
+
+        if (!any)
+        {
+            return;
+        }
+
+        Span<byte> taps = stackalloc byte[(8 * 16) + 16];
+        if (across == 1)
+        {
+            TransposeIn(cb, q0 - 4, cr, q0 - 4, along, taps);
+        }
+        else
+        {
+            for (int k = 2; k <= 5; k++)
+            {
+                int start = q0 + ((k - 4) * across);
+                MemoryMarshal.Write(taps[(k * 16)..], MemoryMarshal.Read<ulong>(cb.AsSpan(start, 8)));
+                MemoryMarshal.Write(taps[((k * 16) + 8)..], MemoryMarshal.Read<ulong>(cr.AsSpan(start, 8)));
+            }
+        }
+
+        FilterTaps(taps, 16, lanes, chroma: true);
+
+        if (across == 1)
+        {
+            TransposeOut(taps, cb, q0 - 4, cr, q0 - 4, along);
+        }
+        else
+        {
+            for (int k = 3; k <= 4; k++)
+            {
+                int start = q0 + ((k - 4) * across);
+                MemoryMarshal.Write(cb.AsSpan(start, 8), MemoryMarshal.Read<ulong>(taps[(k * 16)..]));
+                MemoryMarshal.Write(cr.AsSpan(start, 8), MemoryMarshal.Read<ulong>(taps[((k * 16) + 8)..]));
+            }
+        }
+    }
+
+    /// <summary>
+    /// The per-lane parameters of <see cref="FilterTaps"/> for lanes first .. first + count - 1:
+    /// bS, tC0, alpha and beta, each a row of 16 in <paramref name="lanes"/>.
+    /// </summary>
+    private static void SetLanes(Span<short> lanes, int first, int count, ReadOnlySpan<byte> strengths, int segmentShift, int indexA, int alpha, int beta)
+    {
+        for (int i = 0; i < count; i++)
+        {
+            int bS = strengths[i >> segmentShift];
+            lanes[first + i] = (short)bS;
+            lanes[16 + first + i] = bS is > 0 and < 4 ? Tc0[(indexA * 3) + bS - 1] : (short)0;
+            lanes[32 + first + i] = (short)alpha;
+            lanes[48 + first + i] = (short)beta;
+        }
+    }
+
+    /// <summary>
+    /// The filter (8.7.2.3, 8.7.2.4) on <paramref name="length"/> positions of gathered taps, eight
+    /// 16-bit lanes at a time, with the lane parameters of <see cref="SetLanes"/>.
+    /// </summary>
+    private static void FilterTaps(Span<byte> taps, int length, ReadOnlySpan<short> lanes, bool chroma)
+    {
         for (int h = 0; h < length; h += 8)
         {
-            var bs = Vector128.Create(bsLanes.Slice(h, 8));
-            var tc0 = Vector128.Create(tc0Lanes.Slice(h, 8));
+            var bs = Vector128.Create(lanes.Slice(h, 8));
+            var tc0 = Vector128.Create(lanes.Slice(16 + h, 8));
+            var alphaV = Vector128.Create(lanes.Slice(32 + h, 8));
+            var betaV = Vector128.Create(lanes.Slice(48 + h, 8));
             var p1 = Load(taps, 2, h);
             var p0 = Load(taps, 3, h);
             var q0v = Load(taps, 4, h);
@@ -493,7 +577,7 @@ internal sealed partial class PictureDecoder
             }
 
             // bS == 4 (8.7.2.4).
-            var small = Vector128.LessThan(Vector128.Abs(p0 - q0v), Vector128.Create((short)((alpha >> 2) + 2)));
+            var small = Vector128.LessThan(Vector128.Abs(p0 - q0v), (alphaV >> 2) + Vector128.Create((short)2));
             var sp = ap & small;
             var sq = aq & small;
             var p0Strong = Vector128.ConditionalSelect(sp, (p2 + (p1 << 1) + (p0 << 1) + (q0v << 1) + q1 + four) >> 3, ((p1 << 1) + p0 + q1 + two) >> 2);
@@ -510,9 +594,6 @@ internal sealed partial class PictureDecoder
             Store(taps, 5, h, Vector128.ConditionalSelect(filter, Vector128.ConditionalSelect(strong, q1Strong, q1Normal), q1));
             Store(taps, 6, h, Vector128.ConditionalSelect(strongFilter, q2Strong, q2));
         }
-
-        // Only p2 .. q2 (luma) or p0, q0 (chroma) can change.
-        Scatter(plane, q0, across, along, length, taps, chroma ? 3 : 1, chroma ? 4 : 6);
     }
 
     private static void Gather(byte[] plane, int q0, int across, int along, int length, Span<byte> taps, int firstTap, int lastTap)
@@ -521,7 +602,9 @@ internal sealed partial class PictureDecoder
         {
             // Vertical edges: p3 .. q3 of each row are 8 contiguous bytes. Chroma needs only
             // p1 .. q1 but takes all eight; they lie inside this macroblock and its left neighbour.
-            TransposeIn(plane, q0 - 4, along, taps, length);
+            // With 8 rows the lanes 8-15 repeat rows 0-7 and are not used.
+            int start = q0 - 4;
+            TransposeIn(plane, start, plane, length == 16 ? start + (8 * along) : start, along, taps);
             return;
         }
 
@@ -554,7 +637,7 @@ internal sealed partial class PictureDecoder
     {
         if (across == 1 && length == 16 && firstTap == 1 && Sse2.IsSupported)
         {
-            TransposeOut(taps, plane, q0 - 4, along);
+            TransposeOut(taps, plane, q0 - 4, plane, q0 - 4 + (8 * along), along);
             return;
         }
 
@@ -584,19 +667,21 @@ internal sealed partial class PictureDecoder
     }
 
     /// <summary>
-    /// Vertical edge: <paramref name="rows"/> (16 or 8) rows of p3 .. q3 (8 bytes each, starting at
-    /// <paramref name="start"/>) become the 8 tap rows of 16 lanes, by interleaving at 8, 16, 32 and
-    /// 64 bits. With 8 rows, lanes 8 .. 15 repeat row 7 and are not used.
+    /// Vertical edge: 16 rows of p3 .. q3 (8 bytes each), rows 0-7 from <paramref name="top"/> at
+    /// <paramref name="topStart"/> and rows 8-15 from <paramref name="bottom"/> at
+    /// <paramref name="bottomStart"/>, become the 8 tap rows of 16 lanes, by interleaving at 8, 16,
+    /// 32 and 64 bits.
     /// </summary>
     [SkipLocalsInit]
-    private static void TransposeIn(byte[] plane, int start, int stride, Span<byte> taps, int rows)
+    private static void TransposeIn(byte[] top, int topStart, byte[] bottom, int bottomStart, int stride, Span<byte> taps)
     {
         Span<Vector128<byte>> pairs = stackalloc Vector128<byte>[8];
-        for (int k = 0; k < 8; k++)
+        for (int k = 0; k < 4; k++)
         {
-            int even = Math.Min(2 * k, rows - 1);
-            int odd = Math.Min((2 * k) + 1, rows - 1);
-            pairs[k] = Sse2.UnpackLow(Row8(plane, start + (even * stride)), Row8(plane, start + (odd * stride)));
+            int even = topStart + (2 * k * stride);
+            pairs[k] = Sse2.UnpackLow(Row8(top, even), Row8(top, even + stride));
+            even = bottomStart + (2 * k * stride);
+            pairs[k + 4] = Sse2.UnpackLow(Row8(bottom, even), Row8(bottom, even + stride));
         }
 
         // quads[m] / quadsHigh[m]: bytes 0-3 / 4-7 of rows 4m .. 4m + 3, one 32-bit group per byte.
@@ -613,22 +698,22 @@ internal sealed partial class PictureDecoder
             var source = half == 0 ? quads : quadsHigh;
 
             // Each 64-bit group: one byte position for 8 rows.
-            var top = Sse2.UnpackLow(source[0], source[1]).AsUInt64();
-            var topHigh = Sse2.UnpackHigh(source[0], source[1]).AsUInt64();
-            var bottom = Sse2.UnpackLow(source[2], source[3]).AsUInt64();
-            var bottomHigh = Sse2.UnpackHigh(source[2], source[3]).AsUInt64();
+            var upper = Sse2.UnpackLow(source[0], source[1]).AsUInt64();
+            var upperHigh = Sse2.UnpackHigh(source[0], source[1]).AsUInt64();
+            var lower = Sse2.UnpackLow(source[2], source[3]).AsUInt64();
+            var lowerHigh = Sse2.UnpackHigh(source[2], source[3]).AsUInt64();
 
             int tap = half * 4;
-            Sse2.UnpackLow(top, bottom).AsByte().CopyTo(taps[(tap * 16)..]);
-            Sse2.UnpackHigh(top, bottom).AsByte().CopyTo(taps[((tap + 1) * 16)..]);
-            Sse2.UnpackLow(topHigh, bottomHigh).AsByte().CopyTo(taps[((tap + 2) * 16)..]);
-            Sse2.UnpackHigh(topHigh, bottomHigh).AsByte().CopyTo(taps[((tap + 3) * 16)..]);
+            Sse2.UnpackLow(upper, lower).AsByte().CopyTo(taps[(tap * 16)..]);
+            Sse2.UnpackHigh(upper, lower).AsByte().CopyTo(taps[((tap + 1) * 16)..]);
+            Sse2.UnpackLow(upperHigh, lowerHigh).AsByte().CopyTo(taps[((tap + 2) * 16)..]);
+            Sse2.UnpackHigh(upperHigh, lowerHigh).AsByte().CopyTo(taps[((tap + 3) * 16)..]);
         }
     }
 
     /// <summary>The inverse of <see cref="TransposeIn"/>: writes all 8 bytes of each of the 16 rows.</summary>
     [SkipLocalsInit]
-    private static void TransposeOut(ReadOnlySpan<byte> taps, byte[] plane, int start, int stride)
+    private static void TransposeOut(ReadOnlySpan<byte> taps, byte[] top, int topStart, byte[] bottom, int bottomStart, int stride)
     {
         Span<Vector128<ushort>> low = stackalloc Vector128<ushort>[4];
         Span<Vector128<ushort>> high = stackalloc Vector128<ushort>[4];
@@ -650,11 +735,12 @@ internal sealed partial class PictureDecoder
             var right = Sse2.UnpackLow(source[2], source[3]).AsUInt32();
             var rightHigh = Sse2.UnpackHigh(source[2], source[3]).AsUInt32();
 
-            int row = half * 8;
-            WriteRows(plane, start + (row * stride), stride, Sse2.UnpackLow(left, right).AsUInt64());
-            WriteRows(plane, start + ((row + 2) * stride), stride, Sse2.UnpackHigh(left, right).AsUInt64());
-            WriteRows(plane, start + ((row + 4) * stride), stride, Sse2.UnpackLow(leftHigh, rightHigh).AsUInt64());
-            WriteRows(plane, start + ((row + 6) * stride), stride, Sse2.UnpackHigh(leftHigh, rightHigh).AsUInt64());
+            byte[] plane = half == 0 ? top : bottom;
+            int start = half == 0 ? topStart : bottomStart;
+            WriteRows(plane, start, stride, Sse2.UnpackLow(left, right).AsUInt64());
+            WriteRows(plane, start + (2 * stride), stride, Sse2.UnpackHigh(left, right).AsUInt64());
+            WriteRows(plane, start + (4 * stride), stride, Sse2.UnpackLow(leftHigh, rightHigh).AsUInt64());
+            WriteRows(plane, start + (6 * stride), stride, Sse2.UnpackHigh(leftHigh, rightHigh).AsUInt64());
         }
     }
 

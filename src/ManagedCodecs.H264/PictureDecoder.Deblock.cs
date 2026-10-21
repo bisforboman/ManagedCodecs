@@ -516,15 +516,45 @@ internal sealed partial class PictureDecoder
     /// </summary>
     private static void SetLanes(Span<short> lanes, int first, int count, ReadOnlySpan<byte> strengths, int segmentShift, int indexA, int alpha, int beta)
     {
-        for (int i = 0; i < count; i++)
+        // bS and tC0 are the same along a segment (4 luma or 2 chroma samples), alpha and beta
+        // along the edge: eight lanes at a time.
+        var alphaV = Vector128.Create((short)alpha);
+        var betaV = Vector128.Create((short)beta);
+        for (int lane = 0; lane < count; lane += 8)
         {
-            int bS = strengths[i >> segmentShift];
-            lanes[first + i] = (short)bS;
-            lanes[16 + first + i] = bS is > 0 and < 4 ? Tc0[(indexA * 3) + bS - 1] : (short)0;
-            lanes[32 + first + i] = (short)alpha;
-            lanes[48 + first + i] = (short)beta;
+            int s = lane >> segmentShift;
+            short b0 = strengths[s];
+            short b1 = strengths[s + 1];
+            Vector128<short> bs;
+            Vector128<short> tc;
+            if (segmentShift == 2)
+            {
+                bs = Vector128.Create(b0, b0, b0, b0, b1, b1, b1, b1);
+                short t0 = Tc0Of(b0, indexA);
+                short t1 = Tc0Of(b1, indexA);
+                tc = Vector128.Create(t0, t0, t0, t0, t1, t1, t1, t1);
+            }
+            else
+            {
+                short b2 = strengths[s + 2];
+                short b3 = strengths[s + 3];
+                bs = Vector128.Create(b0, b0, b1, b1, b2, b2, b3, b3);
+                short t0 = Tc0Of(b0, indexA);
+                short t1 = Tc0Of(b1, indexA);
+                short t2 = Tc0Of(b2, indexA);
+                short t3 = Tc0Of(b3, indexA);
+                tc = Vector128.Create(t0, t0, t1, t1, t2, t2, t3, t3);
+            }
+
+            bs.CopyTo(lanes[(first + lane)..]);
+            tc.CopyTo(lanes[(16 + first + lane)..]);
+            alphaV.CopyTo(lanes[(32 + first + lane)..]);
+            betaV.CopyTo(lanes[(48 + first + lane)..]);
         }
     }
+
+    /// <summary>tC0 (Table 8-17) for bS 1 to 3; 0 for the other strengths, which do not use it.</summary>
+    private static short Tc0Of(int bS, int indexA) => bS is > 0 and < 4 ? Tc0[(indexA * 3) + bS - 1] : (short)0;
 
     /// <summary>
     /// The filter (8.7.2.3, 8.7.2.4) on <paramref name="length"/> positions of gathered taps, eight

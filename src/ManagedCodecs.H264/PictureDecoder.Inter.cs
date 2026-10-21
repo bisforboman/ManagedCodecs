@@ -299,10 +299,10 @@ internal sealed partial class PictureDecoder
         {
             for (int b8 = 0; b8 < 4; b8++)
             {
-                AddLuma8x8Residual(mbAddr, residual, cbpLuma, b8, slice.Qp);
+                AddLuma8x8Residual(slice, mbAddr, residual, cbpLuma, b8, slice.Qp);
             }
 
-            ReconstructChroma(mbAddr, residual, cbpChroma, slice.Pps, intraMode: -1, default);
+            ReconstructChroma(slice, mbAddr, residual, cbpChroma, intraMode: -1, default);
             return;
         }
 
@@ -318,11 +318,11 @@ internal sealed partial class PictureDecoder
             }
 
             var block = residual.Luma[i];
-            Transform.Dequantize(block, slice.Qp, skipDc: false);
+            Transform.Dequantize(block, slice.Qp, skipDc: false, slice.Scaling.LevelScale4x4(3));
             Transform.InverseTransformAdd(block, Picture.Y.AsSpan(origin + (y * 4 * stride) + (x * 4)), stride);
         }
 
-        ReconstructChroma(mbAddr, residual, cbpChroma, slice.Pps, intraMode: -1, default);
+        ReconstructChroma(slice, mbAddr, residual, cbpChroma, intraMode: -1, default);
     }
 
     private void StartInterMacroblock(SliceState slice, int mbAddr, MbKind kind)

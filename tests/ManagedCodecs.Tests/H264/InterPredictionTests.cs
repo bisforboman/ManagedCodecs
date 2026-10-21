@@ -22,10 +22,15 @@ public class InterPredictionTests
             int x = (random.Next(0, 3) * 16) + (random.Next(0, 16 / w) * w);
             int y = (random.Next(0, 2) * 16) + (random.Next(0, 16 / h) * h);
 
-            // Mostly small vectors, sometimes far outside the picture.
+            // Mostly small vectors, sometimes far outside the picture; every fourth one full sample
+            // in both luma and chroma (a multiple of 8), which the fast path copies directly.
             int range = random.Next(4) == 0 ? 400 : 40;
             int mvX = random.Next(-range, range + 1);
             int mvY = random.Next(-range, range + 1);
+            if (n % 4 == 0)
+            {
+                (mvX, mvY) = (mvX & ~7, mvY & ~7);
+            }
 
             var expected = new Picture(3, 2);
             var actual = new Picture(3, 2);

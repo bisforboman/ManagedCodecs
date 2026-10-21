@@ -124,8 +124,10 @@ what the two commands above include and are not comparable with FFmpeg's `bench:
    Streams from a second encoder, OpenH264, are checked against FFmpeg too: long-term references
    with reference list modification and memory management operations 1, 4 and 6, POC type 2,
    non-reference P frames, slices by size, deblocking that stops at slice edges, changing and
-   repeated parameter sets, and the base layer of an SVC stream (prefix NAL units and enhancement
-   slices skipped).
+   repeated parameter sets, the base layer of an SVC stream (prefix NAL units and enhancement
+   slices skipped), and gaps in frame_num from dropped temporal layers. The frames inferred for
+   such gaps (8.2.5.2) take their places in the default reference lists and the sliding window;
+   no encoder names a reference by such a position, so hand-built streams test that.
    Produced by neither, so not checked against FFmpeg: I_PCM (decoded from hand-built streams,
    CAVLC and CABAC), memory management operations 2, 3 and 5 (unit tests),
    B sub-macroblock partitions smaller than 8x8, direct prediction without
@@ -133,8 +135,8 @@ what the two commands above include and are not comparable with FFmpeg's `bench:
    implicitly), cabac_init_idc 1 and 2 (only their tables are checked, against libavc), a Cr QP
    offset other than Cb's (second_chroma_qp_index_offset), and of scaling matrices: lists in the
    SPS, fall-back rule B, useDefaultScalingMatrixFlag and a Cr list of its own (unit tests decode
-   samples with rewritten parameter sets). Still open: frame_num gaps (8.2.5.2), 4:2:2 and 4:4:4,
-   more than 8 bits, interlaced video, error concealment, more speed (about 3x FFmpeg's time at 720p, also with
+   samples with rewritten parameter sets). Still open: 4:2:2 and 4:4:4, more than 8 bits,
+   interlaced video, error concealment, more speed (about 3x FFmpeg's time at 720p, also with
    libx264's default High output; 2x on high-bitrate intra content)
 5. ~~AAC-LC decoder~~ done: channel configurations 1 to 7 and program config elements (1 to 8
    channels), all window sequences and shapes, M/S, intensity, PNS, TNS. Both decoders are floating

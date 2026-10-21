@@ -526,13 +526,17 @@ internal sealed partial class PictureDecoder
         public int[][] ChromaAc { get; } = [.. Enumerable.Range(0, 8).Select(_ => new int[16])];
     }
 
-    /// <summary>One residual block by either entropy coder; levels by scan position, returns the number of nonzero ones.</summary>
-    private int ReadBlock(SliceState slice, BitReader r, int mbAddr, BlockCategory category, int x, int y, int component, int maxNumCoeff, Span<int> levels)
+    /// <summary>
+    /// One residual block by either entropy coder, into <paramref name="block"/> through
+    /// <paramref name="scan"/> (cleared first); returns the number of nonzero levels.
+    /// </summary>
+    private int ReadBlock(SliceState slice, BitReader r, int mbAddr, BlockCategory category, int x, int y, int component, int maxNumCoeff, Span<int> block, ReadOnlySpan<byte> scan)
     {
+        block.Clear();
         if (slice.Cabac is { } c)
         {
             int inc = category == BlockCategory.Luma8x8 ? 0 : CodedBlockFlagInc(mbAddr, category, x, y, component);
-            return CabacResidualBlock(c, category, inc, maxNumCoeff, levels);
+            return CabacResidualBlock(c, category, inc, maxNumCoeff, block, scan);
         }
 
         int nC = category switch
@@ -541,38 +545,37 @@ internal sealed partial class PictureDecoder
             BlockCategory.ChromaAc => ChromaNc(mbAddr, component, x, y),
             _ => LumaNc(mbAddr, x, y),
         };
-        return Cavlc.ReadResidualBlock(r, nC, maxNumCoeff, levels);
+        return Cavlc.ReadResidualBlock(r, nC, maxNumCoeff, block, scan);
     }
 
-    [SkipLocalsInit]
+    // Scans without the DC (AC blocks start at scan position 1) and the 2x2 chroma DC's raster order.
+    private static ReadOnlySpan<byte> ZigZag4x4Ac => [1, 4, 8, 5, 2, 3, 6, 9, 12, 13, 10, 7, 11, 14, 15];
+
+    private static ReadOnlySpan<byte> ChromaDcScan => [0, 1, 2, 3];
+
+    // CAVLC's 8x8 blocks come as four interleaved 4x4 blocks: coefficient k of block i4 is at 8x8
+    // scan position 4 * k + i4 (7.3.5.3), so row i4 here holds those positions' raster indices.
+    private static readonly byte[] Cavlc8x8Scan = [.. Enumerable.Range(0, 64).Select(i => Transform.ZigZag8x8[(4 * (i % 16)) + (i / 16)])];
+
     private void ReadResidual(SliceState slice, BitReader r, int mbAddr, Residual residual, bool is16x16, int cbpLuma, int cbpChroma)
     {
-        Span<int> levels = stackalloc int[64];
-        var zigZag = Transform.ZigZag4x4;
         Span<byte> lumaCounts = _totalCoeffLuma.AsSpan(mbAddr * 16, 16);
         Span<byte> chromaCounts = _totalCoeffChroma.AsSpan(mbAddr * 8, 8);
         lumaCounts.Clear();
         chromaCounts.Clear();
 
-        if (is16x16)
+        if (is16x16 && ReadBlock(slice, r, mbAddr, BlockCategory.LumaDc, 0, 0, 0, 16, residual.LumaDc, Transform.ZigZag4x4) != 0)
         {
-            if (ReadBlock(slice, r, mbAddr, BlockCategory.LumaDc, 0, 0, 0, 16, levels) != 0)
-            {
-                _dcCoded[mbAddr] |= 1;
-            }
-
-            for (int k = 0; k < 16; k++)
-            {
-                residual.LumaDc[zigZag[k]] = levels[k];
-            }
+            _dcCoded[mbAddr] |= 1;
         }
 
         if (_transform8x8[mbAddr])
         {
-            ReadResidual8x8(slice, r, mbAddr, residual, cbpLuma, levels);
+            ReadResidual8x8(slice, r, mbAddr, residual, cbpLuma);
         }
         else
         {
+            var scan = is16x16 ? ZigZag4x4Ac : Transform.ZigZag4x4;
             for (int idx = 0; idx < 16; idx++)
             {
                 if ((cbpLuma & (1 << (idx >> 2))) == 0)
@@ -580,20 +583,10 @@ internal sealed partial class PictureDecoder
                     continue;
                 }
 
+                // Reconstruction reads the counts and leaves blocks without coefficients alone.
                 var (x, y) = BlockPosition(idx);
-                var block = residual.Luma[(y * 4) + x];
-                int first = is16x16 ? 1 : 0;
-                int count = ReadBlock(slice, r, mbAddr, is16x16 ? BlockCategory.LumaAc : BlockCategory.Luma4x4, x, y, 0, 16 - first, levels);
-                lumaCounts[(y * 4) + x] = (byte)count;
-                if (count == 0)
-                {
-                    continue; // reconstruction reads the counts and leaves this block alone
-                }
-
-                for (int k = first; k < 16; k++)
-                {
-                    block[zigZag[k]] = levels[k - first];
-                }
+                var category = is16x16 ? BlockCategory.LumaAc : BlockCategory.Luma4x4;
+                lumaCounts[(y * 4) + x] = (byte)ReadBlock(slice, r, mbAddr, category, x, y, 0, scan.Length, residual.Luma[(y * 4) + x], scan);
             }
         }
 
@@ -604,12 +597,10 @@ internal sealed partial class PictureDecoder
 
         for (int c = 0; c < 2; c++)
         {
-            if (ReadBlock(slice, r, mbAddr, BlockCategory.ChromaDc, 0, 0, c, 4, levels) != 0)
+            if (ReadBlock(slice, r, mbAddr, BlockCategory.ChromaDc, 0, 0, c, 4, residual.ChromaDc[c], ChromaDcScan) != 0)
             {
                 _dcCoded[mbAddr] |= (byte)(2 << c);
             }
-
-            levels[..4].CopyTo(residual.ChromaDc[c]);
         }
 
         if (cbpChroma < 2)
@@ -621,20 +612,7 @@ internal sealed partial class PictureDecoder
         {
             for (int b = 0; b < 4; b++)
             {
-                int x = b & 1;
-                int y = b >> 1;
-                var block = residual.ChromaAc[(c * 4) + b];
-                int count = ReadBlock(slice, r, mbAddr, BlockCategory.ChromaAc, x, y, c, 15, levels);
-                chromaCounts[(c * 4) + b] = (byte)count;
-                if (count == 0)
-                {
-                    continue;
-                }
-
-                for (int k = 0; k < 15; k++)
-                {
-                    block[zigZag[k + 1]] = levels[k];
-                }
+                chromaCounts[(c * 4) + b] = (byte)ReadBlock(slice, r, mbAddr, BlockCategory.ChromaAc, b & 1, b >> 1, c, 15, residual.ChromaAc[(c * 4) + b], ZigZag4x4Ac);
             }
         }
     }
@@ -644,9 +622,8 @@ internal sealed partial class PictureDecoder
     /// 8x8 block, whose count stands for all four of its 4x4 blocks; with CAVLC four interleaved
     /// 4x4 blocks (7.3.5.3), each keeping its own TotalCoeff for the nC of later blocks.
     /// </summary>
-    private void ReadResidual8x8(SliceState slice, BitReader r, int mbAddr, Residual residual, int cbpLuma, Span<int> levels)
+    private void ReadResidual8x8(SliceState slice, BitReader r, int mbAddr, Residual residual, int cbpLuma)
     {
-        var zigZag = Transform.ZigZag8x8;
         Span<byte> counts = _totalCoeffLuma.AsSpan(mbAddr * 16, 16);
         for (int b8 = 0; b8 < 4; b8++)
         {
@@ -660,34 +637,21 @@ internal sealed partial class PictureDecoder
             int y8 = (b8 >> 1) * 2;
             if (slice.Cabac is not null)
             {
-                byte count = (byte)ReadBlock(slice, r, mbAddr, BlockCategory.Luma8x8, x8, y8, 0, 64, levels);
+                byte count = (byte)ReadBlock(slice, r, mbAddr, BlockCategory.Luma8x8, x8, y8, 0, 64, block, Transform.ZigZag8x8);
                 counts[(y8 * 4) + x8] = count;
                 counts[(y8 * 4) + x8 + 1] = count;
                 counts[((y8 + 1) * 4) + x8] = count;
                 counts[((y8 + 1) * 4) + x8 + 1] = count;
-                for (int k = 0; k < 64; k++)
-                {
-                    block[zigZag[k]] = levels[k];
-                }
-
                 continue;
             }
 
             block.AsSpan().Clear();
             for (int i4 = 0; i4 < 4; i4++)
             {
+                // Each 4x4 read clears nothing: it fills its own quarter of the 8x8 positions.
                 var (x, y) = BlockPosition((b8 * 4) + i4);
-                int count = ReadBlock(slice, r, mbAddr, BlockCategory.Luma4x4, x, y, 0, 16, levels);
-                counts[(y * 4) + x] = (byte)count;
-                if (count == 0)
-                {
-                    continue;
-                }
-
-                for (int k = 0; k < 16; k++)
-                {
-                    block[zigZag[(4 * k) + i4]] = levels[k];
-                }
+                int nC = LumaNc(mbAddr, x, y);
+                counts[(y * 4) + x] = (byte)Cavlc.ReadResidualBlock(r, nC, 16, block, Cavlc8x8Scan.AsSpan(i4 * 16, 16));
             }
         }
     }

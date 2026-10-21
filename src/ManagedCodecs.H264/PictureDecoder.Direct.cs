@@ -178,19 +178,29 @@ internal sealed partial class PictureDecoder
     }
 
     /// <summary>Top-left luma positions in the macroblock of the size x size blocks of 8x8 blocks first .. first + count - 1.</summary>
-    private static IEnumerable<(int X, int Y)> DirectBlocks(int first, int count, int size)
+    private static DirectBlockList DirectBlocks(int first, int count, int size) => new(first, count, size);
+
+    /// <summary>The positions of <see cref="DirectBlocks"/>, enumerated without allocating.</summary>
+    private struct DirectBlockList(int first, int count, int size)
     {
-        for (int i = first; i < first + count; i++)
+        private readonly int _perBlock = size == 8 ? 1 : 4;
+        private int _index = -1;
+
+        public (int X, int Y) Current { get; private set; }
+
+        public readonly DirectBlockList GetEnumerator() => this;
+
+        public bool MoveNext()
         {
-            int x8 = (i & 1) * 8;
-            int y8 = (i >> 1) * 8;
-            for (int y = 0; y < 8; y += size)
+            if (++_index >= count * _perBlock)
             {
-                for (int x = 0; x < 8; x += size)
-                {
-                    yield return (x8 + x, y8 + y);
-                }
+                return false;
             }
+
+            int block = first + (_index / _perBlock);
+            int k = _index % _perBlock;
+            Current = (((block & 1) * 8) + ((k & 1) * size), ((block >> 1) * 8) + ((k >> 1) * size));
+            return true;
         }
     }
 

@@ -1,6 +1,5 @@
 using System.Numerics;
 using System.Runtime.CompilerServices;
-using System.Runtime.Intrinsics;
 
 namespace ManagedCodecs.H264;
 
@@ -20,19 +19,13 @@ internal static class Cavlc
     public const int ChromaDcNc = -1;
 
     /// <summary>
-    /// Parses one residual_block_cavlc into <paramref name="levels"/>, indexed by scan position
-    /// within the block (0..maxNumCoeff-1), and returns TotalCoeff. <paramref name="levels"/> must
-    /// hold 16 values; all 16 are cleared first.
+    /// Parses one residual_block_cavlc and returns TotalCoeff. The nonzero levels go to
+    /// <paramref name="block"/>[<paramref name="scan"/>[position]] for scan positions
+    /// 0..maxNumCoeff-1; the caller clears the block first.
     /// </summary>
     [SkipLocalsInit]
-    public static int ReadResidualBlock(BitReader r, int nC, int maxNumCoeff, Span<int> levels)
+    public static int ReadResidualBlock(BitReader r, int nC, int maxNumCoeff, Span<int> block, ReadOnlySpan<byte> scan)
     {
-        // Four vector stores; Span.Clear's call costs more than the clearing at this size.
-        Vector128<int>.Zero.CopyTo(levels);
-        Vector128<int>.Zero.CopyTo(levels[4..]);
-        Vector128<int>.Zero.CopyTo(levels[8..]);
-        Vector128<int>.Zero.CopyTo(levels[12..]);
-
         var coeffTokenTable = nC switch
         {
             ChromaDcNc => CoeffTokenChromaDc,
@@ -119,7 +112,7 @@ internal static class Cavlc
         int position = totalCoeff + zerosLeft - 1;
         for (int i = 0; i < totalCoeff; i++)
         {
-            levels[position] = levelVal[i];
+            block[scan[position]] = levelVal[i];
             int run = 0;
             if (i < totalCoeff - 1 && zerosLeft > 0)
             {

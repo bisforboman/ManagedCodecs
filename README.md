@@ -11,7 +11,7 @@ then the same approach for H.264 + AAC in MP4.
 | `src/ManagedCodecs.Core` | `VideoFrame`, `PixelFormat`, `Packet`, `Rational`, `IDemuxer`, `IVideoDecoder` |
 | `src/ManagedCodecs.Containers` | `AviDemuxer`, `Mp4Demuxer`, and `Demuxer.Open` to pick one by content |
 | `src/ManagedCodecs.Mjpeg` | `MjpegDecoder`: baseline/extended Huffman JPEG, bit-exact with FFmpeg |
-| `src/ManagedCodecs.H264` | `H264Decoder`: Constrained Baseline and Main profile H.264 (CAVLC, CABAC, I/P/B, weighted prediction, deblocking), bit-exact |
+| `src/ManagedCodecs.H264` | `H264Decoder`: Constrained Baseline, Main and High profile H.264 (CAVLC, CABAC, I/P/B, weighted prediction, 8x8 transform, deblocking), bit-exact |
 | `src/ManagedCodecs.Aac` | `AacDecoder`: AAC LC (mono to 7.1, M/S, intensity, PNS, TNS), within 3e-7 of FFmpeg's float output |
 | `src/Shared` | Source files linked into several codec projects (the VLC decoder) |
 | `tools/ManagedCodecs.Cli` | `mcdec`: decodes a file and times it, to compare with `ffmpeg -benchmark` |
@@ -93,6 +93,7 @@ line shows the steady speed without them). A snapshot, made that way (2026-10-20
 | `h264-main-p-refs.mp4` (320x240 H.264 Main, CABAC) | 40 | 909 | 354 |
 | `h264-b-pyramid.mp4` (320x240 H.264 Main, CABAC, B frames) | 20 | 1558 | 418 |
 | `h264-wp-default.mp4` (320x240 H.264, libx264's Main defaults: B frames, weighted prediction) | 20 | 1268 | 344 |
+| `h264-high-default.mp4` (320x240 H.264, libx264's High defaults: also the 8x8 transform; 2026-10-21) | 20 | 1258 | 370 |
 | `aac-stereo-48k.mp4` (AAC, stereo) | 100 | 58 | 65 |
 | `aac-5.1.mp4` (AAC, 5.1) | 100 | 205 | 85 |
 
@@ -117,14 +118,17 @@ what the two commands above include and are not comparable with FFmpeg's `bench:
    references and slices, cropping and constrained intra, with CAVLC and with CABAC (Main profile),
    and B frames: every B macroblock type, spatial and temporal direct prediction, bi-prediction, B
    pictures as references (with memory management operation 1); explicit and implicit weighted
-   prediction, so libx264's default Main profile output decodes. Frames come out in display order.
+   prediction, so libx264's default Main profile output decodes; and High profile's 8x8 transform
+   with Intra 8x8 prediction, so libx264's default output decodes too. Frames come out in display order.
    Never produced by libx264, so not checked against FFmpeg: I_PCM (decoded from hand-built streams,
    CAVLC and CABAC), reference list modification and the other memory management operations (unit
    tests), B sub-macroblock partitions smaller than 8x8, direct prediction without
    direct_8x8_inference_flag, explicit weights for bi-predicted blocks (libx264 weights B frames
-   implicitly), cabac_init_idc 1 and 2 (only their tables are checked, against libavc).
-   Still open: the 8x8 transform (High profile), error concealment, more speed (about 3x FFmpeg at
-   720p)
+   implicitly), cabac_init_idc 1 and 2 (only their tables are checked, against libavc), a Cr QP
+   offset other than Cb's (second_chroma_qp_index_offset; a unit test decodes samples with rewritten
+   picture parameter sets). Still open: scaling matrices, 4:2:2 and 4:4:4, more than 8 bits,
+   interlaced video, error concealment, more speed (about 3x FFmpeg at 720p, 4x with High's 8x8
+   transform, whose paths are still scalar)
 5. ~~AAC-LC decoder~~ done: channel configurations 1 to 7 and program config elements (1 to 8
    channels), all window sequences and shapes, M/S, intensity, PNS, TNS. Both decoders are floating
    point, so the tests compare values: they require 2^-17 (about 7.6e-6) and measure at most 3e-7.

@@ -1,3 +1,5 @@
+using System.Runtime.CompilerServices;
+
 namespace ManagedCodecs.H264;
 
 /// <summary>
@@ -14,6 +16,20 @@ internal sealed partial class PictureDecoder
     private static ReadOnlySpan<byte> SignificantCatOffset => [0, 15, 29, 44, 47];
 
     private static ReadOnlySpan<byte> AbsLevelCatOffset => [0, 10, 20, 30, 39];
+
+    // ctxIdxInc of significant_coeff_flag and last_significant_coeff_flag in 8x8 blocks of frames
+    // by scan position (Table 9-43), for positions 0..62.
+    private static ReadOnlySpan<byte> Significant8x8Inc =>
+    [
+        0, 1, 2, 3, 4, 5, 5, 4, 4, 3, 3, 4, 4, 4, 5, 5, 4, 4, 4, 4, 3, 3, 6, 7, 7, 7, 8, 9, 10, 9, 8, 7,
+        7, 6, 11, 12, 13, 11, 6, 7, 8, 9, 14, 10, 9, 8, 6, 11, 12, 13, 11, 6, 9, 14, 10, 9, 11, 12, 13, 11, 14, 10, 12,
+    ];
+
+    private static ReadOnlySpan<byte> Last8x8Inc =>
+    [
+        0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
+        3, 3, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4, 5, 5, 5, 5, 6, 6, 6, 6, 7, 7, 7, 7, 8, 8, 8,
+    ];
 
     // Per macroblock, for the context derivations: coded_block_pattern (luma | chroma << 4),
     // intra_chroma_pred_mode, and the coded_block_flag of the DC blocks (bit 0 luma, 1 Cb, 2 Cr).
@@ -35,6 +51,7 @@ internal sealed partial class PictureDecoder
         Luma4x4 = 2,
         ChromaDc = 3,
         ChromaAc = 4,
+        Luma8x8 = 5,
     }
 
     private void InitCabacState()
@@ -508,31 +525,34 @@ internal sealed partial class PictureDecoder
 
     /// <summary>
     /// residual_block_cabac: coded_block_flag, the significance map and the levels, into
-    /// <paramref name="levels"/> by scan position (all 16 cleared first). Returns the number of
-    /// nonzero coefficients.
+    /// <paramref name="levels"/> by scan position (all 16, or 64 for 8x8 blocks, cleared first).
+    /// Returns the number of nonzero coefficients. 8x8 blocks have no coded_block_flag in 4:2:0:
+    /// it is inferred to be 1.
     /// </summary>
+    [SkipLocalsInit]
     private static int CabacResidualBlock(Cabac c, BlockCategory category, int codedBlockFlagInc, int maxNumCoeff, Span<int> levels)
     {
-        levels[..16].Clear();
+        bool is8x8 = category == BlockCategory.Luma8x8;
+        levels[..(is8x8 ? 64 : 16)].Clear();
         int cat = (int)category;
-        if (c.Decision(85 + CodedBlockFlagCatOffset[cat] + codedBlockFlagInc) == 0)
+        if (!is8x8 && c.Decision(85 + CodedBlockFlagCatOffset[cat] + codedBlockFlagInc) == 0)
         {
             return 0;
         }
 
         // Significance map: positions of the nonzero coefficients, in scan order.
-        Span<int> positions = stackalloc int[16];
+        Span<int> positions = stackalloc int[64];
         int count = 0;
-        int significantBase = 105 + SignificantCatOffset[cat];
-        int lastBase = 166 + SignificantCatOffset[cat];
+        int significantBase = is8x8 ? 402 : 105 + SignificantCatOffset[cat];
+        int lastBase = is8x8 ? 417 : 166 + SignificantCatOffset[cat];
         bool last = false;
         for (int i = 0; i < maxNumCoeff - 1; i++)
         {
             int inc = category == BlockCategory.ChromaDc ? Math.Min(i, 2) : i; // NumC8x8 is 1 for 4:2:0
-            if (c.Decision(significantBase + inc) == 1)
+            if (c.Decision(significantBase + (is8x8 ? Significant8x8Inc[i] : inc)) == 1)
             {
                 positions[count++] = i;
-                if (c.Decision(lastBase + inc) == 1)
+                if (c.Decision(lastBase + (is8x8 ? Last8x8Inc[i] : inc)) == 1)
                 {
                     last = true;
                     break;
@@ -546,7 +566,7 @@ internal sealed partial class PictureDecoder
         }
 
         // Levels, from the last coefficient back: coeff_abs_level_minus1 as UEG0 with uCoff 14.
-        int absBase = 227 + AbsLevelCatOffset[cat];
+        int absBase = is8x8 ? 426 : 227 + AbsLevelCatOffset[cat];
         int maxGt1Inc = category == BlockCategory.ChromaDc ? 3 : 4;
         int equal1 = 0;
         int greater1 = 0;

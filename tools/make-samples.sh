@@ -101,6 +101,26 @@ ff -f lavfi -i "$F" -t 2 -c:v libx264 -profile:v main -pix_fmt yuv420p -x264-par
 ff -f lavfi -i "$F" -t 2 -c:v libx264 -profile:v main -pix_fmt yuv420p -bf 0 -refs 3 samples/h264-wp-p.mp4
 ff -f lavfi -i "testsrc2=size=320x240:rate=25,scroll=h=0.01" -t 2 -c:v libx264 -profile:v main -pix_fmt yuv420p -weightp 0 -bf 3 samples/h264-wp-implicit.mp4
 
+# ---- H.264 High profile (8x8 transform, Intra 8x8) ----
+# Flat scaling matrices only (libx264's default). Intra only with CABAC and CAVLC (also at QP 4 on noise, for large
+# 8x8 levels), P frames with all partitions (8x8 transforms next to sub-8x8 partitions, which must use 4x4), B frames
+# with CABAC and CAVLC, fast motion, slices, an odd size, constrained intra prediction with a chroma QP offset, and
+# libx264's stock High settings. libx264 always writes the same offset for Cb and Cr.
+H=(-c:v libx264 -profile:v high -pix_fmt yuv420p)
+ff -f lavfi -i testsrc2=size=320x240:rate=25 -t 0.2 "${H[@]}" -g 1 samples/h264-high-intra.mp4
+ff -f lavfi -i testsrc2=size=320x240:rate=25 -t 0.2 "${H[@]}" -g 1 -x264-params cabac=0 samples/h264-high-intra-cavlc.mp4
+ff -f lavfi -i testsrc2=size=320x240:rate=25,noise=alls=40:allf=t -t 0.2 "${H[@]}" -g 1 -qp 4 samples/h264-high-intra-qp4.mp4
+ff -f lavfi -i testsrc2=size=320x240:rate=25,noise=alls=40:allf=t -t 0.2 "${H[@]}" -g 1 -qp 4 -x264-params cabac=0 samples/h264-high-intra-qp4-cavlc.mp4
+ff -f lavfi -i "testsrc2=size=320x240:rate=25,scroll=h=0.01:v=0.005" -t 1 "${H[@]}" -bf 0 -refs 3 -x264-params partitions=all samples/h264-high-p.mp4
+ff -f lavfi -i "testsrc2=size=320x240:rate=25,scroll=h=0.01:v=0.005" -t 1 "${H[@]}" -bf 0 -refs 3 -x264-params cabac=0:partitions=all samples/h264-high-p-cavlc.mp4
+ff -f lavfi -i "testsrc2=size=320x240:rate=25,scroll=h=0.01:v=0.005" -t 1 "${H[@]}" -bf 3 -refs 3 -x264-params partitions=all:direct=auto samples/h264-high-b.mp4
+ff -f lavfi -i "testsrc2=size=320x240:rate=25,scroll=h=0.01:v=0.005" -t 1 "${H[@]}" -bf 3 -refs 3 -x264-params cabac=0:partitions=all:direct=auto samples/h264-high-b-cavlc.mp4
+ff -f lavfi -i "testsrc2=size=320x240:rate=25,scroll=h=0.013:v=-0.021,noise=alls=12:allf=t" -t 2 "${H[@]}" -bf 3 -refs 3 -qp 22 -x264-params partitions=all:me=umh:merange=32 samples/h264-high-motion.mp4
+ff -f lavfi -i "testsrc2=size=320x240:rate=25,scroll=h=0.01" -t 1 "${H[@]}" -bf 2 -refs 2 -x264-params slices=4 samples/h264-high-slices.mp4
+ff -f lavfi -i "testsrc2=size=321x239:rate=25,scroll=v=0.02" -t 1 "${H[@]}" -bf 2 -refs 2 samples/h264-high-odd-size.mp4
+ff -f lavfi -i "testsrc2=size=320x240:rate=25,scroll=h=0.02,noise=alls=10:allf=t" -t 1 "${H[@]}" -bf 2 -refs 2 -x264-params constrained-intra=1:chroma-qp-offset=4 samples/h264-high-constrained-intra.mp4
+ff -f lavfi -i "testsrc2=size=320x240:rate=25,fade=in:0:20,fade=out:30:20" -t 2 "${H[@]}" samples/h264-high-default.mp4
+
 # ---- AAC LC ----
 # Each aimed at one tool; the conformance test checks the tool really occurs. PNS is off except in the PNS samples.
 ff -f lavfi -i "sine=frequency=440:sample_rate=44100:duration=1" -c:a aac -b:a 96k -aac_pns 0 samples/aac-mono-44k.mp4

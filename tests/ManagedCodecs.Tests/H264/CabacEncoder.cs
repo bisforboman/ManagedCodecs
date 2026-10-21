@@ -55,6 +55,26 @@ internal sealed class BitWriter
 
         return data;
     }
+
+    /// <summary>A NAL unit with this payload, emulation prevention bytes inserted (7.4.1).</summary>
+    public byte[] ToNal(int refIdc, int type)
+    {
+        var nal = new List<byte> { (byte)((refIdc << 5) | type) };
+        int zeros = 0;
+        foreach (byte b in ToBytes())
+        {
+            if (zeros >= 2 && b <= 3)
+            {
+                nal.Add(3);
+                zeros = 0;
+            }
+
+            nal.Add(b);
+            zeros = b == 0 ? zeros + 1 : 0;
+        }
+
+        return [.. nal];
+    }
 }
 
 /// <summary>The CABAC arithmetic encoder of H.264 clause 9.3.4, with the decoder's context initialization.</summary>

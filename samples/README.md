@@ -17,9 +17,9 @@ references:
   compared by value, within a tolerance.
 
 The decoder tests pick their samples by content, not by name: the MJPEG test decodes every sample whose demuxed
-codec is MJPEG, and the H.264 test every MP4 whose avcC says Baseline (66) or Main profile (77). The other MP4s
-(`h264-bframes`, `h264-faststart` and `h264-delayed` are High profile, `mpeg4-bframes` is MPEG-4 Part 2) only
-feed the demuxer tests, so their `.framemd5` files are unused.
+codec is MJPEG, and the H.264 test every MP4 whose avcC says Baseline (66), Main (77) or High profile (100). It
+compares timestamps from the first frame's, because framemd5 moves them to start at 0 (`h264-delayed` starts at
+0.4 s). The other MP4 (`mpeg4-bframes`, MPEG-4 Part 2) only feeds the demuxer tests, so its `.framemd5` is unused.
 
 `-f framemd5` hashes FFmpeg's decoded frames in their native layout (yuvj420p, yuvj422p),
 which is the same tightly packed layout `VideoFrame.WritePacked` produces.

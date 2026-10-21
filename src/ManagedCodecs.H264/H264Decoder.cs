@@ -69,11 +69,17 @@ public sealed class H264Decoder : IVideoDecoder
 
         var first = state.SecondField ? _firstField!.Value : (State: state, packet.Pts);
         _firstField = null;
-        var frame = Crop(state.Decoder.Picture, state.Sps);
+        var picture = state.Decoder.Picture;
+        if (state.SecondField)
+        {
+            picture.Poc = Math.Min(picture.TopPoc, picture.BottomPoc);
+        }
+
+        var frame = Crop(picture, state.Sps);
         frame.Pts = first.Pts;
 
         bool restart = first.State.Header.IsIdr || first.State.Header.MemoryManagement.Any(op => op.Op == 5);
-        return _output.Add(frame, state.Decoder.Picture.Poc, restart, ReorderDepth(state.Sps));
+        return _output.Add(frame, picture.Poc, restart, ReorderDepth(state.Sps));
     }
 
     public IReadOnlyList<VideoFrame> Flush()
@@ -259,7 +265,8 @@ public sealed class H264Decoder : IVideoDecoder
                 picture.TopPoc = poc;
             }
 
-            picture.Poc = Math.Min(picture.TopPoc, picture.BottomPoc);
+            // The frame keeps the first field's order count while its second field is decoded:
+            // 8.2.4.2.4 orders the first field by PicOrderCnt(fldPrev).
             FieldStatistics.SecondFields++;
         }
         else

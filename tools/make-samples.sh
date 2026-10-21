@@ -45,6 +45,8 @@ FRAG=(-f lavfi -i "testsrc2=size=320x240:rate=25,scroll=h=0.01" -f lavfi -i "sin
 ff "${FRAG[@]}" -movflags frag_keyframe+empty_moov samples/fmp4-empty-moov.mp4
 ff "${FRAG[@]}" -movflags frag_keyframe+empty_moov+default_base_moof -frag_duration 400000 samples/fmp4-base-moof.mp4
 ff "${FRAG[@]}" -movflags frag_keyframe samples/fmp4-first-in-moov.mp4
+# Version 1 track runs with negative composition offsets (-512 for the B frames).
+ff "${FRAG[@]}" -movflags frag_keyframe+empty_moov+negative_cts_offsets samples/fmp4-negative-cts.mp4
 
 # ---- H.264 Constrained Baseline ----
 # Intra only without the deblocking filter (at several QPs), intra with the filter and with filter offsets, P frames

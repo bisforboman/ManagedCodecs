@@ -1,5 +1,4 @@
 using System.Buffers.Binary;
-using System.Numerics;
 using System.Text;
 
 namespace ManagedCodecs.Containers.Mp4;
@@ -13,8 +12,9 @@ namespace ManagedCodecs.Containers.Mp4;
 /// Timestamps follow FFmpeg: the edit list's first non-empty edit shifts dts and pts back by
 /// its media time (so H.264 with B-frames starts at pts 0 and a negative dts, and AAC encoder
 /// priming has negative timestamps), and leading empty edits delay them. A fragment's samples
-/// start at its 'tfdt' decode time, or right after the track's previous sample without one. Not
-/// yet supported: edit lists with more than one non-empty edit (only the first is honoured,
+/// start at its 'tfdt' decode time, or right after the track's previous sample without one.
+/// Negative composition offsets move every pts of their track forward by the largest of them, as
+/// FFmpeg does (which, for 'ctts', looks at all entries but the last two). Not yet supported: edit lists with more than one non-empty edit (only the first is honoured,
 /// nothing is trimmed), compressed 'cmov' headers, and further tracks.
 /// </remarks>
 public sealed class Mp4Demuxer : IDemuxer
@@ -280,8 +280,11 @@ public sealed class Mp4Demuxer : IDemuxer
             stream.ReadExactly(moof);
 
             // Without an explicit base, the first track fragment's data starts at the 'moof' and
-            // each later one's where the previous one's ended (8.8.7.1).
+            // each later one's where the previous one's ended (8.8.7.1). Where that one belongs to a
+            // track not exposed, its data length is not worked out, so a following fragment
+            // without a base of its own cannot be placed.
             long dataEnd = offset;
+            bool skipped = false;
             ReadOnlySpan<byte> boxes = moof;
             while (NextBox(ref boxes, out uint child, out var traf))
             {
@@ -299,7 +302,13 @@ public sealed class Mp4Demuxer : IDemuxer
                 var track = Array.Find(tracks, t => t?.TrackId == trackId);
                 if (track is null)
                 {
-                    continue; // a track not exposed
+                    skipped = true; // a track not exposed
+                    continue;
+                }
+
+                if (skipped && (ReadUInt32(tfhd, 0) & 0x020001) == 0)
+                {
+                    throw new NotSupportedException("A track fragment without a base offset follows one of a track that is not read.");
                 }
 
                 dataEnd = track.AddFragment(traf, offset, dataEnd);
@@ -514,9 +523,9 @@ public sealed class Mp4Demuxer : IDemuxer
                 pos += 4; // sample_description_index: one description is all that is used
             }
 
-            uint defaultDuration = (flags & 0x08) != 0 ? ReadUInt32(Require(tfhd, pos + 4, "tfhd"), (pos += 4) - 4) : _fragmentDefaults.Duration;
-            uint defaultSize = (flags & 0x10) != 0 ? ReadUInt32(Require(tfhd, pos + 4, "tfhd"), (pos += 4) - 4) : _fragmentDefaults.Size;
-            uint defaultFlags = (flags & 0x20) != 0 ? ReadUInt32(Require(tfhd, pos + 4, "tfhd"), (pos += 4) - 4) : _fragmentDefaults.Flags;
+            uint defaultDuration = (flags & 0x08) != 0 ? ReadNext(tfhd, ref pos, "tfhd") : _fragmentDefaults.Duration;
+            uint defaultSize = (flags & 0x10) != 0 ? ReadNext(tfhd, ref pos, "tfhd") : _fragmentDefaults.Size;
+            uint defaultFlags = (flags & 0x20) != 0 ? ReadNext(tfhd, ref pos, "tfhd") : _fragmentDefaults.Flags;
 
             long decodeTime = -1;
             if (FindChild(traf, Box.Tfdt, out var tfdt))
@@ -557,16 +566,14 @@ public sealed class Mp4Demuxer : IDemuxer
                     p += 4;
                 }
 
-                int fieldCount = BitOperations.PopCount(trunFlags & 0xF00);
-                Require(trun, p + (int)(count * fieldCount * 4), "trun");
                 for (uint i = 0; i < count; i++)
                 {
-                    uint duration = (trunFlags & 0x100) != 0 ? ReadUInt32(trun, (p += 4) - 4) : defaultDuration;
-                    uint size = (trunFlags & 0x200) != 0 ? ReadUInt32(trun, (p += 4) - 4) : defaultSize;
-                    uint sampleFlags = (trunFlags & 0x400) != 0 ? ReadUInt32(trun, (p += 4) - 4) : i == 0 && firstFlags is { } first ? first : defaultFlags;
+                    uint duration = (trunFlags & 0x100) != 0 ? ReadNext(trun, ref p, "trun") : defaultDuration;
+                    uint size = (trunFlags & 0x200) != 0 ? ReadNext(trun, ref p, "trun") : defaultSize;
+                    uint sampleFlags = (trunFlags & 0x400) != 0 ? ReadNext(trun, ref p, "trun") : i == 0 && firstFlags is { } first ? first : defaultFlags;
 
                     // Signed in version 1; read as signed in version 0 too, as for 'ctts'.
-                    int compositionOffset = (trunFlags & 0x800) != 0 ? (int)ReadUInt32(trun, (p += 4) - 4) : 0;
+                    int compositionOffset = (trunFlags & 0x800) != 0 ? (int)ReadNext(trun, ref p, "trun") : 0;
 
                     bool isKeyframe = _isAudio || (sampleFlags & 0x10000) == 0; // sample_is_non_sync_sample
                     _fragmentSamples.Add((dataOffset, checked((int)size), i == 0 ? decodeTime : -1, checked((int)duration), compositionOffset, isKeyframe));
@@ -577,6 +584,14 @@ public sealed class Mp4Demuxer : IDemuxer
             }
 
             return dataOffset;
+        }
+
+        /// <summary>The 32-bit field at <paramref name="pos"/>, which moves past it.</summary>
+        private static uint ReadNext(ReadOnlySpan<byte> box, ref int pos, string name)
+        {
+            uint value = ReadUInt32(Require(box, pos + 4, name), pos);
+            pos += 4;
+            return value;
         }
 
         public Sample[] BuildSamples(uint movieTimescale)
@@ -599,11 +614,24 @@ public sealed class Mp4Demuxer : IDemuxer
             var keyframes = ReadKeyframes(count);
             var compositionOffsets = ReadCompositionOffsets(count);
 
+            // Negative composition offsets ('ctts' or 'trun' version 1): like FFmpeg, every pts moves
+            // forward by the largest of them, so that no pts comes before its dts.
+            int ptsShift = 0;
+            foreach (int offset in compositionOffsets)
+            {
+                ptsShift = Math.Max(ptsShift, -offset);
+            }
+
+            foreach (var fragmentSample in _fragmentSamples)
+            {
+                ptsShift = Math.Max(ptsShift, -fragmentSample.CompositionOffset);
+            }
+
             var samples = new Sample[count + _fragmentSamples.Count];
             for (int i = 0; i < count; i++)
             {
                 long decodeTime = dts[i] - shift;
-                samples[i] = new Sample(StreamIndex, offsets[i], sizes[i], decodeTime, decodeTime + compositionOffsets[i], durations[i], keyframes[i]);
+                samples[i] = new Sample(StreamIndex, offsets[i], sizes[i], decodeTime, decodeTime + compositionOffsets[i] + ptsShift, durations[i], keyframes[i]);
             }
 
             // Fragment samples continue from the last sample unless 'tfdt' says where they start.
@@ -612,7 +640,7 @@ public sealed class Mp4Demuxer : IDemuxer
             {
                 var (offset, size, decodeTime, duration, compositionOffset, isKeyframe) = _fragmentSamples[i];
                 long time = (decodeTime >= 0 ? decodeTime : next) - shift;
-                samples[count + i] = new Sample(StreamIndex, offset, size, time, time + compositionOffset, duration, isKeyframe);
+                samples[count + i] = new Sample(StreamIndex, offset, size, time, time + compositionOffset + ptsShift, duration, isKeyframe);
                 next = time + shift + duration;
             }
 

@@ -529,78 +529,31 @@ internal sealed partial class PictureDecoder
     /// Returns the number of nonzero coefficients. 8x8 blocks have no coded_block_flag in 4:2:0:
     /// it is inferred to be 1.
     /// </summary>
-    [SkipLocalsInit]
     private static int CabacResidualBlock(Cabac c, BlockCategory category, int codedBlockFlagInc, int maxNumCoeff, Span<int> levels)
     {
-        bool is8x8 = category == BlockCategory.Luma8x8;
-        levels[..(is8x8 ? 64 : 16)].Clear();
+        if (category == BlockCategory.Luma8x8)
+        {
+            return c.ResidualBlock(-1, 402, 417, Significant8x8Inc, Last8x8Inc, 426, 4, maxNumCoeff, levels);
+        }
+
         int cat = (int)category;
-        if (!is8x8 && c.Decision(85 + CodedBlockFlagCatOffset[cat] + codedBlockFlagInc) == 0)
-        {
-            return 0;
-        }
-
-        // Significance map: positions of the nonzero coefficients, in scan order.
-        Span<int> positions = stackalloc int[64];
-        int count = 0;
-        int significantBase = is8x8 ? 402 : 105 + SignificantCatOffset[cat];
-        int lastBase = is8x8 ? 417 : 166 + SignificantCatOffset[cat];
-        bool last = false;
-        for (int i = 0; i < maxNumCoeff - 1; i++)
-        {
-            int inc = category == BlockCategory.ChromaDc ? Math.Min(i, 2) : i; // NumC8x8 is 1 for 4:2:0
-            if (c.Decision(significantBase + (is8x8 ? Significant8x8Inc[i] : inc)) == 1)
-            {
-                positions[count++] = i;
-                if (c.Decision(lastBase + (is8x8 ? Last8x8Inc[i] : inc)) == 1)
-                {
-                    last = true;
-                    break;
-                }
-            }
-        }
-
-        if (!last)
-        {
-            positions[count++] = maxNumCoeff - 1;
-        }
-
-        // Levels, from the last coefficient back: coeff_abs_level_minus1 as UEG0 with uCoff 14.
-        int absBase = is8x8 ? 426 : 227 + AbsLevelCatOffset[cat];
-        int maxGt1Inc = category == BlockCategory.ChromaDc ? 3 : 4;
-        int equal1 = 0;
-        int greater1 = 0;
-        for (int k = count - 1; k >= 0; k--)
-        {
-            int absMinus1 = 0;
-            if (c.Decision(absBase + (greater1 != 0 ? 0 : Math.Min(4, 1 + equal1))) == 1)
-            {
-                int ctxIdx = absBase + 5 + Math.Min(maxGt1Inc, greater1);
-                absMinus1 = 1;
-                while (absMinus1 < 14 && c.Decision(ctxIdx) == 1)
-                {
-                    absMinus1++;
-                }
-
-                if (absMinus1 == 14)
-                {
-                    absMinus1 += ExpGolombBypass(c, 0);
-                }
-            }
-
-            if (absMinus1 == 0)
-            {
-                equal1++;
-            }
-            else
-            {
-                greater1++;
-            }
-
-            int level = absMinus1 + 1;
-            levels[positions[k]] = c.Bypass() == 1 ? -level : level;
-        }
-
-        return count;
+        bool chromaDc = category == BlockCategory.ChromaDc;
+        var inc = chromaDc ? ChromaDcInc : ScanPositionInc; // NumC8x8 is 1 for 4:2:0
+        return c.ResidualBlock(
+            85 + CodedBlockFlagCatOffset[cat] + codedBlockFlagInc,
+            105 + SignificantCatOffset[cat],
+            166 + SignificantCatOffset[cat],
+            inc,
+            inc,
+            227 + AbsLevelCatOffset[cat],
+            chromaDc ? 3 : 4,
+            maxNumCoeff,
+            levels);
     }
+
+    // ctxIdxInc of significant_coeff_flag and last_significant_coeff_flag in 4x4 blocks: the scan
+    // position, for chroma DC Min(position, 2).
+    private static ReadOnlySpan<byte> ScanPositionInc => [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+
+    private static ReadOnlySpan<byte> ChromaDcInc => [0, 1, 2, 2];
 }

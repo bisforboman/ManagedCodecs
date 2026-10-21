@@ -7,7 +7,7 @@ obj/
 TestResults/
 BenchmarkDotNet.Artifacts/
 
-# Sample media is generated locally with FFmpeg (see samples/README.md)
+# Sample media is generated locally with FFmpeg (see samples/README.md); samples/openh264/ is committed on purpose
 samples/*.avi
 samples/*.mp4
 samples/*.mjpeg

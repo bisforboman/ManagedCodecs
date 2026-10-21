@@ -1,6 +1,10 @@
 # Samples
 
-Test media is generated locally with FFmpeg and is not committed (see `.gitignore`). From the repository root:
+Test media is generated locally with FFmpeg and is not committed (see `.gitignore`), except the H.264 streams in
+`openh264/`: OpenH264's encoder writes what libx264 never does (long-term references, POC type 2, SVC), and CI has
+no OpenH264, so those few small files are committed and `tools/make-samples.sh` copies them here and writes their
+references like any other sample's. `tools/make-openh264-samples.sh <openh264 tree>` makes them again. From the
+repository root:
 
 ```
 tools/make-samples.sh

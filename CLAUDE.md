@@ -33,7 +33,9 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
   before relying on it. Encoders often never emit a tool (libx264: no ref list modification, I_PCM, B partitions
   below 8x8, MMCO other than 1 (which needs b-pyramid), explicit weights in B slices, cabac_init_idc other
   than 0, a second_chroma_qp_index_offset other than the first, scaling lists in the SPS or a Cr list of its own;
-  FFmpeg's AAC: no pulse data); cover those with unit tests and say so in the docs.
+  FFmpeg's AAC: no pulse data). A second encoder covers some: OpenH264 (`tools/make-openh264-samples.sh`, its
+  streams committed in `samples/openh264/`) writes long-term references, MMCO 4 and 6, POC type 2 and SVC. Cover
+  the rest with unit tests and say so in the docs.
   `tests/ManagedCodecs.Tests/H264/ParameterSetRewriter.cs` rewrites a sample's SPS and PPS for such tests.
   `tests/ManagedCodecs.Tests/H264/CabacEncoder.cs` (a CABAC encoder and bit writer) builds such H.264 streams.
 - **Code style**: StyleBro (analyzers on build; rules in `.editorconfig`, chosen by `stylebro-migrate init` from this
@@ -66,3 +68,5 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
   (a chroma row read from x + 1 needs 17 bytes, not 16).
 - libx264 (core 164) fails to parse `cqm8iy`/`cqm8py` in `-x264-params` ("Error parsing option", and encodes on
   with flat 8x8 lists); give scaling lists in a `cqmfile` instead, and check what was really sent.
+- OpenH264's `h264enc` ignores `-cabac 1` in its default Baseline layer config (add `-dprofile 0 77`), takes
+  bitrates in kbit/s, and skips frames under a tight bitrate without leaving frame_num gaps.

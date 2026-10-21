@@ -159,6 +159,12 @@ ff -f lavfi -i "anoisesrc=color=pink:amplitude=0.3:sample_rate=44100:duration=2,
 ff -f lavfi -i "anoisesrc=color=pink:amplitude=0.3:sample_rate=44100:duration=2:seed=1,highpass=f=4000[a];anoisesrc=color=pink:amplitude=0.3:sample_rate=44100:duration=2:seed=2,highpass=f=4000[b];[a][b]amerge=inputs=2" -c:a aac -b:a 64k samples/aac-pns-stereo.mp4
 ff -f lavfi -i "testsrc2=size=320x240:rate=25,scroll=h=0.01" -f lavfi -i "sine=frequency=330:sample_rate=48000:duration=1" -t 1 -c:v libx264 -profile:v baseline -pix_fmt yuv420p -refs 2 -c:a aac -ac 2 -aac_pns 0 samples/h264-with-audio.mp4
 
+# ---- H.264 from OpenH264 ----
+# Committed in samples/openh264/ (CI has no OpenH264): long-term references and the list modification and memory
+# management operations that come with them, POC type 2, non-reference P frames, slices by size, changing and repeated
+# parameter sets, and an SVC stream's base layer. tools/make-openh264-samples.sh says how each was made.
+cp samples/openh264/*.mp4 samples/
+
 # ---- FFmpeg's references ----
 # name.framemd5: decoded frames. name.packets.framemd5: demuxed packets (-copyts keeps the demuxer's own timestamps).
 # name.packets.flags: keyframe flags (framemd5 has no flags column). name.f32: decoded audio, edit list ignored.

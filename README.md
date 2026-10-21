@@ -121,9 +121,13 @@ what the two commands above include and are not comparable with FFmpeg's `bench:
    prediction, so libx264's default Main profile output decodes; and High profile's 8x8 transform
    with Intra 8x8 prediction, so libx264's default output decodes too, and scaling matrices (the
    default ones and custom lists). Frames come out in display order.
-   Never produced by libx264, so not checked against FFmpeg: I_PCM (decoded from hand-built streams,
-   CAVLC and CABAC), reference list modification and the other memory management operations (unit
-   tests), B sub-macroblock partitions smaller than 8x8, direct prediction without
+   Streams from a second encoder, OpenH264, are checked against FFmpeg too: long-term references
+   with reference list modification and memory management operations 1, 4 and 6, POC type 2,
+   non-reference P frames, slices by size, changing and repeated parameter sets, and the base
+   layer of an SVC stream (prefix NAL units and enhancement slices skipped).
+   Produced by neither, so not checked against FFmpeg: I_PCM (decoded from hand-built streams,
+   CAVLC and CABAC), memory management operations 2, 3 and 5 (unit tests), frame_num gaps,
+   B sub-macroblock partitions smaller than 8x8, direct prediction without
    direct_8x8_inference_flag, explicit weights for bi-predicted blocks (libx264 weights B frames
    implicitly), cabac_init_idc 1 and 2 (only their tables are checked, against libavc), a Cr QP
    offset other than Cb's (second_chroma_qp_index_offset), and of scaling matrices: lists in the

@@ -112,7 +112,8 @@ what the two commands above include and are not comparable with FFmpeg's `bench:
    Done so far: AVX2 IDCT, DC-only blocks, single-lookup coefficient decoding, buffer reuse.
    Still open: an ARM64 (AdvSimd) IDCT, decoding straight into the output frame
 3. ~~MP4 demuxer (ISO BMFF: `moov`, `trak`, `stbl` sample tables)~~ done: packets, timestamps and
-   codec private data match FFmpeg, for video and audio tracks. Still open: fragmented MP4, multi-edit edit lists
+   codec private data match FFmpeg, for video and audio tracks, fragmented files (moof) included. Still
+   open: multi-edit edit lists
 4. ~~H.264 decoder, starting with Constrained Baseline (CAVLC, I/P frames)~~ done: bit-exact with
    FFmpeg on libx264 samples covering intra and inter prediction, all partitions, multiple
    references and slices, cropping and constrained intra, with CAVLC and with CABAC (Main profile),

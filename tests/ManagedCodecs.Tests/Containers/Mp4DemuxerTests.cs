@@ -70,22 +70,107 @@ public class Mp4DemuxerTests
         Assert.IsType<Mp4Demuxer>(demuxer);
     }
 
+    /// <summary>
+    /// A fragmented file built by hand for what FFmpeg's muxer never writes: track fragments without
+    /// a base offset (the first starts at its 'moof', the next where the previous one's data
+    /// ended), no 'tfdt' (samples continue from the track's last one), 'trex' defaults, a second
+    /// 'trun' without a data offset, per-sample flags, negative composition offsets in a version 1
+    /// 'trun', and a track fragment of a track that is not exposed.
+    /// </summary>
     [Fact]
-    public void RejectsFragmentedMp4()
+    public void ReadsTrackFragments()
     {
-        var stbl = Box("stbl",
-            SampleDescription(),
+        using var demuxer = new Mp4Demuxer(new MemoryStream(FragmentedMp4()));
+        var video = demuxer.ReadPackets().Where(p => p.StreamIndex == demuxer.Video!.StreamIndex).ToList();
+        var audio = demuxer.ReadPackets().Where(p => p.StreamIndex == demuxer.Audio!.StreamIndex).ToList();
+
+        Assert.Equal(4, demuxer.Video!.FrameCount);
+
+        // The composition offset of -3000 moves every video pts forward by 3000, as in FFmpeg.
+        Assert.Equal(
+            [(0L, 3000L, 3000L, true, 1), (3000, 6000, 3000, false, 2), (9000, 9000, 3000, false, 3), (12000, 15000, 3000, true, 4)],
+            video.Select(p => (p.Dts, p.Pts, p.Duration, p.IsKeyframe, (int)p.Data.Span[0])));
+        Assert.Equal([3, 2, 4, 1], video.Select(p => p.Data.Length));
+        Assert.All(video, p => Assert.All(p.Data.ToArray(), b => Assert.Equal(p.Data.Span[0], b)));
+
+        var packet = Assert.Single(audio);
+        Assert.Equal((0L, 0L, 1024L, true), (packet.Dts, packet.Pts, packet.Duration, packet.IsKeyframe));
+        Assert.Equal(new byte[] { 9, 9, 9, 9, 9 }, packet.Data.ToArray());
+    }
+
+    /// <summary>
+    /// A track fragment without a base offset after one of a track that is not read: where its data
+    /// starts is not known, so the file is refused rather than misread.
+    /// </summary>
+    [Fact]
+    public void RefusesBaselessFragmentAfterUnreadTrack()
+    {
+        var error = Assert.Throws<NotSupportedException>(() => new Mp4Demuxer(new MemoryStream(FragmentedMp4(unreadTrackFirst: true))));
+        Assert.Contains("not read", error.Message);
+    }
+
+    private static byte[] FragmentedMp4(bool unreadTrackFirst = false)
+    {
+        var ftyp = Box("ftyp", Ascii("iso5"), U32(0));
+        byte[] Stbl(byte[] description) => Box("stbl",
+            description,
             FullBox("stts", 0, U32(0)),
             FullBox("stsc", 0, U32(0)),
             FullBox("stsz", 0, U32(0), U32(0)),
             FullBox("stco", 0, U32(0)));
+        byte[] TrackHeader(uint id) => FullBox("tkhd", 0, new byte[8], U32(id), new byte[68]);
         var moov = Box("moov",
             FullBox("mvhd", 0, new byte[8], U32(1000), new byte[84]),
-            Box("trak", Box("mdia", MediaHeader(), Handler("vide"), Box("minf", stbl))),
-            Box("mvex"));
+            Box("trak", TrackHeader(1), Box("mdia", MediaHeader(), Handler("vide"), Box("minf", Stbl(SampleDescription())))),
+            Box("trak", TrackHeader(2), Box("mdia", MediaHeader(timescale: 48_000), Handler("soun"), Box("minf", Stbl(AudioSampleDescription())))),
+            Box("mvex",
+                FullBox("trex", 0, U32(1), U32(1), U32(3000), U32(0), U32(0x0001_0000)), // video: non-sync by default
+                FullBox("trex", 0, U32(2), U32(1), U32(1024), U32(5), U32(0))));
 
-        Assert.Throws<NotSupportedException>(() => new Mp4Demuxer(new MemoryStream([.. Box("ftyp", Ascii("iso5"), U32(0)), .. moov])));
+        // Fragment 1: video samples of 3 and 2 bytes (the first a sync sample by first_sample_flags),
+        // then the audio sample (5 bytes, all from 'trex') where the video data ends, and a fragment
+        // of track 9, which does not exist.
+        var unread = Box("traf",
+            Flagged("tfhd", 0, 0, U32(9)),
+            Flagged("trun", 0, 0x000200, U32(1), U32(7)));
+        var videoFragment = Box("traf",
+            Flagged("tfhd", 0, 0, U32(1)),
+            Flagged("trun", 0, 0x000205, U32(2), U32(0), U32(0), U32(3), U32(2)));
+        byte[] Moof1(int dataOffset)
+        {
+            BinaryPrimitives.WriteUInt32BigEndian(videoFragment.AsSpan(videoFragment.Length - 16), (uint)dataOffset);
+            var audioFragment = Box("traf",
+                Flagged("tfhd", 0, 0, U32(2)),
+                Flagged("trun", 0, 0, U32(1)));
+            return unreadTrackFirst
+                ? Box("moof", FullBox("mfhd", 0, U32(1)), videoFragment, unread, audioFragment)
+                : Box("moof", FullBox("mfhd", 0, U32(1)), videoFragment, audioFragment, unread);
+        }
+
+        int moof1Size = Moof1(0).Length;
+        var moof1 = Moof1(moof1Size + 8);
+        var mdat1 = Box("mdat", [1, 1, 1, 2, 2, 9, 9, 9, 9, 9]);
+
+        // Fragment 2, data based at the 'moof': decode time 9000, one sample with duration, size and a
+        // composition offset of -3000 (version 1), then a second 'trun' with no data offset whose one
+        // sample follows on and is a sync sample by its own flags.
+        byte[] Moof2(int dataOffset) => Box("moof",
+            FullBox("mfhd", 0, U32(2)),
+            Box("traf",
+                Flagged("tfhd", 0, 0x020000, U32(1)),
+                FullBox("tfdt", 1, U64(9000)),
+                Flagged("trun", 1, 0x000B01, U32(1), U32((uint)dataOffset), U32(3000), U32(4), U32(unchecked((uint)-3000))),
+                Flagged("trun", 0, 0x000600, U32(1), U32(1), U32(0))));
+        int moof2Size = Moof2(0).Length;
+        var moof2 = Moof2(moof2Size + 8);
+        var mdat2 = Box("mdat", [3, 3, 3, 3, 4]);
+
+        return [.. ftyp, .. moov, .. moof1, .. mdat1, .. moof2, .. mdat2];
     }
+
+    /// <summary>A FullBox with flags.</summary>
+    private static byte[] Flagged(string type, byte version, uint flags, params byte[][] parts) =>
+        Box(type, [[version, (byte)(flags >> 16), (byte)(flags >> 8), (byte)flags], .. parts]);
 
     [Fact]
     public void RejectsFileWithoutMoov()

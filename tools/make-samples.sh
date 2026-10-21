@@ -37,6 +37,16 @@ ff -f lavfi -i testsrc2=size=320x240:rate=25 -t 2 -c:v libx264 -bf 2 -g 12 sampl
 ff -f lavfi -i testsrc2=size=320x240:rate=30000/1001 -t 2 -c:v libx264 -bf 0 -movflags +faststart samples/h264-faststart.mp4
 ff -f lavfi -i testsrc2=size=320x240:rate=25 -t 1 -c:v mpeg4 -bf 2 samples/mpeg4-bframes.mp4
 ff -f lavfi -i testsrc2=size=320x240:rate=25 -t 1 -c:v libx264 -bf 0 -output_ts_offset 0.4 samples/h264-delayed.mp4
+# Fragmented MP4 (moof/traf/trun) with H.264 (B frames) and AAC: an empty moov and a fragment per keyframe, with data
+# offsets from an explicit base; the same with default-base-is-moof and fragments every 0.4 s; and the first fragment's
+# samples in the moov's own tables, the rest in fragments. None has an edit list.
+FRAG=(-f lavfi -i "testsrc2=size=320x240:rate=25,scroll=h=0.01" -f lavfi -i "sine=frequency=330:sample_rate=48000:duration=2" -t 2
+  -c:v libx264 -profile:v main -pix_fmt yuv420p -bf 2 -g 12 -c:a aac -ac 2)
+ff "${FRAG[@]}" -movflags frag_keyframe+empty_moov samples/fmp4-empty-moov.mp4
+ff "${FRAG[@]}" -movflags frag_keyframe+empty_moov+default_base_moof -frag_duration 400000 samples/fmp4-base-moof.mp4
+ff "${FRAG[@]}" -movflags frag_keyframe samples/fmp4-first-in-moov.mp4
+# Version 1 track runs with negative composition offsets (-512 for the B frames).
+ff "${FRAG[@]}" -movflags frag_keyframe+empty_moov+negative_cts_offsets samples/fmp4-negative-cts.mp4
 
 # ---- H.264 Constrained Baseline ----
 # Intra only without the deblocking filter (at several QPs), intra with the filter and with filter offsets, P frames
@@ -173,6 +183,6 @@ for f in samples/*.mp4; do
   ff -copyts -i "$f" -c copy -f framemd5 "${f%.mp4}.packets.framemd5"
   ffprobe -v error -select_streams v:0 -show_packets -show_entries packet=flags -of csv=p=0 "$f" > "${f%.mp4}.packets.flags"
 done
-for f in samples/aac-*.mp4 samples/h264-with-audio.mp4; do ff -ignore_editlist 1 -i "$f" -map 0:a:0 -f f32le "${f%.mp4}.f32"; done
+for f in samples/aac-*.mp4 samples/h264-with-audio.mp4 samples/fmp4-*.mp4; do ff -ignore_editlist 1 -i "$f" -map 0:a:0 -f f32le "${f%.mp4}.f32"; done
 
 echo "Samples and references written to samples/."

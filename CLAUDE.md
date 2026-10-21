@@ -2,7 +2,7 @@
 
 Pure managed C# media decoders: no native binaries, Native AOT friendly. MJPEG (bit-exact with FFmpeg), H.264
 Constrained Baseline, Main and High (CAVLC and CABAC, I/P/B, weighted prediction, 8x8 transform, scaling matrices,
-MBAFF, bit-exact), AAC LC (within 2^-17 of FFmpeg's float output, measured 3e-7), AVI and MP4
+MBAFF, field pictures of I and P slices, bit-exact), AAC LC (within 2^-17 of FFmpeg's float output, measured 3e-7), AVI and MP4
 demuxing. README.md has the layout, the roadmap and what is not supported yet.
 
 ## Core idea
@@ -36,7 +36,8 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
   than 0, a second_chroma_qp_index_offset other than the first, scaling lists in the SPS or a Cr list of its own;
   FFmpeg's AAC: no pulse data). A second encoder covers some: OpenH264 (`tools/make-openh264-samples.sh`, its
   streams committed in `samples/openh264/`) writes long-term references, MMCO 4 and 6, POC type 2, SVC, and
-  frame_num gaps once temporal layers are dropped. Cover
+  frame_num gaps once temporal layers are dropped. A third, JM (`tools/make-jm-samples.sh`, committed in
+  `samples/jm/`), writes field pictures (PAFF), alone or mixed with frame pictures. Cover
   the rest with unit tests and say so in the docs.
   `tests/ManagedCodecs.Tests/H264/ParameterSetRewriter.cs` rewrites a sample's SPS and PPS for such tests.
   `tests/ManagedCodecs.Tests/H264/CabacEncoder.cs` (a CABAC encoder and bit writer) builds such H.264 streams.
@@ -84,5 +85,9 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
   content comes out all field). The ITU PDF is not reachable from the cloud sandbox; JM (the ITU reference software,
   on GitHub) is, builds with `make -C ldecod CFLAGS="-fcommon -O2"`, and traces every syntax element; printing each
   CABAC bin's (state, MPS, range) in both decoders finds the first divergence.
+- Field pictures in MP4 are one packet a field: FFmpeg's `-f rawvideo` output from such a file repeats frames to keep
+  the packet rate (compare with `-f framemd5` or add `-fps_mode passthrough`); its frame takes the first field's pts.
+  JM's encoder: `make -C lencod CFLAGS="-fcommon -O2"`, `PicInterlace=1` (fields) or `2` (adaptive), about a minute
+  for 10 frames at 320x256; it crashes with `WeightedPrediction=1` and field pictures.
 - In fragmented MP4, FFmpeg's packet durations are not the file's: its demuxer leaves them unset and libavformat
   fills in the codec frame size (1024 for AAC). Compare with FFmpeg's next dts instead (Mp4ConformanceTests does).

@@ -134,7 +134,7 @@ internal sealed partial class PictureDecoder
         bool isB = slice.Header.Type == SliceType.B;
 
         // A field macroblock refers to fields: twice as many as the frames (8.4.2.1).
-        int fieldScale = IsFieldMb(mbAddr) ? 2 : 1;
+        int fieldScale = IsMbaffFieldMb(mbAddr) ? 2 : 1;
         int maxRef0 = (slice.Header.NumRefIdxL0Active * fieldScale) - 1;
         int maxRef1 = (slice.Header.NumRefIdxL1Active * fieldScale) - 1;
 
@@ -398,7 +398,7 @@ internal sealed partial class PictureDecoder
         // A field macroblock's index names a field: of frame refIdx / 2, the same parity as the
         // macroblock for even indices, the other one for odd (8.4.2.1).
         var refList = slice.RefList(list);
-        bool field = IsFieldMb(mbAddr);
+        bool field = IsMbaffFieldMb(mbAddr);
         int frameIdx = field ? refIdx >> 1 : refIdx;
         if (frameIdx >= refList.Count)
         {
@@ -422,6 +422,8 @@ internal sealed partial class PictureDecoder
             reference = reference.Field((mbAddr & 1) ^ (refIdx & 1));
             Statistics.OppositeParity += refIdx & 1;
         }
+
+        FieldStatistics.FromOwnFirstField += _fieldParity >= 0 && reference.Frame == Picture ? 1 : 0;
 
         for (int by = y / 4; by < (y + h) / 4; by++)
         {
@@ -456,7 +458,7 @@ internal sealed partial class PictureDecoder
         int chromaX = lumaX / 2;
         int chromaY = lumaY / 2;
         bool bi = ref0 is not null && ref1 is not null;
-        bool field = IsFieldMb(mbAddr);
+        bool field = IsMbaffFieldMb(mbAddr);
         int refIdx0 = _refIdx[0][part];
         int refIdx1 = _refIdx[1][part];
         var weighting = Weighting(slice, field ? refIdx0 >> 1 : refIdx0, field ? refIdx1 >> 1 : refIdx1, bi, mbAddr, ref0, ref1);
@@ -528,7 +530,7 @@ internal sealed partial class PictureDecoder
         var (chroma, chromaStride) = ChromaPlace(mbAddr);
         int lumaOut = luma + (y * lumaStride) + x;
         int chromaOut = chroma + (y / 2 * chromaStride) + (x / 2);
-        if (!_mbaff)
+        if (!_pairSlots)
         {
             return (((mbAddr % _widthInMbs) * 16) + x, ((mbAddr / _widthInMbs) * 16) + y, lumaOut, lumaStride, chromaOut, chromaStride);
         }

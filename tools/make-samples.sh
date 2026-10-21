@@ -216,6 +216,11 @@ PY
 # parameter sets, and an SVC stream's base layer. tools/make-openh264-samples.sh says how each was made.
 cp samples/openh264/*.mp4 samples/
 
+# ---- H.264 from JM ----
+# Committed in samples/jm/ (CI has no JM): field pictures (PAFF), alone and mixed with frame pictures.
+# tools/make-jm-samples.sh says how each was made.
+cp samples/jm/*.mp4 samples/
+
 # ---- FFmpeg's references ----
 # name.framemd5: decoded frames. name.packets.framemd5: demuxed packets (-copyts keeps the demuxer's own timestamps).
 # name.packets.flags: keyframe flags (framemd5 has no flags column). name.f32: decoded audio, edit list ignored (every

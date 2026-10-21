@@ -59,9 +59,8 @@ internal sealed class Picture
 
     private Picture? _top;
     private Picture? _bottom;
+    private readonly Mark[] _marks = new Mark[2];
     private int _poc;
-    private bool _shortTerm;
-    private bool _longTerm;
 
     public int WidthInMbs { get; }
 
@@ -98,7 +97,10 @@ internal sealed class Picture
     /// <summary>Per macroblock (MBAFF addresses): coded as a field macroblock; all false outside MBAFF frames.</summary>
     public bool[] FieldMb { get; }
 
-    /// <summary>Whether the frame was coded with macroblock-adaptive frame/field coding (its <see cref="FieldMb"/> and motion are in MBAFF addresses).</summary>
+    /// <summary>
+    /// Whether the frame's macroblocks are stored by pair (MBAFF addresses for <see cref="FieldMb"/>
+    /// and motion): an MBAFF frame, or a frame coded as two field pictures (all field macroblocks).
+    /// </summary>
     public bool Mbaff { get; set; }
 
     /// <summary>Motion vector per list (0, 1) and luma 4x4 block, in quarter samples.</summary>
@@ -117,16 +119,46 @@ internal sealed class Picture
     /// <summary>FrameNumWrap (8.2.4.1), updated whenever reference lists are built.</summary>
     public int FrameNumWrap { get; set; }
 
+    /// <summary>
+    /// Marked as used for short-term reference: a frame when both its fields are (8.2.4.2.1), a
+    /// field view when its field is. Setting a frame's marks both fields.
+    /// </summary>
     public bool IsShortTermReference
     {
-        get => Parity < 0 ? _shortTerm : Frame.IsShortTermReference;
-        set => _shortTerm = value;
+        get => Parity < 0 ? Frame._marks[0] == Mark.Short && Frame._marks[1] == Mark.Short : Frame._marks[Parity] == Mark.Short;
+        set => SetMark(Mark.Short, value);
     }
 
+    /// <summary>Marked as used for long-term reference, as for <see cref="IsShortTermReference"/>.</summary>
     public bool IsLongTermReference
     {
-        get => Parity < 0 ? _longTerm : Frame.IsLongTermReference;
-        set => _longTerm = value;
+        get => Parity < 0 ? Frame._marks[0] == Mark.Long && Frame._marks[1] == Mark.Long : Frame._marks[Parity] == Mark.Long;
+        set => SetMark(Mark.Long, value);
+    }
+
+    /// <summary>Whether any field of the frame is marked as used for reference.</summary>
+    public bool HasReferenceField => Frame._marks[0] != Mark.None || Frame._marks[1] != Mark.None;
+
+    /// <summary>Whether the frame was decoded as two field pictures.</summary>
+    public bool CodedAsFields { get; set; }
+
+    private void SetMark(Mark mark, bool on)
+    {
+        for (int parity = 0; parity < 2; parity++)
+        {
+            if (Parity < 0 || Parity == parity)
+            {
+                ref var current = ref Frame._marks[parity];
+                current = on ? mark : current == mark ? Mark.None : current;
+            }
+        }
+    }
+
+    private enum Mark : byte
+    {
+        None,
+        Short,
+        Long,
     }
 
     public int LongTermFrameIdx { get; set; }

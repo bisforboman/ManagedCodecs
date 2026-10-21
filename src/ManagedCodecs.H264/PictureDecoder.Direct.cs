@@ -118,7 +118,7 @@ internal sealed partial class PictureDecoder
         var colFrame = slice.RefList1[0];
         var refList0 = slice.RefList0;
         int size = Sps.Direct8x8Inference ? 8 : 4;
-        bool field = IsFieldMb(mbAddr);
+        bool field = IsMbaffFieldMb(mbAddr);
         int parity = mbAddr & 1;
         int currentPoc = !field ? Picture.Poc : parity == 0 ? Picture.TopPoc : Picture.BottomPoc;
         foreach (var (x, y) in DirectBlocks(first, count, size))

@@ -19,6 +19,12 @@ internal sealed partial class PictureDecoder
 {
     // Whether the current picture is an MBAFF frame, and per macroblock whether it is a field macroblock.
     private bool _mbaff;
+
+    // Whether macroblocks are stored by pair (MBAFF frames, and field pictures, whose macroblock n
+    // of field parity p is stored at 2 * n + p, as a field macroblock of an MBAFF frame), and the
+    // parity of the field picture being decoded (-1 for a frame).
+    private bool _pairSlots;
+    private int _fieldParity = -1;
     private bool[] _fieldMb = [];
 
     // Intra prediction in MBAFF frames reconstructs into these, with the neighbouring samples
@@ -52,16 +58,22 @@ internal sealed partial class PictureDecoder
     /// <summary>Counts of MBAFF pair kinds (shared by every picture of an <see cref="H264Decoder"/>).</summary>
     public MbaffStatistics Statistics { get; init; } = new();
 
+    public FieldStatistics FieldStatistics { get; init; } = new();
+
     /// <summary>Where a macroblock is the planes being reconstructed into: the picture, or the MBAFF scratch.</summary>
     private readonly record struct MbTarget(byte[] Y, int YOrigin, int YStride, byte[] Cb, byte[] Cr, int COrigin, int CStride);
 
-    private bool IsFieldMb(int mbAddr) => _mbaff && _fieldMb[mbAddr];
+    /// <summary>Whether the macroblock is a field macroblock: of an MBAFF frame, or of a field picture (field scans and contexts, field geometry).</summary>
+    private bool IsFieldMb(int mbAddr) => _pairSlots && _fieldMb[mbAddr];
+
+    /// <summary>A field macroblock of an MBAFF frame: its reference indices name fields of the frame lists (8.4.2.1).</summary>
+    private bool IsMbaffFieldMb(int mbAddr) => _mbaff && _fieldMb[mbAddr];
 
     /// <summary>The macroblock's top-left luma sample and the row stride of its samples.</summary>
     private (int Origin, int Stride) LumaPlace(int mbAddr)
     {
         int stride = Picture.LumaStride;
-        if (!_mbaff)
+        if (!_pairSlots)
         {
             return (((mbAddr / _widthInMbs) * 16 * stride) + ((mbAddr % _widthInMbs) * 16), stride);
         }
@@ -78,7 +90,7 @@ internal sealed partial class PictureDecoder
     private (int Origin, int Stride) ChromaPlace(int mbAddr)
     {
         int stride = Picture.ChromaStride;
-        if (!_mbaff)
+        if (!_pairSlots)
         {
             return (((mbAddr / _widthInMbs) * 8 * stride) + ((mbAddr % _widthInMbs) * 8), stride);
         }
@@ -106,7 +118,7 @@ internal sealed partial class PictureDecoder
     /// </summary>
     private (int Mb, int X, int Y) Neighbor(int mbAddr, int xN, int yN, int maxW = 16, int maxH = 16)
     {
-        if (_mbaff)
+        if (_pairSlots)
         {
             return AffNeighbor(mbAddr, xN, yN, maxW, maxH);
         }
@@ -120,9 +132,10 @@ internal sealed partial class PictureDecoder
     /// it is outside the picture, not decoded or (unless <paramref name="anySlice"/>) in another slice.
     /// </summary>
     private int PairIfAvailable(int mbAddr, int pairX, int pairY, bool anySlice = false) =>
-        PairIfAvailable(_sliceOfMb, _widthInMbs, mbAddr, pairX, pairY, anySlice);
+        PairIfAvailable(_sliceOfMb, _widthInMbs, mbAddr, pairX, pairY, anySlice, Math.Max(_fieldParity, 0));
 
-    private static int PairIfAvailable(ReadOnlySpan<int> sliceOfMb, int widthInMbs, int mbAddr, int pairX, int pairY, bool anySlice)
+    /// <remarks>A field picture's pairs hold only one of its macroblocks, at <paramref name="slotParity"/>: availability is that one's.</remarks>
+    private static int PairIfAvailable(ReadOnlySpan<int> sliceOfMb, int widthInMbs, int mbAddr, int pairX, int pairY, bool anySlice, int slotParity = 0)
     {
         if (pairX < 0 || pairX >= widthInMbs || pairY < 0)
         {
@@ -130,18 +143,19 @@ internal sealed partial class PictureDecoder
         }
 
         int top = ((pairY * widthInMbs) + pairX) * 2;
-        return sliceOfMb[top] >= 0 && (anySlice || sliceOfMb[top] == sliceOfMb[mbAddr]) ? top : -1;
+        int slot = top + slotParity;
+        return sliceOfMb[slot] >= 0 && (anySlice || sliceOfMb[slot] == sliceOfMb[mbAddr]) ? top : -1;
     }
 
     /// <summary>Table 6-4: neighbouring locations in MBAFF frames (the deblocking filter also looks into other slices).</summary>
     private (int Mb, int X, int Y) AffNeighbor(int mbAddr, int xN, int yN, int maxW, int maxH, bool anySlice = false) =>
-        AffNeighbor(_fieldMb, _sliceOfMb, _widthInMbs, mbAddr, xN, yN, maxW, maxH, anySlice);
+        AffNeighbor(_fieldMb, _sliceOfMb, _widthInMbs, mbAddr, xN, yN, maxW, maxH, anySlice, Math.Max(_fieldParity, 0));
 
     /// <summary>
     /// Table 6-4 for macroblock <paramref name="mbAddr"/> of an MBAFF frame <paramref name="widthInMbs"/>
     /// pairs wide, given which macroblocks are field macroblocks and the slice of each (-1: not decoded).
     /// </summary>
-    internal static (int Mb, int X, int Y) AffNeighbor(ReadOnlySpan<bool> fieldMb, ReadOnlySpan<int> sliceOfMb, int widthInMbs, int mbAddr, int xN, int yN, int maxW, int maxH, bool anySlice = false)
+    internal static (int Mb, int X, int Y) AffNeighbor(ReadOnlySpan<bool> fieldMb, ReadOnlySpan<int> sliceOfMb, int widthInMbs, int mbAddr, int xN, int yN, int maxW, int maxH, bool anySlice = false, int slotParity = 0)
     {
         if (yN >= maxH || (xN >= maxW && yN >= 0))
         {
@@ -161,7 +175,7 @@ internal sealed partial class PictureDecoder
             // D: above-left; a frame macroblock's bottom half looks into the left pair instead.
             if (frame && !isTop)
             {
-                n = PairIfAvailable(sliceOfMb, widthInMbs, mbAddr, pairX - 1, pairY, anySlice);
+                n = PairIfAvailable(sliceOfMb, widthInMbs, mbAddr, pairX - 1, pairY, anySlice, slotParity);
                 if (n < 0)
                 {
                     return (-1, 0, 0);
@@ -171,7 +185,7 @@ internal sealed partial class PictureDecoder
             }
             else
             {
-                n = PairIfAvailable(sliceOfMb, widthInMbs, mbAddr, pairX - 1, pairY - 1, anySlice);
+                n = PairIfAvailable(sliceOfMb, widthInMbs, mbAddr, pairX - 1, pairY - 1, anySlice, slotParity);
                 if (n < 0)
                 {
                     return (-1, 0, 0);
@@ -183,7 +197,7 @@ internal sealed partial class PictureDecoder
         else if (xN < 0)
         {
             // A: the left pair, row by row.
-            n = PairIfAvailable(sliceOfMb, widthInMbs, mbAddr, pairX - 1, pairY, anySlice);
+            n = PairIfAvailable(sliceOfMb, widthInMbs, mbAddr, pairX - 1, pairY, anySlice, slotParity);
             if (n < 0)
             {
                 return (-1, 0, 0);
@@ -226,7 +240,7 @@ internal sealed partial class PictureDecoder
             }
             else
             {
-                n = PairIfAvailable(sliceOfMb, widthInMbs, mbAddr, pairX + (c ? 1 : 0), pairY - 1, anySlice);
+                n = PairIfAvailable(sliceOfMb, widthInMbs, mbAddr, pairX + (c ? 1 : 0), pairY - 1, anySlice, slotParity);
                 if (n < 0)
                 {
                     return (-1, 0, 0);
@@ -432,7 +446,11 @@ internal sealed partial class PictureDecoder
         Span<byte> topSegments = stackalloc byte[4];
         int lumaRow = Picture.LumaStride;
         int chromaRow = Picture.ChromaStride;
-        for (int mbAddr = 0; mbAddr < _mbCount; mbAddr++)
+
+        // A field picture filters its own macroblocks only (the other field is another picture).
+        int first = Math.Max(_fieldParity, 0);
+        int step = _fieldParity >= 0 ? 2 : 1;
+        for (int mbAddr = first; mbAddr < _mbCount; mbAddr += step)
         {
             var slice = _slices[_sliceOfMb[mbAddr]];
             if (slice.DisableDeblockingFilterIdc == 1)

@@ -129,8 +129,8 @@ what the two commands above include and are not comparable with FFmpeg's `bench:
    offset other than Cb's (second_chroma_qp_index_offset), and of scaling matrices: lists in the
    SPS, fall-back rule B, useDefaultScalingMatrixFlag and a Cr list of its own (unit tests decode
    samples with rewritten parameter sets). Still open: 4:2:2 and 4:4:4, more than 8 bits,
-   interlaced video, error concealment, more speed (about 3x FFmpeg at 720p, 4x with High's 8x8
-   transform, whose paths are still scalar)
+   interlaced video, error concealment, more speed (about 3x FFmpeg's time at 720p, also with
+   libx264's default High output; 2x on high-bitrate intra content)
 5. ~~AAC-LC decoder~~ done: channel configurations 1 to 7 and program config elements (1 to 8
    channels), all window sequences and shapes, M/S, intensity, PNS, TNS. Both decoders are floating
    point, so the tests compare values: they require 2^-17 (about 7.6e-6) and measure at most 3e-7.

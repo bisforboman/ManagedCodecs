@@ -525,15 +525,15 @@ internal sealed partial class PictureDecoder
 
     /// <summary>
     /// residual_block_cabac: coded_block_flag, the significance map and the levels, into
-    /// <paramref name="levels"/> by scan position (all 16, or 64 for 8x8 blocks, cleared first).
-    /// Returns the number of nonzero coefficients. 8x8 blocks have no coded_block_flag in 4:2:0:
-    /// it is inferred to be 1.
+    /// <paramref name="block"/> through <paramref name="scan"/> (the caller clears it). Returns the
+    /// number of nonzero coefficients. 8x8 blocks have no coded_block_flag in 4:2:0: it is
+    /// inferred to be 1.
     /// </summary>
-    private static int CabacResidualBlock(Cabac c, BlockCategory category, int codedBlockFlagInc, int maxNumCoeff, Span<int> levels)
+    private static int CabacResidualBlock(Cabac c, BlockCategory category, int codedBlockFlagInc, int maxNumCoeff, Span<int> block, ReadOnlySpan<byte> scan)
     {
         if (category == BlockCategory.Luma8x8)
         {
-            return c.ResidualBlock(-1, 402, 417, Significant8x8Inc, Last8x8Inc, 426, 4, maxNumCoeff, levels);
+            return c.ResidualBlock(-1, 402, 417, Significant8x8Inc, Last8x8Inc, 426, 4, maxNumCoeff, block, scan);
         }
 
         int cat = (int)category;
@@ -548,7 +548,8 @@ internal sealed partial class PictureDecoder
             227 + AbsLevelCatOffset[cat],
             chromaDc ? 3 : 4,
             maxNumCoeff,
-            levels);
+            block,
+            scan);
     }
 
     // ctxIdxInc of significant_coeff_flag and last_significant_coeff_flag in 4x4 blocks: the scan

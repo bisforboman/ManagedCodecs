@@ -88,18 +88,18 @@ internal sealed class Cabac
     }
 
     /// <summary>
-    /// The significance map and levels of residual_block_cabac (7.3.5.3.3) into
-    /// <paramref name="levels"/> by scan position (all 16, or 64 for 8x8 blocks, cleared first),
-    /// with the engine's state in locals throughout. Returns the number of nonzero coefficients.
+    /// The significance map and levels of residual_block_cabac (7.3.5.3.3), with the engine's
+    /// state in locals throughout. The nonzero levels go to <paramref name="block"/>[<paramref name="scan"/>[position]]
+    /// for scan positions 0..maxNumCoeff-1; the caller clears the block first. Returns the number
+    /// of nonzero coefficients.
     /// </summary>
     /// <param name="codedBlockFlagCtx">ctxIdx of coded_block_flag, or -1 when it is inferred to be 1.</param>
     /// <param name="significantInc">ctxIdxInc of significant_coeff_flag by scan position.</param>
     /// <param name="lastInc">ctxIdxInc of last_significant_coeff_flag by scan position.</param>
     /// <param name="maxGt1Inc">The largest ctxIdxInc of the coeff_abs_level_minus1 bins after the first.</param>
     [SkipLocalsInit]
-    public int ResidualBlock(int codedBlockFlagCtx, int significantBase, int lastBase, ReadOnlySpan<byte> significantInc, ReadOnlySpan<byte> lastInc, int absBase, int maxGt1Inc, int maxNumCoeff, Span<int> levels)
+    public int ResidualBlock(int codedBlockFlagCtx, int significantBase, int lastBase, ReadOnlySpan<byte> significantInc, ReadOnlySpan<byte> lastInc, int absBase, int maxGt1Inc, int maxNumCoeff, Span<int> block, ReadOnlySpan<byte> scan)
     {
-        levels[..(maxNumCoeff > 16 ? 64 : 16)].Clear();
         ref byte contexts = ref MemoryMarshal.GetArrayDataReference(_contexts);
         int range = _range;
         ulong value = _value;
@@ -163,7 +163,7 @@ internal sealed class Cabac
             }
 
             int level = absMinus1 + 1;
-            levels[positions[k]] = Bypass(range, ref value, ref bits) == 1 ? -level : level;
+            block[scan[positions[k]]] = Bypass(range, ref value, ref bits) == 1 ? -level : level;
         }
 
         _range = range;

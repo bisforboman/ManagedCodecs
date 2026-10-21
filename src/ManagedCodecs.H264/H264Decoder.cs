@@ -53,17 +53,38 @@ public sealed class H264Decoder : IVideoDecoder
     {
     }
 
-    /// <summary>Decodes one packet, which holds one picture (MP4 sample), and returns the frames ready for display.</summary>
+    /// <summary>
+    /// Decodes one packet, which holds one picture (MP4 sample), and returns the frames ready for
+    /// display. A field picture is half a frame: the first of a pair gives no frame, the second
+    /// the whole frame, with the first one's timestamp.
+    /// </summary>
     public IReadOnlyList<VideoFrame> Decode(Packet packet)
     {
-        var (frame, state) = DecodePicture(packet.Data.Span);
-        frame.Pts = packet.Pts;
+        var state = DecodePicture(packet.Data.Span);
+        if (state.Header.FieldPic && !state.SecondField)
+        {
+            _firstField = (state, packet.Pts);
+            return [];
+        }
 
-        bool restart = state.Header.IsIdr || state.Header.MemoryManagement.Any(op => op.Op == 5);
-        return _output.Add(frame, state.Poc, restart, ReorderDepth(state.Sps));
+        var first = state.SecondField ? _firstField!.Value : (State: state, packet.Pts);
+        _firstField = null;
+        var frame = Crop(state.Decoder.Picture, state.Sps);
+        frame.Pts = first.Pts;
+
+        bool restart = first.State.Header.IsIdr || first.State.Header.MemoryManagement.Any(op => op.Op == 5);
+        return _output.Add(frame, state.Decoder.Picture.Poc, restart, ReorderDepth(state.Sps));
     }
 
-    public IReadOnlyList<VideoFrame> Flush() => _output.Flush();
+    public IReadOnlyList<VideoFrame> Flush()
+    {
+        if (_firstField is not null)
+        {
+            throw new NotSupportedException("A field without its second field (an unpaired field) is not supported.");
+        }
+
+        return _output.Flush();
+    }
 
     /// <summary>
     /// How many decoded frames can precede, in decoding order, a frame shown before them: the
@@ -106,7 +127,7 @@ public sealed class H264Decoder : IVideoDecoder
         return Math.Clamp(maxDpbMbs / (sps.WidthInMbs * sps.HeightInMbs), 1, 16);
     }
 
-    private (VideoFrame Frame, PictureState State) DecodePicture(ReadOnlySpan<byte> packet)
+    private PictureState DecodePicture(ReadOnlySpan<byte> packet)
     {
         PictureState? current = null;
         int pos = 0;
@@ -138,7 +159,8 @@ public sealed class H264Decoder : IVideoDecoder
             throw new InvalidDataException("The packet contains no picture.");
         }
 
-        return (FinishPicture(current), current);
+        FinishPicture(current);
+        return current;
     }
 
     private PictureState? HandleNal(NalUnit nal, PictureState? current)
@@ -180,6 +202,12 @@ public sealed class H264Decoder : IVideoDecoder
                         SliceType.B => _references.BuildLists(header, current.Sps, current.Poc),
                         _ => (new List<Picture>(), new List<Picture>()),
                     };
+                    if (list1.Count > 0 && list1[0].Frame.CodedAsFields)
+                    {
+                        // Its co-located motion is stored by field (8.4.1.2.1), which direct prediction does not read yet.
+                        throw new NotSupportedException("B pictures whose first list 1 reference was coded as two field pictures are not supported.");
+                    }
+
                     current.Decoder.DecodeSlice(header, pps, reader, list0, list1);
                     break;
                 }
@@ -199,26 +227,63 @@ public sealed class H264Decoder : IVideoDecoder
 
     private PictureState StartPicture(SliceHeader header, SequenceParameterSet sps)
     {
+        // The second field of a frame (7.4.1.2.4): the other parity right after the first, with its
+        // frame_num, not IDR, and a reference if and only if the first one is.
+        bool secondField = header.FieldPic && _firstField?.State is { } first
+            && first.Header.Parity == 1 - header.Parity && first.Header.FrameNum == header.FrameNum && first.Sps == sps
+            && !header.IsIdr && (first.Header.NalRefIdc != 0) == (header.NalRefIdc != 0);
+        if (_firstField is not null && !secondField)
+        {
+            throw new NotSupportedException("A field without its second field (an unpaired field) is not supported.");
+        }
+
         if (header.IsIdr)
         {
             _references.Clear();
         }
-        else
+        else if (!secondField)
         {
             InferGapFrames(header, sps);
         }
 
         if (_decoder is null || _decoder.Sps.WidthInMbs != sps.WidthInMbs || _decoder.Sps.HeightInMbs != sps.HeightInMbs)
         {
-            _decoder = new PictureDecoder(sps) { Statistics = MbaffStatistics };
+            _decoder = new PictureDecoder(sps) { Statistics = MbaffStatistics, FieldStatistics = FieldStatistics };
         }
 
         int poc = _order.Next(header, sps);
-        var picture = TakePicture(sps, header.FrameNum, poc);
-        (picture.TopPoc, picture.BottomPoc) = _order.Fields;
-        _decoder.Begin(picture, sps);
-        return new PictureState(header, sps, _decoder, poc);
+        Picture picture;
+        if (secondField)
+        {
+            picture = _firstField!.Value.State.Decoder.Picture;
+            if (header.BottomField)
+            {
+                picture.BottomPoc = poc;
+            }
+            else
+            {
+                picture.TopPoc = poc;
+            }
+
+            picture.Poc = Math.Min(picture.TopPoc, picture.BottomPoc);
+            FieldStatistics.SecondFields++;
+        }
+        else
+        {
+            FieldStatistics.FramePictures += header.FieldPic || sps.FrameMbsOnly ? 0 : 1;
+            picture = TakePicture(sps, header.FrameNum, poc);
+            (picture.TopPoc, picture.BottomPoc) = _order.Fields;
+        }
+
+        _decoder.Begin(picture, sps, header.Parity, secondField);
+        return new PictureState(header, sps, _decoder, poc, secondField);
     }
+
+    // The first field of a frame being decoded as two field pictures, and its packet's timestamp.
+    private (PictureState State, long Pts)? _firstField;
+
+    /// <summary>How often field pictures were decoded, so tests can check samples exercise them.</summary>
+    internal FieldStatistics FieldStatistics { get; } = new();
 
     /// <summary>
     /// Decoding process for gaps in frame_num (8.2.5.2): a frame_num more than one past the
@@ -271,7 +336,7 @@ public sealed class H264Decoder : IVideoDecoder
         return picture;
     }
 
-    private VideoFrame FinishPicture(PictureState state)
+    private void FinishPicture(PictureState state)
     {
         if (!state.Decoder.IsComplete)
         {
@@ -283,13 +348,18 @@ public sealed class H264Decoder : IVideoDecoder
         var picture = state.Decoder.Picture;
         if (state.Header.NalRefIdc != 0)
         {
-            _references.Mark(state.Header, picture, state.Sps);
+            if (state.Header.FieldPic)
+            {
+                _references.MarkField(state.Header, picture, state.Sps, state.SecondField);
+            }
+            else
+            {
+                _references.Mark(state.Header, picture, state.Sps);
+            }
 
             // PrevRefFrameNum (7.4.3); after memory_management_control_operation 5 it is 0.
             _prevRefFrameNum = state.Header.MemoryManagement.Any(op => op.Op == 5) ? 0 : state.Header.FrameNum;
         }
-
-        return Crop(picture, state.Sps);
     }
 
     /// <summary>Copies the visible area (frame cropping, 7.4.2.1.1) into a new frame.</summary>
@@ -313,7 +383,7 @@ public sealed class H264Decoder : IVideoDecoder
     }
 
     /// <summary>The picture being decoded: its first slice header, its SPS, its decoder and its order count.</summary>
-    private sealed record PictureState(SliceHeader Header, SequenceParameterSet Sps, PictureDecoder Decoder, int Poc);
+    private sealed record PictureState(SliceHeader Header, SequenceParameterSet Sps, PictureDecoder Decoder, int Poc, bool SecondField = false);
 
     private static void CheckSupported(SequenceParameterSet sps)
     {
@@ -327,4 +397,17 @@ public sealed class H264Decoder : IVideoDecoder
             throw new NotSupportedException("Only 8-bit video is supported.");
         }
     }
+}
+
+/// <summary>Counts of field pictures, so tests can check samples exercise them.</summary>
+internal sealed class FieldStatistics
+{
+    /// <summary>Second fields decoded (and so frames made of two field pictures).</summary>
+    public int SecondFields { get; set; }
+
+    /// <summary>Partitions of a second field predicted from the first field of its own frame.</summary>
+    public int FromOwnFirstField { get; set; }
+
+    /// <summary>Frame pictures in streams that may code frames as fields (frame_mbs_only_flag 0).</summary>
+    public int FramePictures { get; set; }
 }

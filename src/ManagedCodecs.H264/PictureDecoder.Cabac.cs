@@ -122,7 +122,7 @@ internal sealed partial class PictureDecoder
                 DecodeMacroblock(slice, r, mbAddr);
             }
 
-            mbAddr++;
+            mbAddr += MbStep;
         }
         while ((_mbaff && (mbAddr & 1) != 0) || cabac.Terminate() == 0); // end_of_slice_flag, in MBAFF frames only after a pair
     }

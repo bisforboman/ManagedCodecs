@@ -1,8 +1,9 @@
 namespace ManagedCodecs.H264;
 
 /// <summary>
-/// Reference picture management for frames: list initialization and modification for P slices
-/// (8.2.4) and reference marking (8.2.5).
+/// Reference picture management: list initialization and modification (8.2.4) and reference
+/// marking (8.2.5), for frames and for field pictures. The list holds frames with any field
+/// marked as used for reference; a field picture's lists are made of field views.
 /// </summary>
 internal sealed class ReferenceList
 {
@@ -29,6 +30,11 @@ internal sealed class ReferenceList
     /// <summary>RefPicList0 for a P slice of the current picture.</summary>
     public List<Picture> BuildList(SliceHeader header, SequenceParameterSet sps)
     {
+        if (header.FieldPic)
+        {
+            return BuildFieldList(header, sps);
+        }
+
         int maxFrameNum = 1 << sps.Log2MaxFrameNum;
         UpdateFrameNumWrap(header.FrameNum, maxFrameNum);
 
@@ -64,6 +70,50 @@ internal sealed class ReferenceList
             Finish(l1, header.NumRefIdxL1Active, header.RefPicListModificationL1, header, maxFrameNum));
     }
 
+    /// <summary>
+    /// RefPicList0 for a P slice of a field picture (8.2.4.2.2, 8.2.4.2.5): the frames with a
+    /// field used for short-term reference by descending FrameNumWrap (the current frame's first
+    /// field included), then those with a long-term field by LongTermFrameIdx, each set turned
+    /// into fields alternately from the current field's parity and the other one.
+    /// </summary>
+    private List<Picture> BuildFieldList(SliceHeader header, SequenceParameterSet sps)
+    {
+        int maxFrameNum = 1 << sps.Log2MaxFrameNum;
+        UpdateFrameNumWrap(header.FrameNum, maxFrameNum);
+        int parity = header.Parity;
+        var shortTerm = _pictures.Where(p => p.Field(0).IsShortTermReference || p.Field(1).IsShortTermReference).OrderByDescending(p => p.FrameNumWrap).ToList();
+        var longTerm = _pictures.Where(p => p.Field(0).IsLongTermReference || p.Field(1).IsLongTermReference).OrderBy(p => p.LongTermFrameIdx).ToList();
+        var list = AlternateFields(shortTerm, parity, f => f.IsShortTermReference)
+            .Concat(AlternateFields(longTerm, parity, f => f.IsLongTermReference))
+            .ToList();
+        return Finish(list, header.NumRefIdxL0Active, header.RefPicListModificationL0, header, maxFrameNum);
+    }
+
+    /// <summary>
+    /// 8.2.4.2.5: fields of the frames in order, starting with the current field's parity and
+    /// alternating, each parity taking its next frame that has such a field marked; when one
+    /// parity runs out, the other's remaining fields follow.
+    /// </summary>
+    private static IEnumerable<Picture> AlternateFields(List<Picture> frames, int parity, Func<Picture, bool> marked)
+    {
+        var same = frames.Select(f => f.Field(parity)).Where(marked).ToList();
+        var other = frames.Select(f => f.Field(1 - parity)).Where(marked).ToList();
+        int i = 0;
+        int j = 0;
+        while (i < same.Count || j < other.Count)
+        {
+            if (i < same.Count)
+            {
+                yield return same[i++];
+            }
+
+            if (j < other.Count)
+            {
+                yield return other[j++];
+            }
+        }
+    }
+
     /// <summary>Truncates an initial list to the active count (8.2.4.2) and applies the modifications (8.2.4.3).</summary>
     private List<Picture> Finish(List<Picture> list, int count, IReadOnlyList<RefPicListModification> modifications, SliceHeader header, int maxFrameNum)
     {
@@ -88,8 +138,18 @@ internal sealed class ReferenceList
     /// <summary>8.2.4.3: moves the named pictures to the front, in order.</summary>
     private void Modify(List<Picture> list, int count, IReadOnlyList<RefPicListModification> modifications, SliceHeader header, int maxFrameNum)
     {
-        int currPicNum = header.FrameNum;
+        // Field pictures number fields (8.2.4.1): CurrPicNum 2 * frame_num + 1, a field's PicNum
+        // 2 * FrameNumWrap + 1 for the current parity and 2 * FrameNumWrap for the other; the
+        // same for LongTermPicNum from LongTermFrameIdx.
+        bool field = header.FieldPic;
+        int maxPicNum = field ? 2 * maxFrameNum : maxFrameNum;
+        int currPicNum = field ? (2 * header.FrameNum) + 1 : header.FrameNum;
         int picNumPred = currPicNum;
+        var candidates = field
+            ? _pictures.SelectMany(p => new[] { p.Field(0), p.Field(1) }).ToList()
+            : _pictures;
+        int PicNum(Picture p) => field ? (2 * p.Frame.FrameNumWrap) + (p.Parity == header.Parity ? 1 : 0) : p.FrameNumWrap;
+        int LongTermPicNum(Picture p) => field ? (2 * p.Frame.LongTermFrameIdx) + (p.Parity == header.Parity ? 1 : 0) : p.LongTermFrameIdx;
         int refIdx = 0;
 
         // Work on a list one longer than the final one, as the spec does.
@@ -109,25 +169,25 @@ internal sealed class ReferenceList
                 int picNumNoWrap = modification.Idc == 0 ? picNumPred - absDiff : picNumPred + absDiff;
                 if (picNumNoWrap < 0)
                 {
-                    picNumNoWrap += maxFrameNum;
+                    picNumNoWrap += maxPicNum;
                 }
-                else if (picNumNoWrap >= maxFrameNum)
+                else if (picNumNoWrap >= maxPicNum)
                 {
-                    picNumNoWrap -= maxFrameNum;
+                    picNumNoWrap -= maxPicNum;
                 }
 
                 picNumPred = picNumNoWrap;
-                int picNum = picNumNoWrap > currPicNum ? picNumNoWrap - maxFrameNum : picNumNoWrap;
-                picture = _pictures.FirstOrDefault(p => p.IsShortTermReference && p.FrameNumWrap == picNum)
+                int picNum = picNumNoWrap > currPicNum ? picNumNoWrap - maxPicNum : picNumNoWrap;
+                picture = candidates.FirstOrDefault(p => p.IsShortTermReference && PicNum(p) == picNum)
                     ?? throw new InvalidDataException($"Reference list modification names missing picture {picNum}.");
-                isSame = p => p is { IsShortTermReference: true } && p.FrameNumWrap == picNum;
+                isSame = p => p is { IsShortTermReference: true } && PicNum(p) == picNum;
             }
             else
             {
                 int longTermPicNum = modification.Value;
-                picture = _pictures.FirstOrDefault(p => p.IsLongTermReference && p.LongTermFrameIdx == longTermPicNum)
+                picture = candidates.FirstOrDefault(p => p.IsLongTermReference && LongTermPicNum(p) == longTermPicNum)
                     ?? throw new InvalidDataException($"Reference list modification names missing long-term picture {longTermPicNum}.");
-                isSame = p => p is { IsLongTermReference: true } && p.LongTermFrameIdx == longTermPicNum;
+                isSame = p => p is { IsLongTermReference: true } && LongTermPicNum(p) == longTermPicNum;
             }
 
             for (int c = count; c > refIdx; c--)
@@ -155,6 +215,62 @@ internal sealed class ReferenceList
             }
 
             list.Add(picture);
+        }
+    }
+
+    /// <summary>
+    /// Marks a just-decoded reference field (8.2.5) of frame <paramref name="frame"/>. The second
+    /// field of a pair whose first field is a short-term reference is marked the same, without the
+    /// sliding window (8.2.5.3); otherwise as a picture of its own, the window counting frames.
+    /// Of the adaptive operations only 1 (unmark a field) is supported in field pictures.
+    /// </summary>
+    public void MarkField(SliceHeader header, Picture frame, SequenceParameterSet sps, bool secondField)
+    {
+        int maxFrameNum = 1 << sps.Log2MaxFrameNum;
+        UpdateFrameNumWrap(header.FrameNum, maxFrameNum);
+        var field = frame.Field(header.Parity);
+        if (header.IsIdr && header.LongTermReference)
+        {
+            throw new NotSupportedException("Long-term IDR field pictures are not supported.");
+        }
+
+        if (header.AdaptiveRefPicMarking)
+        {
+            int currPicNum = (2 * header.FrameNum) + 1;
+            foreach (var op in header.MemoryManagement)
+            {
+                if (op.Op != 1)
+                {
+                    throw new NotSupportedException($"memory_management_control_operation {op.Op} in field pictures is not supported.");
+                }
+
+                int picNum = currPicNum - op.DifferenceOfPicNums;
+                var target = _pictures.SelectMany(p => new[] { p.Field(0), p.Field(1) })
+                    .FirstOrDefault(f => f.IsShortTermReference && (2 * f.Frame.FrameNumWrap) + (f.Parity == header.Parity ? 1 : 0) == picNum);
+                if (target is not null)
+                {
+                    target.IsShortTermReference = false;
+                    if (!target.HasReferenceField)
+                    {
+                        _pictures.Remove(target.Frame);
+                    }
+                }
+            }
+        }
+        else if (!header.IsIdr && !(secondField && frame.Field(1 - header.Parity).IsShortTermReference))
+        {
+            SlidingWindow(sps);
+        }
+
+        if (header.IsIdr)
+        {
+            _maxLongTermFrameIdx = -1;
+        }
+
+        field.IsShortTermReference = true;
+        if (!_pictures.Contains(frame))
+        {
+            _pictures.Add(frame);
         }
     }
 
@@ -254,12 +370,15 @@ internal sealed class ReferenceList
         _pictures.Add(picture);
     }
 
-    /// <summary>Sliding window (8.2.5.3): drops the oldest short-term picture when the DPB is full.</summary>
+    /// <summary>
+    /// Sliding window (8.2.5.3): when the frames (pairs, unpaired fields) marked as references
+    /// fill the DPB, drops the short-term one with the smallest FrameNumWrap, both its fields.
+    /// </summary>
     private void SlidingWindow(SequenceParameterSet sps)
     {
         if (_pictures.Count >= Math.Max(sps.MaxNumRefFrames, 1))
         {
-            var oldest = _pictures.Where(p => p.IsShortTermReference).MinBy(p => p.FrameNumWrap);
+            var oldest = _pictures.Where(p => p.Field(0).IsShortTermReference || p.Field(1).IsShortTermReference).MinBy(p => p.FrameNumWrap);
             Unmark(oldest);
         }
     }

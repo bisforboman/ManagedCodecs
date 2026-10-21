@@ -127,6 +127,83 @@ public class ReferenceListTests
         Assert.Equal([0], Pocs(l1));
     }
 
+    private static readonly SequenceParameterSet FieldSps = new() { Log2MaxFrameNum = 4, MaxNumRefFrames = 2, WidthInMbs = 1, HeightInMapUnits = 1, FrameMbsOnly = false };
+
+    private static readonly SequenceParameterSet FieldSps3 = new() { Log2MaxFrameNum = 4, MaxNumRefFrames = 3, WidthInMbs = 1, HeightInMapUnits = 1, FrameMbsOnly = false };
+
+    [Fact]
+    public void FieldLists_AlternateParityFromTheCurrentFieldsAndIncludeTheFirstField()
+    {
+        var sps = FieldSps3;
+        var refs = new ReferenceList();
+        DecodeFields(refs, 0, idr: true, sps);
+        DecodeFields(refs, 1, sps: sps);
+        var frame2 = new Picture(1, 1) { FrameNum = 2 };
+        refs.MarkField(FieldHeader(2, bottom: false), frame2, sps, secondField: false);
+
+        // The bottom field of frame 2: bottom fields first, latest frame first, alternating with top fields; the
+        // top field of its own frame comes in as the latest top field (8.2.4.2.5).
+        Assert.Equal(["1b", "2t", "0b", "1t", "0t"], Fields(refs.BuildList(FieldHeader(2, bottom: true, numRef: 5), sps)));
+    }
+
+    [Fact]
+    public void FieldMarking_SecondFieldOfAReferenceFrameDoesNotSlideTheWindow()
+    {
+        var refs = new ReferenceList();
+        DecodeFields(refs, 0, idr: true);
+        DecodeFields(refs, 1);
+
+        // Two frames fill the window: frame 2's top field pushes frame 0 out, its bottom field pushes nothing out
+        // (8.2.5.3: the first field of the frame is already a short-term reference).
+        DecodeFields(refs, 2);
+
+        Assert.Equal(["2t", "2b", "1t", "1b"], Fields(refs.BuildList(FieldHeader(3, bottom: false, numRef: 4), FieldSps)));
+    }
+
+    [Fact]
+    public void FieldMarking_UnmarksByFieldPicNum()
+    {
+        var sps = FieldSps3;
+        var refs = new ReferenceList();
+        DecodeFields(refs, 0, idr: true, sps);
+        DecodeFields(refs, 1, sps: sps);
+
+        // The top field of frame 2 (CurrPicNum 2 * 2 + 1 = 5) unmarks PicNum 2: the bottom field of frame 1, as
+        // fields of the other parity have PicNum 2 * FrameNumWrap and those of the same parity 2 * FrameNumWrap + 1.
+        var frame2 = new Picture(1, 1) { FrameNum = 2 };
+        refs.MarkField(FieldHeader(2, bottom: false, operations: [new MemoryManagementOperation(1, 3, 0, 0, 0)]), frame2, sps, secondField: false);
+
+        Assert.Equal(["0b", "2t", "1t", "0t"], Fields(refs.BuildList(FieldHeader(2, bottom: true, numRef: 4), sps)));
+    }
+
+    private static void DecodeFields(ReferenceList refs, int frameNum, bool idr = false, SequenceParameterSet? sps = null)
+    {
+        if (idr)
+        {
+            refs.Clear();
+        }
+
+        var frame = new Picture(1, 1) { FrameNum = frameNum };
+        refs.MarkField(FieldHeader(frameNum, bottom: false, idr: idr), frame, sps ?? FieldSps, secondField: false);
+        refs.MarkField(FieldHeader(frameNum, bottom: true), frame, sps ?? FieldSps, secondField: true);
+    }
+
+    private static SliceHeader FieldHeader(int frameNum, bool bottom, bool idr = false, int numRef = 1, IReadOnlyList<MemoryManagementOperation>? operations = null) => new()
+    {
+        Type = SliceType.P,
+        FrameNum = frameNum,
+        FieldPic = true,
+        BottomField = bottom,
+        IsIdr = idr,
+        NalRefIdc = 1,
+        NumRefIdxL0Active = numRef,
+        RefPicListModificationL0 = [],
+        AdaptiveRefPicMarking = operations is not null,
+        MemoryManagement = operations ?? [],
+    };
+
+    private static string[] Fields(IEnumerable<Picture> fields) => [.. fields.Select(f => $"{f.Frame.FrameNum}{(f.Parity == 0 ? 't' : 'b')}")];
+
     private static void Decode(ReferenceList refs, int frameNum, bool idr = false, int poc = 0)
     {
         if (idr)

@@ -15,7 +15,7 @@ internal readonly record struct RefPicListModification(int Idc, int Value);
 /// <summary>One memory_management_control_operation (7.3.3.3).</summary>
 internal readonly record struct MemoryManagementOperation(int Op, int DifferenceOfPicNums, int LongTermPicNum, int LongTermFrameIdx, int MaxLongTermFrameIdxPlus1);
 
-/// <summary>slice_header (7.3.3) for frame slices (field_pic_flag 0), MBAFF frames included.</summary>
+/// <summary>slice_header (7.3.3): of frames (MBAFF frames included) and of field pictures.</summary>
 internal sealed class SliceHeader
 {
     /// <summary>first_mb_in_slice: in MBAFF frames it counts macroblock pairs (see <see cref="FirstMbAddr"/>).</summary>
@@ -24,8 +24,20 @@ internal sealed class SliceHeader
     /// <summary>MbaffFrameFlag (7-25): the frame codes macroblock pairs, each as a frame or a field pair.</summary>
     public bool Mbaff { get; internal init; }
 
-    /// <summary>The address of the slice's first macroblock: first_mb_in_slice * (1 + MbaffFrameFlag).</summary>
-    public int FirstMbAddr => Mbaff ? FirstMbInSlice * 2 : FirstMbInSlice;
+    /// <summary>field_pic_flag: the picture is one field, the bottom one with bottom_field_flag.</summary>
+    public bool FieldPic { get; internal init; }
+
+    public bool BottomField { get; internal init; }
+
+    /// <summary>The field's parity (0 top, 1 bottom) for a field picture, -1 for a frame.</summary>
+    public int Parity => FieldPic ? (BottomField ? 1 : 0) : -1;
+
+    /// <summary>
+    /// The address of the slice's first macroblock: first_mb_in_slice * (1 + MbaffFrameFlag). A
+    /// field picture's macroblocks are stored where the same macroblocks of an all-field MBAFF
+    /// frame would be: field macroblock n at 2 * n + parity.
+    /// </summary>
+    public int FirstMbAddr => Mbaff ? FirstMbInSlice * 2 : FieldPic ? (FirstMbInSlice * 2) + Parity : FirstMbInSlice;
 
     public SliceType Type { get; internal init; }
 
@@ -108,12 +120,14 @@ internal sealed class SliceHeader
 
         bool isIdr = nal.Type == NalUnitType.IdrSlice;
         int frameNum = (int)r.ReadBits(sps.Log2MaxFrameNum);
-        if (!sps.FrameMbsOnly && r.ReadFlag())
+        bool fieldPic = !sps.FrameMbsOnly && r.ReadFlag();
+        bool bottomField = fieldPic && r.ReadFlag();
+        if (fieldPic && type == SliceType.B)
         {
-            throw new NotSupportedException("Field pictures (field_pic_flag) are not supported.");
+            throw new NotSupportedException("B slices in field pictures are not supported.");
         }
 
-        bool mbaff = sps.MbAdaptiveFrameField;
+        bool mbaff = sps.MbAdaptiveFrameField && !fieldPic;
 
         int idrPicId = isIdr ? (int)r.ReadUe() : 0;
 
@@ -124,7 +138,7 @@ internal sealed class SliceHeader
         if (sps.PicOrderCntType == 0)
         {
             pocLsb = (int)r.ReadBits(sps.Log2MaxPicOrderCntLsb);
-            if (pps.BottomFieldPicOrderInFramePresent)
+            if (pps.BottomFieldPicOrderInFramePresent && !fieldPic)
             {
                 deltaBottom = r.ReadSe();
             }
@@ -132,7 +146,7 @@ internal sealed class SliceHeader
         else if (sps.PicOrderCntType == 1 && !sps.DeltaPicOrderAlwaysZero)
         {
             delta0 = r.ReadSe();
-            if (pps.BottomFieldPicOrderInFramePresent)
+            if (pps.BottomFieldPicOrderInFramePresent && !fieldPic)
             {
                 delta1 = r.ReadSe();
             }
@@ -223,6 +237,8 @@ internal sealed class SliceHeader
         {
             FirstMbInSlice = firstMb,
             Mbaff = mbaff,
+            FieldPic = fieldPic,
+            BottomField = bottomField,
             Type = type,
             PpsId = ppsId,
             FrameNum = frameNum,

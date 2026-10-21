@@ -15,12 +15,18 @@ internal sealed class PictureOrder
     private int _prevFrameNum;
 
     /// <summary>
-    /// PicOrderCnt of the frame whose first slice header is <paramref name="header"/>, and the
-    /// state update for the pictures after it. Call once per picture, in decoding order.
+    /// PicOrderCnt of the picture whose first slice header is <paramref name="header"/> (a frame,
+    /// or a field: its own order count), and the state update for the pictures after it. Call
+    /// once per picture, in decoding order.
     /// </summary>
     public int Next(SliceHeader header, SequenceParameterSet sps)
     {
         bool mmco5 = header.MemoryManagement.Any(op => op.Op == 5);
+        if (mmco5 && header.FieldPic)
+        {
+            throw new NotSupportedException("memory_management_control_operation 5 in a field picture is not supported.");
+        }
+
         int top;
         int bottom;
 
@@ -45,8 +51,9 @@ internal sealed class PictureOrder
                 msb -= maxLsb;
             }
 
+            // A field picture's one order count is msb + lsb either way (8-4, 8-5).
             top = msb + lsb;
-            bottom = top + header.DeltaPicOrderCntBottom;
+            bottom = header.FieldPic ? top : top + header.DeltaPicOrderCntBottom;
             if (header.NalRefIdc != 0)
             {
                 // After memory_management_control_operation 5 the picture's own order count is
@@ -77,6 +84,14 @@ internal sealed class PictureOrder
             // After memory_management_control_operation 5, frame_num counts as 0.
             _prevFrameNumOffset = mmco5 ? 0 : frameNumOffset;
             _prevFrameNum = mmco5 ? 0 : header.FrameNum;
+        }
+
+        if (header.FieldPic)
+        {
+            // Type 1 gives a bottom field its offset from the top (8-10); the others the same value.
+            int field = header.BottomField ? bottom : top;
+            Fields = (field, field);
+            return field;
         }
 
         int poc = Math.Min(top, bottom);

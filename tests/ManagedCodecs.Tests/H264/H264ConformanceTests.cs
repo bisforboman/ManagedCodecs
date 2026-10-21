@@ -57,6 +57,14 @@ public class H264ConformanceTests
 
         Assert.Equal(expected.Count, index);
 
+        // Field picture samples (from JM) must pair fields, and predict second fields from their first.
+        if (sampleName.Contains("paff", StringComparison.Ordinal))
+        {
+            var fields = decoder.FieldStatistics;
+            Assert.True(fields.SecondFields > 0 && fields.FromOwnFirstField > 0, $"{fields.SecondFields} field pairs, {fields.FromOwnFirstField} partitions predicted from their own first field.");
+            Assert.True(!sampleName.Contains("adaptive", StringComparison.Ordinal) || fields.FramePictures > 0, "No frame pictures between the field pairs.");
+        }
+
         // MBAFF samples must mix field and frame pairs every way they can meet.
         if (sampleName.Contains("mbaff", StringComparison.Ordinal))
         {

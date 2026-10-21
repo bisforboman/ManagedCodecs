@@ -77,13 +77,28 @@ internal sealed partial class PictureDecoder
 
     public int DecodedMbCount { get; private set; }
 
-    /// <summary>Starts decoding into <paramref name="picture"/>, forgetting the previous picture's state.</summary>
-    public void Begin(Picture picture, SequenceParameterSet sps)
+    /// <summary>
+    /// Starts decoding into <paramref name="picture"/>, forgetting the previous picture's state: a
+    /// frame, or the field of parity <paramref name="fieldParity"/>. The second field of a frame
+    /// keeps the first one's macroblocks (its other slots) as they are.
+    /// </summary>
+    public void Begin(Picture picture, SequenceParameterSet sps, int fieldParity = -1, bool secondField = false)
     {
         Sps = sps;
         Picture = picture;
         DecodedMbCount = 0;
         _slices.Clear();
+        _fieldParity = fieldParity;
+        _pairSlots = fieldParity >= 0;
+        _mbaff = false;
+        _fieldMb = picture.FieldMb;
+        if (secondField)
+        {
+            (_mvX, _mvY, _refIdx, _refId) = (picture.MvX, picture.MvY, picture.RefIdx, picture.RefId);
+            ClearSlots(fieldParity);
+            return;
+        }
+
         Array.Fill(_sliceOfMb, -1);
         Array.Clear(_kind);
         Array.Clear(_qp);
@@ -91,21 +106,56 @@ internal sealed partial class PictureDecoder
         Array.Clear(_totalCoeffLuma);
         Array.Clear(_totalCoeffChroma);
         Array.Clear(_intra4x4Mode);
-        _fieldMb = picture.FieldMb;
-        Array.Clear(_fieldMb);
-        _mbaff = false;
+        Array.Fill(_fieldMb, fieldParity >= 0); // a frame coded as fields: all field macroblocks, by pair
+        picture.Mbaff = fieldParity >= 0;
+        picture.CodedAsFields = fieldParity >= 0;
         ResetInter(picture);
         ResetCabacState();
     }
 
-    public bool IsComplete => DecodedMbCount == _mbCount;
+    /// <summary>Clears the state of the macroblock slots of one field (every other slot).</summary>
+    private void ClearSlots(int parity)
+    {
+        for (int mb = parity; mb < _mbCount; mb += 2)
+        {
+            _sliceOfMb[mb] = -1;
+            _kind[mb] = MbKind.NotDecoded;
+            _qp[mb] = 0;
+            _transform8x8[mb] = false;
+            _totalCoeffLuma.AsSpan(mb * 16, 16).Clear();
+            _totalCoeffChroma.AsSpan(mb * 8, 8).Clear();
+            _intra4x4Mode.AsSpan(mb * 16, 16).Clear();
+            _cbp[mb] = 0;
+            _chromaPredMode[mb] = 0;
+            _dcCoded[mb] = 0;
+            _directMb[mb] = false;
+            _direct.AsSpan(mb * 4, 4).Clear();
+            for (int list = 0; list < 2; list++)
+            {
+                _mvX[list].AsSpan(mb * 16, 16).Clear();
+                _mvY[list].AsSpan(mb * 16, 16).Clear();
+                _refIdx[list].AsSpan(mb * 4, 4).Fill(-1);
+                _refId[list].AsSpan(mb * 4, 4).Clear();
+                _refPic[list].AsSpan(mb * 4, 4).Clear();
+                _absMvd[list][0].AsSpan(mb * 16, 16).Clear();
+                _absMvd[list][1].AsSpan(mb * 16, 16).Clear();
+            }
+        }
+    }
+
+    /// <summary>Whether every macroblock of the picture (or of the field) is decoded.</summary>
+    public bool IsComplete => DecodedMbCount == (_fieldParity >= 0 ? _mbCount / 2 : _mbCount);
+
+    // The distance between consecutive macroblock addresses: a field picture's take every other slot.
+    private int MbStep => _fieldParity >= 0 ? 2 : 1;
 
     /// <summary>slice_data (7.3.4).</summary>
     public void DecodeSlice(SliceHeader header, PictureParameterSet pps, BitReader r, IReadOnlyList<Picture> refList0, IReadOnlyList<Picture> refList1)
     {
         int sliceNum = _slices.Count;
         _mbaff = header.Mbaff;
-        Picture.Mbaff = header.Mbaff;
+        _pairSlots = header.Mbaff || header.FieldPic;
+        Picture.Mbaff = _pairSlots;
         _slices.Add(new SliceInfo(header.DisableDeblockingFilterIdc, header.SliceAlphaC0Offset, header.SliceBetaOffset, pps.ChromaQpIndexOffset, pps.SecondChromaQpIndexOffset));
 
         if (_scaling.Sps != Sps || _scaling.Pps != pps)
@@ -156,7 +206,7 @@ internal sealed partial class PictureDecoder
 
                     DecodeSkip(slice, mbAddr);
                     PairDone(mbAddr);
-                    mbAddr++;
+                    mbAddr += MbStep;
                 }
             }
 
@@ -170,7 +220,7 @@ internal sealed partial class PictureDecoder
 
                 DecodeMacroblock(slice, r, mbAddr);
                 PairDone(mbAddr);
-                mbAddr++;
+                mbAddr += MbStep;
                 moreData = r.MoreRbspData();
             }
         }
@@ -230,7 +280,7 @@ internal sealed partial class PictureDecoder
     /// </summary>
     private int NeighborMb(int mbAddr, int x, int y, int size = 16)
     {
-        if (_mbaff)
+        if (_pairSlots)
         {
             return AffNeighbor(mbAddr, x, y, size, size).Mb;
         }

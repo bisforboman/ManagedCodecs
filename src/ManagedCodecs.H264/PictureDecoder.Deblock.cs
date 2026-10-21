@@ -36,7 +36,7 @@ internal sealed partial class PictureDecoder
     [SkipLocalsInit]
     public void Deblock()
     {
-        if (_mbaff)
+        if (_pairSlots)
         {
             DeblockMbaff();
             return;

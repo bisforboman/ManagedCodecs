@@ -287,10 +287,5 @@ public sealed class H264Decoder : IVideoDecoder
         {
             throw new NotSupportedException("Scaling matrices are not supported.");
         }
-
-        if (pps.Transform8x8Mode)
-        {
-            throw new NotSupportedException("8x8 transforms are not supported.");
-        }
     }
 }

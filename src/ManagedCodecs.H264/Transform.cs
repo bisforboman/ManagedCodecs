@@ -1,9 +1,11 @@
+using System.Runtime.CompilerServices;
+
 namespace ManagedCodecs.H264;
 
-/// <summary>Scaling (dequantization) and inverse transforms for 4x4 blocks (H.264 clause 8.5).</summary>
+/// <summary>Scaling (dequantization) and inverse transforms for 4x4 and 8x8 blocks (H.264 clause 8.5).</summary>
 /// <remarks>
-/// Only flat scaling matrices exist in Baseline, so LevelScale4x4 is 16 times the normAdjust4x4
-/// values v of equation 8-315. Matrices are row-major: index = row * 4 + column.
+/// Only flat scaling matrices are supported, so LevelScale4x4 and LevelScale8x8 are 16 times the
+/// normAdjust values v of equations 8-315 and 8-318. Matrices are row-major: index = row * size + column.
 /// </remarks>
 internal static class Transform
 {
@@ -61,6 +63,135 @@ internal static class Transform
                 block[i] = ((block[i] * scale[i]) + round) >> shift;
             }
         }
+    }
+
+    /// <summary>8x8 frame zig-zag scan (Table 8-14): scan position to row-major index.</summary>
+    public static ReadOnlySpan<byte> ZigZag8x8 =>
+    [
+        0, 1, 8, 16, 9, 2, 3, 10, 17, 24, 32, 25, 18, 11, 4, 5,
+        12, 19, 26, 33, 40, 48, 41, 34, 27, 20, 13, 6, 7, 14, 21, 28,
+        35, 42, 49, 56, 57, 50, 43, 36, 29, 22, 15, 23, 30, 37, 44, 51,
+        58, 59, 52, 45, 38, 31, 39, 46, 53, 60, 61, 54, 47, 55, 62, 63,
+    ];
+
+    // normAdjust8x8 (8-318): v per qP % 6 (rows) and position class (columns, see Class8x8).
+    private static ReadOnlySpan<byte> Norm8x8 =>
+    [
+        20, 18, 32, 19, 25, 24,
+        22, 19, 35, 21, 28, 26,
+        26, 23, 42, 24, 33, 31,
+        28, 25, 45, 26, 35, 33,
+        32, 28, 51, 30, 40, 38,
+        36, 32, 58, 34, 46, 43,
+    ];
+
+    /// <summary>Which column of v (8-318) applies at row i, column j of an 8x8 block.</summary>
+    private static int Class8x8(int i, int j) =>
+        (i % 4 == 0 && j % 4 == 0) ? 0
+        : (i % 2 == 1 && j % 2 == 1) ? 1
+        : (i % 4 == 2 && j % 4 == 2) ? 2
+        : ((i % 4 == 0 && j % 2 == 1) || (i % 2 == 1 && j % 4 == 0)) ? 3
+        : ((i % 4 == 0 && j % 4 == 2) || (i % 4 == 2 && j % 4 == 0)) ? 4
+        : 5;
+
+    /// <summary>LevelScale8x8(qP % 6, row, column) for flat matrices.</summary>
+    public static int LevelScale8x8(int qpRem, int index) => 16 * Norm8x8[(qpRem * 6) + Class8x8(index >> 3, index & 7)];
+
+    // LevelScale8x8 for every qP % 6 and position: entry qpRem * 64 + index.
+    private static readonly int[] LevelScale8x8Table = [.. Enumerable.Range(0, 6 * 64).Select(i => LevelScale8x8(i / 64, i % 64))];
+
+    /// <summary>Scales the coefficients of an 8x8 block in place (8.5.13.1).</summary>
+    public static void Dequantize8x8(Span<int> block, int qp)
+    {
+        int qpDiv = qp / 6;
+        var scale = LevelScale8x8Table.AsSpan((qp % 6) * 64, 64);
+        if (qp >= 36)
+        {
+            int shift = qpDiv - 6;
+            for (int i = 0; i < 64; i++)
+            {
+                block[i] = (block[i] * scale[i]) << shift;
+            }
+        }
+        else
+        {
+            int shift = 6 - qpDiv;
+            int round = 1 << (5 - qpDiv);
+            for (int i = 0; i < 64; i++)
+            {
+                block[i] = ((block[i] * scale[i]) + round) >> shift;
+            }
+        }
+    }
+
+    /// <summary>
+    /// 8x8 inverse transform (8.5.13.2) of scaled coefficients, added to the prediction already
+    /// in <paramref name="dest"/> and clipped (8.5.14).
+    /// </summary>
+    [SkipLocalsInit]
+    public static void InverseTransform8x8Add(Span<int> d, Span<byte> dest, int stride)
+    {
+        Span<int> g = stackalloc int[64];
+
+        // Rows (horizontal) first, then columns.
+        for (int i = 0; i < 8; i++)
+        {
+            Transform8(d, i * 8, 1, g, i * 8);
+        }
+
+        Span<int> m = stackalloc int[8];
+        for (int j = 0; j < 8; j++)
+        {
+            Transform8(g, j, 8, m, 0);
+            for (int i = 0; i < 8; i++)
+            {
+                AddClipped(dest, (i * stride) + j, (m[i] + 32) >> 6);
+            }
+        }
+    }
+
+    /// <summary>
+    /// The one-dimensional 8-point transform of 8-338 to 8-361 on s[start + k * step], k = 0..7,
+    /// written to output[outputStart + k].
+    /// </summary>
+    private static void Transform8(ReadOnlySpan<int> s, int start, int step, Span<int> output, int outputStart)
+    {
+        int d0 = s[start];
+        int d1 = s[start + step];
+        int d2 = s[start + (2 * step)];
+        int d3 = s[start + (3 * step)];
+        int d4 = s[start + (4 * step)];
+        int d5 = s[start + (5 * step)];
+        int d6 = s[start + (6 * step)];
+        int d7 = s[start + (7 * step)];
+
+        int e0 = d0 + d4;
+        int e1 = -d3 + d5 - d7 - (d7 >> 1);
+        int e2 = d0 - d4;
+        int e3 = d1 + d7 - d3 - (d3 >> 1);
+        int e4 = (d2 >> 1) - d6;
+        int e5 = -d1 + d7 + d5 + (d5 >> 1);
+        int e6 = d2 + (d6 >> 1);
+        int e7 = d3 + d5 + d1 + (d1 >> 1);
+
+        int f0 = e0 + e6;
+        int f1 = e1 + (e7 >> 2);
+        int f2 = e2 + e4;
+        int f3 = e3 + (e5 >> 2);
+        int f4 = e2 - e4;
+        int f5 = (e3 >> 2) - e5;
+        int f6 = e0 - e6;
+        int f7 = e7 - (e1 >> 2);
+
+        var o = output.Slice(outputStart, 8);
+        o[0] = f0 + f7;
+        o[1] = f2 + f5;
+        o[2] = f4 + f3;
+        o[3] = f6 + f1;
+        o[4] = f6 - f1;
+        o[5] = f4 - f3;
+        o[6] = f2 - f5;
+        o[7] = f0 - f7;
     }
 
     /// <summary>

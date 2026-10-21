@@ -1,3 +1,5 @@
+using System.Runtime.CompilerServices;
+
 namespace ManagedCodecs.H264;
 
 /// <summary>Which neighbouring samples of a block may be used for intra prediction.</summary>
@@ -143,6 +145,183 @@ internal static class IntraPrediction
                 plane[offset + (y * stride) + x] = (byte)value;
             }
         }
+    }
+
+    /// <summary>
+    /// Intra_8x8 prediction (8.3.2.2) for the block at <paramref name="offset"/>: the neighbouring
+    /// samples are low-pass filtered first (8.3.2.2.1), then predicted from as Intra_4x4 does.
+    /// </summary>
+    [SkipLocalsInit]
+    public static void Predict8x8(int mode, byte[] plane, int offset, int stride, IntraNeighbors n)
+    {
+        // p[-1, y] for y = 7..-1 then p[x, -1] for x = 0..15: p[-1, y] is e[7 - y], p[x, -1] is e[9 + x].
+        Span<int> p = stackalloc int[25];
+        Span<int> e = stackalloc int[25];
+        p.Clear();
+        e.Clear();
+        if (n.Top)
+        {
+            for (int x = 0; x < 8; x++)
+            {
+                p[9 + x] = plane[offset - stride + x];
+            }
+
+            // Missing top-right samples are replaced by p[7, -1] (8.3.2.2).
+            for (int x = 8; x < 16; x++)
+            {
+                p[9 + x] = n.TopRight ? plane[offset - stride + x] : p[16];
+            }
+        }
+
+        if (n.Left)
+        {
+            for (int y = 0; y < 8; y++)
+            {
+                p[7 - y] = plane[offset + (y * stride) - 1];
+            }
+        }
+
+        if (n.TopLeft)
+        {
+            p[8] = plane[offset - stride - 1];
+        }
+
+        // Reference sample filtering (8.3.2.2.1).
+        if (n.Top)
+        {
+            e[9] = n.TopLeft ? (p[8] + (2 * p[9]) + p[10] + 2) >> 2 : ((3 * p[9]) + p[10] + 2) >> 2;
+            for (int i = 10; i < 24; i++)
+            {
+                e[i] = (p[i - 1] + (2 * p[i]) + p[i + 1] + 2) >> 2;
+            }
+
+            e[24] = (p[23] + (3 * p[24]) + 2) >> 2;
+        }
+
+        if (n.TopLeft)
+        {
+            e[8] = (n.Top, n.Left) switch
+            {
+                (true, true) => (p[9] + (2 * p[8]) + p[7] + 2) >> 2,
+                (true, false) => ((3 * p[8]) + p[9] + 2) >> 2,
+                (false, true) => ((3 * p[8]) + p[7] + 2) >> 2,
+                _ => p[8],
+            };
+        }
+
+        if (n.Left)
+        {
+            e[7] = n.TopLeft ? (p[8] + (2 * p[7]) + p[6] + 2) >> 2 : ((3 * p[7]) + p[6] + 2) >> 2;
+            for (int i = 1; i < 7; i++)
+            {
+                e[i] = (p[i - 1] + (2 * p[i]) + p[i + 1] + 2) >> 2;
+            }
+
+            e[0] = (p[1] + (3 * p[0]) + 2) >> 2;
+        }
+
+        int dc = 128;
+        switch (mode)
+        {
+            case 0 or 3 or 7:
+                Require(n.Top, mode);
+                break;
+            case 1 or 8:
+                Require(n.Left, mode);
+                break;
+            case 2:
+                int sumTop = 0;
+                int sumLeft = 0;
+                for (int i = 0; i < 8; i++)
+                {
+                    sumTop += e[9 + i];
+                    sumLeft += e[i];
+                }
+
+                dc = (n.Left, n.Top) switch
+                {
+                    (true, true) => (sumTop + sumLeft + 8) >> 4,
+                    (true, false) => (sumLeft + 4) >> 3,
+                    (false, true) => (sumTop + 4) >> 3,
+                    _ => 128,
+                };
+                break;
+            case 4 or 5 or 6:
+                Require(n.Top && n.Left && n.TopLeft, mode);
+                break;
+            default:
+                throw new InvalidDataException($"Invalid Intra8x8 prediction mode {mode}.");
+        }
+
+        for (int y = 0; y < 8; y++)
+        {
+            for (int x = 0; x < 8; x++)
+            {
+                int value = mode switch
+                {
+                    0 => T(e, x),
+                    1 => L(e, y),
+                    2 => dc,
+                    3 => x == 7 && y == 7
+                        ? (T(e, 14) + (3 * T(e, 15)) + 2) >> 2
+                        : Filter3(T(e, x + y), T(e, x + y + 1), T(e, x + y + 2)),
+                    4 => x > y ? Filter3(T(e, x - y - 2), T(e, x - y - 1), T(e, x - y))
+                        : x < y ? Filter3(L(e, y - x - 2), L(e, y - x - 1), L(e, y - x))
+                        : Filter3(T(e, 0), T(e, -1), L(e, 0)),
+                    5 => VerticalRight(e, x, y),
+                    6 => HorizontalDown(e, x, y),
+                    7 => (y & 1) == 0
+                        ? (T(e, x + (y >> 1)) + T(e, x + (y >> 1) + 1) + 1) >> 1
+                        : Filter3(T(e, x + (y >> 1)), T(e, x + (y >> 1) + 1), T(e, x + (y >> 1) + 2)),
+                    _ => HorizontalUp(e, x, y),
+                };
+
+                plane[offset + (y * stride) + x] = (byte)value;
+            }
+        }
+    }
+
+    // Filtered neighbours of Predict8x8: p'[x, -1] for x >= -1 and p'[-1, y] for y >= -1.
+    private static int T(ReadOnlySpan<int> e, int x) => e[9 + x];
+
+    private static int L(ReadOnlySpan<int> e, int y) => e[7 - y];
+
+    private static int Filter3(int a, int b, int c) => (a + (2 * b) + c + 2) >> 2;
+
+    private static int VerticalRight(ReadOnlySpan<int> e, int x, int y)
+    {
+        int z = (2 * x) - y;
+        return z switch
+        {
+            >= 0 when (z & 1) == 0 => (T(e, x - (y >> 1) - 1) + T(e, x - (y >> 1)) + 1) >> 1,
+            >= 0 => Filter3(T(e, x - (y >> 1) - 2), T(e, x - (y >> 1) - 1), T(e, x - (y >> 1))),
+            -1 => Filter3(L(e, 0), L(e, -1), T(e, 0)),
+            _ => Filter3(L(e, y - (2 * x) - 1), L(e, y - (2 * x) - 2), L(e, y - (2 * x) - 3)),
+        };
+    }
+
+    private static int HorizontalDown(ReadOnlySpan<int> e, int x, int y)
+    {
+        int z = (2 * y) - x;
+        return z switch
+        {
+            >= 0 when (z & 1) == 0 => (L(e, y - (x >> 1) - 1) + L(e, y - (x >> 1)) + 1) >> 1,
+            >= 0 => Filter3(L(e, y - (x >> 1) - 2), L(e, y - (x >> 1) - 1), L(e, y - (x >> 1))),
+            -1 => Filter3(L(e, 0), L(e, -1), T(e, 0)),
+            _ => Filter3(T(e, x - (2 * y) - 1), T(e, x - (2 * y) - 2), T(e, x - (2 * y) - 3)),
+        };
+    }
+
+    private static int HorizontalUp(ReadOnlySpan<int> e, int x, int y)
+    {
+        int z = x + (2 * y);
+        return z switch
+        {
+            < 13 when (z & 1) == 0 => (L(e, y + (x >> 1)) + L(e, y + (x >> 1) + 1) + 1) >> 1,
+            < 13 => Filter3(L(e, y + (x >> 1)), L(e, y + (x >> 1) + 1), L(e, y + (x >> 1) + 2)),
+            13 => (L(e, 6) + (3 * L(e, 7)) + 2) >> 2,
+            _ => L(e, 7),
+        };
     }
 
     /// <summary>Intra_16x16 prediction (8.3.3).</summary>

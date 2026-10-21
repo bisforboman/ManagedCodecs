@@ -135,8 +135,12 @@ internal sealed partial class PictureDecoder
         int maxRef0 = slice.Header.NumRefIdxL0Active - 1;
         int maxRef1 = slice.Header.NumRefIdxL1Active - 1;
 
+        // Whether transform_size_8x8_flag may follow coded_block_pattern: no partitions below 8x8 (7.3.5).
+        bool noPartitionBelow8x8 = true;
         if (isB && mbType == 0)
         {
+            noPartitionBelow8x8 = Sps.Direct8x8Inference;
+
             // B_Direct_16x16.
             _directMb[mbAddr] = true;
             DirectMotion(slice, mbAddr, 0, 4);
@@ -182,17 +186,18 @@ internal sealed partial class PictureDecoder
         }
         else
         {
-            DecodeSubMacroblocks(slice, r, mbAddr, isB, refIdxZero: !isB && mbType == 4, maxRef0, maxRef1);
+            noPartitionBelow8x8 = DecodeSubMacroblocks(slice, r, mbAddr, isB, refIdxZero: !isB && mbType == 4, maxRef0, maxRef1);
         }
 
-        DecodeInterResidual(slice, r, mbAddr);
+        DecodeInterResidual(slice, r, mbAddr, noPartitionBelow8x8);
     }
 
     /// <summary>
     /// P_8x8 / P_8x8ref0 / B_8x8: four sub_mb_types, then ref_idx_l0, ref_idx_l1, mvd_l0 and mvd_l1
     /// for the sub-macroblocks that use each list. B_Direct_8x8 sub-macroblocks are direct predicted.
+    /// Returns noSubMbPartSizeLessThan8x8Flag (7.3.5).
     /// </summary>
-    private void DecodeSubMacroblocks(SliceState slice, BitReader r, int mbAddr, bool isB, bool refIdxZero, int maxRef0, int maxRef1)
+    private bool DecodeSubMacroblocks(SliceState slice, BitReader r, int mbAddr, bool isB, bool refIdxZero, int maxRef0, int maxRef1)
     {
         Span<int> subTypes = stackalloc int[4];
         for (int i = 0; i < 4; i++)
@@ -241,28 +246,40 @@ internal sealed partial class PictureDecoder
             }
         }
 
+        bool noPartitionBelow8x8 = true;
         for (int i = 0; i < 4; i++)
         {
             if (shapes[i] < 0)
             {
+                noPartitionBelow8x8 &= Sps.Direct8x8Inference;
                 PredictDirect(slice, mbAddr, i, 1);
                 continue;
             }
 
+            noPartitionBelow8x8 &= shapes[i] == 0;
             foreach (var (x, y, w, h) in SubPartitions[shapes[i]])
             {
                 PredictPartition(slice, mbAddr, ((i & 1) * 8) + x, ((i >> 1) * 8) + y, w, h);
             }
         }
+
+        return noPartitionBelow8x8;
     }
 
-    /// <summary>coded_block_pattern, mb_qp_delta and the residual of an inter macroblock, added to its prediction.</summary>
-    private void DecodeInterResidual(SliceState slice, BitReader r, int mbAddr)
+    /// <summary>
+    /// coded_block_pattern, transform_size_8x8_flag, mb_qp_delta and the residual of an inter
+    /// macroblock, added to its prediction.
+    /// </summary>
+    private void DecodeInterResidual(SliceState slice, BitReader r, int mbAddr, bool noPartitionBelow8x8)
     {
         int cbp = slice.Cabac is { } cabac ? CabacCbp(cabac, mbAddr) : CavlcTables.CodedBlockPatternInter[r.ReadUe(47, "coded_block_pattern")];
         int cbpLuma = cbp & 15;
         int cbpChroma = cbp >> 4;
         _cbp[mbAddr] = (byte)cbp;
+        if (cbpLuma != 0 && slice.Pps.Transform8x8Mode && noPartitionBelow8x8)
+        {
+            _transform8x8[mbAddr] = ReadTransformSize8x8Flag(slice, r, mbAddr);
+        }
 
         var residual = _residual;
         if (cbp != 0)
@@ -277,6 +294,17 @@ internal sealed partial class PictureDecoder
         }
 
         _qp[mbAddr] = slice.Qp;
+
+        if (_transform8x8[mbAddr])
+        {
+            for (int b8 = 0; b8 < 4; b8++)
+            {
+                AddLuma8x8Residual(mbAddr, residual, cbpLuma, b8, slice.Qp);
+            }
+
+            ReconstructChroma(mbAddr, residual, cbpChroma, slice.Pps, intraMode: -1, default);
+            return;
+        }
 
         var (origin, _) = Origins(mbAddr);
         int stride = Picture.LumaStride;
@@ -294,7 +322,7 @@ internal sealed partial class PictureDecoder
             Transform.InverseTransformAdd(block, Picture.Y.AsSpan(origin + (y * 4 * stride) + (x * 4)), stride);
         }
 
-        ReconstructChroma(mbAddr, residual, cbpChroma, slice.Pps.ChromaQpIndexOffset, intraMode: -1, default);
+        ReconstructChroma(mbAddr, residual, cbpChroma, slice.Pps, intraMode: -1, default);
     }
 
     private void StartInterMacroblock(SliceState slice, int mbAddr, MbKind kind)
@@ -302,6 +330,7 @@ internal sealed partial class PictureDecoder
         _sliceOfMb[mbAddr] = slice.Number;
         DecodedMbCount++;
         _kind[mbAddr] = kind;
+        _transform8x8[mbAddr] = false;
         _intra4x4Mode.AsSpan(mbAddr * 16, 16).Fill(-1);
         _cbp[mbAddr] = 0;
         _dcCoded[mbAddr] = 0;

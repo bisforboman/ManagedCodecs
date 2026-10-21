@@ -78,6 +78,16 @@ internal sealed partial class PictureDecoder
                 InternalStrengths(mbAddr, vertical, horizontal);
             }
 
+            // With 8x8 transforms the luma edges inside the 8x8 blocks are not filtered; chroma
+            // (4:2:0) filters only edges 0 and 2 anyway.
+            if (_transform8x8[mbAddr])
+            {
+                vertical.Slice(4, 4).Clear();
+                vertical.Slice(12, 4).Clear();
+                horizontal.Slice(4, 4).Clear();
+                horizontal.Slice(12, 4).Clear();
+            }
+
             var (lumaOrigin, chromaOrigin) = Origins(mbAddr);
             int lumaStride = Picture.LumaStride;
             int chromaStride = Picture.ChromaStride;
@@ -96,20 +106,21 @@ internal sealed partial class PictureDecoder
                 FilterEdge(Picture.Y, lumaOrigin + (edge * 4 * lumaStride), lumaStride, 1, 16, horizontal.Slice(edge * 4, 4), qpP, qp, slice.AlphaOffset, slice.BetaOffset, chroma: false);
             }
 
-            // Chroma (4:2:0): edges 0 and 4 use the bS of luma edges 0 and 8.
-            int qpc = ChromaQp(qp, slice.ChromaQpIndexOffset);
+            // Chroma (4:2:0): edges 0 and 4 use the bS of luma edges 0 and 8; QP_C per component.
             for (int c = 0; c < 2; c++)
             {
                 byte[] plane = c == 0 ? Picture.Cb : Picture.Cr;
+                int qpOffset = c == 0 ? slice.CbQpOffset : slice.CrQpOffset;
+                int qpc = ChromaQp(qp, qpOffset);
                 for (int edge = 0; edge < 2; edge++)
                 {
-                    int qpcP = edge == 0 && mbX > 0 ? ChromaQp(_qp[mbAddr - 1], slice.ChromaQpIndexOffset) : qpc;
+                    int qpcP = edge == 0 && mbX > 0 ? ChromaQp(_qp[mbAddr - 1], qpOffset) : qpc;
                     FilterEdge(plane, chromaOrigin + (edge * 4), 1, chromaStride, 8, vertical.Slice(edge * 8, 4), qpcP, qpc, slice.AlphaOffset, slice.BetaOffset, chroma: true);
                 }
 
                 for (int edge = 0; edge < 2; edge++)
                 {
-                    int qpcP = edge == 0 && mbY > 0 ? ChromaQp(_qp[mbAddr - _widthInMbs], slice.ChromaQpIndexOffset) : qpc;
+                    int qpcP = edge == 0 && mbY > 0 ? ChromaQp(_qp[mbAddr - _widthInMbs], qpOffset) : qpc;
                     FilterEdge(plane, chromaOrigin + (edge * 4 * chromaStride), chromaStride, 1, 8, horizontal.Slice(edge * 8, 4), qpcP, qpc, slice.AlphaOffset, slice.BetaOffset, chroma: true);
                 }
             }
@@ -124,7 +135,7 @@ internal sealed partial class PictureDecoder
             return mbEdge ? 4 : 3;
         }
 
-        if (_totalCoeffLuma[(mbP * 16) + blockP] != 0 || _totalCoeffLuma[(mbQ * 16) + blockQ] != 0)
+        if (HasCoefficients(mbP, blockP) || HasCoefficients(mbQ, blockQ))
         {
             return 2;
         }
@@ -190,9 +201,23 @@ internal sealed partial class PictureDecoder
     /// </summary>
     private void InternalStrengths(int mbAddr, Span<byte> vertical, Span<byte> horizontal)
     {
-        var coefficients = _totalCoeffLuma.AsSpan(mbAddr * 16, 16);
+        // With 8x8 transforms each 4x4 block counts as coded when its 8x8 block is.
+        Span<byte> per8x8 = stackalloc byte[16];
+        ReadOnlySpan<byte> coefficients = per8x8;
+        if (_transform8x8[mbAddr])
+        {
+            for (int i = 0; i < 16; i++)
+            {
+                per8x8[i] = (byte)(HasCoefficients(mbAddr, i) ? 1 : 0);
+            }
+        }
+        else
+        {
+            coefficients = _totalCoeffLuma.AsSpan(mbAddr * 16, 16);
+        }
+
         int base4x4 = mbAddr * 16;
-        int Strength(int p, int q, Span<byte> coefficients) =>
+        int Strength(int p, int q, ReadOnlySpan<byte> coefficients) =>
             (coefficients[p] | coefficients[q]) != 0 ? 2 : MotionStrength(base4x4 + p, base4x4 + q);
 
         for (int edge = 1; edge < 4; edge++)
@@ -237,6 +262,13 @@ internal sealed partial class PictureDecoder
 
         return true;
     }
+
+    /// <summary>
+    /// Whether the transform block holding luma 4x4 block <paramref name="block"/> (raster index)
+    /// has nonzero coefficients: the 4x4 block itself, or with 8x8 transforms its 8x8 block.
+    /// </summary>
+    private bool HasCoefficients(int mbAddr, int block) =>
+        _transform8x8[mbAddr] ? Has8x8Coefficients(mbAddr, ((block >> 3) * 2) + ((block & 3) >> 1)) : _totalCoeffLuma[(mbAddr * 16) + block] != 0;
 
     private bool IsIntra(int mbAddr) => _kind[mbAddr] is MbKind.Intra4x4 or MbKind.Intra16x16 or MbKind.IPcm;
 

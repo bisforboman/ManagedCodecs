@@ -41,4 +41,66 @@ public class InterPredictionTests
             }
         }
     }
+
+    /// <summary>
+    /// Field views (MBAFF field macroblocks): every other row of the frame, half its height, with
+    /// the edges repeated within the field; vectors cross the field's top and bottom edges.
+    /// </summary>
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    public void FastFieldPrediction_MatchesReference(int parity)
+    {
+        var random = new Random(7 + parity);
+        var frame = new Picture(3, 2);
+        random.NextBytes(frame.Y);
+        random.NextBytes(frame.Cb);
+        random.NextBytes(frame.Cr);
+        var field = frame.Field(parity);
+        Span<byte> expected = stackalloc byte[16 * 16];
+        Span<byte> actual = stackalloc byte[16 * 16];
+
+        for (int n = 0; n < 4000; n++)
+        {
+            var (w, h) = BlockSizes[random.Next(BlockSizes.Length)];
+            int x = (random.Next(0, 3) * 16) + (random.Next(0, 16 / w) * w);
+            int y = random.Next(0, 16 / h) * h; // the field is 16 rows high
+            int range = random.Next(4) == 0 ? 200 : 40;
+            int mvX = random.Next(-range, range + 1);
+            int mvY = random.Next(-range, range + 1);
+
+            expected.Clear();
+            actual.Clear();
+            InterPrediction.PredictLumaReference(field, x, y, w, h, mvX, mvY, expected, 16);
+            InterPrediction.PredictLuma(field, x, y, w, h, mvX, mvY, actual, 16);
+            Assert.True(expected.SequenceEqual(actual), $"Field {parity} luma {w}x{h} at ({x},{y}) mv ({mvX},{mvY})");
+
+            for (int c = 1; c <= 2; c++)
+            {
+                expected.Clear();
+                actual.Clear();
+                InterPrediction.PredictChromaReference(field, c, x / 2, y / 2, w / 2, h / 2, mvX, mvY, expected, 16);
+                InterPrediction.PredictChroma(field, c, x / 2, y / 2, w / 2, h / 2, mvX, mvY, actual, 16);
+                Assert.True(expected.SequenceEqual(actual), $"Field {parity} chroma {c} {w}x{h} at ({x},{y}) mv ({mvX},{mvY})");
+            }
+        }
+    }
+
+    /// <summary>A field view reads only its own rows: the other field's samples never reach it.</summary>
+    [Fact]
+    public void FieldView_ReadsOnlyItsRows()
+    {
+        var frame = new Picture(1, 2);
+        for (int row = 0; row < 32; row++)
+        {
+            frame.Y.AsSpan(row * 16, 16).Fill((byte)(row % 2 == 0 ? 50 : 200));
+        }
+
+        Span<byte> output = stackalloc byte[16 * 16];
+        for (int parity = 0; parity < 2; parity++)
+        {
+            InterPrediction.PredictLuma(frame.Field(parity), 0, 0, 16, 16, 6, -70, output, 16); // fractional, past the top
+            Assert.All(output.ToArray(), sample => Assert.Equal(parity == 0 ? 50 : 200, sample));
+        }
+    }
 }

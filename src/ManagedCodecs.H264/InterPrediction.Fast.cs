@@ -18,10 +18,24 @@ internal static partial class InterPrediction
     /// The scratch buffers are not zeroed: lanes past the block's width may hold anything, and
     /// only the first <c>width</c> bytes of each row are ever stored.
     /// </remarks>
+    /// <remarks>
+    /// A field view of a frame (<see cref="Picture.Field"/>) is read as a picture of its own: every
+    /// other row, half the height, its edges repeated within the field. (<paramref name="x"/>,
+    /// <paramref name="y"/>) are then field coordinates.
+    /// </remarks>
     [SkipLocalsInit]
     public static void PredictLuma(Picture reference, int x, int y, int width, int height, int mvX, int mvY, Span<byte> output, int outputStride)
     {
         int stride = reference.LumaStride;
+        int maxY = (reference.HeightInMbs * 16) - 1;
+        ReadOnlySpan<byte> plane = reference.Y;
+        if (reference.Parity >= 0)
+        {
+            plane = plane[(reference.Parity * stride)..];
+            stride *= 2;
+            maxY = (reference.HeightInMbs * 8) - 1;
+        }
+
         int xFrac = mvX & 3;
         int yFrac = mvY & 3;
 
@@ -31,21 +45,20 @@ internal static partial class InterPrediction
         int left = x + (mvX >> 2) - 2;
         int top = y + (mvY >> 2) - 2;
         int maxX = (reference.WidthInMbs * 16) - 1;
-        int maxY = (reference.HeightInMbs * 16) - 1;
         Span<byte> copy = stackalloc byte[(WindowStride * WindowStride) + 32]; // slack for 16-byte loads
         ReadOnlySpan<byte> window = copy;
         int ws;
         int g;
         if (left >= 0 && top >= 0 && left + width + 4 <= maxX && top + height + 4 <= maxY
-            && ((top + height + 5) * stride) + left + 16 <= reference.Y.Length)
+            && ((top + height + 5) * stride) + left + 16 <= plane.Length)
         {
-            window = reference.Y;
+            window = plane;
             ws = stride;
             g = ((top + 2) * stride) + left + 2;
         }
         else
         {
-            FetchWindow(reference.Y, stride, maxX, maxY, left, top, width + 5, height + 5, copy);
+            FetchWindow(plane, stride, maxX, maxY, left, top, width + 5, height + 5, copy);
             ws = WindowStride;
             g = (2 * WindowStride) + 2; // G of output (0, 0) sits at window (2, 2)
         }
@@ -130,16 +143,23 @@ internal static partial class InterPrediction
     public static void PredictChroma(Picture reference, int component, int x, int y, int width, int height, int mvX, int mvY, Span<byte> output, int outputStride)
     {
         int stride = reference.ChromaStride;
+        int maxY = (reference.HeightInMbs * 8) - 1;
+        ReadOnlySpan<byte> plane = reference.Plane(component);
+        if (reference.Parity >= 0)
+        {
+            plane = plane[(reference.Parity * stride)..];
+            stride *= 2;
+            maxY = (reference.HeightInMbs * 4) - 1;
+        }
+
         int xFrac = mvX & 7;
         int yFrac = mvY & 7;
 
         // As for luma: read the reference directly when the (width + 1) x (height + 1) area is
         // inside it with room for 16-byte loads, else a clamped copy.
-        byte[] plane = reference.Plane(component);
         int left = x + (mvX >> 3);
         int top = y + (mvY >> 3);
         int maxX = (reference.WidthInMbs * 8) - 1;
-        int maxY = (reference.HeightInMbs * 8) - 1;
         Span<byte> copy = stackalloc byte[(9 * 9) + 32];
         ReadOnlySpan<byte> window = copy;
         int windowStride = 9;
@@ -177,7 +197,7 @@ internal static partial class InterPrediction
     /// Copies a <paramref name="width"/> x <paramref name="height"/> area at (<paramref name="x"/>,
     /// <paramref name="y"/>) into the window, clamping coordinates into the picture.
     /// </summary>
-    private static void FetchWindow(byte[] plane, int stride, int maxX, int maxY, int x, int y, int width, int height, Span<byte> window, int windowStride = WindowStride)
+    private static void FetchWindow(ReadOnlySpan<byte> plane, int stride, int maxX, int maxY, int x, int y, int width, int height, Span<byte> window, int windowStride = WindowStride)
     {
         bool inside = x >= 0 && y >= 0 && x + width - 1 <= maxX && y + height - 1 <= maxY;
         for (int j = 0; j < height; j++)
@@ -186,7 +206,7 @@ internal static partial class InterPrediction
             int sy = Math.Clamp(y + j, 0, maxY) * stride;
             if (inside)
             {
-                plane.AsSpan(sy + x, width).CopyTo(row);
+                plane.Slice(sy + x, width).CopyTo(row);
                 continue;
             }
 

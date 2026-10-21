@@ -21,7 +21,42 @@ internal sealed class Picture
         MvY = [new short[mbCount * 16], new short[mbCount * 16]];
         RefIdx = [new sbyte[mbCount * 4], new sbyte[mbCount * 4]];
         RefId = [new long[mbCount * 4], new long[mbCount * 4]];
+        Frame = this;
+        Parity = -1;
     }
+
+    /// <summary>A view of one field of <paramref name="frame"/>: the same arrays, every other row.</summary>
+    private Picture(Picture frame, int parity)
+    {
+        WidthInMbs = frame.WidthInMbs;
+        HeightInMbs = frame.HeightInMbs;
+        LumaStride = frame.LumaStride;
+        ChromaStride = frame.ChromaStride;
+        Y = frame.Y;
+        Cb = frame.Cb;
+        Cr = frame.Cr;
+        MvX = frame.MvX;
+        MvY = frame.MvY;
+        RefIdx = frame.RefIdx;
+        RefId = frame.RefId;
+        Frame = frame;
+        Parity = parity;
+    }
+
+    /// <summary>The frame this picture is, or is a field of.</summary>
+    public Picture Frame { get; }
+
+    /// <summary>-1 for a frame; 0 or 1 for the top or bottom field view (<see cref="Field"/>).</summary>
+    public int Parity { get; }
+
+    /// <summary>
+    /// The top (0) or bottom (1) field of this frame as a reference for field macroblocks: one
+    /// object per field, so that comparing references compares fields.
+    /// </summary>
+    public Picture Field(int parity) => parity == 0 ? _top ??= new Picture(this, 0) : _bottom ??= new Picture(this, 1);
+
+    private Picture? _top;
+    private Picture? _bottom;
 
     public int WidthInMbs { get; }
 

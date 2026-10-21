@@ -16,15 +16,22 @@ internal static partial class InterPrediction
     /// is at (<paramref name="x"/>, <paramref name="y"/>) in the picture, with a motion vector in
     /// quarter samples, into <paramref name="dest"/> at the same position.
     /// </summary>
-    public static void PredictLumaReference(Picture reference, byte[] dest, int stride, int x, int y, int width, int height, int mvX, int mvY)
+    public static void PredictLumaReference(Picture reference, byte[] dest, int stride, int x, int y, int width, int height, int mvX, int mvY) =>
+        PredictLumaReference(reference, x, y, width, height, mvX, mvY, dest.AsSpan((y * stride) + x), stride);
+
+    /// <summary>
+    /// The same, written to <paramref name="output"/> (the block's top-left). A field view
+    /// (<see cref="Picture.Field"/>) is a picture of its own: every other row, half the height.
+    /// </summary>
+    public static void PredictLumaReference(Picture reference, int x, int y, int width, int height, int mvX, int mvY, Span<byte> output, int outputStride)
     {
+        var (origin, stride, maxY) = Plane(reference, reference.LumaStride, reference.HeightInMbs * 16);
         int maxX = (reference.WidthInMbs * 16) - 1;
-        int maxY = (reference.HeightInMbs * 16) - 1;
         byte[] src = reference.Y;
         int xFrac = mvX & 3;
         int yFrac = mvY & 3;
 
-        int S(int sx, int sy) => src[(Math.Clamp(sy, 0, maxY) * stride) + Math.Clamp(sx, 0, maxX)];
+        int S(int sx, int sy) => src[origin + (Math.Clamp(sy, 0, maxY) * stride) + Math.Clamp(sx, 0, maxX)];
 
         // Half-sample values before rounding (b1, h1 and j1 of 8.4.2.2.1).
         int B1(int sx, int sy) => Tap(S(sx - 2, sy), S(sx - 1, sy), S(sx, sy), S(sx + 1, sy), S(sx + 2, sy), S(sx + 3, sy));
@@ -61,7 +68,7 @@ internal static partial class InterPrediction
                     _ => Avg(Center(J1(gx, gy)), Half(H1(gx + 1, gy))),         // k (3, 2)
                 };
 
-                dest[((y + j) * stride) + x + i] = (byte)value;
+                output[(j * outputStride) + i] = (byte)value;
             }
         }
     }
@@ -70,15 +77,19 @@ internal static partial class InterPrediction
     /// Predicts a chroma block (4:2:0) at chroma position (<paramref name="x"/>, <paramref name="y"/>)
     /// with the luma motion vector, which is in eighth chroma samples (8.4.2.2.2).
     /// </summary>
-    public static void PredictChromaReference(Picture reference, int component, byte[] dest, int stride, int x, int y, int width, int height, int mvX, int mvY)
+    public static void PredictChromaReference(Picture reference, int component, byte[] dest, int stride, int x, int y, int width, int height, int mvX, int mvY) =>
+        PredictChromaReference(reference, component, x, y, width, height, mvX, mvY, dest.AsSpan((y * stride) + x), stride);
+
+    /// <summary>The same, written to <paramref name="output"/> (the block's top-left); field views as for luma.</summary>
+    public static void PredictChromaReference(Picture reference, int component, int x, int y, int width, int height, int mvX, int mvY, Span<byte> output, int outputStride)
     {
+        var (origin, stride, maxY) = Plane(reference, reference.ChromaStride, reference.HeightInMbs * 8);
         int maxX = (reference.WidthInMbs * 8) - 1;
-        int maxY = (reference.HeightInMbs * 8) - 1;
         byte[] src = reference.Plane(component);
         int xFrac = mvX & 7;
         int yFrac = mvY & 7;
 
-        int S(int sx, int sy) => src[(Math.Clamp(sy, 0, maxY) * stride) + Math.Clamp(sx, 0, maxX)];
+        int S(int sx, int sy) => src[origin + (Math.Clamp(sy, 0, maxY) * stride) + Math.Clamp(sx, 0, maxX)];
 
         for (int j = 0; j < height; j++)
         {
@@ -90,10 +101,14 @@ internal static partial class InterPrediction
                     + (xFrac * (8 - yFrac) * S(ax + 1, ay))
                     + ((8 - xFrac) * yFrac * S(ax, ay + 1))
                     + (xFrac * yFrac * S(ax + 1, ay + 1));
-                dest[((y + j) * stride) + x + i] = (byte)((value + 32) >> 6);
+                output[(j * outputStride) + i] = (byte)((value + 32) >> 6);
             }
         }
     }
+
+    /// <summary>A plane's first sample, row stride and last row: the frame's, or a field view's every other row.</summary>
+    private static (int Origin, int Stride, int MaxY) Plane(Picture reference, int stride, int height) =>
+        reference.Parity < 0 ? (0, stride, height - 1) : (reference.Parity * stride, stride * 2, (height / 2) - 1);
 
     private static int Tap(int e, int f, int g, int h, int i, int j) => e - (5 * f) + (20 * g) + (20 * h) - (5 * i) + j;
 

@@ -306,12 +306,16 @@ internal static class IntraPrediction
         PredictBlock(mode, plane, offset, stride, n, size: 16, isChroma: false);
 
     /// <summary>4:2:0 chroma prediction (8.3.4) for one 8x8 component.</summary>
-    public static void PredictChroma(int mode, byte[] plane, int offset, int stride, IntraNeighbors n)
+    /// <param name="leftLower">
+    /// Whether the left samples of the lower 4x4 blocks may be used, where that differs from the
+    /// upper ones (<see cref="IntraNeighbors.Left"/>): only DC prediction treats them apart.
+    /// </param>
+    public static void PredictChroma(int mode, byte[] plane, int offset, int stride, IntraNeighbors n, bool? leftLower = null)
     {
         // Chroma mode numbers differ from 16x16: 0 DC, 1 Horizontal, 2 Vertical, 3 Plane.
         if (mode == 0)
         {
-            PredictChromaDc(plane, offset, stride, n);
+            PredictChromaDc(plane, offset, stride, n, leftLower ?? n.Left);
             return;
         }
 
@@ -416,10 +420,11 @@ internal static class IntraPrediction
     }
 
     /// <summary>Chroma DC (8.3.4.1-3): each 4x4 block gets its own average with its own fallbacks.</summary>
-    private static void PredictChromaDc(byte[] plane, int offset, int stride, IntraNeighbors n)
+    private static void PredictChromaDc(byte[] plane, int offset, int stride, IntraNeighbors n, bool leftLower)
     {
         for (int yO = 0; yO < 8; yO += 4)
         {
+            bool left = yO == 0 ? n.Left : leftLower;
             for (int xO = 0; xO < 8; xO += 4)
             {
                 int sumTop = 0;
@@ -427,13 +432,13 @@ internal static class IntraPrediction
                 for (int i = 0; i < 4; i++)
                 {
                     sumTop += n.Top ? plane[offset - stride + xO + i] : 0;
-                    sumLeft += n.Left ? plane[offset + ((yO + i) * stride) - 1] : 0;
+                    sumLeft += left ? plane[offset + ((yO + i) * stride) - 1] : 0;
                 }
 
                 int value;
                 if ((xO == 0 && yO == 0) || (xO > 0 && yO > 0))
                 {
-                    value = (n.Left, n.Top) switch
+                    value = (left, n.Top) switch
                     {
                         (true, true) => (sumTop + sumLeft + 4) >> 3,
                         (true, false) => (sumLeft + 2) >> 2,
@@ -443,11 +448,11 @@ internal static class IntraPrediction
                 }
                 else if (xO > 0)
                 {
-                    value = n.Top ? (sumTop + 2) >> 2 : n.Left ? (sumLeft + 2) >> 2 : 128;
+                    value = n.Top ? (sumTop + 2) >> 2 : left ? (sumLeft + 2) >> 2 : 128;
                 }
                 else
                 {
-                    value = n.Left ? (sumLeft + 2) >> 2 : n.Top ? (sumTop + 2) >> 2 : 128;
+                    value = left ? (sumLeft + 2) >> 2 : n.Top ? (sumTop + 2) >> 2 : 128;
                 }
 
                 for (int y = 0; y < 4; y++)

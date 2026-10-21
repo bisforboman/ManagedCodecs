@@ -47,7 +47,8 @@ internal sealed partial class PictureDecoder
     // Per macroblock: B_Skip or B_Direct_16x16 (for the contexts of mb_type in B slices).
     private bool[] _directMb = [];
 
-    // Per list, component and luma 4x4 block: |mvd|, capped (only sums up to 33 matter).
+    // Per list, component and luma 4x4 block: |mvd|, capped (only sums up to 33 matter, also
+    // after the halving of 9.3.3.1.1.7).
     private byte[][][] _absMvd = [[[], []], [[], []]];
 
     /// <summary>ctxBlockCat (Table 9-42).</summary>
@@ -99,6 +100,7 @@ internal sealed partial class PictureDecoder
         cabac.InitEngine(r);
 
         int mbAddr = slice.Header.FirstMbAddr;
+        int skipCtx = slice.Header.Type == SliceType.B ? 24 : 11;
         do
         {
             CheckAddress(mbAddr);
@@ -106,7 +108,12 @@ internal sealed partial class PictureDecoder
             // The contexts of mb_skip_flag and mb_type already look at the neighbours, which
             // count as available only once this macroblock belongs to the slice.
             _sliceOfMb[mbAddr] = slice.Number;
-            if (slice.Header.Type != SliceType.I && cabac.Decision((slice.Header.Type == SliceType.B ? 24 : 11) + SkipFlagInc(mbAddr)) == 1)
+            if (_mbaff)
+            {
+                mbAddr = DecodeMbaffCabac(slice, r, cabac, mbAddr, skipCtx);
+                PairDone(mbAddr);
+            }
+            else if (slice.Header.Type != SliceType.I && cabac.Decision(skipCtx + SkipFlagInc(mbAddr)) == 1)
             {
                 DecodeSkip(slice, mbAddr);
             }
@@ -118,6 +125,74 @@ internal sealed partial class PictureDecoder
             mbAddr++;
         }
         while ((_mbaff && (mbAddr & 1) != 0) || cabac.Terminate() == 0); // end_of_slice_flag, in MBAFF frames only after a pair
+    }
+
+    /// <summary>
+    /// One macroblock of an MBAFF frame with CABAC, or both of its pair when the top one is skipped;
+    /// returns the address of the last one decoded. The pair's mb_field_decoding_flag comes with
+    /// the first macroblock that is not skipped (7.3.4). Until then the pair is taken to be of the
+    /// kind inferred from its neighbours (7.4.4), which the mb_skip_flag contexts use; a skipped
+    /// top macroblock's motion depends on the flag, so it is decoded after the bottom one's.
+    /// </summary>
+    private int DecodeMbaffCabac(SliceState slice, BitReader r, Cabac cabac, int mbAddr, int skipCtx)
+    {
+        bool isTop = (mbAddr & 1) == 0;
+        if (slice.Header.Type == SliceType.I)
+        {
+            if (isTop)
+            {
+                SetPairField(mbAddr, ReadFieldDecodingFlag(slice, r, mbAddr));
+            }
+
+            DecodeMacroblock(slice, r, mbAddr);
+            return mbAddr;
+        }
+
+        if (!isTop)
+        {
+            // The top macroblock was coded, with the flag.
+            if (cabac.Decision(skipCtx + SkipFlagInc(mbAddr)) == 1)
+            {
+                DecodeSkip(slice, mbAddr);
+            }
+            else
+            {
+                DecodeMacroblock(slice, r, mbAddr);
+            }
+
+            return mbAddr;
+        }
+
+        SetPairField(mbAddr, InferPairField(mbAddr));
+        if (cabac.Decision(skipCtx + SkipFlagInc(mbAddr)) == 0)
+        {
+            SetPairField(mbAddr, ReadFieldDecodingFlag(slice, r, mbAddr));
+            DecodeMacroblock(slice, r, mbAddr);
+            return mbAddr;
+        }
+
+        // A skipped top macroblock: the bottom one's mb_skip_flag (seeing the top one as skipped)
+        // and, if it is coded, the pair's flag come first.
+        int bottom = CheckAddress(mbAddr + 1);
+        _sliceOfMb[bottom] = slice.Number;
+        _kind[mbAddr] = MbKind.PSkip;
+        bool bottomSkipped = cabac.Decision(skipCtx + SkipFlagInc(bottom)) == 1;
+        if (!bottomSkipped)
+        {
+            SetPairField(mbAddr, ReadFieldDecodingFlag(slice, r, bottom));
+        }
+
+        DecodeSkip(slice, mbAddr);
+        if (bottomSkipped)
+        {
+            DecodeSkip(slice, bottom);
+        }
+        else
+        {
+            DecodeMacroblock(slice, r, bottom);
+        }
+
+        return bottom;
     }
 
     // ---- mb_skip_flag, mb_type, sub_mb_type (9.3.3.1.1.1, 9.3.3.1.1.3, 9.3.3.1.2) ----
@@ -279,15 +354,17 @@ internal sealed partial class PictureDecoder
     {
         int RefInc(int nx, int ny)
         {
-            int n = NeighborMb(mbAddr, nx, ny);
+            var (n, xW, yW) = Neighbor(mbAddr, nx, ny);
             if (n < 0 || _kind[n] == MbKind.PSkip)
             {
                 return 0;
             }
 
-            // Direct predicted partitions count as 0, as do intra blocks (refIdx -1).
-            int part = (n * 4) + ((((ny + 16) % 16) >> 3) * 2) + (((nx + 16) % 16) >> 3);
-            return !_direct[part] && _refIdx[list][part] > 0 ? 1 : 0;
+            // Direct predicted partitions count as 0, as do intra blocks (refIdx -1). A frame
+            // macroblock sees a field neighbour's index halved (9.3.3.1.1.6).
+            int part = (n * 4) + ((yW >> 3) * 2) + (xW >> 3);
+            int threshold = _mbaff && _fieldMb[n] && !_fieldMb[mbAddr] ? 1 : 0;
+            return !_direct[part] && _refIdx[list][part] > threshold ? 1 : 0;
         }
 
         int inc = RefInc(x - 1, y) + (2 * RefInc(x, y - 1));
@@ -320,15 +397,22 @@ internal sealed partial class PictureDecoder
         byte[] absMvd = _absMvd[list][component];
         int AbsMvd(int nx, int ny)
         {
-            int n = NeighborMb(mbAddr, nx, ny);
+            var (n, xW, yW) = Neighbor(mbAddr, nx, ny);
             if (n < 0)
             {
                 return 0;
             }
 
-            int bx = ((nx + 16) % 16) >> 2;
-            int by = ((ny + 16) % 16) >> 2;
-            return absMvd[(n * 16) + (by * 4) + bx]; // 0 for skipped and intra macroblocks
+            int value = absMvd[(n * 16) + ((yW >> 2) * 4) + (xW >> 2)]; // 0 for skipped and intra macroblocks
+
+            // In MBAFF frames a vertical mvd of the other kind of macroblock is scaled to the
+            // current one's (9.3.3.1.1.7).
+            if (component == 1 && _mbaff && _fieldMb[n] != _fieldMb[mbAddr])
+            {
+                value = _fieldMb[mbAddr] ? value / 2 : value * 2;
+            }
+
+            return value;
         }
 
         int sum = AbsMvd(x - 1, y) + AbsMvd(x, y - 1);
@@ -356,8 +440,8 @@ internal sealed partial class PictureDecoder
     /// <summary>Records |mvd| over a partition for the contexts of later partitions.</summary>
     private void StoreAbsMvd(int list, int mbAddr, int x, int y, int w, int h, int mvdX, int mvdY)
     {
-        byte absX = (byte)Math.Min(Math.Abs(mvdX), 64);
-        byte absY = (byte)Math.Min(Math.Abs(mvdY), 64);
+        byte absX = (byte)Math.Min(Math.Abs(mvdX), 127);
+        byte absY = (byte)Math.Min(Math.Abs(mvdY), 127);
         for (int by = y / 4; by < (y + h) / 4; by++)
         {
             for (int bx = x / 4; bx < (x + w) / 4; bx++)

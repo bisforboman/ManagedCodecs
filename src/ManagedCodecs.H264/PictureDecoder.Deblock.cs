@@ -152,7 +152,7 @@ internal sealed partial class PictureDecoder
     /// motion; the blocks are picture-wide 4x4 block indices (macroblock * 16 + raster index). The
     /// reference pictures are compared as pictures, whichever list they came from.
     /// </summary>
-    private int MotionStrength(int p, int q)
+    private int MotionStrength(int p, int q, int limitY = 4)
     {
         int partP = ((p >> 4) * 4) + ((p & 15) >> 3 << 1) + ((p & 3) >> 1);
         int partQ = ((q >> 4) * 4) + ((q & 15) >> 3 << 1) + ((q & 3) >> 1);
@@ -162,7 +162,7 @@ internal sealed partial class PictureDecoder
         var q1 = _refPic[1][partQ];
 
         bool Far(int listA, int a, int listB, int b) =>
-            Math.Abs(_mvX[listA][a] - _mvX[listB][b]) >= 4 || Math.Abs(_mvY[listA][a] - _mvY[listB][b]) >= 4;
+            Math.Abs(_mvX[listA][a] - _mvX[listB][b]) >= 4 || Math.Abs(_mvY[listA][a] - _mvY[listB][b]) >= limitY;
 
         if (p1 is null && q1 is null)
         {
@@ -203,7 +203,7 @@ internal sealed partial class PictureDecoder
     /// bS of the internal edges (1..3) of an inter macroblock: <see cref="BoundaryStrength"/> with
     /// both blocks in the same macroblock, so neither is intra.
     /// </summary>
-    private void InternalStrengths(int mbAddr, Span<byte> vertical, Span<byte> horizontal)
+    private void InternalStrengths(int mbAddr, Span<byte> vertical, Span<byte> horizontal, int limitY = 4)
     {
         // With 8x8 transforms each 4x4 block counts as coded when its 8x8 block is.
         Span<byte> per8x8 = stackalloc byte[16];
@@ -222,7 +222,7 @@ internal sealed partial class PictureDecoder
 
         int base4x4 = mbAddr * 16;
         int Strength(int p, int q, ReadOnlySpan<byte> coefficients) =>
-            (coefficients[p] | coefficients[q]) != 0 ? 2 : MotionStrength(base4x4 + p, base4x4 + q);
+            (coefficients[p] | coefficients[q]) != 0 ? 2 : MotionStrength(base4x4 + p, base4x4 + q, limitY);
 
         for (int edge = 1; edge < 4; edge++)
         {

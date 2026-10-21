@@ -50,6 +50,7 @@ internal sealed partial class PictureDecoder
     private short[][] _mvY = [[], []];
     private sbyte[][] _refIdx = [[], []];
     private long[][] _refId = [[], []];
+    private sbyte[][] _refParity = [[], []];
 
     // Per list and 8x8 block: the referenced picture, for motion compensation and deblocking.
     private Picture?[][] _refPic = [[], []];
@@ -85,6 +86,7 @@ internal sealed partial class PictureDecoder
         _mvY = picture.MvY;
         _refIdx = picture.RefIdx;
         _refId = picture.RefId;
+        _refParity = picture.RefParity;
         for (int list = 0; list < 2; list++)
         {
             Array.Clear(_mvX[list]);
@@ -434,6 +436,7 @@ internal sealed partial class PictureDecoder
                 int part = (mbAddr * 4) + ((by >> 1) * 2) + (bx >> 1);
                 _refIdx[list][part] = (sbyte)refIdx;
                 _refId[list][part] = referenceId;
+                _refParity[list][part] = (sbyte)reference.Parity;
                 _refPic[list][part] = reference;
             }
         }

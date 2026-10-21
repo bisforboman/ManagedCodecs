@@ -63,6 +63,17 @@ public class H264ConformanceTests
             var fields = decoder.FieldStatistics;
             Assert.True(fields.SecondFields > 0 && fields.FromOwnFirstField > 0, $"{fields.SecondFields} field pairs, {fields.FromOwnFirstField} partitions predicted from their own first field.");
             Assert.True(!sampleName.Contains("adaptive", StringComparison.Ordinal) || fields.FramePictures > 0, "No frame pictures between the field pairs.");
+            if (sampleName.Contains("paff-b", StringComparison.Ordinal))
+            {
+                // B field pictures: direct prediction in fields, temporal where the sample says so (the CAVLC one is
+                // temporal too), and in the adaptive ones co-located blocks across frame and field coding: B frames over
+                // fields in both, B fields over frames in the spatial one (JM's temporal one codes no such pair).
+                Assert.True(decoder.MbaffStatistics.DirectField > 0, "No direct prediction in field pictures.");
+                Assert.True((!sampleName.Contains("temporal", StringComparison.Ordinal) && !sampleName.Contains("cavlc", StringComparison.Ordinal)) || fields.TemporalDirect > 0, "No temporal direct prediction in field pictures.");
+                bool adaptive = sampleName.Contains("adaptive", StringComparison.Ordinal);
+                bool temporal = sampleName.Contains("temporal", StringComparison.Ordinal);
+                Assert.True(!adaptive || (fields.FrameOverFields > 0 && (temporal || fields.FieldOverFrame > 0)), $"{fields.FieldOverFrame} field blocks over frames, {fields.FrameOverFields} frame blocks over fields.");
+            }
         }
 
         // MBAFF samples must mix field and frame pairs every way they can meet.

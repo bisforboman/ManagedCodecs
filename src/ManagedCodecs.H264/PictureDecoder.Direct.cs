@@ -23,6 +23,7 @@ internal sealed partial class PictureDecoder
         {
             Statistics.DirectField++;
             Statistics.TemporalField += slice.Header.DirectSpatialMvPred ? 0 : 1;
+            FieldStatistics.TemporalDirect += _fieldParity >= 0 && !slice.Header.DirectSpatialMvPred ? 1 : 0;
         }
 
         if (slice.Header.DirectSpatialMvPred)
@@ -119,13 +120,33 @@ internal sealed partial class PictureDecoder
         var refList0 = slice.RefList0;
         int size = Sps.Direct8x8Inference ? 8 : 4;
         bool field = IsMbaffFieldMb(mbAddr);
+        bool fieldPicture = _fieldParity >= 0;
         int parity = mbAddr & 1;
-        int currentPoc = !field ? Picture.Poc : parity == 0 ? Picture.TopPoc : Picture.BottomPoc;
+        int currentPoc = !field && !fieldPicture ? Picture.Poc : parity == 0 ? Picture.TopPoc : Picture.BottomPoc;
         foreach (var (x, y) in DirectBlocks(first, count, size))
         {
             var col = CoLocated(colFrame, mbAddr, x / 4, y / 4);
             int frameIdx = 0;
-            if (col.RefIdx >= 0)
+            if (fieldPicture)
+            {
+                // List 0 holds fields: the field the co-located block referred to, or of a frame
+                // it referred to, the field of the current parity.
+                if (col.RefIdx >= 0)
+                {
+                    int refParity = col.Scale == VerticalScale.FrameToField ? parity : col.RefParity;
+                    frameIdx = -1;
+                    for (int i = 0; i < refList0.Count && frameIdx < 0; i++)
+                    {
+                        frameIdx = refList0[i].Id == col.RefId && refList0[i].Parity == refParity ? i : -1;
+                    }
+
+                    if (frameIdx < 0)
+                    {
+                        throw new InvalidDataException("Temporal direct: the co-located block's reference is not in list 0.");
+                    }
+                }
+            }
+            else if (col.RefIdx >= 0)
             {
                 // The lowest index in list 0 of the picture the co-located block referred to.
                 frameIdx = -1;
@@ -215,11 +236,41 @@ internal sealed partial class PictureDecoder
 
         int colMb = mbAddr;
         var scale = VerticalScale.OneToOne;
-        bool colField = false;
-        if (_mbaff && colPic.Mbaff)
+        var colFrame = colPic.Frame;
+        if (_fieldParity >= 0)
+        {
+            // A field picture: the field RefPicList1[0] where it was decoded as a field (a field
+            // picture, or a field pair of an MBAFF frame), else the frame macroblocks over the
+            // field macroblock's rows (Frm_To_Fld).
+            int n = mbAddr >> 1;
+            if (colFrame.CodedAsFields || (colFrame.Mbaff && colFrame.FieldMb[2 * n]))
+            {
+                colMb = (2 * n) + colPic.Parity;
+            }
+            else
+            {
+                int yCol = by * 4;
+                colMb = colFrame.Mbaff ? (2 * n) + (yCol >> 3) : (2 * _widthInMbs * (n / _widthInMbs)) + (n % _widthInMbs) + (_widthInMbs * (yCol >> 3));
+                by = ((2 * yCol) % 16) >> 2;
+                scale = VerticalScale.FrameToField;
+                FieldStatistics.FieldOverFrame++;
+            }
+        }
+        else if (!_mbaff && colFrame.CodedAsFields)
+        {
+            // A frame over a frame coded as two field pictures: the field nearer in order count,
+            // at the rows of the frame macroblock's half of its pair (Fld_To_Frm).
+            int parity = Math.Abs(Picture.Poc - colFrame.BottomPoc) > Math.Abs(Picture.Poc - colFrame.TopPoc) ? 0 : 1;
+            int yCol = by * 4;
+            colMb = (2 * ((_widthInMbs * (mbAddr / (2 * _widthInMbs))) + (mbAddr % _widthInMbs))) + parity;
+            by = (2 * ((mbAddr / _widthInMbs) % 2)) + (yCol >> 3);
+            scale = VerticalScale.FieldToFrame;
+            FieldStatistics.FrameOverFields++;
+        }
+        else if (_mbaff && colPic.Mbaff)
         {
             int top = mbAddr & ~1;
-            colField = colPic.FieldMb[top];
+            bool colField = colPic.FieldMb[top];
             if (colField != _fieldMb[mbAddr])
             {
                 int yCol = by * 4;
@@ -248,7 +299,7 @@ internal sealed partial class PictureDecoder
         int refIdx = colPic.RefIdx[list][part];
         return refIdx < 0
             ? new CoLocatedMotion(-1, 0, 0, -1, -1, scale)
-            : new CoLocatedMotion(refIdx, colPic.MvX[list][block], colPic.MvY[list][block], colPic.RefId[list][part], colField ? (colMb & 1) ^ (refIdx & 1) : -1, scale);
+            : new CoLocatedMotion(refIdx, colPic.MvX[list][block], colPic.MvY[list][block], colPic.RefId[list][part], colPic.RefParity[list][part], scale);
     }
 
     /// <summary>Top-left luma positions in the macroblock of the size x size blocks of 8x8 blocks first .. first + count - 1.</summary>

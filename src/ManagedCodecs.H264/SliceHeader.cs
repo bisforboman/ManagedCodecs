@@ -122,11 +122,6 @@ internal sealed class SliceHeader
         int frameNum = (int)r.ReadBits(sps.Log2MaxFrameNum);
         bool fieldPic = !sps.FrameMbsOnly && r.ReadFlag();
         bool bottomField = fieldPic && r.ReadFlag();
-        if (fieldPic && type == SliceType.B)
-        {
-            throw new NotSupportedException("B slices in field pictures are not supported.");
-        }
-
         bool mbaff = sps.MbAdaptiveFrameField && !fieldPic;
 
         int idrPicId = isIdr ? (int)r.ReadUe() : 0;

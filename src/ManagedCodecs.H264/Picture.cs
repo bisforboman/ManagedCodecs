@@ -21,6 +21,7 @@ internal sealed class Picture
         MvY = [new short[mbCount * 16], new short[mbCount * 16]];
         RefIdx = [new sbyte[mbCount * 4], new sbyte[mbCount * 4]];
         RefId = [new long[mbCount * 4], new long[mbCount * 4]];
+        RefParity = [new sbyte[mbCount * 4], new sbyte[mbCount * 4]];
         FieldMb = new bool[mbCount];
         Frame = this;
         Parity = -1;
@@ -40,6 +41,7 @@ internal sealed class Picture
         MvY = frame.MvY;
         RefIdx = frame.RefIdx;
         RefId = frame.RefId;
+        RefParity = frame.RefParity;
         FieldMb = frame.FieldMb;
         Frame = frame;
         Parity = parity;
@@ -61,6 +63,7 @@ internal sealed class Picture
     private Picture? _bottom;
     private readonly Mark[] _marks = new Mark[2];
     private int _poc;
+    private long _id;
 
     public int WidthInMbs { get; }
 
@@ -80,7 +83,11 @@ internal sealed class Picture
     /// Identifies the picture decoded into this object; pictures are reused once they stop being
     /// references, so anything that names a picture across pictures uses this, not the object.
     /// </summary>
-    public long Id { get; set; }
+    public long Id
+    {
+        get => Frame._id;
+        set => Frame._id = value;
+    }
 
     /// <summary>PicOrderCnt (8.2.1): of the frame, the smaller of its fields'; of a field view, that field's.</summary>
     public int Poc
@@ -113,6 +120,12 @@ internal sealed class Picture
 
     /// <summary><see cref="Id"/> of the referenced picture per list and 8x8 block, where <see cref="RefIdx"/> is not -1.</summary>
     public long[][] RefId { get; }
+
+    /// <summary>
+    /// Which field of <see cref="RefId"/> the block refers to (0 top, 1 bottom) where the block
+    /// predicts from a field (field macroblocks, field pictures); -1 where from a frame.
+    /// </summary>
+    public sbyte[][] RefParity { get; }
 
     public int FrameNum { get; set; }
 

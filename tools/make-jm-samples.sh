@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Encodes the H.264 samples in samples/jm/ with JM's encoder (lencod, the ITU-T reference software), which writes
 # what libx264 and OpenH264 never do: field pictures (PAFF), each field of a frame its own picture, in pairs whose
-# second field predicts from the first, and pictures that switch between frame and field coding. These files are
-# committed: CI has no JM (and it takes a minute a sample), so tools/make-samples.sh only copies them into samples/
-# and writes their FFmpeg references like any other sample's.
+# second field predicts from the first, pictures that switch between frame and field coding, and B field pictures
+# whose direct prediction looks into fields and frames. These files are committed: CI has no JM (and it takes a minute
+# a sample), so tools/make-samples.sh only copies them into samples/ and writes their FFmpeg references like any
+# other sample's.
 #
 # Usage: tools/make-jm-samples.sh <JM source tree with lencod built>
 #   (git clone https://github.com/shihuade/JM && make -C lencod CFLAGS="-fcommon -O2"; made with JM 19.0)
@@ -19,11 +20,14 @@ trap 'rm -rf "$work"' EXIT
 # 320x256, 10 interlaced frames (20 fields of moving test pattern, top field first).
 ffmpeg -hide_banner -loglevel error -y -f lavfi -i "testsrc2=size=320x256:rate=50" -vf tinterlace=interleave_top \
   -frames:v 10 -pix_fmt yuv420p -f rawvideo "$work/src.yuv"
+# The same scrolling and with noise: smaller partitions, and JM codes more of it as fields.
+ffmpeg -hide_banner -loglevel error -y -f lavfi -i "testsrc2=size=320x256:rate=50,scroll=h=0.01:v=0.005,noise=alls=6:allf=t" \
+  -vf tinterlace=interleave_top -frames:v 10 -pix_fmt yuv420p -f rawvideo "$work/noisy.yuv"
 cp "$jm/bin/encoder_main.cfg" "$work/"
 
-# encode name [lencod options]: encoder_main.cfg's settings (Main profile, CABAC, 5 reference frames, QP 28) without
-# B pictures (B field pictures are not supported yet), with the options on top, then remuxed into MP4 (one packet a
-# field, as FFmpeg's muxer writes it).
+# encode name [lencod options]: encoder_main.cfg's settings (Main profile, CABAC, 5 reference frames, QP 28, POC
+# type 0) without B pictures, with the options on top, then remuxed into MP4 (one packet a field, as FFmpeg's muxer
+# writes it).
 encode() {
   local name=$1; shift
   (cd "$work" && "$jm/bin/lencod.exe" -d encoder_main.cfg -p InputFile=src.yuv -p SourceWidth=320 -p SourceHeight=256 \
@@ -31,8 +35,35 @@ encode() {
   ffmpeg -hide_banner -loglevel error -y -r 25 -i "$work/$name.264" -c copy "$out/jm-$name.mp4"
 }
 
+# encode-b name [lencod options]: the same with B pictures. A raw stream has no timestamps and FFmpeg gives its
+# packets pts = dts in decoding order, which leaves B pictures out of place (and FFmpeg drops frames). So each packet
+# (a field, or a frame) gets pts from its first slice's pic_order_cnt_lsb, which counts fields here (POC type 0, no
+# wrap in 10 frames), dts four fields behind its position and a field's duration (else the last sample's is 1), as
+# setts expressions.
+encode-b() {
+  local name=$1; shift
+  (cd "$work" && "$jm/bin/lencod.exe" -d encoder_main.cfg -p InputFile=src.yuv -p SourceWidth=320 -p SourceHeight=256 \
+    -p FramesToBeEncoded=10 -p FrameRate=25 -p OutputFile="$name.264" -p ReconFile=rec.yuv "$@" > "$name.log")
+  local poc
+  poc=($(ffmpeg -hide_banner -i "$work/$name.264" -c copy -bsf:v trace_headers -f null - 2>&1 |
+    awk '/first_mb_in_slice/ { first = ($NF == 0) } /pic_order_cnt_lsb/ && first { print $NF }'))
+  local pts=${poc[-1]}
+  for ((i = ${#poc[@]} - 2; i >= 0; i--)); do pts="if(eq(N\\,$i)\\,${poc[i]}\\,$pts)"; done
+  ffmpeg -hide_banner -loglevel error -y -r 25 -i "$work/$name.264" -c copy \
+    -bsf:v "setts=pts=($pts)*256:dts=(N-4)*256:duration=256:time_base=1/12800" "$out/jm-$name.mp4"
+}
+
 encode paff -p PicInterlace=1             # every frame as two field pictures: an I and a P field, then P fields
 encode paff-cavlc -p PicInterlace=1 -p SymbolMode=0 -p SliceMode=1 -p SliceArgument=40 -p PicOrderCntType=1 \
   -p UseConstrainedIntraPred=1            # CAVLC, four slices a field, POC type 1, constrained intra prediction
 encode paff-adaptive -p PicInterlace=2 -p PicOrderCntType=2 -p ProfileIDC=100 -p Transform8x8Mode=1 \
   -p IntraPeriod=4                        # frame or field pictures as fits each frame; POC type 2, 8x8 transform
+encode-b paff-b -p PicInterlace=1 -p NumberBFrames=1  # B field pairs, spatial direct (co-located in fields)
+encode-b paff-b-temporal -p PicInterlace=1 -p NumberBFrames=1 -p DirectModeType=0  # temporal direct
+encode-b paff-b-cavlc -p PicInterlace=1 -p NumberBFrames=2 -p SymbolMode=0 -p DirectModeType=0  # two B frames, CAVLC
+encode-b paff-b-adaptive -p PicInterlace=2 -p NumberBFrames=1 -p IntraPeriod=4  # B fields over frames and over
+                                                                                  # fields, a B frame over fields
+encode-b paff-b-adaptive-temporal -p PicInterlace=2 -p NumberBFrames=1 -p IntraPeriod=4 -p DirectModeType=0  # temporal
+                                                                                  # direct; B frames over fields
+# Temporal direct over the noisy source: B fields over a frame, from co-located partitions smaller than 8x8.
+encode-b paff-b-noisy -p InputFile=noisy.yuv -p PicInterlace=2 -p NumberBFrames=1 -p IntraPeriod=3 -p DirectModeType=0

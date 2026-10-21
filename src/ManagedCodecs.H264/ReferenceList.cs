@@ -49,6 +49,11 @@ internal sealed class ReferenceList
     /// <summary>RefPicList0 and RefPicList1 for a B slice of the current picture, whose order count is <paramref name="currentPoc"/>.</summary>
     public (List<Picture> L0, List<Picture> L1) BuildLists(SliceHeader header, SequenceParameterSet sps, int currentPoc)
     {
+        if (header.FieldPic)
+        {
+            return BuildFieldLists(header, sps, currentPoc);
+        }
+
         int maxFrameNum = 1 << sps.Log2MaxFrameNum;
         UpdateFrameNumWrap(header.FrameNum, maxFrameNum);
 
@@ -60,6 +65,36 @@ internal sealed class ReferenceList
         var longTerm = _pictures.Where(p => p.IsLongTermReference).OrderBy(p => p.LongTermFrameIdx).ToList();
         var l0 = before.Concat(after).Concat(longTerm).ToList();
         var l1 = after.Concat(before).Concat(longTerm).ToList();
+        if (l1.Count > 1 && l1.SequenceEqual(l0))
+        {
+            (l1[0], l1[1]) = (l1[1], l1[0]);
+        }
+
+        return (
+            Finish(l0, header.NumRefIdxL0Active, header.RefPicListModificationL0, header, maxFrameNum),
+            Finish(l1, header.NumRefIdxL1Active, header.RefPicListModificationL1, header, maxFrameNum));
+    }
+
+    /// <summary>
+    /// RefPicList0 and RefPicList1 for a B slice of a field picture whose order count is
+    /// <paramref name="currentPoc"/> (8.2.4.2.4): the frames with a short-term field by order count
+    /// (a frame's being the smaller of its decoded fields', the current frame's first field's
+    /// alone), those up to the current field's latest first and then the later ones earliest first
+    /// for list 0, the other way round for list 1, then the long-term ones by LongTermFrameIdx, each
+    /// set turned into fields as for P slices (8.2.4.2.5).
+    /// </summary>
+    private (List<Picture> L0, List<Picture> L1) BuildFieldLists(SliceHeader header, SequenceParameterSet sps, int currentPoc)
+    {
+        int maxFrameNum = 1 << sps.Log2MaxFrameNum;
+        UpdateFrameNumWrap(header.FrameNum, maxFrameNum);
+        int parity = header.Parity;
+        var shortTerm = _pictures.Where(p => p.Field(0).IsShortTermReference || p.Field(1).IsShortTermReference).ToList();
+        var before = shortTerm.Where(p => p.Poc <= currentPoc).OrderByDescending(p => p.Poc).ToList();
+        var after = shortTerm.Where(p => p.Poc > currentPoc).OrderBy(p => p.Poc).ToList();
+        var longTerm = _pictures.Where(p => p.Field(0).IsLongTermReference || p.Field(1).IsLongTermReference).OrderBy(p => p.LongTermFrameIdx).ToList();
+        var longTermFields = AlternateFields(longTerm, parity, f => f.IsLongTermReference).ToList();
+        var l0 = AlternateFields([.. before, .. after], parity, f => f.IsShortTermReference).Concat(longTermFields).ToList();
+        var l1 = AlternateFields([.. after, .. before], parity, f => f.IsShortTermReference).Concat(longTermFields).ToList();
         if (l1.Count > 1 && l1.SequenceEqual(l0))
         {
             (l1[0], l1[1]) = (l1[1], l1[0]);

@@ -18,6 +18,12 @@ internal sealed class SequenceParameterSet
 
     public int BitDepthLuma { get; internal init; } = 8;
 
+    /// <summary>separate_colour_plane_flag: 4:4:4 coded as three monochrome pictures (not supported).</summary>
+    public bool SeparateColourPlanes { get; internal init; }
+
+    /// <summary>qpprime_y_zero_transform_bypass_flag: lossless macroblocks at QP'Y 0 (not supported).</summary>
+    public bool TransformBypass { get; internal init; }
+
     public int BitDepthChroma { get; internal init; } = 8;
 
     /// <summary>The sequence's scaling matrix, or null for flat scaling (no seq_scaling_matrix_present_flag).</summary>
@@ -77,18 +83,20 @@ internal sealed class SequenceParameterSet
         int chromaFormat = 1;
         int bitDepthLuma = 8;
         int bitDepthChroma = 8;
+        bool separatePlanes = false;
+        bool bypass = false;
         ScalingMatrix? scaling = null;
         if (profile is 100 or 110 or 122 or 244 or 44 or 83 or 86 or 118 or 128 or 138 or 139 or 134 or 135)
         {
             chromaFormat = r.ReadUe(3, "chroma_format_idc");
             if (chromaFormat == 3)
             {
-                r.ReadFlag(); // separate_colour_plane_flag
+                separatePlanes = r.ReadFlag();
             }
 
             bitDepthLuma = 8 + r.ReadUe(6, "bit_depth_luma_minus8");
             bitDepthChroma = 8 + r.ReadUe(6, "bit_depth_chroma_minus8");
-            r.ReadFlag(); // qpprime_y_zero_transform_bypass_flag
+            bypass = r.ReadFlag();
             if (r.ReadFlag())
             {
                 // Lists the SPS leaves out fall back by rule A (Table 7-2).
@@ -148,6 +156,8 @@ internal sealed class SequenceParameterSet
             ChromaFormatIdc = chromaFormat,
             BitDepthLuma = bitDepthLuma,
             BitDepthChroma = bitDepthChroma,
+            SeparateColourPlanes = separatePlanes,
+            TransformBypass = bypass,
             Scaling = scaling,
             Log2MaxFrameNum = log2MaxFrameNum,
             PicOrderCntType = pocType,
@@ -301,7 +311,8 @@ internal sealed class PictureParameterSet
 
     public int SecondChromaQpIndexOffset { get; internal init; }
 
-    public static PictureParameterSet Parse(BitReader r)
+    /// <param name="sequences">The SPSs received so far: the one this PPS names says how many 8x8 scaling lists it has.</param>
+    public static PictureParameterSet Parse(BitReader r, IReadOnlyDictionary<int, SequenceParameterSet>? sequences = null)
     {
         int id = r.ReadUe(255, "pic_parameter_set_id");
         int spsId = r.ReadUe(31, "seq_parameter_set_id");
@@ -332,9 +343,9 @@ internal sealed class PictureParameterSet
             transform8x8 = r.ReadFlag();
             if (r.ReadFlag())
             {
-                // 6 + 2 * transform_8x8_mode_flag lists for 4:2:0; 4:4:4 would have 6 8x8 lists, but
-                // it is rejected before any slice is decoded.
-                scaling = ScalingMatrix.ParseLists(r, 6 + (transform8x8 ? 2 : 0));
+                // 6 + 2 * transform_8x8_mode_flag lists, 6 + 6 * transform_8x8_mode_flag in 4:4:4.
+                bool chroma444 = sequences is not null && sequences.TryGetValue(spsId, out var sps) && sps.ChromaFormatIdc == 3;
+                scaling = ScalingMatrix.ParseLists(r, 6 + (transform8x8 ? (chroma444 ? 6 : 2) : 0));
             }
 
             secondChromaOffset = r.ReadSe();

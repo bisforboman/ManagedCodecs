@@ -2,13 +2,13 @@ namespace ManagedCodecs.H264;
 
 /// <summary>
 /// H.264 decoder for Constrained Baseline, Main, High and High 4:2:2 profile streams (CAVLC or
-/// CABAC; I, P and B slices; 8-bit; 4:2:0 progressive or interlaced (MBAFF frames, field pictures),
-/// and progressive 4:2:2), taking MP4-style samples: length-prefixed NAL units, one picture per sample.
+/// CABAC; I, P and B slices; 8-bit; 4:2:0 or 4:2:2, progressive or interlaced (MBAFF frames, field
+/// pictures)), taking MP4-style samples: length-prefixed NAL units, one picture per sample.
 /// </summary>
 /// <remarks>
 /// Implemented from ITU-T H.264; output is bit-exact with any conforming decoder. Streams that
-/// use other features (FMO, data partitioning, 4:4:4 or monochrome, more than 8 bits, interlaced
-/// 4:2:2) are rejected with <see cref="NotSupportedException"/>. Frames come out in display order (picture order
+/// use other features (FMO, data partitioning, 4:4:4 or monochrome, more than 8 bits) are rejected
+/// with <see cref="NotSupportedException"/>. Frames come out in display order (picture order
 /// count, 8.2.1), held back as far as the stream's max_num_reorder_frames says reordering can
 /// reach; <see cref="Flush"/> returns the rest at the end.
 /// </remarks>
@@ -422,11 +422,6 @@ public sealed class H264Decoder : IVideoDecoder
         if (sps.ChromaFormatIdc is not (1 or 2))
         {
             throw new NotSupportedException($"chroma_format_idc {sps.ChromaFormatIdc} is not supported (4:2:0 and 4:2:2 only).");
-        }
-
-        if (sps.ChromaFormatIdc == 2 && !sps.FrameMbsOnly)
-        {
-            throw new NotSupportedException("Interlaced 4:2:2 (frame_mbs_only_flag 0) is not supported.");
         }
 
         if (sps.BitDepthLuma != 8 || sps.BitDepthChroma != 8)

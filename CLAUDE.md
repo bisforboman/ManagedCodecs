@@ -2,7 +2,7 @@
 
 Pure managed C# media decoders: no native binaries, Native AOT friendly. MJPEG (bit-exact with FFmpeg), H.264
 Constrained Baseline, Main and High (CAVLC and CABAC, I/P/B, weighted prediction, 8x8 transform, scaling matrices,
-MBAFF, field pictures, progressive 4:2:2, bit-exact), AAC LC (within 2^-17 of FFmpeg's float output, measured 3e-7), AVI and MP4
+MBAFF, field pictures, 4:2:2, bit-exact), AAC LC (within 2^-17 of FFmpeg's float output, measured 3e-7), AVI and MP4
 demuxing. README.md has the layout, the roadmap and what is not supported yet.
 
 ## Core idea
@@ -26,7 +26,9 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
 - **Advisor**: when an advisor tool is available, call it before design decisions or recommendations, before
   splitting work across agents or sessions, and before declaring a larger task done.
 - **Asking the user**: whenever you need input from the user (a choice, an approval, whether to go on), ask with
-  the multiple-choice prompt (AskUserQuestion), not with a question at the end of a reply.
+  the multiple-choice prompt (AskUserQuestion), not with a question at the end of a reply. That includes what to do
+  next: once a PR merges (or whenever a reply would end waiting for "what's next"), prompt the next choice at once,
+  with the advisor's recommendation first, rather than inviting the user to ask.
 - **Before pushing**: `tools/make-samples.sh` (once; needs ffmpeg with libx264 and ImageMagick) and
   `dotnet test ManagedCodecs.slnx`; for SIMD changes also with `DOTNET_EnableHWIntrinsic=0` (CI runs both).
 - **New feature, new sample**: add it to tools/make-samples.sh with a comment saying what it isolates, and check
@@ -37,7 +39,7 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
   FFmpeg's AAC: no pulse data). A second encoder covers some: OpenH264 (`tools/make-openh264-samples.sh`, its
   streams committed in `samples/openh264/`) writes long-term references, MMCO 4 and 6, POC type 2, SVC, and
   frame_num gaps once temporal layers are dropped. A third, JM (`tools/make-jm-samples.sh`, committed in
-  `samples/jm/`), writes field pictures (PAFF), alone or mixed with frame pictures. Cover
+  `samples/jm/`), writes field pictures (PAFF), alone or mixed with frame pictures, also in 4:2:2. Cover
   the rest with unit tests and say so in the docs.
   `tests/ManagedCodecs.Tests/H264/ParameterSetRewriter.cs` rewrites a sample's SPS and PPS for such tests.
   `tests/ManagedCodecs.Tests/H264/CabacEncoder.cs` (a CABAC encoder and bit writer) builds such H.264 streams.
@@ -91,7 +93,8 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
   the packet rate (compare with `-f framemd5` or add `-fps_mode passthrough`); its frame takes the first field's pts.
   JM's encoder: `make -C lencod CFLAGS="-fcommon -O2"`, `PicInterlace=1` (fields) or `2` (adaptive), about a minute
   for 10 frames at 320x256; it crashes with `WeightedPrediction=1` or `WeightedBiprediction=2` and field pictures,
-  and refuses `PicInterlace=2` with `MbInterlace=2`. Remuxing a raw stream with B pictures gives pts = dts in
+  and refuses `PicInterlace=2` with `MbInterlace=2`. With `PicInterlace=2` it codes a clean testsrc2 source's frames
+  all as frames in 4:2:2 (`YUVFormat=2`): check `field_pic_flag` in `trace_headers`, and add noise. Remuxing a raw stream with B pictures gives pts = dts in
   decoding order (FFmpeg then drops frames): `make-jm-samples.sh` sets pts from pic_order_cnt_lsb with `setts`.
 - Interlaced MJPEG: FFmpeg's encoder refuses interlacing (make-samples.sh encodes fields as images and pairs them
   into AVI1 packets in Python). Its decoder takes an image of less than 3/4 of the stream's height (integer division)

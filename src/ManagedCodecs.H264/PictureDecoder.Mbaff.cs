@@ -32,8 +32,8 @@ internal sealed partial class PictureDecoder
     private const int ScratchLumaStride = 32;
     private const int ScratchChromaStride = 16;
     private readonly byte[] _scratchY = new byte[ScratchLumaStride * 20];
-    private readonly byte[] _scratchCb = new byte[ScratchChromaStride * 12];
-    private readonly byte[] _scratchCr = new byte[ScratchChromaStride * 12];
+    private readonly byte[] _scratchCb = new byte[ScratchChromaStride * 20]; // row -1, 8 or 16 rows (4:2:2), slack
+    private readonly byte[] _scratchCr = new byte[ScratchChromaStride * 20];
 
     // Inverse scans of field macroblocks (8.5.6, Tables 8-13 and 8-14), as raster indices.
     private static ReadOnlySpan<byte> Field4x4 => [0, 4, 1, 8, 12, 5, 9, 13, 2, 6, 10, 14, 3, 7, 11, 15];
@@ -285,9 +285,9 @@ internal sealed partial class PictureDecoder
             _leftRows |= n >= 0 && !IsInter(n) ? 1 << y : 0;
         }
 
-        for (int y = 0; y < 8; y++)
+        for (int y = 0; y < _mbHeightC; y++)
         {
-            int n = AffNeighbor(mbAddr, -1, y, 8, 8).Mb;
+            int n = AffNeighbor(mbAddr, -1, y, 8, _mbHeightC).Mb;
             _leftChromaRows |= n >= 0 && !IsInter(n) ? 1 << y : 0;
         }
     }
@@ -301,6 +301,18 @@ internal sealed partial class PictureDecoder
 
     /// <summary>Whether the four chroma rows from <paramref name="first"/> of the left neighbouring samples may be used.</summary>
     private bool LeftChromaRows(int first) => ((_leftChromaRows >> first) & 15) == 15;
+
+    /// <summary>Per row of chroma 4x4 blocks (bit k: rows 4k to 4k + 3), whether its left neighbouring samples may be used.</summary>
+    private int LeftChromaBlocks()
+    {
+        int blocks = 0;
+        for (int k = 0; k < _mbHeightC / 4; k++)
+        {
+            blocks |= LeftChromaRows(k * 4) ? 1 << k : 0;
+        }
+
+        return blocks;
+    }
 
     /// <summary>Sets whether the pair holding <paramref name="mbAddr"/> is a field pair.</summary>
     private void SetPairField(int mbAddr, bool field)
@@ -382,19 +394,20 @@ internal sealed partial class PictureDecoder
     /// <summary>
     /// The planes an intra macroblock of an MBAFF frame is reconstructed into: the scratch blocks,
     /// with every neighbouring sample prediction may read gathered through Table 6-4 (luma row -1
-    /// from x = -1 to 23 and column -1; chroma row -1 and column -1).
+    /// from x = -1 to 23 and column -1; chroma row -1 and column -1, 8 or 16 rows).
     /// </summary>
     private MbTarget GatherMbaffNeighbors(int mbAddr)
     {
-        GatherPlane(mbAddr, Picture.Y, _scratchY, ScratchLumaStride, 16, 24);
-        GatherPlane(mbAddr, Picture.Cb, _scratchCb, ScratchChromaStride, 8, 8);
-        GatherPlane(mbAddr, Picture.Cr, _scratchCr, ScratchChromaStride, 8, 8);
+        GatherPlane(mbAddr, Picture.Y, _scratchY, ScratchLumaStride, 16, 16, 24);
+        GatherPlane(mbAddr, Picture.Cb, _scratchCb, ScratchChromaStride, 8, _mbHeightC, 8);
+        GatherPlane(mbAddr, Picture.Cr, _scratchCr, ScratchChromaStride, 8, _mbHeightC, 8);
         return new MbTarget(_scratchY, ScratchLumaStride + 1, ScratchLumaStride, _scratchCb, _scratchCr, ScratchChromaStride + 1, ScratchChromaStride);
     }
 
-    private void GatherPlane(int mbAddr, byte[] plane, byte[] scratch, int scratchStride, int size, int topWidth)
+    private void GatherPlane(int mbAddr, byte[] plane, byte[] scratch, int scratchStride, int maxW, int maxH, int topWidth)
     {
-        for (int yN = -1; yN < size; yN++)
+        bool luma = plane == Picture.Y;
+        for (int yN = -1; yN < maxH; yN++)
         {
             Copy(-1, yN);
         }
@@ -406,10 +419,10 @@ internal sealed partial class PictureDecoder
 
         void Copy(int xN, int yN)
         {
-            var (n, x, y) = AffNeighbor(mbAddr, xN, yN, size, size);
+            var (n, x, y) = AffNeighbor(mbAddr, xN, yN, maxW, maxH);
             if (n >= 0)
             {
-                var (origin, stride) = size == 16 ? LumaPlace(n) : ChromaPlace(n);
+                var (origin, stride) = luma ? LumaPlace(n) : ChromaPlace(n);
                 scratch[((yN + 1) * scratchStride) + xN + 1] = plane[origin + (y * stride) + x];
             }
         }
@@ -425,7 +438,7 @@ internal sealed partial class PictureDecoder
         }
 
         var (chroma, chromaStride) = ChromaPlace(mbAddr);
-        for (int y = 0; y < 8; y++)
+        for (int y = 0; y < _mbHeightC; y++)
         {
             target.Cb.AsSpan(target.COrigin + (y * target.CStride), 8).CopyTo(Picture.Cb.AsSpan(chroma + (y * chromaStride)));
             target.Cr.AsSpan(target.COrigin + (y * target.CStride), 8).CopyTo(Picture.Cr.AsSpan(chroma + (y * chromaStride)));
@@ -543,6 +556,12 @@ internal sealed partial class PictureDecoder
                 }
             }
 
+            if (_mbHeightC == 16)
+            {
+                DeblockMbaffChroma422(slice, mbAddr, left, leftLines, vertical, horizontal, topEdges);
+                continue;
+            }
+
             // Chroma (4:2:0): the macroblock edges, with the bS of luma lines of the same parity
             // as each chroma line, and the edge in the middle.
             if (left)
@@ -581,6 +600,62 @@ internal sealed partial class PictureDecoder
             }
 
             FilterChromaEdge(Picture.Cb, Picture.Cr, chroma + (4 * chromaStride), chromaStride, 1, horizontal.Slice(8, 4), qpCb, qpCb, qpCr, qpCr, slice.AlphaOffset, slice.BetaOffset);
+        }
+    }
+
+    /// <summary>
+    /// The chroma edges of a 4:2:2 macroblock of an MBAFF frame or a field picture. Its chroma
+    /// rows are the luma's (16 a macroblock), so every chroma line meets the macroblock its luma
+    /// line meets and takes that line's bS: <paramref name="leftLines"/> across the left edge,
+    /// the luma pass's <paramref name="topEdges"/> (two of them under a field pair) across the
+    /// top one, chroma column x the luma segment x / 2. Inside, as in frames: vertical edge 4
+    /// along 16 rows, horizontal edges 4, 8 and 12 with the bS of luma edges 1 to 3.
+    /// </summary>
+    private void DeblockMbaffChroma422(SliceInfo slice, int mbAddr, bool left, ReadOnlySpan<byte> leftLines, ReadOnlySpan<byte> vertical, ReadOnlySpan<byte> horizontal, (int P, int PRow, int PStep, int QOffset, int QStep)[] topEdges)
+    {
+        int qp = _qp[mbAddr];
+        int qpCb = ChromaQp(qp, slice.CbQpOffset);
+        int qpCr = ChromaQp(qp, slice.CrQpOffset);
+        var (chroma, chromaStride) = ChromaPlace(mbAddr);
+        int chromaRow = Picture.ChromaStride;
+        if (left)
+        {
+            for (int y = 0; y < 16; y++)
+            {
+                if (leftLines[y] != 0)
+                {
+                    var (p, xP, yP) = AffNeighbor(mbAddr, -1, y, 8, 16, anySlice: true);
+                    var (pOrigin, pStride) = ChromaPlace(p);
+                    FilterMbaffChromaLine(pOrigin + (yP * pStride) + xP, 1, chroma + (y * chromaStride), 1, leftLines[y], _qp[p], qp, slice);
+                }
+            }
+        }
+
+        var strengths = vertical.Slice(8, 4);
+        FilterEdge(Picture.Cb, chroma + 4, 1, chromaStride, 16, strengths, qpCb, qpCb, slice.AlphaOffset, slice.BetaOffset, chroma: true, segmentShift: 2);
+        FilterEdge(Picture.Cr, chroma + 4, 1, chromaStride, 16, strengths, qpCr, qpCr, slice.AlphaOffset, slice.BetaOffset, chroma: true, segmentShift: 2);
+
+        Span<byte> topSegments = stackalloc byte[4];
+        foreach (var (p, pRow, pStep, qOffset, qStep) in topEdges)
+        {
+            for (int k = 0; k < 4; k++)
+            {
+                topSegments[k] = (byte)MbaffStrength(p, ((pRow >> 2) * 4) + k, mbAddr, ((qOffset >> 2) * 4) + k, horizontalEdge: true);
+            }
+
+            var (pOrigin, pStride) = ChromaPlace(p);
+            for (int x = 0; x < 8; x++)
+            {
+                if (topSegments[x >> 1] != 0)
+                {
+                    FilterMbaffChromaLine(pOrigin + (pRow * pStride) + x, pStep * chromaRow, chroma + (qOffset * chromaRow) + x, qStep * chromaRow, topSegments[x >> 1], _qp[p], qp, slice);
+                }
+            }
+        }
+
+        for (int edge = 1; edge < 4; edge++)
+        {
+            FilterChromaEdge(Picture.Cb, Picture.Cr, chroma + (edge * 4 * chromaStride), chromaStride, 1, horizontal.Slice(edge * 4, 4), qpCb, qpCb, qpCr, qpCr, slice.AlphaOffset, slice.BetaOffset);
         }
     }
 

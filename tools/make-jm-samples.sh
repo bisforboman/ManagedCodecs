@@ -2,9 +2,9 @@
 # Encodes the H.264 samples in samples/jm/ with JM's encoder (lencod, the ITU-T reference software), which writes
 # what libx264 and OpenH264 never do: field pictures (PAFF), each field of a frame its own picture, in pairs whose
 # second field predicts from the first, pictures that switch between frame and field coding, and B field pictures
-# whose direct prediction looks into fields and frames. These files are committed: CI has no JM (and it takes a minute
-# a sample), so tools/make-samples.sh only copies them into samples/ and writes their FFmpeg references like any
-# other sample's.
+# whose direct prediction looks into fields and frames, in 4:2:0 and 4:2:2. These files are committed: CI has no JM
+# (and it takes a minute a sample), so tools/make-samples.sh only copies them into samples/ and writes their FFmpeg
+# references like any other sample's.
 #
 # Usage: tools/make-jm-samples.sh <JM source tree with lencod built>
 #   (git clone https://github.com/shihuade/JM && make -C lencod CFLAGS="-fcommon -O2"; made with JM 19.0)
@@ -23,6 +23,11 @@ ffmpeg -hide_banner -loglevel error -y -f lavfi -i "testsrc2=size=320x256:rate=5
 # The same scrolling and with noise: smaller partitions, and JM codes more of it as fields.
 ffmpeg -hide_banner -loglevel error -y -f lavfi -i "testsrc2=size=320x256:rate=50,scroll=h=0.01:v=0.005,noise=alls=6:allf=t" \
   -vf tinterlace=interleave_top -frames:v 10 -pix_fmt yuv420p -f rawvideo "$work/noisy.yuv"
+# Both in 4:2:2.
+ffmpeg -hide_banner -loglevel error -y -f lavfi -i "testsrc2=size=320x256:rate=50" -vf tinterlace=interleave_top \
+  -frames:v 10 -pix_fmt yuv422p -f rawvideo "$work/src422.yuv"
+ffmpeg -hide_banner -loglevel error -y -f lavfi -i "testsrc2=size=320x256:rate=50,scroll=h=0.01:v=0.005,noise=alls=6:allf=t" \
+  -vf tinterlace=interleave_top -frames:v 10 -pix_fmt yuv422p -f rawvideo "$work/noisy422.yuv"
 cp "$jm/bin/encoder_main.cfg" "$work/"
 
 # encode name [lencod options]: encoder_main.cfg's settings (Main profile, CABAC, 5 reference frames, QP 28, POC
@@ -67,3 +72,8 @@ encode-b paff-b-adaptive-temporal -p PicInterlace=2 -p NumberBFrames=1 -p IntraP
                                                                                   # direct; B frames over fields
 # Temporal direct over the noisy source: B fields over a frame, from co-located partitions smaller than 8x8.
 encode-b paff-b-noisy -p InputFile=noisy.yuv -p PicInterlace=2 -p NumberBFrames=1 -p IntraPeriod=3 -p DirectModeType=0
+# 4:2:2 (High 4:2:2): field pairs with 16 chroma rows a macroblock; and frames switching between frame and field
+# coding with B pictures, with CAVLC (on the noisy source: on the clean one JM codes every frame as a frame).
+encode paff-422 -p InputFile=src422.yuv -p YUVFormat=2 -p ProfileIDC=122 -p PicInterlace=1
+encode-b paff-422-b-adaptive -p InputFile=noisy422.yuv -p YUVFormat=2 -p ProfileIDC=122 -p PicInterlace=2 -p NumberBFrames=1 \
+  -p IntraPeriod=4 -p SymbolMode=0

@@ -306,16 +306,17 @@ internal static class IntraPrediction
         PredictBlock(mode, plane, offset, stride, n, width: 16, height: 16);
 
     /// <summary>Chroma prediction (8.3.4) for one component: 8x8 (4:2:0) or 8x16 (4:2:2, <paramref name="height"/> 16).</summary>
-    /// <param name="leftLower">
-    /// Whether the left samples of the 4x4 blocks below the first row of them may be used, where
-    /// that differs from the upper ones (<see cref="IntraNeighbors.Left"/>): only DC prediction treats them apart.
+    /// <param name="leftBlocks">
+    /// Per row of 4x4 blocks (bit k: rows 4k to 4k + 3), whether its left neighbouring samples may
+    /// be used, where that differs from <see cref="IntraNeighbors.Left"/> (MBAFF with constrained
+    /// intra prediction): only DC prediction treats the rows apart. -1: as Left says, for all.
     /// </param>
-    public static void PredictChroma(int mode, byte[] plane, int offset, int stride, IntraNeighbors n, bool? leftLower = null, int height = 8)
+    public static void PredictChroma(int mode, byte[] plane, int offset, int stride, IntraNeighbors n, int leftBlocks = -1, int height = 8)
     {
         // Chroma mode numbers differ from 16x16: 0 DC, 1 Horizontal, 2 Vertical, 3 Plane.
         if (mode == 0)
         {
-            PredictChromaDc(plane, offset, stride, n, leftLower ?? n.Left, height);
+            PredictChromaDc(plane, offset, stride, n, leftBlocks < 0 ? (n.Left ? 15 : 0) : leftBlocks, height);
             return;
         }
 
@@ -425,11 +426,11 @@ internal static class IntraPrediction
     }
 
     /// <summary>Chroma DC (8.3.4.1-3): each 4x4 block gets its own average with its own fallbacks.</summary>
-    private static void PredictChromaDc(byte[] plane, int offset, int stride, IntraNeighbors n, bool leftLower, int height)
+    private static void PredictChromaDc(byte[] plane, int offset, int stride, IntraNeighbors n, int leftBlocks, int height)
     {
         for (int yO = 0; yO < height; yO += 4)
         {
-            bool left = yO == 0 ? n.Left : leftLower;
+            bool left = ((leftBlocks >> (yO / 4)) & 1) != 0;
             for (int xO = 0; xO < 8; xO += 4)
             {
                 int sumTop = 0;

@@ -91,5 +91,9 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
   for 10 frames at 320x256; it crashes with `WeightedPrediction=1` or `WeightedBiprediction=2` and field pictures,
   and refuses `PicInterlace=2` with `MbInterlace=2`. Remuxing a raw stream with B pictures gives pts = dts in
   decoding order (FFmpeg then drops frames): `make-jm-samples.sh` sets pts from pic_order_cnt_lsb with `setts`.
+- Interlaced MJPEG: FFmpeg's encoder refuses interlacing (make-samples.sh encodes fields as images and pairs them
+  into AVI1 packets in Python). Its decoder takes an image of less than 3/4 of the stream's height (integer division)
+  as a field, ignores the AVI1 field byte, and puts the first field on the odd rows unless the decoder's field order
+  is tt, tb or bt (`-field_order` as an input option shows it); one field a packet it does not decode at all.
 - In fragmented MP4, FFmpeg's packet durations are not the file's: its demuxer leaves them unset and libavformat
   fills in the codec frame size (1024 for AAC). Compare with FFmpeg's next dts instead (Mp4ConformanceTests does).

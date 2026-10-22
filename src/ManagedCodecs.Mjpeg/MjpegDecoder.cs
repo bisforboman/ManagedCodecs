@@ -6,6 +6,10 @@ namespace ManagedCodecs.Mjpeg;
 /// Only the inverse DCT follows FFmpeg's arithmetic, so output is bit-exact with it.
 /// Quantization and Huffman tables persist from frame to frame, as many MJPEG streams send
 /// them once or not at all; until a DHT arrives the standard tables of T.81 Annex K.3 apply.
+/// Interlaced MJPEG (AVI1, as capture cards write it) holds a frame's two fields as two JPEG
+/// images in one packet; constructed with the stream's <see cref="VideoStreamInfo"/>, the decoder
+/// recognizes them as FFmpeg does, by an image less than 3/4 of the stream's height, and weaves
+/// them into one frame of twice the image's height.
 /// </remarks>
 public sealed class MjpegDecoder : IVideoDecoder
 {
@@ -20,6 +24,9 @@ public sealed class MjpegDecoder : IVideoDecoder
     // Sample buffers of the previous frame, reused while the layout stays the same.
     private FrameState? _previous;
 
+    // The stream's height, from the container; 0 when unknown (no field detection).
+    private readonly int _streamHeight;
+
     public MjpegDecoder()
     {
         _dcTables[0] = new HuffmanTable(JpegTables.DcLuminanceBits, JpegTables.DcLuminanceValues);
@@ -27,6 +34,24 @@ public sealed class MjpegDecoder : IVideoDecoder
         _acTables[0] = new HuffmanTable(JpegTables.AcLuminanceBits, JpegTables.AcLuminanceValues);
         _acTables[1] = new HuffmanTable(JpegTables.AcChrominanceBits, JpegTables.AcChrominanceValues);
     }
+
+    /// <summary>
+    /// A decoder that knows the stream's height, so that it recognizes interlaced packets: two
+    /// JPEG images of less than 3/4 of that height each, the fields of one frame.
+    /// </summary>
+    public MjpegDecoder(VideoStreamInfo stream)
+        : this()
+    {
+        _streamHeight = stream.Height;
+    }
+
+    /// <summary>
+    /// Put the first field of an interlaced packet on the frame's top (even) rows. By default it
+    /// goes on the bottom (odd) rows, as FFmpeg does when it knows no field order, which AVI does
+    /// not tell (FFmpeg's <c>-field_order tt</c> gives this option's order). The AVI1 segment's
+    /// field byte is ignored, as by FFmpeg.
+    /// </summary>
+    public bool FirstFieldOnTop { get; init; }
 
     /// <summary>Decodes one MJPEG packet; every packet is a complete frame, so exactly one comes out.</summary>
     public IReadOnlyList<VideoFrame> Decode(Packet packet)
@@ -39,8 +64,52 @@ public sealed class MjpegDecoder : IVideoDecoder
     /// <summary>MJPEG holds no frames back.</summary>
     public IReadOnlyList<VideoFrame> Flush() => [];
 
-    /// <summary>Decodes one JPEG image (one MJPEG packet's data).</summary>
+    /// <summary>
+    /// Decodes one MJPEG packet's data: one JPEG image, or with the stream's height known, the two
+    /// fields of an interlaced frame woven together. Data after the image (or the second field) is
+    /// ignored.
+    /// </summary>
     public VideoFrame Decode(ReadOnlySpan<byte> packet)
+    {
+        var first = DecodeImage(packet, out int end);
+        int height = first.Header.Height;
+        if (_streamHeight == 0 || height >= _streamHeight * 3 / 4)
+        {
+            return first.ToVideoFrame();
+        }
+
+        // A field: weave it into a frame of twice its height, then decode the second field
+        // (into the same buffers, so the first is copied out before).
+        var frame = new VideoFrame(first.Header.Width, 2 * height, first.Format);
+        for (int plane = 0; plane < frame.Planes.Length; plane++)
+        {
+            if (first.Format.PlaneSize(plane, frame.Width, frame.Height).Height != 2 * first.Format.PlaneSize(plane, frame.Width, height).Height)
+            {
+                throw new NotSupportedException("Interlaced fields of an odd height with vertically subsampled chroma are not supported.");
+            }
+        }
+
+        first.WriteField(frame, FirstFieldOnTop ? 0 : 1);
+        int second = packet[end..].IndexOf(SecondImageStart);
+        if (second < 0)
+        {
+            throw new NotSupportedException("An interlaced packet with one field (the second field is not in the same packet) is not supported.");
+        }
+
+        var other = DecodeImage(packet[(end + second)..], out _);
+        if (other.Header.Width != first.Header.Width || other.Header.Height != height || other.Format != first.Format)
+        {
+            throw new InvalidDataException("The two fields of an interlaced packet differ in size or sampling.");
+        }
+
+        other.WriteField(frame, FirstFieldOnTop ? 1 : 0);
+        return frame;
+    }
+
+    private static ReadOnlySpan<byte> SecondImageStart => [0xFF, JpegMarker.Soi];
+
+    /// <summary>Decodes one JPEG image into the sample buffers; <paramref name="end"/> is the offset just past its EOI.</summary>
+    private FrameState DecodeImage(ReadOnlySpan<byte> packet, out int end)
     {
         var segments = JpegMarkerReader.ReadSegments(packet);
         FrameState? frame = null;
@@ -104,7 +173,8 @@ public sealed class MjpegDecoder : IVideoDecoder
             throw new InvalidDataException("No SOS segment found.");
         }
 
-        return frame.ToVideoFrame();
+        end = segments[^1].PayloadOffset; // just past the EOI marker
+        return frame;
     }
 
     private void ParseQuantizationTables(ReadOnlySpan<byte> payload)
@@ -384,6 +454,20 @@ public sealed class MjpegDecoder : IVideoDecoder
             }
 
             return frame;
+        }
+
+        /// <summary>Copies the image into every other row of <paramref name="frame"/>, from row <paramref name="parity"/>.</summary>
+        public void WriteField(VideoFrame frame, int parity)
+        {
+            for (int plane = 0; plane < Buffers.Length; plane++)
+            {
+                var (width, height) = Format.PlaneSize(plane, Header.Width, Header.Height);
+                int stride = BufferStrides[plane];
+                for (int y = 0; y < height; y++)
+                {
+                    Buffers[plane].AsSpan(y * stride, width).CopyTo(frame.GetRow(plane, (2 * y) + parity));
+                }
+            }
         }
 
         private static int DivUp(int value, int divisor) => (value + divisor - 1) / divisor;

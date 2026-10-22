@@ -43,7 +43,7 @@ for (int loop = 0; loop < loops; loop++)
 
     IVideoDecoder? videoDecoder = video?.Codec switch
     {
-        CodecIds.Mjpeg => new MjpegDecoder(),
+        CodecIds.Mjpeg => new MjpegDecoder(video),
         CodecIds.H264 => new H264Decoder(video) { BorrowFrames = borrowFrames },
         _ => null,
     };

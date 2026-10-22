@@ -10,7 +10,7 @@ then the same approach for H.264 + AAC in MP4.
 | --- | --- |
 | `src/ManagedCodecs.Core` | `VideoFrame`, `PixelFormat`, `Packet`, `Rational`, `IDemuxer`, `IVideoDecoder` |
 | `src/ManagedCodecs.Containers` | `AviDemuxer`, `Mp4Demuxer`, and `Demuxer.Open` to pick one by content |
-| `src/ManagedCodecs.Mjpeg` | `MjpegDecoder`: baseline/extended Huffman JPEG, bit-exact with FFmpeg |
+| `src/ManagedCodecs.Mjpeg` | `MjpegDecoder`: baseline/extended Huffman JPEG, interlaced AVI1, bit-exact with FFmpeg |
 | `src/ManagedCodecs.H264` | `H264Decoder`: Constrained Baseline, Main and High profile H.264 (CAVLC, CABAC, I/P/B, weighted prediction, 8x8 transform, scaling matrices, deblocking), bit-exact |
 | `src/ManagedCodecs.Aac` | `AacDecoder`: AAC LC (mono to 7.1, M/S, intensity, PNS, TNS), within 3e-7 of FFmpeg's float output |
 | `src/Shared` | Source files linked into several codec projects (the VLC decoder) |
@@ -44,7 +44,7 @@ zero or more frames and `Flush` returns the rest:
 ```csharp
 using var demuxer = Demuxer.Open("video.mp4");
 var video = demuxer.Video!;
-IVideoDecoder decoder = video.Codec == CodecIds.H264 ? new H264Decoder(video) : new MjpegDecoder();
+IVideoDecoder decoder = video.Codec == CodecIds.H264 ? new H264Decoder(video) : new MjpegDecoder(video);
 
 foreach (var packet in demuxer.ReadPackets().Where(p => p.StreamIndex == video.StreamIndex))
 {
@@ -119,7 +119,10 @@ what the two commands above include and are not comparable with FFmpeg's `bench:
 ## Roadmap
 
 1. ~~MJPEG baseline decoder, bit-exact against FFmpeg (4:2:0, 4:2:2, 4:4:4, gray, restart markers, missing DHT)~~ done;
-   still open: interlaced AVI1 frames (two fields per packet), real camera files
+   interlaced AVI1 frames too (two JPEG fields per packet, recognized as FFmpeg does by being less than 3/4 of the
+   stream's height, so the decoder needs `new MjpegDecoder(video)`), woven with the first field on the odd rows, the
+   order FFmpeg takes for AVI, which does not tell it (`FirstFieldOnTop` gives the other; the AVI1 segment's field
+   byte is ignored, as by FFmpeg). Still open: real camera files, and packets of one field (FFmpeg decodes none)
 2. SIMD: `Span`, `Vector128`/`Vector256` IDCT and colour paths; measure the ratio to FFmpeg.
    Done so far: AVX2 IDCT, DC-only blocks, single-lookup coefficient decoding, buffer reuse.
    Still open: an ARM64 (AdvSimd) IDCT, decoding straight into the output frame

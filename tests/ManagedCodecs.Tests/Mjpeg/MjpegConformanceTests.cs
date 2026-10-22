@@ -24,7 +24,7 @@ public class MjpegConformanceTests
 
         using var demuxer = Demuxer.Open(TestSamples.PathOf(sampleName));
         var video = demuxer.Video!;
-        var decoder = new MjpegDecoder();
+        var decoder = new MjpegDecoder(video); // the stream's height tells interlaced packets (two fields) apart
 
         int index = 0;
         foreach (var packet in demuxer.ReadPackets().Where(p => p.StreamIndex == video.StreamIndex))

@@ -89,13 +89,13 @@ internal sealed partial class PictureDecoder<TPixel>
 
             // 4:2:2 chroma first, while the bS of all four horizontal edges are there (the planes
             // are independent, so the order does not matter).
-            if (_mbHeightC == 16)
+            if (_mbHeightC == 16 && !_chroma444)
             {
                 DeblockChroma422(slice, mbAddr, vertical, horizontal);
             }
 
-            // With 8x8 transforms the luma edges inside the 8x8 blocks are not filtered; chroma
-            // (4:2:0) filters only edges 0 and 2 anyway.
+            // With 8x8 transforms the luma edges inside the 8x8 blocks are not filtered, nor 4:4:4
+            // chroma's; 4:2:0 chroma filters only edges 0 and 2 anyway.
             if (_transform8x8[mbAddr])
             {
                 vertical.Slice(4, 4).Clear();
@@ -107,18 +107,16 @@ internal sealed partial class PictureDecoder<TPixel>
             var (lumaOrigin, lumaStride) = LumaPlace(mbAddr);
             var (chromaOrigin, chromaStride) = ChromaPlace(mbAddr);
             int qp = _qp[mbAddr];
+            int qpLeft = mbX > 0 ? _qp[mbAddr - 1] : qp;
+            int qpAbove = mbY > 0 ? _qp[mbAddr - _widthInMbs] : qp;
+            FilterLumaEdges(PlaneY, lumaOrigin, lumaStride, vertical, horizontal, qpLeft, qpAbove, qp, slice);
 
-            // Luma: all vertical edges, then all horizontal ones.
-            for (int edge = 0; edge < 4; edge++)
+            // 4:4:4 chroma: the luma filter on the luma edges (chromaStyleFilteringFlag 0, 8.7.2), at the QP_C of each side.
+            if (_chroma444)
             {
-                int qpP = edge == 0 && mbX > 0 ? _qp[mbAddr - 1] : qp;
-                FilterEdge(PlaneY, lumaOrigin + (edge * 4), 1, lumaStride, 16, vertical.Slice(edge * 4, 4), qpP, qp, slice.AlphaOffset, slice.BetaOffset, chroma: false, bitDepth: _bitDepth);
-            }
-
-            for (int edge = 0; edge < 4; edge++)
-            {
-                int qpP = edge == 0 && mbY > 0 ? _qp[mbAddr - _widthInMbs] : qp;
-                FilterEdge(PlaneY, lumaOrigin + (edge * 4 * lumaStride), lumaStride, 1, 16, horizontal.Slice(edge * 4, 4), qpP, qp, slice.AlphaOffset, slice.BetaOffset, chroma: false, bitDepth: _bitDepth);
+                FilterLumaEdges(PlaneCb, chromaOrigin, chromaStride, vertical, horizontal, ChromaQp(qpLeft, slice.CbQpOffset, _qpBdOffset), ChromaQp(qpAbove, slice.CbQpOffset, _qpBdOffset), ChromaQp(qp, slice.CbQpOffset, _qpBdOffset), slice);
+                FilterLumaEdges(PlaneCr, chromaOrigin, chromaStride, vertical, horizontal, ChromaQp(qpLeft, slice.CrQpOffset, _qpBdOffset), ChromaQp(qpAbove, slice.CrQpOffset, _qpBdOffset), ChromaQp(qp, slice.CrQpOffset, _qpBdOffset), slice);
+                continue;
             }
 
             if (_mbHeightC == 16)
@@ -130,8 +128,6 @@ internal sealed partial class PictureDecoder<TPixel>
             // Cb and Cr are filtered together, all vertical edges first.
             int qpCb = ChromaQp(qp, slice.CbQpOffset, _qpBdOffset);
             int qpCr = ChromaQp(qp, slice.CrQpOffset, _qpBdOffset);
-            int qpLeft = mbX > 0 ? _qp[mbAddr - 1] : qp;
-            int qpAbove = mbY > 0 ? _qp[mbAddr - _widthInMbs] : qp;
             for (int edge = 0; edge < 2; edge++)
             {
                 int qpP = edge == 0 ? qpLeft : qp;
@@ -143,6 +139,24 @@ internal sealed partial class PictureDecoder<TPixel>
                 int qpP = edge == 0 ? qpAbove : qp;
                 FilterChromaEdge(PlaneCb, PlaneCr, chromaOrigin + (edge * 4 * chromaStride), chromaStride, 1, horizontal.Slice(edge * 8, 4), ChromaQp(qpP, slice.CbQpOffset, _qpBdOffset), qpCb, ChromaQp(qpP, slice.CrQpOffset, _qpBdOffset), qpCr, slice.AlphaOffset, slice.BetaOffset, bitDepth: _bitDepth);
             }
+        }
+    }
+
+    /// <summary>
+    /// The four vertical edges of a 16x16 block, then its four horizontal ones, with the luma
+    /// filter: luma, or a 4:4:4 chroma component. The QPs are of the left, upper and current
+    /// macroblocks (the QP_C of the component for chroma).
+    /// </summary>
+    private void FilterLumaEdges(TPixel[] plane, int origin, int stride, ReadOnlySpan<byte> vertical, ReadOnlySpan<byte> horizontal, int qpLeft, int qpAbove, int qp, SliceInfo slice)
+    {
+        for (int edge = 0; edge < 4; edge++)
+        {
+            FilterEdge(plane, origin + (edge * 4), 1, stride, 16, vertical.Slice(edge * 4, 4), edge == 0 ? qpLeft : qp, qp, slice.AlphaOffset, slice.BetaOffset, chroma: false, bitDepth: _bitDepth);
+        }
+
+        for (int edge = 0; edge < 4; edge++)
+        {
+            FilterEdge(plane, origin + (edge * 4 * stride), stride, 1, 16, horizontal.Slice(edge * 4, 4), edge == 0 ? qpAbove : qp, qp, slice.AlphaOffset, slice.BetaOffset, chroma: false, bitDepth: _bitDepth);
         }
     }
 

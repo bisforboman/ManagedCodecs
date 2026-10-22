@@ -10,22 +10,28 @@ namespace ManagedCodecs.Tests.H264;
 /// macroblock carries 8x16 chroma samples a component, and DC prediction of the second one's lower
 /// chroma blocks reads them too. At 10 bits (High 10, High 4:2:2) each sample takes 10 bits
 /// (pcm_sample_luma and pcm_sample_chroma are BitDepth bits wide) and comes out as a 16-bit word.
+/// In 4:4:4 (High 4:4:4 Predictive) chroma has 256 samples a component, and the second
+/// macroblock, with no intra_chroma_pred_mode, predicts Cb and Cr with its luma mode and codes
+/// their DC levels as luma's (coded_block_flag contexts 460 and 472 with CABAC).
 /// </summary>
 public class H264PcmTests
 {
     [Theory]
-    [InlineData(false, false, 8)]
-    [InlineData(true, false, 8)]
-    [InlineData(false, true, 8)]
-    [InlineData(true, true, 8)]
-    [InlineData(false, false, 10)]
-    [InlineData(true, false, 10)]
-    [InlineData(true, true, 10)]
-    public void PcmMacroblock_GivesItsSamplesAndDecodingResumes(bool cabac, bool chroma422, int bitDepth)
+    [InlineData(false, 1, 8)]
+    [InlineData(true, 1, 8)]
+    [InlineData(false, 2, 8)]
+    [InlineData(true, 2, 8)]
+    [InlineData(false, 1, 10)]
+    [InlineData(true, 1, 10)]
+    [InlineData(true, 2, 10)]
+    [InlineData(false, 3, 8)]
+    [InlineData(true, 3, 8)]
+    [InlineData(true, 3, 10)]
+    public void PcmMacroblock_GivesItsSamplesAndDecodingResumes(bool cabac, int chromaFormat, int bitDepth)
     {
         int[] values = bitDepth == 8 ? [100, 50, 200] : [700, 300, 900];
-        var decoder = new H264Decoder(AvcC(Sps(chroma422, bitDepth), Pps(cabac)));
-        var slice = cabac ? CabacSlice(chroma422, bitDepth, values) : CavlcSlice(chroma422, bitDepth, values);
+        var decoder = new H264Decoder(AvcC(Sps(chromaFormat, bitDepth), Pps(cabac)));
+        var slice = cabac ? CabacSlice(chromaFormat, bitDepth, values) : CavlcSlice(chromaFormat, bitDepth, values);
         var nal = slice.ToNal(3, 5);
         var packet = new byte[4 + nal.Length];
         System.Buffers.Binary.BinaryPrimitives.WriteInt32BigEndian(packet, nal.Length);
@@ -33,11 +39,13 @@ public class H264PcmTests
 
         var frame = Assert.Single(decoder.Decode(new Packet(0, 0, packet, true, 0, 0, 1)));
         Assert.Equal((32, 16), (frame.Width, frame.Height));
-        var expectedFormat = (chroma422, bitDepth) switch
+        var expectedFormat = (chromaFormat, bitDepth) switch
         {
-            (true, 8) => PixelFormat.Yuv422P,
-            (true, _) => PixelFormat.Yuv422P10,
-            (false, 8) => PixelFormat.Yuv420P,
+            (3, 8) => PixelFormat.Yuv444P,
+            (3, _) => PixelFormat.Yuv444P10,
+            (2, 8) => PixelFormat.Yuv422P,
+            (2, _) => PixelFormat.Yuv422P10,
+            (_, 8) => PixelFormat.Yuv420P,
             _ => PixelFormat.Yuv420P10,
         };
         Assert.Equal(expectedFormat, frame.Format);
@@ -50,16 +58,21 @@ public class H264PcmTests
         }
     }
 
-    private static BitWriter Sps(bool chroma422, int bitDepth)
+    private static BitWriter Sps(int chromaFormat, int bitDepth)
     {
         var w = new BitWriter();
-        w.Bits(chroma422 ? 122 : bitDepth > 8 ? 110 : 77, 8); // profile_idc: High 4:2:2, High 10 or Main
+        w.Bits(chromaFormat switch { 3 => 244, 2 => 122, _ => bitDepth > 8 ? 110 : 77 }, 8); // profile_idc: High 4:4:4 Predictive, High 4:2:2, High 10 or Main
         w.Bits(0, 8);  // constraint flags
         w.Bits(30, 8); // level_idc
         w.Ue(0);       // seq_parameter_set_id
-        if (chroma422 || bitDepth > 8)
+        if (chromaFormat != 1 || bitDepth > 8)
         {
-            w.Ue(chroma422 ? 2u : 1u); // chroma_format_idc
+            w.Ue((uint)chromaFormat); // chroma_format_idc
+            if (chromaFormat == 3)
+            {
+                w.Bit(0); // separate_colour_plane_flag
+            }
+
             w.Ue((uint)bitDepth - 8); // bit_depth_luma_minus8
             w.Ue((uint)bitDepth - 8); // bit_depth_chroma_minus8
             w.Bit(0); // qpprime_y_zero_transform_bypass_flag
@@ -117,10 +130,10 @@ public class H264PcmTests
         return w;
     }
 
-    private static void PcmSamples(BitWriter w, bool chroma422, int bitDepth, int[] values)
+    private static void PcmSamples(BitWriter w, int chromaFormat, int bitDepth, int[] values)
     {
         w.AlignWith(0); // pcm_alignment_zero_bit
-        int chroma = chroma422 ? 128 : 64;
+        int chroma = chromaFormat switch { 3 => 256, 2 => 128, _ => 64 };
         foreach (var (value, count) in new[] { (values[0], 256), (values[1], chroma), (values[2], chroma) })
         {
             for (int i = 0; i < count; i++)
@@ -130,21 +143,31 @@ public class H264PcmTests
         }
     }
 
-    private static BitWriter CavlcSlice(bool chroma422, int bitDepth, int[] values)
+    private static BitWriter CavlcSlice(int chromaFormat, int bitDepth, int[] values)
     {
         var w = SliceHeader();
         w.Ue(25); // mb_type I_PCM
-        PcmSamples(w, chroma422, bitDepth, values);
+        PcmSamples(w, chromaFormat, bitDepth, values);
         w.Ue(3);  // mb_type I_16x16_2_0_0: DC prediction, no coded blocks
-        w.Ue(0);  // intra_chroma_pred_mode: DC
+        if (chromaFormat != 3)
+        {
+            w.Ue(0); // intra_chroma_pred_mode: DC
+        }
+
         w.Se(0);  // mb_qp_delta
-        w.Bits(3, 6); // Intra16x16DCLevel coeff_token, nC 16 (left is I_PCM): TotalCoeff 0
+
+        // Intra16x16DCLevel coeff_token, nC 16 (left is I_PCM): TotalCoeff 0; in 4:4:4 also Cb's and Cr's.
+        for (int c = 0; c < (chromaFormat == 3 ? 3 : 1); c++)
+        {
+            w.Bits(3, 6);
+        }
+
         w.Trailing();
         return w;
     }
 
     /// <summary>The same two macroblocks with CABAC; each context as 9.3.3.1 derives it.</summary>
-    private static BitWriter CabacSlice(bool chroma422, int bitDepth, int[] values)
+    private static BitWriter CabacSlice(int chromaFormat, int bitDepth, int[] values)
     {
         var w = SliceHeader();
         w.AlignWith(1); // cabac_alignment_one_bit
@@ -153,7 +176,7 @@ public class H264PcmTests
         // Macroblock 0: mb_type bin 0 (no neighbours: ctxIdx 3), then the terminate bin 1 for I_PCM.
         e.Decision(3, 1);
         e.Terminate(1);
-        PcmSamples(w, chroma422, bitDepth, values);
+        PcmSamples(w, chromaFormat, bitDepth, values);
         e.InitEngine();
         e.Terminate(0); // end_of_slice_flag
 
@@ -165,9 +188,19 @@ public class H264PcmTests
         e.Decision(7, 0);
         e.Decision(9, 1);
         e.Decision(10, 0);
-        e.Decision(64, 0); // intra_chroma_pred_mode 0: I_PCM and missing neighbours both count 0
+        if (chromaFormat != 3)
+        {
+            e.Decision(64, 0); // intra_chroma_pred_mode 0: I_PCM and missing neighbours both count 0
+        }
+
         e.Decision(60, 0); // mb_qp_delta 0: the previous macroblock is I_PCM
         e.Decision(85 + 3, 0); // DC coded_block_flag 0: left I_PCM counts 1, the missing top (intra) 1
+        if (chromaFormat == 3)
+        {
+            e.Decision(460 + 3, 0); // Cb's (ctxBlockCat 6) and Cr's (10), the same way
+            e.Decision(472 + 3, 0);
+        }
+
         e.Terminate(1); // end_of_slice_flag; the flush ends with rbsp_stop_one_bit
         w.AlignWith(0);
         return w;

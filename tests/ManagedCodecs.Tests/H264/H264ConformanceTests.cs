@@ -123,6 +123,6 @@ public class H264ConformanceTests
         }
 
         var avcC = video.CodecPrivate.Span;
-        return avcC.Length > 1 && avcC[1] is 66 or 77 or 100 or 110 or 122;
+        return avcC.Length > 1 && avcC[1] is 66 or 77 or 100 or 110 or 122 or 244;
     }
 }

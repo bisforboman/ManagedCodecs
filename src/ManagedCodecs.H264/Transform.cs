@@ -369,6 +369,44 @@ internal static class Transform
         }
     }
 
+    /// <summary>
+    /// The residual of a lossless macroblock (TransformBypassModeFlag, 8.5.12.1 and 8.5.15): the
+    /// levels <paramref name="r"/> themselves (<paramref name="width"/> x <paramref name="height"/>,
+    /// row-major), added to the prediction. Intra blocks predicted vertically or horizontally first
+    /// sum their residual down each column (<paramref name="dpcm"/> <see cref="BypassDpcm.Vertical"/>)
+    /// or along each row (<see cref="BypassDpcm.Horizontal"/>), in place.
+    /// </summary>
+    public static void AddBypass<TPixel>(Span<int> r, int width, int height, BypassDpcm dpcm, Span<TPixel> dest, int stride, int bitDepth)
+        where TPixel : unmanaged, IBinaryInteger<TPixel>
+    {
+        if (dpcm == BypassDpcm.Vertical)
+        {
+            for (int i = width; i < width * height; i++)
+            {
+                r[i] += r[i - width];
+            }
+        }
+        else if (dpcm == BypassDpcm.Horizontal)
+        {
+            for (int y = 0; y < height; y++)
+            {
+                for (int x = 1; x < width; x++)
+                {
+                    r[(y * width) + x] += r[(y * width) + x - 1];
+                }
+            }
+        }
+
+        int max = Samples.Max<TPixel>(bitDepth);
+        for (int y = 0; y < height; y++)
+        {
+            for (int x = 0; x < width; x++)
+            {
+                AddClipped(dest, (y * stride) + x, r[(y * width) + x], max);
+            }
+        }
+    }
+
     private static void AddClipped<TPixel>(Span<TPixel> dest, int index, int residual, int max)
         where TPixel : unmanaged, IBinaryInteger<TPixel> =>
         dest[index] = TPixel.CreateTruncating(Math.Clamp(int.CreateTruncating(dest[index]) + residual, 0, max));
@@ -400,4 +438,12 @@ internal static class Transform
             f[12 + j] = t0 - t1 + t2 - t3;
         }
     }
+}
+
+/// <summary>The direction a lossless intra residual is summed in (8.5.15), if any.</summary>
+internal enum BypassDpcm
+{
+    None,
+    Vertical,
+    Horizontal,
 }

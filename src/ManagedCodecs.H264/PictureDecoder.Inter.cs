@@ -279,7 +279,9 @@ internal sealed partial class PictureDecoder<TPixel>
     /// </summary>
     private void DecodeInterResidual(SliceState slice, BitReader r, int mbAddr, bool noPartitionBelow8x8)
     {
-        int cbp = slice.Cabac is { } cabac ? CabacCbp(cabac, mbAddr) : CavlcTables.CodedBlockPatternInter[r.ReadUe(47, "coded_block_pattern")];
+        int cbp = slice.Cabac is { } cabac
+            ? CabacCbp(cabac, mbAddr)
+            : (_chroma444 ? CavlcTables.CodedBlockPatternInter444 : CavlcTables.CodedBlockPatternInter)[r.ReadUe(_chroma444 ? 15 : 47, "coded_block_pattern")];
         int cbpLuma = cbp & 15;
         int cbpChroma = cbp >> 4;
         _cbp[mbAddr] = (byte)cbp;
@@ -302,33 +304,55 @@ internal sealed partial class PictureDecoder<TPixel>
 
         _qp[mbAddr] = slice.Qp;
 
+        var target = PictureTarget(mbAddr);
+        AddInterResidual(slice, mbAddr, target, cbpLuma, 0);
+        if (_chroma444)
+        {
+            AddInterResidual(slice, mbAddr, target, cbpLuma, 1);
+            AddInterResidual(slice, mbAddr, target, cbpLuma, 2);
+            return;
+        }
+
+        ReconstructChroma(slice, mbAddr, target, residual, cbpChroma, intraMode: -1, default);
+    }
+
+    /// <summary>The residual of an inter macroblock's luma, or in 4:4:4 of its Cb or Cr, added to the prediction.</summary>
+    private void AddInterResidual(SliceState slice, int mbAddr, MbTarget target, int cbpLuma, int component)
+    {
+        int qp = QpPrime(slice, mbAddr, component);
         if (_transform8x8[mbAddr])
         {
             for (int b8 = 0; b8 < 4; b8++)
             {
-                AddLuma8x8Residual(slice, mbAddr, PictureTarget(mbAddr), residual, cbpLuma, b8, slice.Qp + _qpBdOffset);
+                AddLuma8x8Residual(slice, mbAddr, target, cbpLuma, b8, qp, component);
             }
 
-            ReconstructChroma(slice, mbAddr, PictureTarget(mbAddr), residual, cbpChroma, intraMode: -1, default);
             return;
         }
 
-        var (origin, stride) = LumaPlace(mbAddr);
+        var (plane, origin, stride) = ComponentOf(target, component);
+        var counts = _totalCoeff[component];
+        var residual = _residuals[component];
         for (int i = 0; i < 16; i++)
         {
             int x = i & 3;
             int y = i >> 2;
-            if ((cbpLuma & (1 << (((y >> 1) * 2) + (x >> 1)))) == 0 || _totalCoeffLuma[(mbAddr * 16) + i] == 0)
+            if ((cbpLuma & (1 << (((y >> 1) * 2) + (x >> 1)))) == 0 || counts[(mbAddr * 16) + i] == 0)
             {
                 continue;
             }
 
             var block = residual.Luma[i];
-            Transform.Dequantize(block, slice.Qp + _qpBdOffset, skipDc: false, slice.Scaling.LevelScale4x4(3));
-            Transform.InverseTransformAdd(block, PlaneY.AsSpan(origin + (y * 4 * stride) + (x * 4)), stride, _bitDepth);
-        }
+            var dest = plane.AsSpan(origin + (y * 4 * stride) + (x * 4));
+            if (IsLossless(mbAddr))
+            {
+                Transform.AddBypass(block, 4, 4, BypassDpcm.None, dest, stride, _bitDepth);
+                continue;
+            }
 
-        ReconstructChroma(slice, mbAddr, PictureTarget(mbAddr), residual, cbpChroma, intraMode: -1, default);
+            Transform.Dequantize(block, qp, skipDc: false, slice.Scaling.LevelScale4x4(3 + component)); // Inter Y, Cb or Cr
+            Transform.InverseTransformAdd(block, dest, stride, _bitDepth);
+        }
     }
 
     private void StartInterMacroblock(SliceState slice, int mbAddr, MbKind kind)
@@ -472,72 +496,64 @@ internal sealed partial class PictureDecoder<TPixel>
         // Where the partition is, in the coordinates of the references (a field macroblock's are
         // its field's), and where its samples go in the picture.
         var (lumaX, lumaY, lumaOut, lumaStride, chromaOut, chromaStride) = PartitionPlace(mbAddr, x, y);
-
-        // 4:2:2 chroma has the luma's rows: its vertical vector, in eighth samples, is the luma's doubled.
-        bool tall = _mbHeightC == 16;
-        int chromaX = lumaX / 2;
-        int chromaY = tall ? lumaY : lumaY / 2;
-        int ch = tall ? h : h / 2;
         bool bi = ref0 is not null && ref1 is not null;
         bool field = IsMbaffFieldMb(mbAddr);
         int refIdx0 = _refIdx[0][part];
         int refIdx1 = _refIdx[1][part];
         var weighting = Weighting(slice, field ? refIdx0 >> 1 : refIdx0, field ? refIdx1 >> 1 : refIdx1, bi, mbAddr, ref0, ref1);
 
-        if (!bi)
+        for (int c = 0; c < 3; c++)
         {
-            int list = ref0 is null ? 1 : 0;
-            var reference = (ref0 ?? ref1)!;
-            int mvX = _mvX[list][block];
-            int mvY = _mvY[list][block];
-            int mvCY = ChromaMvY(mvY, mbAddr, reference);
-            if (weighting.IsDefault)
+            // A chroma block's size: 4:2:0 halves both sides, 4:2:2 the width, 4:4:4 neither.
+            bool lumaLike = c == 0 || _chroma444;
+            int cw = lumaLike ? w : w / 2;
+            int ch = lumaLike || _mbHeightC == 16 ? h : h / 2;
+            var output = Picture.Plane<TPixel>(c).AsSpan(c == 0 ? lumaOut : chromaOut);
+            int outputStride = c == 0 ? lumaStride : chromaStride;
+            if (!bi)
             {
-                InterPrediction.PredictLumaBlock(reference, lumaX, lumaY, w, h, mvX, mvY, PlaneY.AsSpan(lumaOut), lumaStride);
-                InterPrediction.PredictChromaBlock(reference, 1, chromaX, chromaY, w / 2, ch, mvX, mvCY, PlaneCb.AsSpan(chromaOut), chromaStride);
-                InterPrediction.PredictChromaBlock(reference, 2, chromaX, chromaY, w / 2, ch, mvX, mvCY, PlaneCr.AsSpan(chromaOut), chromaStride);
-                return;
+                int list = ref0 is null ? 1 : 0;
+                var reference = (ref0 ?? ref1)!;
+                if (weighting.IsDefault)
+                {
+                    PredictComponent(reference, c, mbAddr, lumaX, lumaY, w, h, _mvX[list][block], _mvY[list][block], output, outputStride);
+                    continue;
+                }
+
+                PredictComponent(reference, c, mbAddr, lumaX, lumaY, w, h, _mvX[list][block], _mvY[list][block], _predictionL0, 16);
+                WeightOne(_predictionL0, 16, cw, ch, output, outputStride, weighting, list, c);
+                continue;
             }
 
-            InterPrediction.PredictLumaBlock(reference, lumaX, lumaY, w, h, mvX, mvY, _predictionL0, 16);
-            WeightOne(_predictionL0, 16, w, h, PlaneY.AsSpan(lumaOut), lumaStride, weighting, list, 0);
-            for (int c = 1; c <= 2; c++)
-            {
-                InterPrediction.PredictChromaBlock(reference, c, chromaX, chromaY, w / 2, ch, mvX, mvCY, _predictionL0, 8);
-                WeightOne(_predictionL0, 8, w / 2, ch, Picture.Plane<TPixel>(c).AsSpan(chromaOut), chromaStride, weighting, list, c);
-            }
-
-            return;
-        }
-
-        InterPrediction.PredictLumaBlock(ref0!, lumaX, lumaY, w, h, _mvX[0][block], _mvY[0][block], _predictionL0, 16);
-        InterPrediction.PredictLumaBlock(ref1!, lumaX, lumaY, w, h, _mvX[1][block], _mvY[1][block], _predictionL1, 16);
-        var luma = PlaneY.AsSpan(lumaOut);
-        if (weighting.IsDefault)
-        {
-            InterPrediction.AverageBlock(_predictionL0, _predictionL1, 16, w, h, luma, lumaStride);
-        }
-        else
-        {
-            WeightBoth(_predictionL0, _predictionL1, 16, w, h, luma, lumaStride, weighting, 0);
-        }
-
-        int mvCY0 = ChromaMvY(_mvY[0][block], mbAddr, ref0!);
-        int mvCY1 = ChromaMvY(_mvY[1][block], mbAddr, ref1!);
-        for (int c = 1; c <= 2; c++)
-        {
-            InterPrediction.PredictChromaBlock(ref0!, c, chromaX, chromaY, w / 2, ch, _mvX[0][block], mvCY0, _predictionL0, 8);
-            InterPrediction.PredictChromaBlock(ref1!, c, chromaX, chromaY, w / 2, ch, _mvX[1][block], mvCY1, _predictionL1, 8);
-            var chroma = Picture.Plane<TPixel>(c).AsSpan(chromaOut);
+            PredictComponent(ref0!, c, mbAddr, lumaX, lumaY, w, h, _mvX[0][block], _mvY[0][block], _predictionL0, 16);
+            PredictComponent(ref1!, c, mbAddr, lumaX, lumaY, w, h, _mvX[1][block], _mvY[1][block], _predictionL1, 16);
             if (weighting.IsDefault)
             {
-                InterPrediction.AverageBlock(_predictionL0, _predictionL1, 8, w / 2, ch, chroma, chromaStride);
+                InterPrediction.AverageBlock(_predictionL0, _predictionL1, 16, cw, ch, output, outputStride);
             }
             else
             {
-                WeightBoth(_predictionL0, _predictionL1, 8, w / 2, ch, chroma, chromaStride, weighting, c);
+                WeightBoth(_predictionL0, _predictionL1, 16, cw, ch, output, outputStride, weighting, c);
             }
         }
+    }
+
+    /// <summary>
+    /// Motion compensation of one component of a w x h luma partition at reference position
+    /// (lumaX, lumaY): luma, and in 4:4:4 Cb and Cr, with the luma filter (8.4.2.2.1); 4:2:0 and
+    /// 4:2:2 chroma with the chroma one, at its position and size (8.4.2.2.2).
+    /// </summary>
+    private void PredictComponent(Picture reference, int c, int mbAddr, int lumaX, int lumaY, int w, int h, int mvX, int mvY, Span<TPixel> output, int outputStride)
+    {
+        if (c == 0 || _chroma444)
+        {
+            InterPrediction.PredictLumaBlock(reference, lumaX, lumaY, w, h, mvX, mvY, output, outputStride, c);
+            return;
+        }
+
+        // 4:2:2 chroma has the luma's rows: its vertical vector, in eighth samples, is the luma's doubled.
+        bool tall = _mbHeightC == 16;
+        InterPrediction.PredictChromaBlock(reference, c, lumaX / 2, tall ? lumaY : lumaY / 2, w / 2, tall ? h : h / 2, mvX, ChromaMvY(mvY, mbAddr, reference), output, outputStride);
     }
 
     /// <summary>
@@ -550,7 +566,7 @@ internal sealed partial class PictureDecoder<TPixel>
         var (luma, lumaStride) = LumaPlace(mbAddr);
         var (chroma, chromaStride) = ChromaPlace(mbAddr);
         int lumaOut = luma + (y * lumaStride) + x;
-        int chromaOut = chroma + ((_mbHeightC == 16 ? y : y / 2) * chromaStride) + (x / 2);
+        int chromaOut = chroma + ((_mbHeightC == 16 ? y : y / 2) * chromaStride) + (_mbWidthC == 16 ? x : x / 2);
         if (!_pairSlots)
         {
             return (((mbAddr % _widthInMbs) * 16) + x, ((mbAddr / _widthInMbs) * 16) + y, lumaOut, lumaStride, chromaOut, chromaStride);

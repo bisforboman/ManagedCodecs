@@ -262,7 +262,7 @@ public sealed class H264Decoder : IVideoDecoder
         }
 
         if (_decoder is null || _decoder.Sps.WidthInMbs != sps.WidthInMbs || _decoder.Sps.HeightInMbs != sps.HeightInMbs
-            || _decoder.Sps.MbHeightC != sps.MbHeightC || _decoder.Sps.BitDepthLuma != sps.BitDepthLuma)
+            || _decoder.Sps.ChromaFormatIdc != sps.ChromaFormatIdc || _decoder.Sps.BitDepthLuma != sps.BitDepthLuma)
         {
             _decoder = sps.BitDepthLuma > 8
                 ? new PictureDecoder<ushort>(sps) { Statistics = MbaffStatistics, FieldStatistics = FieldStatistics }
@@ -334,12 +334,13 @@ public sealed class H264Decoder : IVideoDecoder
     {
         // A picture whose frame was returned by the previous call may be reused: borrowed frames
         // are valid until the next call. One waiting in the output queue may not.
-        bool Fits(Picture p) => p.WidthInMbs == sps.WidthInMbs && p.HeightInMbs == sps.HeightInMbs && p.MbHeightC == sps.MbHeightC && p.BitDepth == sps.BitDepthLuma;
+        bool Fits(Picture p) => p.WidthInMbs == sps.WidthInMbs && p.HeightInMbs == sps.HeightInMbs && p.MbHeightC == sps.MbHeightC
+            && p.MbWidthC == sps.MbWidthC && p.BitDepth == sps.BitDepthLuma;
         _pictures.RemoveAll(p => !Fits(p) && !_references.Contains(p) && !_output.Holds(p));
         var picture = _pictures.Find(p => Fits(p) && !_references.Contains(p) && !_output.Holds(p));
         if (picture is null)
         {
-            picture = new Picture(sps.WidthInMbs, sps.HeightInMbs, sps.MbHeightC, sps.BitDepthLuma);
+            picture = new Picture(sps.WidthInMbs, sps.HeightInMbs, sps.MbHeightC, sps.BitDepthLuma, sps.MbWidthC);
             _pictures.Add(picture);
         }
 
@@ -392,7 +393,7 @@ public sealed class H264Decoder : IVideoDecoder
         var (left, _, top, _) = sps.Crop;
         for (int plane = 0; plane < 3; plane++)
         {
-            int shiftX = plane == 0 ? 0 : 1;
+            int shiftX = plane == 0 || picture.MbWidthC == 16 ? 0 : 1;
             int shiftY = plane == 0 || picture.MbHeightC == 16 ? 0 : 1;
             int stride = plane == 0 ? picture.LumaStride : picture.ChromaStride;
             var (width, height) = format.PlaneSize(plane, sps.Width, sps.Height);
@@ -418,7 +419,7 @@ public sealed class H264Decoder : IVideoDecoder
     private static VideoFrame Borrow(Picture picture, SequenceParameterSet sps)
     {
         var (left, _, top, _) = sps.Crop;
-        int chromaOffset = ((picture.MbHeightC == 16 ? top : top >> 1) * picture.ChromaStride) + (left >> 1);
+        int chromaOffset = ((picture.MbHeightC == 16 ? top : top >> 1) * picture.ChromaStride) + (picture.MbWidthC == 16 ? left : left >> 1);
         return new VideoFrame(
             sps.Width,
             sps.Height,
@@ -428,8 +429,10 @@ public sealed class H264Decoder : IVideoDecoder
             [(top * picture.LumaStride) + left, chromaOffset, chromaOffset]);
     }
 
-    private static PixelFormat FormatOf(Picture picture) => (picture.MbHeightC, picture.BitDepth) switch
+    private static PixelFormat FormatOf(Picture picture) => (picture.MbWidthC == 16 ? 3 : picture.MbHeightC, picture.BitDepth) switch
     {
+        (3, 8) => PixelFormat.Yuv444P,
+        (3, _) => PixelFormat.Yuv444P10,
         (16, 8) => PixelFormat.Yuv422P,
         (16, _) => PixelFormat.Yuv422P10,
         (_, 8) => PixelFormat.Yuv420P,
@@ -441,14 +444,14 @@ public sealed class H264Decoder : IVideoDecoder
 
     private static void CheckSupported(SequenceParameterSet sps)
     {
-        if (sps.ChromaFormatIdc is not (1 or 2))
+        if (sps.ChromaFormatIdc == 0)
         {
-            throw new NotSupportedException($"chroma_format_idc {sps.ChromaFormatIdc} is not supported (4:2:0 and 4:2:2 only).");
+            throw new NotSupportedException("Monochrome video (chroma_format_idc 0) is not supported.");
         }
 
-        if (sps.SeparateColourPlanes || sps.TransformBypass)
+        if (sps.SeparateColourPlanes)
         {
-            throw new NotSupportedException("Separate colour planes and lossless (transform bypass) macroblocks are not supported.");
+            throw new NotSupportedException("Separate colour planes (separate_colour_plane_flag) are not supported.");
         }
 
         if (sps.BitDepthLuma is not (8 or 10) || sps.BitDepthChroma != sps.BitDepthLuma)

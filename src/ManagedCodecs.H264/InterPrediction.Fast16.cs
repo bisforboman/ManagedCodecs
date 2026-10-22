@@ -17,13 +17,13 @@ internal static partial class InterPrediction
     // Rows of the intermediate planes (first, second, b1): up to 16 samples, plus a 4-lane load's slack.
     private const int Plane16Stride = 16;
 
-    /// <summary>Same output as <see cref="PredictLumaReference{TPixel}(Picture, int, int, int, int, int, int, Span{TPixel}, int)"/> for ushort planes.</summary>
+    /// <summary>Same output as <see cref="PredictLumaReference{TPixel}(Picture, int, int, int, int, int, int, Span{TPixel}, int, int)"/> for ushort planes.</summary>
     [SkipLocalsInit]
-    public static void PredictLuma16(Picture reference, int x, int y, int width, int height, int mvX, int mvY, Span<ushort> output, int outputStride)
+    public static void PredictLuma16(Picture reference, int x, int y, int width, int height, int mvX, int mvY, Span<ushort> output, int outputStride, int component = 0)
     {
         int stride = reference.LumaStride;
         int maxY = (reference.HeightInMbs * 16) - 1;
-        ReadOnlySpan<ushort> plane = reference.Plane<ushort>(0);
+        ReadOnlySpan<ushort> plane = reference.Plane<ushort>(component);
         if (reference.Parity >= 0)
         {
             plane = plane[(reference.Parity * stride)..];

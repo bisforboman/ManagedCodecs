@@ -48,9 +48,13 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
     private readonly int _widthInMbs;
     private readonly int _mbCount;
 
-    // MbHeightC (8 or 16) and the chroma 4x4 blocks of a component (4 or 8).
+    // MbWidthC and MbHeightC (8 or 16) and the chroma 4x4 blocks of a component (4 or 8). In
+    // 4:4:4 (ChromaArrayType 3) Cb and Cr are coded and reconstructed as luma is, each with its
+    // own coefficients, QP and scaling lists, so the per-component state below has three entries.
+    private readonly int _mbWidthC;
     private readonly int _mbHeightC;
     private readonly int _chromaBlocks;
+    private readonly bool _chroma444;
 
     // Bits per sample (8 for byte samples, more for ushort ones), and QpBdOffset (7-4): QP_Y runs
     // from -QpBdOffset to 51, dequantization uses QP'Y = QP_Y + QpBdOffset (8.5.12.1), the
@@ -64,15 +68,18 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
     private readonly int[] _qp;
     private readonly bool[] _transform8x8;
 
-    // Per 4x4 block.
+    // Per 4x4 block: TotalCoeff of luma (and in 4:4:4 of Cb and Cr, as luma blocks), of 4:2:0 and 4:2:2 chroma.
+    private readonly byte[][] _totalCoeff;
     private readonly byte[] _totalCoeffLuma;
     private readonly byte[] _totalCoeffChroma;
     private readonly sbyte[] _intra4x4Mode;
 
     private readonly List<SliceInfo> _slices = [];
 
-    // Coefficients of the macroblock being decoded, reused from one macroblock to the next.
+    // Coefficients of the macroblock being decoded, reused from one macroblock to the next; in
+    // 4:4:4 also the luma-style levels of Cb and Cr.
     private readonly Residual _residual = new();
+    private readonly Residual[] _residuals;
 
     // The CABAC engine and contexts, reinitialized for every CABAC slice.
     private readonly Cabac _cabac = new();
@@ -85,8 +92,10 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
         Sps = sps;
         _widthInMbs = sps.WidthInMbs;
         _mbCount = sps.WidthInMbs * sps.HeightInMbs;
+        _mbWidthC = sps.MbWidthC;
         _mbHeightC = sps.MbHeightC;
         _chromaBlocks = _mbHeightC / 2;
+        _chroma444 = sps.ChromaFormatIdc == 3;
         _bitDepth = sps.BitDepthLuma;
         _qpBdOffset = 6 * (_bitDepth - 8);
 
@@ -95,7 +104,9 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
         _kind = new MbKind[_mbCount];
         _qp = new int[_mbCount];
         _transform8x8 = new bool[_mbCount];
-        _totalCoeffLuma = new byte[_mbCount * 16];
+        _totalCoeff = _chroma444 ? [new byte[_mbCount * 16], new byte[_mbCount * 16], new byte[_mbCount * 16]] : [new byte[_mbCount * 16], [], []];
+        _totalCoeffLuma = _totalCoeff[0];
+        _residuals = _chroma444 ? [_residual, new(), new()] : [_residual];
         _totalCoeffChroma = new byte[_mbCount * 16];
         _intra4x4Mode = new sbyte[_mbCount * 16];
 
@@ -143,7 +154,9 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
         Array.Clear(_kind);
         Array.Clear(_qp);
         Array.Clear(_transform8x8);
-        Array.Clear(_totalCoeffLuma);
+        Array.Clear(_totalCoeff[0]);
+        Array.Clear(_totalCoeff[1]);
+        Array.Clear(_totalCoeff[2]);
         Array.Clear(_totalCoeffChroma);
         Array.Clear(_intra4x4Mode);
         Array.Fill(_fieldMb, fieldParity >= 0); // a frame coded as fields: all field macroblocks, by pair
@@ -162,8 +175,7 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
             _kind[mb] = MbKind.NotDecoded;
             _qp[mb] = 0;
             _transform8x8[mb] = false;
-            _totalCoeffLuma.AsSpan(mb * 16, 16).Clear();
-            _totalCoeffChroma.AsSpan(mb * 16, 16).Clear();
+            ClearCounts(mb);
             _intra4x4Mode.AsSpan(mb * 16, 16).Clear();
             _cbp[mb] = 0;
             _chromaPredMode[mb] = 0;
@@ -355,11 +367,11 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
     private static (int X, int Y) BlockPosition(int index) =>
         ((((index >> 2) & 1) * 2) + (index & 1), (((index >> 3) & 1) * 2) + ((index >> 1) & 1));
 
-    /// <summary>nC for a luma 4x4 block (9.2.1).</summary>
-    private int LumaNc(int mbAddr, int x, int y) =>
+    /// <summary>nC for a luma 4x4 block (9.2.1), or in 4:4:4 a Cb or Cr one (<paramref name="component"/> 1 or 2).</summary>
+    private int LumaNc(int mbAddr, int x, int y, int component = 0) =>
         CombineNc(
-            NeighborTotalCoeff(mbAddr, (x * 4) - 1, y * 4, chroma: false, 0),
-            NeighborTotalCoeff(mbAddr, x * 4, (y * 4) - 1, chroma: false, 0));
+            NeighborTotalCoeff(mbAddr, (x * 4) - 1, y * 4, chroma: false, component),
+            NeighborTotalCoeff(mbAddr, x * 4, (y * 4) - 1, chroma: false, component));
 
     /// <summary>nC for a chroma AC 4x4 block of component <paramref name="c"/> (9.2.1).</summary>
     private int ChromaNc(int mbAddr, int c, int x, int y) =>
@@ -375,11 +387,11 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
         _ => 0,
     };
 
-    /// <summary>TotalCoeff of the 4x4 block covering a location, or -1 when unavailable.</summary>
+    /// <summary>TotalCoeff of the 4x4 block covering a location, or -1 when unavailable (luma-shaped blocks: of luma or of a 4:4:4 chroma component).</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private int NeighborTotalCoeff(int mbAddr, int x, int y, bool chroma, int component)
     {
-        var (n, xW, yW) = chroma ? Neighbor(mbAddr, x, y, 8, _mbHeightC) : Neighbor(mbAddr, x, y);
+        var (n, xW, yW) = chroma ? Neighbor(mbAddr, x, y, _mbWidthC, _mbHeightC) : Neighbor(mbAddr, x, y);
         if (n < 0)
         {
             return -1;
@@ -389,7 +401,7 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
         int by = yW / 4;
         return chroma
             ? _totalCoeffChroma[(n * 16) + (component * 8) + (by * 2) + bx]
-            : _totalCoeffLuma[(n * 16) + (by * 4) + bx];
+            : _totalCoeff[component][(n * 16) + (by * 4) + bx];
     }
 
     // ---- Macroblock layer (7.3.5) ----
@@ -444,7 +456,7 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
             // Table 7-11: mb_type 1..24 encode the prediction mode and both CBP parts.
             int t = mbType - 1;
             predMode16x16 = t % 4;
-            cbpChroma = (t / 4) % 3;
+            cbpChroma = _chroma444 ? 0 : (t / 4) % 3; // 4:4:4 has no chroma part (7.4.5)
             cbpLuma = t >= 12 ? 15 : 0;
             modes.Fill(-1);
         }
@@ -481,12 +493,15 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
             cbpChroma = 0;
         }
 
-        int chromaPredMode = slice.Cabac is { } cabac ? CabacChromaPredMode(cabac, mbAddr) : r.ReadUe(3, "intra_chroma_pred_mode");
+        // 4:4:4 predicts Cb and Cr with the luma modes: there is no intra_chroma_pred_mode.
+        int chromaPredMode = _chroma444 ? 0 : slice.Cabac is { } cabac ? CabacChromaPredMode(cabac, mbAddr) : r.ReadUe(3, "intra_chroma_pred_mode");
         _chromaPredMode[mbAddr] = (byte)chromaPredMode;
 
         if (!is16x16)
         {
-            int cbp = slice.Cabac is { } cabacCbp ? CabacCbp(cabacCbp, mbAddr) : CavlcTables.CodedBlockPatternIntra[r.ReadUe(47, "coded_block_pattern")];
+            int cbp = slice.Cabac is { } cabacCbp
+                ? CabacCbp(cabacCbp, mbAddr)
+                : (_chroma444 ? CavlcTables.CodedBlockPatternIntra444 : CavlcTables.CodedBlockPatternIntra)[r.ReadUe(_chroma444 ? 15 : 47, "coded_block_pattern")];
             cbpLuma = cbp & 15;
             cbpChroma = cbp >> 4;
         }
@@ -510,8 +525,17 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
         var neighbors = IntraMbNeighbors(slice, mbAddr);
         SetLeftRows(slice, mbAddr, neighbors.A);
         var target = _mbaff ? GatherMbaffNeighbors(mbAddr) : PictureTarget(mbAddr);
-        ReconstructIntraLuma(slice, mbAddr, target, residual, is16x16, predMode16x16, cbpLuma, neighbors);
-        ReconstructChroma(slice, mbAddr, target, residual, cbpChroma, intraMode: chromaPredMode, neighbors);
+        ReconstructIntraLuma(slice, mbAddr, target, is16x16, predMode16x16, cbpLuma, neighbors, 0);
+        if (_chroma444)
+        {
+            ReconstructIntraLuma(slice, mbAddr, target, is16x16, predMode16x16, cbpLuma, neighbors, 1);
+            ReconstructIntraLuma(slice, mbAddr, target, is16x16, predMode16x16, cbpLuma, neighbors, 2);
+        }
+        else
+        {
+            ReconstructChroma(slice, mbAddr, target, residual, cbpChroma, intraMode: chromaPredMode, neighbors);
+        }
+
         if (_mbaff)
         {
             ScatterMbaff(mbAddr, target);
@@ -540,6 +564,11 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
         _intra4x4Mode.AsSpan(mbAddr * 16, 16).Fill(-1);
         _totalCoeffLuma.AsSpan(mbAddr * 16, 16).Fill(16);
         _totalCoeffChroma.AsSpan(mbAddr * 16, 16).Fill(16);
+        if (_chroma444)
+        {
+            _totalCoeff[1].AsSpan(mbAddr * 16, 16).Fill(16);
+            _totalCoeff[2].AsSpan(mbAddr * 16, 16).Fill(16);
+        }
 
         // For the CABAC contexts of later macroblocks I_PCM counts as fully coded.
         _cbp[mbAddr] = 15 | (2 << 4);
@@ -566,7 +595,7 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
         {
             for (int y = 0; y < _mbHeightC; y++)
             {
-                for (int x = 0; x < 8; x++)
+                for (int x = 0; x < _mbWidthC; x++)
                 {
                     plane[chromaOrigin + (y * chromaStride) + x] = TPixel.CreateTruncating(r.ReadBits(_bitDepth));
                 }
@@ -594,6 +623,11 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
     {
         _totalCoeffLuma.AsSpan(mbAddr * 16, 16).Clear();
         _totalCoeffChroma.AsSpan(mbAddr * 16, 16).Clear();
+        if (_chroma444)
+        {
+            _totalCoeff[1].AsSpan(mbAddr * 16, 16).Clear();
+            _totalCoeff[2].AsSpan(mbAddr * 16, 16).Clear();
+        }
     }
 
     /// <summary>Intra4x4PredMode prediction (8.3.1.1).</summary>
@@ -657,15 +691,16 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
         block.Clear();
         if (slice.Cabac is { } c)
         {
-            int inc = category == BlockCategory.Luma8x8 ? 0 : CodedBlockFlagInc(mbAddr, category, x, y, component);
-            return CabacResidualBlock(c, category, inc, IsFieldMb(mbAddr), maxNumCoeff, block, scan);
+            // 8x8 blocks have a coded_block_flag of their own only in 4:4:4 (7.3.5.3.3).
+            int inc = category == BlockCategory.Luma8x8 && !_chroma444 ? -1 : CodedBlockFlagInc(mbAddr, category, x, y, component);
+            return CabacResidualBlock(c, category, component, inc, IsFieldMb(mbAddr), maxNumCoeff, block, scan);
         }
 
         int nC = category switch
         {
             BlockCategory.ChromaDc => _mbHeightC == 8 ? Cavlc.ChromaDcNc : Cavlc.ChromaDc422Nc,
             BlockCategory.ChromaAc => ChromaNc(mbAddr, component, x, y),
-            _ => LumaNc(mbAddr, x, y),
+            _ => LumaNc(mbAddr, x, y, component),
         };
         return Cavlc.ReadResidualBlock(r, nC, maxNumCoeff, block, scan);
     }
@@ -684,45 +719,24 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
 
     private void ReadResidual(SliceState slice, BitReader r, int mbAddr, Residual residual, bool is16x16, int cbpLuma, int cbpChroma)
     {
-        Span<byte> lumaCounts = _totalCoeffLuma.AsSpan(mbAddr * 16, 16);
         Span<byte> chromaCounts = _totalCoeffChroma.AsSpan(mbAddr * 16, 16);
-        lumaCounts.Clear();
         chromaCounts.Clear();
-
-        // Field macroblocks use the field scans (8.5.6).
-        bool field = IsFieldMb(mbAddr);
-        var scan4x4 = field ? Field4x4 : Transform.ZigZag4x4;
-        var scanAc = field ? Field4x4Ac : ZigZag4x4Ac;
-        if (is16x16 && ReadBlock(slice, r, mbAddr, BlockCategory.LumaDc, 0, 0, 0, 16, residual.LumaDc, scan4x4) != 0)
+        ReadResidualLuma(slice, r, mbAddr, residual, is16x16, cbpLuma, 0);
+        if (_chroma444)
         {
-            _dcCoded[mbAddr] |= 1;
-        }
-
-        if (_transform8x8[mbAddr])
-        {
-            ReadResidual8x8(slice, r, mbAddr, residual, cbpLuma);
-        }
-        else
-        {
-            var scan = is16x16 ? scanAc : scan4x4;
-            for (int idx = 0; idx < 16; idx++)
-            {
-                if ((cbpLuma & (1 << (idx >> 2))) == 0)
-                {
-                    continue;
-                }
-
-                // Reconstruction reads the counts and leaves blocks without coefficients alone.
-                var (x, y) = BlockPosition(idx);
-                var category = is16x16 ? BlockCategory.LumaAc : BlockCategory.Luma4x4;
-                lumaCounts[(y * 4) + x] = (byte)ReadBlock(slice, r, mbAddr, category, x, y, 0, scan.Length, residual.Luma[(y * 4) + x], scan);
-            }
+            // residual_luma again for Cb and Cr (7.3.5.3), under the luma coded_block_pattern.
+            ReadResidualLuma(slice, r, mbAddr, _residuals[1], is16x16, cbpLuma, 1);
+            ReadResidualLuma(slice, r, mbAddr, _residuals[2], is16x16, cbpLuma, 2);
+            return;
         }
 
         if (cbpChroma == 0)
         {
             return;
         }
+
+        // Field macroblocks use the field scans (8.5.6).
+        var scanAc = IsFieldMb(mbAddr) ? Field4x4Ac : ZigZag4x4Ac;
 
         for (int c = 0; c < 2; c++)
         {
@@ -749,13 +763,52 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
     }
 
     /// <summary>
-    /// The luma levels of a macroblock with 8x8 transforms: with CABAC one block of 64 per coded
-    /// 8x8 block, whose count stands for all four of its 4x4 blocks; with CAVLC four interleaved
-    /// 4x4 blocks (7.3.5.3), each keeping its own TotalCoeff for the nC of later blocks.
+    /// residual_luma (7.3.5.3) of <paramref name="component"/>: luma, or in 4:4:4 Cb (1) or Cr (2),
+    /// whose blocks are luma blocks of ctxBlockCat 6 to 9 and 10 to 13.
     /// </summary>
-    private void ReadResidual8x8(SliceState slice, BitReader r, int mbAddr, Residual residual, int cbpLuma)
+    private void ReadResidualLuma(SliceState slice, BitReader r, int mbAddr, Residual residual, bool is16x16, int cbpLuma, int component)
     {
-        Span<byte> counts = _totalCoeffLuma.AsSpan(mbAddr * 16, 16);
+        Span<byte> counts = _totalCoeff[component].AsSpan(mbAddr * 16, 16);
+        counts.Clear();
+
+        // Field macroblocks use the field scans (8.5.6).
+        bool field = IsFieldMb(mbAddr);
+        var scan4x4 = field ? Field4x4 : Transform.ZigZag4x4;
+        if (is16x16 && ReadBlock(slice, r, mbAddr, BlockCategory.LumaDc, 0, 0, component, 16, residual.LumaDc, scan4x4) != 0)
+        {
+            _dcCoded[mbAddr] |= (byte)(1 << component);
+        }
+
+        if (_transform8x8[mbAddr])
+        {
+            ReadResidual8x8(slice, r, mbAddr, residual, cbpLuma, component);
+            return;
+        }
+
+        var scan = is16x16 ? (field ? Field4x4Ac : ZigZag4x4Ac) : scan4x4;
+        for (int idx = 0; idx < 16; idx++)
+        {
+            if ((cbpLuma & (1 << (idx >> 2))) == 0)
+            {
+                continue;
+            }
+
+            // Reconstruction reads the counts and leaves blocks without coefficients alone.
+            var (x, y) = BlockPosition(idx);
+            var category = is16x16 ? BlockCategory.LumaAc : BlockCategory.Luma4x4;
+            counts[(y * 4) + x] = (byte)ReadBlock(slice, r, mbAddr, category, x, y, component, scan.Length, residual.Luma[(y * 4) + x], scan);
+        }
+    }
+
+    /// <summary>
+    /// The luma levels (or 4:4:4 Cb or Cr levels) of a macroblock with 8x8 transforms: with CABAC
+    /// one block of 64 per coded 8x8 block, whose count stands for all four of its 4x4 blocks;
+    /// with CAVLC four interleaved 4x4 blocks (7.3.5.3), each keeping its own TotalCoeff for the
+    /// nC of later blocks.
+    /// </summary>
+    private void ReadResidual8x8(SliceState slice, BitReader r, int mbAddr, Residual residual, int cbpLuma, int component)
+    {
+        Span<byte> counts = _totalCoeff[component].AsSpan(mbAddr * 16, 16);
         bool field = IsFieldMb(mbAddr);
         for (int b8 = 0; b8 < 4; b8++)
         {
@@ -769,7 +822,7 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
             int y8 = (b8 >> 1) * 2;
             if (slice.Cabac is not null)
             {
-                byte count = (byte)ReadBlock(slice, r, mbAddr, BlockCategory.Luma8x8, x8, y8, 0, 64, block, field ? Field8x8 : Transform.ZigZag8x8);
+                byte count = (byte)ReadBlock(slice, r, mbAddr, BlockCategory.Luma8x8, x8, y8, component, 64, block, field ? Field8x8 : Transform.ZigZag8x8);
                 counts[(y8 * 4) + x8] = count;
                 counts[(y8 * 4) + x8 + 1] = count;
                 counts[((y8 + 1) * 4) + x8] = count;
@@ -782,52 +835,104 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
             {
                 // Each 4x4 read clears nothing: it fills its own quarter of the 8x8 positions.
                 var (x, y) = BlockPosition((b8 * 4) + i4);
-                int nC = LumaNc(mbAddr, x, y);
+                int nC = LumaNc(mbAddr, x, y, component);
                 counts[(y * 4) + x] = (byte)Cavlc.ReadResidualBlock(r, nC, 16, block, (field ? CavlcField8x8Scan : Cavlc8x8Scan).AsSpan(i4 * 16, 16));
             }
         }
     }
 
-    /// <summary>Whether any of the four 4x4 blocks of 8x8 block <paramref name="b8"/> has coefficients.</summary>
-    private bool Has8x8Coefficients(int mbAddr, int b8)
+    /// <summary>Whether any of the four 4x4 blocks of 8x8 block <paramref name="b8"/> of a component has coefficients.</summary>
+    private bool Has8x8Coefficients(int mbAddr, int b8, int component = 0)
     {
+        var counts = _totalCoeff[component];
         int i = (mbAddr * 16) + ((b8 >> 1) * 8) + ((b8 & 1) * 2);
-        return (_totalCoeffLuma[i] | _totalCoeffLuma[i + 1] | _totalCoeffLuma[i + 4] | _totalCoeffLuma[i + 5]) != 0;
+        return (counts[i] | counts[i + 1] | counts[i + 4] | counts[i + 5]) != 0;
     }
 
-    /// <summary>Adds the residual of each coded 8x8 block to the luma prediction; <paramref name="qp"/> is QP'Y.</summary>
-    private void AddLuma8x8Residual(SliceState slice, int mbAddr, MbTarget target, Residual residual, int cbpLuma, int b8, int qp)
+    /// <summary>
+    /// Adds the residual of 8x8 block <paramref name="b8"/>, if coded, to the prediction of a
+    /// component (luma, or Cb or Cr in 4:4:4); <paramref name="qp"/> is its QP'.
+    /// </summary>
+    private void AddLuma8x8Residual(SliceState slice, int mbAddr, MbTarget target, int cbpLuma, int b8, int qp, int component)
     {
-        if ((cbpLuma & (1 << b8)) == 0 || !Has8x8Coefficients(mbAddr, b8))
+        if ((cbpLuma & (1 << b8)) == 0 || !Has8x8Coefficients(mbAddr, b8, component))
         {
             return;
         }
 
-        int stride = target.YStride;
-        var block = residual.Luma8x8[b8];
-        Transform.Dequantize8x8(block, qp, slice.Scaling.LevelScale8x8(IsInter(mbAddr) ? 1 : 0));
-        Transform.InverseTransform8x8Add(block, target.Y.AsSpan(target.YOrigin + ((b8 >> 1) * 8 * stride) + ((b8 & 1) * 8)), stride, _bitDepth);
+        var (plane, origin, stride) = ComponentOf(target, component);
+        var block = _residuals[component].Luma8x8[b8];
+        if (IsLossless(mbAddr))
+        {
+            int mode = _intra4x4Mode[(mbAddr * 16) + ((b8 >> 1) * 8) + ((b8 & 1) * 2)];
+            Transform.AddBypass(block, 8, 8, DpcmOf(mode), plane.AsSpan(origin + ((b8 >> 1) * 8 * stride) + ((b8 & 1) * 8)), stride, _bitDepth);
+            return;
+        }
+
+        Transform.Dequantize8x8(block, qp, slice.Scaling.LevelScale8x8((2 * component) + (IsInter(mbAddr) ? 1 : 0)));
+        Transform.InverseTransform8x8Add(block, plane.AsSpan(origin + ((b8 >> 1) * 8 * stride) + ((b8 & 1) * 8)), stride, _bitDepth);
     }
 
-    // ---- Reconstruction ----
-    private void ReconstructIntraLuma(SliceState slice, int mbAddr, MbTarget target, Residual residual, bool is16x16, int predMode16x16, int cbpLuma, (bool A, bool B, bool C, bool D) mbs)
+    /// <summary>
+    /// Whether the macroblock is lossless: TransformBypassModeFlag, set when the SPS allows it and
+    /// QP'Y is 0 (7.4.2.1.1), for all three components whatever their QP'C.
+    /// </summary>
+    private bool IsLossless(int mbAddr) => Sps.TransformBypass && _qp[mbAddr] + _qpBdOffset == 0;
+
+    /// <summary>
+    /// How a lossless intra block's residual is summed (8.5.15) for a luma prediction mode
+    /// (Intra4x4, Intra8x8 or Intra16x16: 0 vertical, 1 horizontal); -1, inter, for none.
+    /// </summary>
+    private static BypassDpcm DpcmOf(int lumaMode) => lumaMode switch
     {
-        int origin = target.YOrigin;
-        int stride = target.YStride;
-        TPixel[] plane = target.Y;
-        int qp = _qp[mbAddr] + _qpBdOffset; // QP'Y
+        0 => BypassDpcm.Vertical,
+        1 => BypassDpcm.Horizontal,
+        _ => BypassDpcm.None,
+    };
+
+    /// <summary>The plane, first sample and row stride of a component of a target.</summary>
+    private static (TPixel[] Plane, int Origin, int Stride) ComponentOf(MbTarget target, int component) => component switch
+    {
+        0 => (target.Y, target.YOrigin, target.YStride),
+        1 => (target.Cb, target.COrigin, target.CStride),
+        _ => (target.Cr, target.COrigin, target.CStride),
+    };
+
+    /// <summary>QP' of a component (8.5.12.1): QP'Y, or QP'C of Cb or Cr (the same as luma's QpBdOffset: equal bit depths).</summary>
+    private int QpPrime(SliceState slice, int mbAddr, int component) => component == 0
+        ? _qp[mbAddr] + _qpBdOffset
+        : ChromaQp(_qp[mbAddr], component == 1 ? slice.Pps.ChromaQpIndexOffset : slice.Pps.SecondChromaQpIndexOffset, _qpBdOffset) + _qpBdOffset;
+
+    // ---- Reconstruction ----
+    /// <summary>
+    /// Intra prediction and residual of luma, or in 4:4:4 of Cb or Cr (<paramref name="component"/>
+    /// 1 or 2), which take luma's prediction modes (8.3.4.5) and their own levels, QP and scaling lists.
+    /// </summary>
+    private void ReconstructIntraLuma(SliceState slice, int mbAddr, MbTarget target, bool is16x16, int predMode16x16, int cbpLuma, (bool A, bool B, bool C, bool D) mbs, int component)
+    {
+        var (plane, origin, stride) = ComponentOf(target, component);
+        var residual = _residuals[component];
+        var counts = _totalCoeff[component];
+        int qp = QpPrime(slice, mbAddr, component);
+        var levelScale = slice.Scaling.LevelScale4x4(component); // Intra Y, Cb or Cr
 
         if (is16x16)
         {
             IntraPrediction.Predict16x16(predMode16x16, plane, origin, stride, new IntraNeighbors(LeftRows(0, 16), mbs.B, mbs.C, mbs.D), _bitDepth);
+            if (IsLossless(mbAddr))
+            {
+                AddBypass16x16(mbAddr, residual, counts, predMode16x16, plane.AsSpan(origin), stride);
+                return;
+            }
+
             Span<int> dc = stackalloc int[16];
             residual.LumaDc.CopyTo(dc);
-            Transform.InverseLumaDc(dc, qp, slice.Scaling.LevelScale4x4(0));
+            Transform.InverseLumaDc(dc, qp, levelScale);
 
             for (int i = 0; i < 16; i++)
             {
                 var dest = plane.AsSpan(origin + ((i >> 2) * 4 * stride) + ((i & 3) * 4));
-                if (_totalCoeffLuma[(mbAddr * 16) + i] == 0)
+                if (counts[(mbAddr * 16) + i] == 0)
                 {
                     Transform.AddDc(dc[i], dest, stride, _bitDepth);
                     continue;
@@ -835,7 +940,7 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
 
                 var block = residual.Luma[i];
                 block[0] = dc[i];
-                Transform.Dequantize(block, qp, skipDc: true, slice.Scaling.LevelScale4x4(0));
+                Transform.Dequantize(block, qp, skipDc: true, levelScale);
                 Transform.InverseTransformAdd(block, dest, stride, _bitDepth);
             }
 
@@ -858,7 +963,7 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
                 };
                 int offset8 = origin + (y * 4 * stride) + (x * 4);
                 IntraPrediction.Predict8x8(_intra4x4Mode[(mbAddr * 16) + (y * 4) + x], plane, offset8, stride, n, _bitDepth);
-                AddLuma8x8Residual(slice, mbAddr, target, residual, cbpLuma, b8, qp);
+                AddLuma8x8Residual(slice, mbAddr, target, cbpLuma, b8, qp, component);
             }
 
             return;
@@ -884,13 +989,68 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
 
             IntraPrediction.Predict4x4(_intra4x4Mode[(mbAddr * 16) + (y * 4) + x], plane, offset, stride, new IntraNeighbors(left, top, topRight, topLeft), _bitDepth);
 
-            if ((cbpLuma & (1 << (idx >> 2))) != 0 && _totalCoeffLuma[(mbAddr * 16) + (y * 4) + x] != 0)
+            if ((cbpLuma & (1 << (idx >> 2))) != 0 && counts[(mbAddr * 16) + (y * 4) + x] != 0)
             {
                 var block = residual.Luma[(y * 4) + x];
-                Transform.Dequantize(block, qp, skipDc: false, slice.Scaling.LevelScale4x4(0));
+                if (IsLossless(mbAddr))
+                {
+                    Transform.AddBypass(block, 4, 4, DpcmOf(_intra4x4Mode[(mbAddr * 16) + (y * 4) + x]), plane.AsSpan(offset), stride, _bitDepth);
+                    continue;
+                }
+
+                Transform.Dequantize(block, qp, skipDc: false, levelScale);
                 Transform.InverseTransformAdd(block, plane.AsSpan(offset), stride, _bitDepth);
             }
         }
+    }
+
+    /// <summary>
+    /// The residual of a lossless Intra_16x16 macroblock (8.5.10, 8.5.15): each 4x4 block's levels
+    /// with its DC level in place, summed over the whole 16x16 block for vertical or horizontal prediction.
+    /// </summary>
+    [SkipLocalsInit]
+    private void AddBypass16x16(int mbAddr, Residual residual, byte[] counts, int predMode16x16, Span<TPixel> dest, int stride)
+    {
+        Span<int> r = stackalloc int[256];
+        for (int i = 0; i < 16; i++)
+        {
+            var block = residual.Luma[i];
+            bool coded = counts[(mbAddr * 16) + i] != 0;
+            for (int k = 0; k < 16; k++)
+            {
+                r[((((i >> 2) * 4) + (k >> 2)) * 16) + ((i & 3) * 4) + (k & 3)] = k == 0 ? residual.LumaDc[i] : coded ? block[k] : 0;
+            }
+        }
+
+        Transform.AddBypass(r, 16, 16, DpcmOf(predMode16x16), dest, stride, _bitDepth);
+    }
+
+    /// <summary>
+    /// The chroma residual of a lossless macroblock (4:2:0 or 4:2:2): the levels of each 4x4 block
+    /// with its DC level in place, summed over the whole component for horizontal (1) or vertical
+    /// (2) intra prediction (8.5.11, 8.5.15).
+    /// </summary>
+    [SkipLocalsInit]
+    private void AddChromaBypass(int mbAddr, Residual residual, int c, int intraMode, Span<TPixel> dest, int stride)
+    {
+        Span<int> r = stackalloc int[8 * 16];
+        for (int b = 0; b < _chromaBlocks; b++)
+        {
+            var block = residual.ChromaAc[(c * 8) + b];
+            bool coded = _totalCoeffChroma[(mbAddr * 16) + (c * 8) + b] != 0;
+            for (int k = 0; k < 16; k++)
+            {
+                r[((((b >> 1) * 4) + (k >> 2)) * 8) + ((b & 1) * 4) + (k & 3)] = k == 0 ? residual.ChromaDc[c][b] : coded ? block[k] : 0;
+            }
+        }
+
+        var dpcm = intraMode switch
+        {
+            1 => BypassDpcm.Horizontal,
+            2 => BypassDpcm.Vertical,
+            _ => BypassDpcm.None,
+        };
+        Transform.AddBypass(r[..(8 * _mbHeightC)], 8, _mbHeightC, dpcm, dest, stride, _bitDepth);
     }
 
     /// <summary>
@@ -916,6 +1076,12 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
 
             if (cbpChroma == 0)
             {
+                continue;
+            }
+
+            if (IsLossless(mbAddr))
+            {
+                AddChromaBypass(mbAddr, residual, c, intraMode, plane.AsSpan(origin), stride);
                 continue;
             }
 

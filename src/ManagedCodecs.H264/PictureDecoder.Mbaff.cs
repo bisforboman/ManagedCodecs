@@ -31,9 +31,9 @@ internal sealed partial class PictureDecoder<TPixel>
     // Intra prediction in MBAFF frames reconstructs into these, with the neighbouring samples
     // gathered around the macroblock (row 0 and column 0), then copies the result out.
     private const int ScratchLumaStride = 32;
-    private const int ScratchChromaStride = 16;
+    private const int ScratchChromaStride = 32;
     private readonly TPixel[] _scratchY = new TPixel[ScratchLumaStride * 20];
-    private readonly TPixel[] _scratchCb = new TPixel[ScratchChromaStride * 20]; // row -1, 8 or 16 rows (4:2:2), slack
+    private readonly TPixel[] _scratchCb = new TPixel[ScratchChromaStride * 20]; // row -1, 8 or 16 rows (4:2:2, 4:4:4), slack
     private readonly TPixel[] _scratchCr = new TPixel[ScratchChromaStride * 20];
 
     // Inverse scans of field macroblocks (8.5.6, Tables 8-13 and 8-14), as raster indices.
@@ -93,15 +93,15 @@ internal sealed partial class PictureDecoder<TPixel>
         int stride = Picture.ChromaStride;
         if (!_pairSlots)
         {
-            return (((mbAddr / _widthInMbs) * _mbHeightC * stride) + ((mbAddr % _widthInMbs) * 8), stride);
+            return (((mbAddr / _widthInMbs) * _mbHeightC * stride) + ((mbAddr % _widthInMbs) * _mbWidthC), stride);
         }
 
         int pair = mbAddr >> 1;
         int row = (pair / _widthInMbs) * 2 * _mbHeightC;
         int bottom = mbAddr & 1;
         return _fieldMb[mbAddr]
-            ? (((row + bottom) * stride) + ((pair % _widthInMbs) * 8), stride * 2)
-            : (((row + (bottom * _mbHeightC)) * stride) + ((pair % _widthInMbs) * 8), stride);
+            ? (((row + bottom) * stride) + ((pair % _widthInMbs) * _mbWidthC), stride * 2)
+            : (((row + (bottom * _mbHeightC)) * stride) + ((pair % _widthInMbs) * _mbWidthC), stride);
     }
 
     private MbTarget PictureTarget(int mbAddr)
@@ -288,7 +288,7 @@ internal sealed partial class PictureDecoder<TPixel>
 
         for (int y = 0; y < _mbHeightC; y++)
         {
-            int n = AffNeighbor(mbAddr, -1, y, 8, _mbHeightC).Mb;
+            int n = AffNeighbor(mbAddr, -1, y, _mbWidthC, _mbHeightC).Mb;
             _leftChromaRows |= n >= 0 && !IsInter(n) ? 1 << y : 0;
         }
     }
@@ -395,13 +395,16 @@ internal sealed partial class PictureDecoder<TPixel>
     /// <summary>
     /// The planes an intra macroblock of an MBAFF frame is reconstructed into: the scratch blocks,
     /// with every neighbouring sample prediction may read gathered through Table 6-4 (luma row -1
-    /// from x = -1 to 23 and column -1; chroma row -1 and column -1, 8 or 16 rows).
+    /// from x = -1 to 23 and column -1; chroma row -1 and column -1, 8 or 16 rows, in 4:4:4 as luma).
     /// </summary>
     private MbTarget GatherMbaffNeighbors(int mbAddr)
     {
         GatherPlane(mbAddr, PlaneY, _scratchY, ScratchLumaStride, 16, 16, 24);
-        GatherPlane(mbAddr, PlaneCb, _scratchCb, ScratchChromaStride, 8, _mbHeightC, 8);
-        GatherPlane(mbAddr, PlaneCr, _scratchCr, ScratchChromaStride, 8, _mbHeightC, 8);
+
+        // 4:4:4 chroma takes the luma intra modes, which read row -1 up to x = 23 too.
+        int topWidth = _chroma444 ? 24 : 8;
+        GatherPlane(mbAddr, PlaneCb, _scratchCb, ScratchChromaStride, _mbWidthC, _mbHeightC, topWidth);
+        GatherPlane(mbAddr, PlaneCr, _scratchCr, ScratchChromaStride, _mbWidthC, _mbHeightC, topWidth);
         return new MbTarget(_scratchY, ScratchLumaStride + 1, ScratchLumaStride, _scratchCb, _scratchCr, ScratchChromaStride + 1, ScratchChromaStride);
     }
 
@@ -441,8 +444,8 @@ internal sealed partial class PictureDecoder<TPixel>
         var (chroma, chromaStride) = ChromaPlace(mbAddr);
         for (int y = 0; y < _mbHeightC; y++)
         {
-            target.Cb.AsSpan(target.COrigin + (y * target.CStride), 8).CopyTo(PlaneCb.AsSpan(chroma + (y * chromaStride)));
-            target.Cr.AsSpan(target.COrigin + (y * target.CStride), 8).CopyTo(PlaneCr.AsSpan(chroma + (y * chromaStride)));
+            target.Cb.AsSpan(target.COrigin + (y * target.CStride), _mbWidthC).CopyTo(PlaneCb.AsSpan(chroma + (y * chromaStride)));
+            target.Cr.AsSpan(target.COrigin + (y * target.CStride), _mbWidthC).CopyTo(PlaneCr.AsSpan(chroma + (y * chromaStride)));
         }
     }
 
@@ -508,7 +511,7 @@ internal sealed partial class PictureDecoder<TPixel>
                 InternalStrengths(mbAddr, vertical, horizontal, field ? 2 : 4);
             }
 
-            // Luma: vertical edges, then horizontal ones.
+            // Luma (and 4:4:4 chroma, at the same places): vertical edges, then horizontal ones.
             if (left)
             {
                 for (int y = 0; y < 16; y++)
@@ -518,7 +521,7 @@ internal sealed partial class PictureDecoder<TPixel>
                     if (leftLines[y] != 0)
                     {
                         var (pOrigin, pStride) = LumaPlace(p);
-                        FilterMbaffLine(PlaneY, pOrigin + (yP * pStride) + xP, 1, luma + (y * lumaStride), 1, leftLines[y], _qp[p], qp, slice, chroma: false);
+                        FilterMbaffLumaLine(pOrigin + (yP * pStride) + xP, 1, luma + (y * lumaStride), 1, leftLines[y], _qp[p], qp, slice);
                     }
                 }
             }
@@ -527,7 +530,7 @@ internal sealed partial class PictureDecoder<TPixel>
             {
                 if ((edge & 1) == 0 || !transform8x8)
                 {
-                    FilterEdge(PlaneY, luma + (edge * 4), 1, lumaStride, 16, vertical.Slice(edge * 4, 4), qp, qp, slice.AlphaOffset, slice.BetaOffset, chroma: false, bitDepth: _bitDepth);
+                    FilterInternalLumaEdge(luma + (edge * 4), 1, lumaStride, vertical.Slice(edge * 4, 4), qp, slice);
                 }
             }
 
@@ -544,7 +547,7 @@ internal sealed partial class PictureDecoder<TPixel>
                 {
                     if (topSegments[x >> 2] != 0)
                     {
-                        FilterMbaffLine(PlaneY, pOrigin + (pRow * pStride) + x, pStep * lumaRow, luma + (qOffset * lumaRow) + x, qStep * lumaRow, topSegments[x >> 2], _qp[p], qp, slice, chroma: false);
+                        FilterMbaffLumaLine(pOrigin + (pRow * pStride) + x, pStep * lumaRow, luma + (qOffset * lumaRow) + x, qStep * lumaRow, topSegments[x >> 2], _qp[p], qp, slice);
                     }
                 }
             }
@@ -553,8 +556,13 @@ internal sealed partial class PictureDecoder<TPixel>
             {
                 if ((edge & 1) == 0 || !transform8x8)
                 {
-                    FilterEdge(PlaneY, luma + (edge * 4 * lumaStride), lumaStride, 1, 16, horizontal.Slice(edge * 4, 4), qp, qp, slice.AlphaOffset, slice.BetaOffset, chroma: false, bitDepth: _bitDepth);
+                    FilterInternalLumaEdge(luma + (edge * 4 * lumaStride), lumaStride, 1, horizontal.Slice(edge * 4, 4), qp, slice);
                 }
+            }
+
+            if (_chroma444)
+            {
+                continue;
             }
 
             if (_mbHeightC == 16)
@@ -719,6 +727,33 @@ internal sealed partial class PictureDecoder<TPixel>
         if (alpha != 0 && beta != 0)
         {
             FilterSamples(plane, p0, pStep, q0, qStep, bS, indexA, alpha, beta, chroma, _bitDepth);
+        }
+    }
+
+    /// <summary>
+    /// One luma line across an MBAFF macroblock edge, and in 4:4:4 the Cb and Cr lines at the same
+    /// place, with the luma filter at their QP_C (8.7.2: chromaStyleFilteringFlag 0).
+    /// </summary>
+    private void FilterMbaffLumaLine(int p0, int pStep, int q0, int qStep, int bS, int qpP, int qpQ, SliceInfo slice)
+    {
+        FilterMbaffLine(PlaneY, p0, pStep, q0, qStep, bS, qpP, qpQ, slice, chroma: false);
+        if (_chroma444)
+        {
+            FilterMbaffLine(PlaneCb, p0, pStep, q0, qStep, bS, ChromaQp(qpP, slice.CbQpOffset, _qpBdOffset), ChromaQp(qpQ, slice.CbQpOffset, _qpBdOffset), slice, chroma: false);
+            FilterMbaffLine(PlaneCr, p0, pStep, q0, qStep, bS, ChromaQp(qpP, slice.CrQpOffset, _qpBdOffset), ChromaQp(qpQ, slice.CrQpOffset, _qpBdOffset), slice, chroma: false);
+        }
+    }
+
+    /// <summary>An internal luma edge of an MBAFF macroblock, and in 4:4:4 the Cb and Cr edges at the same place.</summary>
+    private void FilterInternalLumaEdge(int q0, int across, int along, ReadOnlySpan<byte> strengths, int qp, SliceInfo slice)
+    {
+        FilterEdge(PlaneY, q0, across, along, 16, strengths, qp, qp, slice.AlphaOffset, slice.BetaOffset, chroma: false, bitDepth: _bitDepth);
+        if (_chroma444)
+        {
+            int qpCb = ChromaQp(qp, slice.CbQpOffset, _qpBdOffset);
+            int qpCr = ChromaQp(qp, slice.CrQpOffset, _qpBdOffset);
+            FilterEdge(PlaneCb, q0, across, along, 16, strengths, qpCb, qpCb, slice.AlphaOffset, slice.BetaOffset, chroma: false, bitDepth: _bitDepth);
+            FilterEdge(PlaneCr, q0, across, along, 16, strengths, qpCr, qpCr, slice.AlphaOffset, slice.BetaOffset, chroma: false, bitDepth: _bitDepth);
         }
     }
 

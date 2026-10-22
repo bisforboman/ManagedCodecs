@@ -476,8 +476,8 @@ internal sealed partial class PictureDecoder<TPixel>
 
     // ---- mb_qp_delta, intra prediction modes, coded_block_pattern (9.3.3.1.1.4, .5, .8) ----
 
-    /// <summary>mb_qp_delta: the mapped value of Table 9-3 in unary, ctxIdxOffset 60.</summary>
-    private static int CabacQpDelta(SliceState slice, Cabac c)
+    /// <summary>mb_qp_delta: the mapped value of Table 9-3 in unary, ctxIdxOffset 60; |mb_qp_delta| up to 26 + QpBdOffset / 2.</summary>
+    private int CabacQpDelta(SliceState slice, Cabac c)
     {
         if (c.Decision(60 + (slice.LastQpDeltaNonZero ? 1 : 0)) == 0)
         {
@@ -490,7 +490,7 @@ internal sealed partial class PictureDecoder<TPixel>
         {
             mapped++;
             ctxIdx = 63;
-            if (mapped > 52)
+            if (mapped > 52 + _qpBdOffset)
             {
                 throw new InvalidDataException("mb_qp_delta is out of range.");
             }

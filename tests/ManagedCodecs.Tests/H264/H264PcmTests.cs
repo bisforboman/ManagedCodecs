@@ -8,23 +8,24 @@ namespace ManagedCodecs.Tests.H264;
 /// frame must come out flat. With CABAC this also checks that the arithmetic decoder stops at the
 /// right bit before the samples and restarts after them (9.3.1.2). In 4:2:2 (High 4:2:2 profile) the
 /// macroblock carries 8x16 chroma samples a component, and DC prediction of the second one's lower
-/// chroma blocks reads them too.
+/// chroma blocks reads them too. At 10 bits (High 10, High 4:2:2) each sample takes 10 bits
+/// (pcm_sample_luma and pcm_sample_chroma are BitDepth bits wide) and comes out as a 16-bit word.
 /// </summary>
 public class H264PcmTests
 {
-    private const byte Luma = 100;
-    private const byte Cb = 50;
-    private const byte Cr = 200;
-
     [Theory]
-    [InlineData(false, false)]
-    [InlineData(true, false)]
-    [InlineData(false, true)]
-    [InlineData(true, true)]
-    public void PcmMacroblock_GivesItsSamplesAndDecodingResumes(bool cabac, bool chroma422)
+    [InlineData(false, false, 8)]
+    [InlineData(true, false, 8)]
+    [InlineData(false, true, 8)]
+    [InlineData(true, true, 8)]
+    [InlineData(false, false, 10)]
+    [InlineData(true, false, 10)]
+    [InlineData(true, true, 10)]
+    public void PcmMacroblock_GivesItsSamplesAndDecodingResumes(bool cabac, bool chroma422, int bitDepth)
     {
-        var decoder = new H264Decoder(AvcC(Sps(chroma422), Pps(cabac)));
-        var slice = cabac ? CabacSlice(chroma422) : CavlcSlice(chroma422);
+        int[] values = bitDepth == 8 ? [100, 50, 200] : [700, 300, 900];
+        var decoder = new H264Decoder(AvcC(Sps(chroma422, bitDepth), Pps(cabac)));
+        var slice = cabac ? CabacSlice(chroma422, bitDepth, values) : CavlcSlice(chroma422, bitDepth, values);
         var nal = slice.ToNal(3, 5);
         var packet = new byte[4 + nal.Length];
         System.Buffers.Binary.BinaryPrimitives.WriteInt32BigEndian(packet, nal.Length);
@@ -32,24 +33,35 @@ public class H264PcmTests
 
         var frame = Assert.Single(decoder.Decode(new Packet(0, 0, packet, true, 0, 0, 1)));
         Assert.Equal((32, 16), (frame.Width, frame.Height));
-        Assert.Equal(chroma422 ? PixelFormat.Yuv422P : PixelFormat.Yuv420P, frame.Format);
-        Assert.All(frame.Planes[0], sample => Assert.Equal(Luma, sample));
-        Assert.All(frame.Planes[1], sample => Assert.Equal(Cb, sample));
-        Assert.All(frame.Planes[2], sample => Assert.Equal(Cr, sample));
+        var expectedFormat = (chroma422, bitDepth) switch
+        {
+            (true, 8) => PixelFormat.Yuv422P,
+            (true, _) => PixelFormat.Yuv422P10,
+            (false, 8) => PixelFormat.Yuv420P,
+            _ => PixelFormat.Yuv420P10,
+        };
+        Assert.Equal(expectedFormat, frame.Format);
+        for (int plane = 0; plane < 3; plane++)
+        {
+            int[] samples = bitDepth == 8
+                ? [.. frame.Planes[plane].Select(b => (int)b)]
+                : [.. System.Runtime.InteropServices.MemoryMarshal.Cast<byte, ushort>(frame.Planes[plane]).ToArray().Select(v => (int)v)];
+            Assert.All(samples, sample => Assert.Equal(values[plane], sample));
+        }
     }
 
-    private static BitWriter Sps(bool chroma422)
+    private static BitWriter Sps(bool chroma422, int bitDepth)
     {
         var w = new BitWriter();
-        w.Bits(chroma422 ? 122 : 77, 8); // profile_idc: High 4:2:2 or Main
+        w.Bits(chroma422 ? 122 : bitDepth > 8 ? 110 : 77, 8); // profile_idc: High 4:2:2, High 10 or Main
         w.Bits(0, 8);  // constraint flags
         w.Bits(30, 8); // level_idc
         w.Ue(0);       // seq_parameter_set_id
-        if (chroma422)
+        if (chroma422 || bitDepth > 8)
         {
-            w.Ue(2);  // chroma_format_idc: 4:2:2
-            w.Ue(0);  // bit_depth_luma_minus8
-            w.Ue(0);  // bit_depth_chroma_minus8
+            w.Ue(chroma422 ? 2u : 1u); // chroma_format_idc
+            w.Ue((uint)bitDepth - 8); // bit_depth_luma_minus8
+            w.Ue((uint)bitDepth - 8); // bit_depth_chroma_minus8
             w.Bit(0); // qpprime_y_zero_transform_bypass_flag
             w.Bit(0); // seq_scaling_matrix_present_flag
         }
@@ -105,24 +117,24 @@ public class H264PcmTests
         return w;
     }
 
-    private static void PcmSamples(BitWriter w, bool chroma422)
+    private static void PcmSamples(BitWriter w, bool chroma422, int bitDepth, int[] values)
     {
         w.AlignWith(0); // pcm_alignment_zero_bit
         int chroma = chroma422 ? 128 : 64;
-        foreach (var (value, count) in new[] { (Luma, 256), (Cb, chroma), (Cr, chroma) })
+        foreach (var (value, count) in new[] { (values[0], 256), (values[1], chroma), (values[2], chroma) })
         {
             for (int i = 0; i < count; i++)
             {
-                w.Bits(value, 8);
+                w.Bits(value, bitDepth);
             }
         }
     }
 
-    private static BitWriter CavlcSlice(bool chroma422)
+    private static BitWriter CavlcSlice(bool chroma422, int bitDepth, int[] values)
     {
         var w = SliceHeader();
         w.Ue(25); // mb_type I_PCM
-        PcmSamples(w, chroma422);
+        PcmSamples(w, chroma422, bitDepth, values);
         w.Ue(3);  // mb_type I_16x16_2_0_0: DC prediction, no coded blocks
         w.Ue(0);  // intra_chroma_pred_mode: DC
         w.Se(0);  // mb_qp_delta
@@ -132,7 +144,7 @@ public class H264PcmTests
     }
 
     /// <summary>The same two macroblocks with CABAC; each context as 9.3.3.1 derives it.</summary>
-    private static BitWriter CabacSlice(bool chroma422)
+    private static BitWriter CabacSlice(bool chroma422, int bitDepth, int[] values)
     {
         var w = SliceHeader();
         w.AlignWith(1); // cabac_alignment_one_bit
@@ -141,7 +153,7 @@ public class H264PcmTests
         // Macroblock 0: mb_type bin 0 (no neighbours: ctxIdx 3), then the terminate bin 1 for I_PCM.
         e.Decision(3, 1);
         e.Terminate(1);
-        PcmSamples(w, chroma422);
+        PcmSamples(w, chroma422, bitDepth, values);
         e.InitEngine();
         e.Terminate(0); // end_of_slice_flag
 

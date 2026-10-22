@@ -10,7 +10,7 @@ then the same approach for H.264 + AAC in MP4.
 | --- | --- |
 | `src/ManagedCodecs.Core` | `VideoFrame`, `PixelFormat`, `Packet`, `Rational`, `IDemuxer`, `IVideoDecoder` |
 | `src/ManagedCodecs.Containers` | `AviDemuxer`, `Mp4Demuxer`, and `Demuxer.Open` to pick one by content |
-| `src/ManagedCodecs.Mjpeg` | `MjpegDecoder`: baseline/extended Huffman JPEG, bit-exact with FFmpeg |
+| `src/ManagedCodecs.Mjpeg` | `MjpegDecoder`: baseline/extended Huffman JPEG, interlaced AVI1, bit-exact with FFmpeg |
 | `src/ManagedCodecs.H264` | `H264Decoder`: Constrained Baseline, Main and High profile H.264 (CAVLC, CABAC, I/P/B, weighted prediction, 8x8 transform, scaling matrices, deblocking), bit-exact |
 | `src/ManagedCodecs.Aac` | `AacDecoder`: AAC LC (mono to 7.1, M/S, intensity, PNS, TNS), within 3e-7 of FFmpeg's float output |
 | `src/Shared` | Source files linked into several codec projects (the VLC decoder) |
@@ -44,7 +44,7 @@ zero or more frames and `Flush` returns the rest:
 ```csharp
 using var demuxer = Demuxer.Open("video.mp4");
 var video = demuxer.Video!;
-IVideoDecoder decoder = video.Codec == CodecIds.H264 ? new H264Decoder(video) : new MjpegDecoder();
+IVideoDecoder decoder = video.Codec == CodecIds.H264 ? new H264Decoder(video) : new MjpegDecoder(video);
 
 foreach (var packet in demuxer.ReadPackets().Where(p => p.StreamIndex == video.StreamIndex))
 {

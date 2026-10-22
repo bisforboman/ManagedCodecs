@@ -34,9 +34,10 @@ rm -rf "$frames"
 # in an AVI of 320x240. FFmpeg's decoder weaves them, the first field on the odd rows (the order it takes for AVI,
 # which does not tell); 4:2:0 and 4:2:2 fields.
 for chroma in 420 422; do
+  fields=$(mktemp)
   ff -f lavfi -i testsrc2=size=320x240:rate=50 -t 0.8 -vf "tinterlace=interleave_top,setfield=tff,separatefields,format=yuvj${chroma}p" \
-    -c:v mjpeg -q:v 3 "$frames.avi"
-  python3 -I - "$frames.avi" "samples/mjpeg-interlaced-$chroma.avi" <<'PY'
+    -c:v mjpeg -q:v 3 -f avi "$fields"
+  python3 -I - "$fields" "samples/mjpeg-interlaced-$chroma.avi" <<'PY'
 import struct, sys
 data = open(sys.argv[1], 'rb').read()
 
@@ -79,7 +80,7 @@ for f in frames:
 body = b'AVI ' + hdrl + lst(b'movi', b''.join(chunk(b'00dc', f) for f in frames)) + chunk(b'idx1', index)
 open(sys.argv[2], 'wb').write(b'RIFF' + struct.pack('<I', len(body)) + body)
 PY
-  rm "$frames.avi"
+  rm "$fields"
 done
 
 # ---- MP4 for the demuxer ----

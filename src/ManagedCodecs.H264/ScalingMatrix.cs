@@ -2,8 +2,8 @@ namespace ManagedCodecs.H264;
 
 /// <summary>
 /// The scaling matrices of a picture (7.3.2.1.1.1, 7.4.2.1.1, Table 7-2) and the LevelScale tables
-/// they give (8.5.9). Lists 0 to 5 are 4x4 (Intra Y, Cb, Cr, Inter Y, Cb, Cr), 6 and 7 are 8x8
-/// (Intra Y, Inter Y); 4:4:4 has four more 8x8 lists, parsed but not used.
+/// they give (8.5.9). Lists 0 to 5 are 4x4 (Intra Y, Cb, Cr, Inter Y, Cb, Cr), 6 to 11 are 8x8
+/// (Intra Y, Inter Y, and in 4:4:4 Intra Cb, Inter Cb, Intra Cr, Inter Cr).
 /// </summary>
 internal sealed class ScalingMatrix
 {
@@ -18,7 +18,7 @@ internal sealed class ScalingMatrix
     {
         _lists = lists;
         _levelScale4x4 = [.. Enumerable.Range(0, 6).Select(i => Transform.LevelScale4x4Table(lists[i]))];
-        _levelScale8x8 = [.. Enumerable.Range(6, 2).Select(i => Transform.LevelScale8x8Table(lists[i]))];
+        _levelScale8x8 = [.. Enumerable.Range(6, 6).Select(i => Transform.LevelScale8x8Table(lists[i]))];
     }
 
     /// <summary>Flat_4x4_16 and Flat_8x8_16: no scaling matrix in either parameter set.</summary>
@@ -48,7 +48,10 @@ internal sealed class ScalingMatrix
     /// <summary>LevelScale4x4 of 4x4 list <paramref name="list"/> for every qP % 6 and position.</summary>
     public ReadOnlySpan<int> LevelScale4x4(int list) => _levelScale4x4[list];
 
-    /// <summary>LevelScale8x8 of 8x8 list <paramref name="list"/> (0 Intra Y, 1 Inter Y) for every qP % 6 and position.</summary>
+    /// <summary>
+    /// LevelScale8x8 of 8x8 list <paramref name="list"/> (0 Intra Y, 1 Inter Y, 2 Intra Cb, 3 Inter Cb,
+    /// 4 Intra Cr, 5 Inter Cr) for every qP % 6 and position.
+    /// </summary>
     public ReadOnlySpan<int> LevelScale8x8(int list) => _levelScale8x8[list];
 
     /// <summary>

@@ -8,15 +8,69 @@ namespace ManagedCodecs.H264;
 /// </remarks>
 internal static class CabacTables
 {
-    /// <summary>Number of context variables (ctxIdx 0 .. 459).</summary>
-    public const int ContextCount = 460;
+    /// <summary>Number of context variables (ctxIdx 0 .. 1023).</summary>
+    public const int ContextCount = 1024;
+
+    // Contexts 0 .. 459, those of every chroma format but 4:4:4.
+    private const int BaseContextCount = 460;
 
     /// <summary>
-    /// (m, n) per ctxIdx for I slices and for cabac_init_idc 0, 1 and 2 (Tables 9-12 to 9-25): entry
+    /// (m, n) per ctxIdx for I slices and for cabac_init_idc 0, 1 and 2 (Tables 9-12 to 9-33): entry
     /// ctxIdx * 8 + table * 2 holds m, the next one n, with table 0 for I and SI slices and 1 + cabac_init_idc
     /// otherwise. Contexts 11 to 59 occur only in P and B slices; their I-slice values are unused zeros.
     /// </summary>
-    public static ReadOnlySpan<sbyte> InitValues =>
+    public static ReadOnlySpan<sbyte> InitValues => AllInitValues;
+
+    private static readonly sbyte[] AllInitValues = BuildInitValues();
+
+    /// <summary>
+    /// Contexts 460 .. 1023 (Tables 9-26 to 9-33) belong to the residual blocks of 4:4:4: Cb and Cr
+    /// blocks coded as luma ones (ctxBlockCat 6 to 13) and the coded_block_flag of 8x8 blocks
+    /// (1012 .. 1023). Their (m, n) are those of the luma contexts they mirror, which is how the
+    /// tables read: each Cb and Cr range repeats the luma range of its block category. Checked
+    /// against the ITU reference software (JM's ctx_tables.h, its 22 block types) entry by entry.
+    /// </summary>
+    private static sbyte[] BuildInitValues()
+    {
+        var values = new sbyte[ContextCount * 8];
+        BaseInitValues.CopyTo(values);
+        for (int ctxIdx = BaseContextCount; ctxIdx < ContextCount; ctxIdx++)
+        {
+            values.AsSpan(MirroredLumaContext(ctxIdx) * 8, 8).CopyTo(values.AsSpan(ctxIdx * 8));
+        }
+
+        return values;
+    }
+
+    /// <summary>The luma context (0 .. 459) whose (m, n) a 4:4:4 context (460 .. 1023) repeats.</summary>
+    internal static int MirroredLumaContext(int ctxIdx) => ctxIdx switch
+    {
+        < 472 => 85 + (ctxIdx - 460),     // coded_block_flag, Cb Intra16x16 DC, AC, 4x4 (cat 6 .. 8 as 0 .. 2)
+        < 484 => 85 + (ctxIdx - 472),     // the same for Cr (cat 10 .. 12)
+        < 528 => 105 + (ctxIdx - 484),    // significant_coeff_flag, frame, Cb
+        < 572 => 105 + (ctxIdx - 528),    // Cr
+        < 616 => 166 + (ctxIdx - 572),    // last_significant_coeff_flag, frame, Cb
+        < 660 => 166 + (ctxIdx - 616),    // Cr
+        < 675 => 402 + (ctxIdx - 660),    // significant_coeff_flag, frame, Cb 8x8 (cat 9 as 5)
+        < 690 => 436 + (ctxIdx - 675),    // field
+        < 699 => 417 + (ctxIdx - 690),    // last_significant_coeff_flag, frame, Cb 8x8
+        < 708 => 451 + (ctxIdx - 699),    // field
+        < 718 => 426 + (ctxIdx - 708),    // coeff_abs_level_minus1, Cb 8x8
+        < 733 => 402 + (ctxIdx - 718),    // the same five for Cr 8x8 (cat 13)
+        < 748 => 436 + (ctxIdx - 733),
+        < 757 => 417 + (ctxIdx - 748),
+        < 766 => 451 + (ctxIdx - 757),
+        < 776 => 426 + (ctxIdx - 766),
+        < 820 => 277 + (ctxIdx - 776),    // significant_coeff_flag, field, Cb
+        < 864 => 277 + (ctxIdx - 820),    // Cr
+        < 908 => 338 + (ctxIdx - 864),    // last_significant_coeff_flag, field, Cb
+        < 952 => 338 + (ctxIdx - 908),    // Cr
+        < 982 => 227 + (ctxIdx - 952),    // coeff_abs_level_minus1, Cb
+        < 1012 => 227 + (ctxIdx - 982),   // Cr
+        _ => 93 + ((ctxIdx - 1012) & 3),  // coded_block_flag of 8x8 blocks, Y, Cb, Cr: the luma 4x4 one's
+    };
+
+    private static ReadOnlySpan<sbyte> BaseInitValues =>
     [
         // Table 9-12: mb_type (SI prefix, I)
         20, -15, 20, -15, 20, -15, 20, -15, // 0

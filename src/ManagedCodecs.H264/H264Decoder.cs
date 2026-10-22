@@ -197,7 +197,7 @@ public sealed class H264Decoder : IVideoDecoder
 
             case NalUnitType.Pps:
                 {
-                    var pps = PictureParameterSet.Parse(nal.CreateReader());
+                    var pps = PictureParameterSet.Parse(nal.CreateReader(), _sps);
                     _pps[pps.Id] = pps;
                     break;
                 }
@@ -444,6 +444,11 @@ public sealed class H264Decoder : IVideoDecoder
         if (sps.ChromaFormatIdc is not (1 or 2))
         {
             throw new NotSupportedException($"chroma_format_idc {sps.ChromaFormatIdc} is not supported (4:2:0 and 4:2:2 only).");
+        }
+
+        if (sps.SeparateColourPlanes || sps.TransformBypass)
+        {
+            throw new NotSupportedException("Separate colour planes and lossless (transform bypass) macroblocks are not supported.");
         }
 
         if (sps.BitDepthLuma is not (8 or 10) || sps.BitDepthChroma != sps.BitDepthLuma)

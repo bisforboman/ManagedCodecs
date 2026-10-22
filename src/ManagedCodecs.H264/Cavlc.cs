@@ -11,12 +11,17 @@ internal static class Cavlc
     private static readonly Vlc CoeffToken4 = new(CavlcTables.CoeffToken4);
     private static readonly Vlc CoeffToken8 = new(CavlcTables.CoeffToken8);
     private static readonly Vlc CoeffTokenChromaDc = new(CavlcTables.CoeffTokenChromaDc);
+    private static readonly Vlc CoeffTokenChromaDc422 = new(CavlcTables.CoeffTokenChromaDc422);
     private static readonly Vlc[] TotalZeros4x4 = [.. CavlcTables.TotalZeros4x4.Select(t => t.Length == 0 ? null! : new Vlc(t))];
     private static readonly Vlc[] TotalZerosChromaDc = [.. CavlcTables.TotalZerosChromaDc.Select(t => t.Length == 0 ? null! : new Vlc(t))];
+    private static readonly Vlc[] TotalZerosChromaDc422 = [.. CavlcTables.TotalZerosChromaDc422.Select(t => t.Length == 0 ? null! : new Vlc(t))];
     private static readonly Vlc[] RunBefore = [.. CavlcTables.RunBefore.Select(t => t.Length == 0 ? null! : new Vlc(t))];
 
     /// <summary>nC value that selects the chroma DC table (4:2:0).</summary>
     public const int ChromaDcNc = -1;
+
+    /// <summary>nC value that selects the chroma DC table of 4:2:2.</summary>
+    public const int ChromaDc422Nc = -2;
 
     /// <summary>
     /// Parses one residual_block_cavlc and returns TotalCoeff. The nonzero levels go to
@@ -29,6 +34,7 @@ internal static class Cavlc
         var coeffTokenTable = nC switch
         {
             ChromaDcNc => CoeffTokenChromaDc,
+            ChromaDc422Nc => CoeffTokenChromaDc422,
             < 2 => CoeffToken0,
             < 4 => CoeffToken2,
             < 8 => CoeffToken4,
@@ -99,7 +105,12 @@ internal static class Cavlc
         int zerosLeft = 0;
         if (totalCoeff < maxNumCoeff)
         {
-            var table = nC == ChromaDcNc ? TotalZerosChromaDc[totalCoeff] : TotalZeros4x4[totalCoeff];
+            var table = nC switch
+            {
+                ChromaDcNc => TotalZerosChromaDc[totalCoeff],
+                ChromaDc422Nc => TotalZerosChromaDc422[totalCoeff],
+                _ => TotalZeros4x4[totalCoeff],
+            };
             zerosLeft = r.Read(table);
             if (totalCoeff + zerosLeft > maxNumCoeff)
             {

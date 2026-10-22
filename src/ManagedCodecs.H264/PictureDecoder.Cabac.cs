@@ -582,12 +582,13 @@ internal sealed partial class PictureDecoder
     private int CodedBlockFlagInc(int mbAddr, BlockCategory category, int x, int y, int component)
     {
         bool chroma = category is BlockCategory.ChromaDc or BlockCategory.ChromaAc;
-        int size = chroma ? 8 : 16;
+        int maxH = chroma ? _mbHeightC : 16;
+        int maxW = chroma ? 8 : 16;
         bool currentIntra = !IsInter(mbAddr);
 
         int Cond(int px, int py)
         {
-            var (n, xW, yW) = Neighbor(mbAddr, px, py, size, size);
+            var (n, xW, yW) = Neighbor(mbAddr, px, py, maxW, maxH);
             if (n < 0)
             {
                 return currentIntra ? 1 : 0;
@@ -604,7 +605,7 @@ internal sealed partial class PictureDecoder
             {
                 BlockCategory.LumaDc => _kind[n] == MbKind.Intra16x16 ? _dcCoded[n] & 1 : 0,
                 BlockCategory.ChromaDc => _kind[n] != MbKind.PSkip && (_cbp[n] >> 4) != 0 ? (_dcCoded[n] >> (1 + component)) & 1 : 0,
-                BlockCategory.ChromaAc => _totalCoeffChroma[(n * 8) + (component * 4) + (by * 2) + bx] != 0 ? 1 : 0,
+                BlockCategory.ChromaAc => _totalCoeffChroma[(n * 16) + (component * 8) + (by * 2) + bx] != 0 ? 1 : 0,
                 _ => _totalCoeffLuma[(n * 16) + (by * 4) + bx] != 0 ? 1 : 0,
             };
         }
@@ -631,7 +632,7 @@ internal sealed partial class PictureDecoder
 
         int cat = (int)category;
         bool chromaDc = category == BlockCategory.ChromaDc;
-        var inc = chromaDc ? ChromaDcInc : ScanPositionInc; // NumC8x8 is 1 for 4:2:0
+        var inc = !chromaDc ? ScanPositionInc : maxNumCoeff == 4 ? ChromaDcInc : ChromaDc422Inc;
         return c.ResidualBlock(
             85 + CodedBlockFlagCatOffset[cat] + codedBlockFlagInc,
             (field ? 277 : 105) + SignificantCatOffset[cat],
@@ -646,8 +647,10 @@ internal sealed partial class PictureDecoder
     }
 
     // ctxIdxInc of significant_coeff_flag and last_significant_coeff_flag in 4x4 blocks: the scan
-    // position, for chroma DC Min(position, 2).
+    // position, for chroma DC Min(position / NumC8x8, 2) (NumC8x8 1 in 4:2:0, 2 in 4:2:2).
     private static ReadOnlySpan<byte> ScanPositionInc => [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
 
     private static ReadOnlySpan<byte> ChromaDcInc => [0, 1, 2, 2];
+
+    private static ReadOnlySpan<byte> ChromaDc422Inc => [0, 0, 1, 1, 2, 2, 2, 2];
 }

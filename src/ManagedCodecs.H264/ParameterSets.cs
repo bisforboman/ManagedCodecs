@@ -13,6 +13,9 @@ internal sealed class SequenceParameterSet
 
     public int ChromaFormatIdc { get; internal init; } = 1;
 
+    /// <summary>MbHeightC (6.2): the chroma rows of a macroblock, 8 in 4:2:0 and 16 in 4:2:2.</summary>
+    public int MbHeightC => ChromaFormatIdc == 1 ? 8 : 16;
+
     public int BitDepthLuma { get; internal init; } = 8;
 
     public int BitDepthChroma { get; internal init; } = 8;
@@ -127,7 +130,7 @@ internal sealed class SequenceParameterSet
         var crop = (0, 0, 0, 0);
         if (r.ReadFlag())
         {
-            // Crop units for 4:2:0 frames (Table 6-1, equations 7-19 to 7-22).
+            // Crop units (Table 6-1, equations 7-19 to 7-22): chroma samples, of 4:2:0 or 4:2:2.
             int unitX = chromaFormat is 1 or 2 ? 2 : 1;
             int unitY = (chromaFormat == 1 ? 2 : 1) * (frameMbsOnly ? 1 : 2);
             crop = ((int)r.ReadUe() * unitX, (int)r.ReadUe() * unitX, (int)r.ReadUe() * unitY, (int)r.ReadUe() * unitY);

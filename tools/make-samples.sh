@@ -235,6 +235,27 @@ ff -f lavfi -i "testsrc2=size=321x239:rate=25,scroll=v=0.02" -t 1 "${H[@]}" -bf 
 ff -f lavfi -i "testsrc2=size=320x240:rate=25,scroll=h=0.02,noise=alls=10:allf=t" -t 1 "${H[@]}" -bf 2 -refs 2 -x264-params constrained-intra=1:chroma-qp-offset=4 samples/h264-high-constrained-intra.mp4
 ff -f lavfi -i "testsrc2=size=320x240:rate=25,fade=in:0:20,fade=out:30:20" -t 2 "${H[@]}" samples/h264-high-default.mp4
 
+# ---- H.264 High 4:2:2 ----
+# 4:2:2 chroma (chroma_format_idc 2): 8x16 chroma blocks of eight 4x4 blocks, a 2x4 chroma DC transform at QP_C + 3,
+# CAVLC's chroma DC tables for nC = -2 and CABAC's chroma DC contexts for 8 coefficients, plane and DC intra
+# prediction over 16 chroma rows, chroma motion with quarter-sample vertical vectors, and chroma deblocking along 16
+# rows and across four horizontal edges (with the 8x8 transform too). Intra with CABAC and CAVLC, intra at QP 4 on
+# noise (large DC levels), 4x4 transforms only, P and B frames with every partition (CAVLC too), motion on noise, an
+# odd size (cropping in 4:2:2 units), constrained intra with a chroma QP offset, and libx264's defaults on fades
+# (explicit and implicit weights).
+H2=(-c:v libx264 -profile:v high422 -pix_fmt yuv422p)
+ff -f lavfi -i testsrc2=size=320x240:rate=25 -t 0.2 "${H2[@]}" -g 1 samples/h264-422-intra.mp4
+ff -f lavfi -i testsrc2=size=320x240:rate=25 -t 0.2 "${H2[@]}" -g 1 -x264-params cabac=0 samples/h264-422-intra-cavlc.mp4
+ff -f lavfi -i testsrc2=size=320x240:rate=25,noise=alls=40:allf=t -t 0.2 "${H2[@]}" -g 1 -qp 4 samples/h264-422-intra-qp4.mp4
+ff -f lavfi -i testsrc2=size=320x240:rate=25,noise=alls=40:allf=t -t 0.2 "${H2[@]}" -g 1 -qp 4 -x264-params cabac=0 samples/h264-422-intra-qp4-cavlc.mp4
+ff -f lavfi -i "testsrc2=size=320x240:rate=25,scroll=h=0.01:v=0.005" -t 1 "${H2[@]}" -bf 2 -refs 2 -x264-params 8x8dct=0 samples/h264-422-4x4.mp4
+ff -f lavfi -i "testsrc2=size=320x240:rate=25,scroll=h=0.01:v=0.005" -t 1 "${H2[@]}" -bf 3 -refs 3 -x264-params partitions=all:direct=auto samples/h264-422-b.mp4
+ff -f lavfi -i "testsrc2=size=320x240:rate=25,scroll=h=0.01:v=0.005" -t 1 "${H2[@]}" -bf 3 -refs 3 -x264-params cabac=0:partitions=all:direct=auto samples/h264-422-b-cavlc.mp4
+ff -f lavfi -i "testsrc2=size=320x240:rate=25,scroll=h=0.013:v=-0.021,noise=alls=12:allf=t" -t 2 "${H2[@]}" -bf 3 -refs 3 -qp 22 -x264-params partitions=all:me=umh:merange=32 samples/h264-422-motion.mp4
+ff -f lavfi -i "testsrc2=size=321x239:rate=25,scroll=v=0.02" -t 1 "${H2[@]}" -bf 2 -refs 2 samples/h264-422-odd-size.mp4
+ff -f lavfi -i "testsrc2=size=320x240:rate=25,scroll=h=0.02,noise=alls=10:allf=t" -t 1 "${H2[@]}" -bf 2 -refs 2 -x264-params constrained-intra=1:chroma-qp-offset=4 samples/h264-422-constrained-intra.mp4
+ff -f lavfi -i "testsrc2=size=320x240:rate=25,fade=in:0:20,fade=out:30:20" -t 2 "${H2[@]}" samples/h264-422-default.mp4
+
 # ---- H.264 interlaced: MBAFF ----
 # Interlaced content (two moving frames woven into one) with libx264's macroblock-adaptive frame/field coding: each
 # macroblock pair is coded as a frame or a field pair, and testsrc2's still background next to its moving parts gives

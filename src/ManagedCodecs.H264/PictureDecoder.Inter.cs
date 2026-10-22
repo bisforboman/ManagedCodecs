@@ -458,8 +458,12 @@ internal sealed partial class PictureDecoder
         // Where the partition is, in the coordinates of the references (a field macroblock's are
         // its field's), and where its samples go in the picture.
         var (lumaX, lumaY, lumaOut, lumaStride, chromaOut, chromaStride) = PartitionPlace(mbAddr, x, y);
+
+        // 4:2:2 chroma has the luma's rows: its vertical vector, in eighth samples, is the luma's doubled.
+        bool tall = _mbHeightC == 16;
         int chromaX = lumaX / 2;
-        int chromaY = lumaY / 2;
+        int chromaY = tall ? lumaY : lumaY / 2;
+        int ch = tall ? h : h / 2;
         bool bi = ref0 is not null && ref1 is not null;
         bool field = IsMbaffFieldMb(mbAddr);
         int refIdx0 = _refIdx[0][part];
@@ -472,12 +476,12 @@ internal sealed partial class PictureDecoder
             var reference = (ref0 ?? ref1)!;
             int mvX = _mvX[list][block];
             int mvY = _mvY[list][block];
-            int mvCY = mvY + ChromaFieldOffset(mbAddr, reference);
+            int mvCY = ChromaMvY(mvY, mbAddr, reference);
             if (weighting.IsDefault)
             {
                 InterPrediction.PredictLuma(reference, lumaX, lumaY, w, h, mvX, mvY, Picture.Y.AsSpan(lumaOut), lumaStride);
-                InterPrediction.PredictChroma(reference, 1, chromaX, chromaY, w / 2, h / 2, mvX, mvCY, Picture.Cb.AsSpan(chromaOut), chromaStride);
-                InterPrediction.PredictChroma(reference, 2, chromaX, chromaY, w / 2, h / 2, mvX, mvCY, Picture.Cr.AsSpan(chromaOut), chromaStride);
+                InterPrediction.PredictChroma(reference, 1, chromaX, chromaY, w / 2, ch, mvX, mvCY, Picture.Cb.AsSpan(chromaOut), chromaStride);
+                InterPrediction.PredictChroma(reference, 2, chromaX, chromaY, w / 2, ch, mvX, mvCY, Picture.Cr.AsSpan(chromaOut), chromaStride);
                 return;
             }
 
@@ -485,8 +489,8 @@ internal sealed partial class PictureDecoder
             WeightOne(_predictionL0, 16, w, h, Picture.Y.AsSpan(lumaOut), lumaStride, weighting, list, 0);
             for (int c = 1; c <= 2; c++)
             {
-                InterPrediction.PredictChroma(reference, c, chromaX, chromaY, w / 2, h / 2, mvX, mvCY, _predictionL0, 8);
-                WeightOne(_predictionL0, 8, w / 2, h / 2, Picture.Plane(c).AsSpan(chromaOut), chromaStride, weighting, list, c);
+                InterPrediction.PredictChroma(reference, c, chromaX, chromaY, w / 2, ch, mvX, mvCY, _predictionL0, 8);
+                WeightOne(_predictionL0, 8, w / 2, ch, Picture.Plane(c).AsSpan(chromaOut), chromaStride, weighting, list, c);
             }
 
             return;
@@ -504,20 +508,20 @@ internal sealed partial class PictureDecoder
             WeightBoth(_predictionL0, _predictionL1, 16, w, h, luma, lumaStride, weighting, 0);
         }
 
-        int mvCY0 = _mvY[0][block] + ChromaFieldOffset(mbAddr, ref0!);
-        int mvCY1 = _mvY[1][block] + ChromaFieldOffset(mbAddr, ref1!);
+        int mvCY0 = ChromaMvY(_mvY[0][block], mbAddr, ref0!);
+        int mvCY1 = ChromaMvY(_mvY[1][block], mbAddr, ref1!);
         for (int c = 1; c <= 2; c++)
         {
-            InterPrediction.PredictChroma(ref0!, c, chromaX, chromaY, w / 2, h / 2, _mvX[0][block], mvCY0, _predictionL0, 8);
-            InterPrediction.PredictChroma(ref1!, c, chromaX, chromaY, w / 2, h / 2, _mvX[1][block], mvCY1, _predictionL1, 8);
+            InterPrediction.PredictChroma(ref0!, c, chromaX, chromaY, w / 2, ch, _mvX[0][block], mvCY0, _predictionL0, 8);
+            InterPrediction.PredictChroma(ref1!, c, chromaX, chromaY, w / 2, ch, _mvX[1][block], mvCY1, _predictionL1, 8);
             var chroma = Picture.Plane(c).AsSpan(chromaOut);
             if (weighting.IsDefault)
             {
-                InterPrediction.Average(_predictionL0, _predictionL1, 8, w / 2, h / 2, chroma, chromaStride);
+                InterPrediction.Average(_predictionL0, _predictionL1, 8, w / 2, ch, chroma, chromaStride);
             }
             else
             {
-                WeightBoth(_predictionL0, _predictionL1, 8, w / 2, h / 2, chroma, chromaStride, weighting, c);
+                WeightBoth(_predictionL0, _predictionL1, 8, w / 2, ch, chroma, chromaStride, weighting, c);
             }
         }
     }
@@ -532,7 +536,7 @@ internal sealed partial class PictureDecoder
         var (luma, lumaStride) = LumaPlace(mbAddr);
         var (chroma, chromaStride) = ChromaPlace(mbAddr);
         int lumaOut = luma + (y * lumaStride) + x;
-        int chromaOut = chroma + (y / 2 * chromaStride) + (x / 2);
+        int chromaOut = chroma + ((_mbHeightC == 16 ? y : y / 2) * chromaStride) + (x / 2);
         if (!_pairSlots)
         {
             return (((mbAddr % _widthInMbs) * 16) + x, ((mbAddr / _widthInMbs) * 16) + y, lumaOut, lumaStride, chromaOut, chromaStride);
@@ -543,6 +547,14 @@ internal sealed partial class PictureDecoder
         int lumaY = _fieldMb[mbAddr] ? ((pair / _widthInMbs) * 16) + y : ((pair / _widthInMbs) * 32) + ((mbAddr & 1) * 16) + y;
         return (lumaX, lumaY, lumaOut, lumaStride, chromaOut, chromaStride);
     }
+
+    /// <summary>
+    /// The vertical chroma vector (8.4.1.4) in eighth chroma samples: the luma one in 4:2:0, plus
+    /// the offset of a field predicting from the other parity; in 4:2:2 the luma one doubled
+    /// (yIntC and yFracC of 8.4.2.2.2), with no field offset.
+    /// </summary>
+    private int ChromaMvY(int mvY, int mbAddr, Picture reference) =>
+        _mbHeightC == 16 ? mvY * 2 : mvY + ChromaFieldOffset(mbAddr, reference);
 
     /// <summary>
     /// The vertical chroma offset of a field macroblock predicting from the field of the other

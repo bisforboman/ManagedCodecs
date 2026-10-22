@@ -33,8 +33,11 @@ public class DeblockingTests
                 }
             }
 
+            // Chroma edges of 8 samples, or of 16 with four to a luma segment (vertical edges of 4:2:2).
             bool chroma = random.Next(3) == 0;
-            int length = chroma ? 8 : 16;
+            bool tallChroma = chroma && random.Next(2) == 0;
+            int length = chroma && !tallChroma ? 8 : 16;
+            int segmentShift = tallChroma ? 2 : 0;
             for (int i = 0; i < 4; i++)
             {
                 strengths[i] = (byte)random.Next(0, 5);
@@ -52,15 +55,15 @@ public class DeblockingTests
 
             var expected = (byte[])plane.Clone();
             var actual = (byte[])plane.Clone();
-            PictureDecoder.FilterEdge(expected, q0, acrossStep, alongStep, length, strengths, qpP, qpQ, alphaOffset, betaOffset, chroma, vectorized: false);
-            PictureDecoder.FilterEdge(actual, q0, acrossStep, alongStep, length, strengths, qpP, qpQ, alphaOffset, betaOffset, chroma, vectorized: true);
+            PictureDecoder.FilterEdge(expected, q0, acrossStep, alongStep, length, strengths, qpP, qpQ, alphaOffset, betaOffset, chroma, vectorized: false, segmentShift);
+            PictureDecoder.FilterEdge(actual, q0, acrossStep, alongStep, length, strengths, qpP, qpQ, alphaOffset, betaOffset, chroma, vectorized: true, segmentShift);
 
             if (!expected.AsSpan().SequenceEqual(plane))
             {
                 filtered++;
             }
 
-            Assert.True(expected.AsSpan().SequenceEqual(actual), $"Case {n}: chroma {chroma}, vertical {vertical}, bS [{string.Join(",", strengths)}], qp {qpP}/{qpQ}");
+            Assert.True(expected.AsSpan().SequenceEqual(actual), $"Case {n}: chroma {chroma} ({length}), vertical {vertical}, bS [{string.Join(",", strengths)}], qp {qpP}/{qpQ}");
         }
 
         Assert.True(filtered > 5_000, $"Only {filtered} cases changed any sample; the test data is too rough.");

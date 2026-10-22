@@ -22,12 +22,17 @@ internal sealed record SliceInfo(int DisableDeblockingFilterIdc, int AlphaOffset
 /// </summary>
 /// <remarks>
 /// Block arrays use raster order inside the macroblock: luma 4x4 block (x, y) is y * 4 + x,
-/// chroma 4x4 block (x, y) of component c (0 = Cb, 1 = Cr) is c * 4 + y * 2 + x.
+/// chroma 4x4 block (x, y) of component c (0 = Cb, 1 = Cr) is c * 8 + y * 2 + x (y up to 1 in
+/// 4:2:0, up to 3 in 4:2:2, whose chroma blocks are 8x16 samples).
 /// </remarks>
 internal sealed partial class PictureDecoder
 {
     private readonly int _widthInMbs;
     private readonly int _mbCount;
+
+    // MbHeightC (8 or 16) and the chroma 4x4 blocks of a component (4 or 8).
+    private readonly int _mbHeightC;
+    private readonly int _chromaBlocks;
 
     // Per macroblock.
     private readonly int[] _sliceOfMb;
@@ -56,6 +61,8 @@ internal sealed partial class PictureDecoder
         Sps = sps;
         _widthInMbs = sps.WidthInMbs;
         _mbCount = sps.WidthInMbs * sps.HeightInMbs;
+        _mbHeightC = sps.MbHeightC;
+        _chromaBlocks = _mbHeightC / 2;
 
         _sliceOfMb = new int[_mbCount];
         Array.Fill(_sliceOfMb, -1);
@@ -63,7 +70,7 @@ internal sealed partial class PictureDecoder
         _qp = new int[_mbCount];
         _transform8x8 = new bool[_mbCount];
         _totalCoeffLuma = new byte[_mbCount * 16];
-        _totalCoeffChroma = new byte[_mbCount * 8];
+        _totalCoeffChroma = new byte[_mbCount * 16];
         _intra4x4Mode = new sbyte[_mbCount * 16];
 
         InitInter();
@@ -123,7 +130,7 @@ internal sealed partial class PictureDecoder
             _qp[mb] = 0;
             _transform8x8[mb] = false;
             _totalCoeffLuma.AsSpan(mb * 16, 16).Clear();
-            _totalCoeffChroma.AsSpan(mb * 8, 8).Clear();
+            _totalCoeffChroma.AsSpan(mb * 16, 16).Clear();
             _intra4x4Mode.AsSpan(mb * 16, 16).Clear();
             _cbp[mb] = 0;
             _chromaPredMode[mb] = 0;
@@ -278,21 +285,21 @@ internal sealed partial class PictureDecoder
     /// (outside the picture, in another slice, or not decoded yet). Locations inside the
     /// current macroblock return the current address; callers check decoding order there.
     /// </summary>
-    private int NeighborMb(int mbAddr, int x, int y, int size = 16)
+    private int NeighborMb(int mbAddr, int x, int y, int maxW = 16, int maxH = 16)
     {
         if (_pairSlots)
         {
-            return AffNeighbor(mbAddr, x, y, size, size).Mb;
+            return AffNeighbor(mbAddr, x, y, maxW, maxH).Mb;
         }
 
-        if (y >= size || (x >= size && y >= 0))
+        if (y >= maxH || (x >= maxW && y >= 0))
         {
             return -1;
         }
 
         int mbX = mbAddr % _widthInMbs;
         int mbY = mbAddr / _widthInMbs;
-        int nx = mbX + (x < 0 ? -1 : x >= size ? 1 : 0);
+        int nx = mbX + (x < 0 ? -1 : x >= maxW ? 1 : 0);
         int ny = mbY + (y < 0 ? -1 : 0);
         if (nx < 0 || nx >= _widthInMbs || ny < 0)
         {
@@ -318,14 +325,14 @@ internal sealed partial class PictureDecoder
     /// <summary>nC for a luma 4x4 block (9.2.1).</summary>
     private int LumaNc(int mbAddr, int x, int y) =>
         CombineNc(
-            NeighborTotalCoeff(mbAddr, (x * 4) - 1, y * 4, _totalCoeffLuma, 16, 0),
-            NeighborTotalCoeff(mbAddr, x * 4, (y * 4) - 1, _totalCoeffLuma, 16, 0));
+            NeighborTotalCoeff(mbAddr, (x * 4) - 1, y * 4, chroma: false, 0),
+            NeighborTotalCoeff(mbAddr, x * 4, (y * 4) - 1, chroma: false, 0));
 
     /// <summary>nC for a chroma AC 4x4 block of component <paramref name="c"/> (9.2.1).</summary>
     private int ChromaNc(int mbAddr, int c, int x, int y) =>
         CombineNc(
-            NeighborTotalCoeff(mbAddr, (x * 4) - 1, y * 4, _totalCoeffChroma, 8, c),
-            NeighborTotalCoeff(mbAddr, x * 4, (y * 4) - 1, _totalCoeffChroma, 8, c));
+            NeighborTotalCoeff(mbAddr, (x * 4) - 1, y * 4, chroma: true, c),
+            NeighborTotalCoeff(mbAddr, x * 4, (y * 4) - 1, chroma: true, c));
 
     private static int CombineNc(int a, int b) => (a, b) switch
     {
@@ -336,9 +343,10 @@ internal sealed partial class PictureDecoder
     };
 
     /// <summary>TotalCoeff of the 4x4 block covering a location, or -1 when unavailable.</summary>
-    private int NeighborTotalCoeff(int mbAddr, int x, int y, byte[] counts, int size, int component)
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private int NeighborTotalCoeff(int mbAddr, int x, int y, bool chroma, int component)
     {
-        var (n, xW, yW) = Neighbor(mbAddr, x, y, size, size);
+        var (n, xW, yW) = chroma ? Neighbor(mbAddr, x, y, 8, _mbHeightC) : Neighbor(mbAddr, x, y);
         if (n < 0)
         {
             return -1;
@@ -346,9 +354,9 @@ internal sealed partial class PictureDecoder
 
         int bx = xW / 4;
         int by = yW / 4;
-        return size == 16
-            ? counts[(n * 16) + (by * 4) + bx]
-            : counts[(n * 8) + (component * 4) + (by * 2) + bx];
+        return chroma
+            ? _totalCoeffChroma[(n * 16) + (component * 8) + (by * 2) + bx]
+            : _totalCoeffLuma[(n * 16) + (by * 4) + bx];
     }
 
     // ---- Macroblock layer (7.3.5) ----
@@ -498,7 +506,7 @@ internal sealed partial class PictureDecoder
         _qp[mbAddr] = 0; // what the deblocking filter uses for I_PCM; QP_Y,PRED carries on unchanged
         _intra4x4Mode.AsSpan(mbAddr * 16, 16).Fill(-1);
         _totalCoeffLuma.AsSpan(mbAddr * 16, 16).Fill(16);
-        _totalCoeffChroma.AsSpan(mbAddr * 8, 8).Fill(16);
+        _totalCoeffChroma.AsSpan(mbAddr * 16, 16).Fill(16);
 
         // For the CABAC contexts of later macroblocks I_PCM counts as fully coded.
         _cbp[mbAddr] = 15 | (2 << 4);
@@ -523,7 +531,7 @@ internal sealed partial class PictureDecoder
         var (chromaOrigin, chromaStride) = ChromaPlace(mbAddr);
         foreach (var plane in new[] { Picture.Cb, Picture.Cr })
         {
-            for (int y = 0; y < 8; y++)
+            for (int y = 0; y < _mbHeightC; y++)
             {
                 for (int x = 0; x < 8; x++)
                 {
@@ -551,7 +559,7 @@ internal sealed partial class PictureDecoder
     private void ClearCounts(int mbAddr)
     {
         _totalCoeffLuma.AsSpan(mbAddr * 16, 16).Clear();
-        _totalCoeffChroma.AsSpan(mbAddr * 8, 8).Clear();
+        _totalCoeffChroma.AsSpan(mbAddr * 16, 16).Clear();
     }
 
     /// <summary>Intra4x4PredMode prediction (8.3.1.1).</summary>
@@ -599,10 +607,11 @@ internal sealed partial class PictureDecoder
         /// <summary>Intra16x16 DC levels, row-major by block position.</summary>
         public int[] LumaDc { get; } = new int[16];
 
-        public int[][] ChromaDc { get; } = [new int[4], new int[4]];
+        /// <summary>Chroma DC levels per component, in the order they are coded (4 in 4:2:0, 8 in 4:2:2).</summary>
+        public int[][] ChromaDc { get; } = [new int[8], new int[8]];
 
-        /// <summary>Chroma levels per component and raster 4x4 block.</summary>
-        public int[][] ChromaAc { get; } = [.. Enumerable.Range(0, 8).Select(_ => new int[16])];
+        /// <summary>Chroma levels per component and raster 4x4 block (component * 8 + y * 2 + x).</summary>
+        public int[][] ChromaAc { get; } = [.. Enumerable.Range(0, 16).Select(_ => new int[16])];
     }
 
     /// <summary>
@@ -620,17 +629,20 @@ internal sealed partial class PictureDecoder
 
         int nC = category switch
         {
-            BlockCategory.ChromaDc => Cavlc.ChromaDcNc,
+            BlockCategory.ChromaDc => _mbHeightC == 8 ? Cavlc.ChromaDcNc : Cavlc.ChromaDc422Nc,
             BlockCategory.ChromaAc => ChromaNc(mbAddr, component, x, y),
             _ => LumaNc(mbAddr, x, y),
         };
         return Cavlc.ReadResidualBlock(r, nC, maxNumCoeff, block, scan);
     }
 
-    // Scans without the DC (AC blocks start at scan position 1) and the 2x2 chroma DC's raster order.
+    // Scans without the DC (AC blocks start at scan position 1), and the chroma DC levels in coded order.
     private static ReadOnlySpan<byte> ZigZag4x4Ac => [1, 4, 8, 5, 2, 3, 6, 9, 12, 13, 10, 7, 11, 14, 15];
 
     private static ReadOnlySpan<byte> ChromaDcScan => [0, 1, 2, 3];
+
+    // 4:2:2's 2x4 chroma DC: coded order down the first column first (8.5.11.1), as raster indices two to a row.
+    private static ReadOnlySpan<byte> ChromaDc422Scan => [0, 2, 1, 4, 6, 3, 5, 7];
 
     // CAVLC's 8x8 blocks come as four interleaved 4x4 blocks: coefficient k of block i4 is at 8x8
     // scan position 4 * k + i4 (7.3.5.3), so row i4 here holds those positions' raster indices.
@@ -639,7 +651,7 @@ internal sealed partial class PictureDecoder
     private void ReadResidual(SliceState slice, BitReader r, int mbAddr, Residual residual, bool is16x16, int cbpLuma, int cbpChroma)
     {
         Span<byte> lumaCounts = _totalCoeffLuma.AsSpan(mbAddr * 16, 16);
-        Span<byte> chromaCounts = _totalCoeffChroma.AsSpan(mbAddr * 8, 8);
+        Span<byte> chromaCounts = _totalCoeffChroma.AsSpan(mbAddr * 16, 16);
         lumaCounts.Clear();
         chromaCounts.Clear();
 
@@ -680,7 +692,8 @@ internal sealed partial class PictureDecoder
 
         for (int c = 0; c < 2; c++)
         {
-            if (ReadBlock(slice, r, mbAddr, BlockCategory.ChromaDc, 0, 0, c, 4, residual.ChromaDc[c], ChromaDcScan) != 0)
+            int dcCount = _chromaBlocks; // 4 * NumC8x8
+            if (ReadBlock(slice, r, mbAddr, BlockCategory.ChromaDc, 0, 0, c, dcCount, residual.ChromaDc[c].AsSpan(0, dcCount), dcCount == 4 ? ChromaDcScan : ChromaDc422Scan) != 0)
             {
                 _dcCoded[mbAddr] |= (byte)(2 << c);
             }
@@ -693,9 +706,10 @@ internal sealed partial class PictureDecoder
 
         for (int c = 0; c < 2; c++)
         {
-            for (int b = 0; b < 4; b++)
+            for (int b = 0; b < _chromaBlocks; b++)
             {
-                chromaCounts[(c * 4) + b] = (byte)ReadBlock(slice, r, mbAddr, BlockCategory.ChromaAc, b & 1, b >> 1, c, 15, residual.ChromaAc[(c * 4) + b], scanAc);
+                // In 4:2:2 the blocks come by 8x8 quadrant (chroma4x4BlkIdx), which is raster order here too.
+                chromaCounts[(c * 8) + b] = (byte)ReadBlock(slice, r, mbAddr, BlockCategory.ChromaAc, b & 1, b >> 1, c, 15, residual.ChromaAc[(c * 8) + b], scanAc);
             }
         }
     }
@@ -853,7 +867,7 @@ internal sealed partial class PictureDecoder
     {
         int origin = target.COrigin;
         int stride = target.CStride;
-        Span<int> dc = stackalloc int[4];
+        int blocks = _chromaBlocks;
 
         for (int c = 0; c < 2; c++)
         {
@@ -862,7 +876,7 @@ internal sealed partial class PictureDecoder
             byte[] plane = c == 0 ? target.Cb : target.Cr;
             if (intraMode >= 0)
             {
-                IntraPrediction.PredictChroma(intraMode, plane, origin, stride, new IntraNeighbors(LeftChromaRows(0), mbs.B, mbs.C, mbs.D), LeftChromaRows(4));
+                IntraPrediction.PredictChroma(intraMode, plane, origin, stride, new IntraNeighbors(LeftChromaRows(0), mbs.B, mbs.C, mbs.D), LeftChromaRows(4), _mbHeightC);
             }
 
             if (cbpChroma == 0)
@@ -870,19 +884,27 @@ internal sealed partial class PictureDecoder
                 continue;
             }
 
-            residual.ChromaDc[c].CopyTo(dc);
-            Transform.InverseChromaDc(dc, qpc, levelScale);
+            // In place: the levels are read again for every macroblock with chroma coefficients.
+            Span<int> dc = residual.ChromaDc[c];
+            if (blocks == 4)
+            {
+                Transform.InverseChromaDc(dc, qpc, levelScale);
+            }
+            else
+            {
+                Transform.InverseChromaDc422(dc, qpc, levelScale);
+            }
 
-            for (int b = 0; b < 4; b++)
+            for (int b = 0; b < blocks; b++)
             {
                 var dest = plane.AsSpan(origin + ((b >> 1) * 4 * stride) + ((b & 1) * 4));
-                if (_totalCoeffChroma[(mbAddr * 8) + (c * 4) + b] == 0)
+                if (_totalCoeffChroma[(mbAddr * 16) + (c * 8) + b] == 0)
                 {
                     Transform.AddDc(dc[b], dest, stride);
                     continue;
                 }
 
-                var block = residual.ChromaAc[(c * 4) + b];
+                var block = residual.ChromaAc[(c * 8) + b];
                 block[0] = dc[b];
                 Transform.Dequantize(block, qpc, skipDc: true, levelScale);
                 Transform.InverseTransformAdd(block, dest, stride);

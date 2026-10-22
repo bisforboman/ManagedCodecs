@@ -303,19 +303,19 @@ internal static class IntraPrediction
 
     /// <summary>Intra_16x16 prediction (8.3.3).</summary>
     public static void Predict16x16(int mode, byte[] plane, int offset, int stride, IntraNeighbors n) =>
-        PredictBlock(mode, plane, offset, stride, n, size: 16, isChroma: false);
+        PredictBlock(mode, plane, offset, stride, n, width: 16, height: 16);
 
-    /// <summary>4:2:0 chroma prediction (8.3.4) for one 8x8 component.</summary>
+    /// <summary>Chroma prediction (8.3.4) for one component: 8x8 (4:2:0) or 8x16 (4:2:2, <paramref name="height"/> 16).</summary>
     /// <param name="leftLower">
-    /// Whether the left samples of the lower 4x4 blocks may be used, where that differs from the
-    /// upper ones (<see cref="IntraNeighbors.Left"/>): only DC prediction treats them apart.
+    /// Whether the left samples of the 4x4 blocks below the first row of them may be used, where
+    /// that differs from the upper ones (<see cref="IntraNeighbors.Left"/>): only DC prediction treats them apart.
     /// </param>
-    public static void PredictChroma(int mode, byte[] plane, int offset, int stride, IntraNeighbors n, bool? leftLower = null)
+    public static void PredictChroma(int mode, byte[] plane, int offset, int stride, IntraNeighbors n, bool? leftLower = null, int height = 8)
     {
         // Chroma mode numbers differ from 16x16: 0 DC, 1 Horizontal, 2 Vertical, 3 Plane.
         if (mode == 0)
         {
-            PredictChromaDc(plane, offset, stride, n, leftLower ?? n.Left);
+            PredictChromaDc(plane, offset, stride, n, leftLower ?? n.Left, height);
             return;
         }
 
@@ -326,11 +326,11 @@ internal static class IntraPrediction
             3 => 3,
             _ => throw new InvalidDataException($"Invalid chroma prediction mode {mode}."),
         };
-        PredictBlock(lumaStyleMode, plane, offset, stride, n, size: 8, isChroma: true);
+        PredictBlock(lumaStyleMode, plane, offset, stride, n, width: 8, height);
     }
 
-    /// <summary>Vertical (0), Horizontal (1), DC (2, luma only) and Plane (3) for 16x16 or 8x8.</summary>
-    private static void PredictBlock(int mode, byte[] plane, int offset, int stride, IntraNeighbors n, int size, bool isChroma)
+    /// <summary>Vertical (0), Horizontal (1), DC (2, luma only) and Plane (3) for 16x16, 8x8 or 8x16.</summary>
+    private static void PredictBlock(int mode, byte[] plane, int offset, int stride, IntraNeighbors n, int width, int height)
     {
         int Top(int x) => plane[offset - stride + x];
         int Left(int y) => plane[offset + (y * stride) - 1];
@@ -340,18 +340,18 @@ internal static class IntraPrediction
         {
             case 0: // Vertical
                 Require(n.Top, mode);
-                for (int y = 0; y < size; y++)
+                for (int y = 0; y < height; y++)
                 {
-                    plane.AsSpan(offset - stride, size).CopyTo(plane.AsSpan(offset + (y * stride), size));
+                    plane.AsSpan(offset - stride, width).CopyTo(plane.AsSpan(offset + (y * stride), width));
                 }
 
                 break;
 
             case 1: // Horizontal
                 Require(n.Left, mode);
-                for (int y = 0; y < size; y++)
+                for (int y = 0; y < height; y++)
                 {
-                    plane.AsSpan(offset + (y * stride), size).Fill((byte)Left(y));
+                    plane.AsSpan(offset + (y * stride), width).Fill((byte)Left(y));
                 }
 
                 break;
@@ -384,29 +384,34 @@ internal static class IntraPrediction
 
             case 3: // Plane
                 {
+                    // 16 samples a side weigh the gradient by 5, 8 by 34 (8.3.3.4; 8.3.4.4 with xCF and yCF).
                     Require(n.Top && n.Left && n.TopLeft, mode);
-                    int half = size / 2;
+                    int halfW = width / 2;
+                    int halfH = height / 2;
                     int TopOrCorner(int x) => x < 0 ? Corner() : Top(x);
                     int LeftOrCorner(int y) => y < 0 ? Corner() : Left(y);
 
                     int h = 0;
                     int v = 0;
-                    for (int i = 0; i < half; i++)
+                    for (int i = 0; i < halfW; i++)
                     {
-                        h += (i + 1) * (Top(half + i) - TopOrCorner(half - 2 - i));
-                        v += (i + 1) * (Left(half + i) - LeftOrCorner(half - 2 - i));
+                        h += (i + 1) * (Top(halfW + i) - TopOrCorner(halfW - 2 - i));
                     }
 
-                    int a = 16 * (Left(size - 1) + Top(size - 1));
-                    int b = isChroma ? ((34 * h) + 32) >> 6 : ((5 * h) + 32) >> 6;
-                    int c = isChroma ? ((34 * v) + 32) >> 6 : ((5 * v) + 32) >> 6;
-                    int center = half - 1;
-
-                    for (int y = 0; y < size; y++)
+                    for (int i = 0; i < halfH; i++)
                     {
-                        for (int x = 0; x < size; x++)
+                        v += (i + 1) * (Left(halfH + i) - LeftOrCorner(halfH - 2 - i));
+                    }
+
+                    int a = 16 * (Left(height - 1) + Top(width - 1));
+                    int b = (((width == 8 ? 34 : 5) * h) + 32) >> 6;
+                    int c = (((height == 8 ? 34 : 5) * v) + 32) >> 6;
+
+                    for (int y = 0; y < height; y++)
+                    {
+                        for (int x = 0; x < width; x++)
                         {
-                            int value = (a + (b * (x - center)) + (c * (y - center)) + 16) >> 5;
+                            int value = (a + (b * (x - halfW + 1)) + (c * (y - halfH + 1)) + 16) >> 5;
                             plane[offset + (y * stride) + x] = (byte)Math.Clamp(value, 0, 255);
                         }
                     }
@@ -420,9 +425,9 @@ internal static class IntraPrediction
     }
 
     /// <summary>Chroma DC (8.3.4.1-3): each 4x4 block gets its own average with its own fallbacks.</summary>
-    private static void PredictChromaDc(byte[] plane, int offset, int stride, IntraNeighbors n, bool leftLower)
+    private static void PredictChromaDc(byte[] plane, int offset, int stride, IntraNeighbors n, bool leftLower, int height)
     {
-        for (int yO = 0; yO < 8; yO += 4)
+        for (int yO = 0; yO < height; yO += 4)
         {
             bool left = yO == 0 ? n.Left : leftLower;
             for (int xO = 0; xO < 8; xO += 4)

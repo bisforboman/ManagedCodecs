@@ -265,6 +265,40 @@ internal static class Transform
     }
 
     /// <summary>
+    /// 4:2:2 chroma DC (8.5.11): the 2x4 DC levels (row-major, two to a row) through the 4x4
+    /// transform down the columns and the 2x2 one across the rows, then scaling at
+    /// qP,DC = qP + 3 with LevelScale4x4(qP,DC % 6, 0, 0) of the component's list.
+    /// </summary>
+    public static void InverseChromaDc422(Span<int> c, int qp, ReadOnlySpan<int> levelScale)
+    {
+        Span<int> g = stackalloc int[8];
+        for (int i = 0; i < 4; i++)
+        {
+            g[i * 2] = c[i * 2] + c[(i * 2) + 1];
+            g[(i * 2) + 1] = c[i * 2] - c[(i * 2) + 1];
+        }
+
+        int qpDc = qp + 3;
+        int qpDiv = qpDc / 6;
+        int scale = levelScale[(qpDc % 6) * 16];
+        for (int j = 0; j < 2; j++)
+        {
+            int g0 = g[j];
+            int g1 = g[2 + j];
+            int g2 = g[4 + j];
+            int g3 = g[6 + j];
+            Scale(ref c[j], g0 + g1 + g2 + g3);
+            Scale(ref c[2 + j], g0 + g1 - g2 - g3);
+            Scale(ref c[4 + j], g0 - g1 - g2 + g3);
+            Scale(ref c[6 + j], g0 - g1 + g2 - g3);
+        }
+
+        void Scale(ref int dc, int f) => dc = qpDc >= 36
+            ? (f * scale) << (qpDiv - 6)
+            : ((f * scale) + (1 << (5 - qpDiv))) >> (6 - qpDiv);
+    }
+
+    /// <summary>
     /// 4x4 inverse transform (8.5.12.2) of scaled coefficients, added to the prediction already
     /// in <paramref name="dest"/> and clipped (8.5.14).
     /// </summary>

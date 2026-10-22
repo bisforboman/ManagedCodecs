@@ -6,4 +6,9 @@
     <IsAotCompatible>true</IsAotCompatible>
   </PropertyGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="ManagedCodecs.H264" />
+    <InternalsVisibleTo Include="ManagedCodecs.Mjpeg" />
+  </ItemGroup>
+
 </Project>

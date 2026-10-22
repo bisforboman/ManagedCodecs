@@ -234,10 +234,12 @@ what the two commands above include and are not comparable with FFmpeg's `bench:
    error concealment, more speed (about 3.2 to 3.3x FFmpeg's time at 720p, with
    libx264's default High output too, and about the same ratio at 10 bits as at 8; 2x on high-bitrate intra content). A profile of a
    720p libx264 default stream (2026-10-22) is flat: CABAC residual decoding takes 14%, deblocking 21%
-   in pieces of at most 2.5% (bS, transposes, the filter), nothing else over 5%. Candidates left, each
-   worth 1 to 2% and so best judged by instruction counts (callgrind) rather than wall time on a
-   cloud VM: output planes allocated without zeroing, fewer whole-picture clears in `Begin`, one
-   transpose for all four vertical luma edges, and deblocking a macroblock row behind decoding
+   in pieces of at most 2.5% (bS, transposes, the filter), nothing else over 5%. Output planes are allocated
+   without zeroing (callgrind: 0.4% fewer instructions on `h264-high-b.mp4`, 2.6% on `testsrc-420.avi`). Looked
+   at and left: dropping the whole-picture clears in `Begin` (skipped, direct and intra macroblocks rely on the
+   zeros in `_absMvd` and the motion arrays, so each path would clear its own macroblock instead, about as many
+   bytes), one transpose for all four vertical luma edges (`FilterEdge` already skips the transposes of edges whose
+   bS are all 0, which a whole-macroblock transpose would not), and deblocking a macroblock row behind decoding
    (for cache locality, which matters little with a large L2)
 5. ~~AAC-LC decoder~~ done: channel configurations 1 to 7 and program config elements (1 to 8
    channels), all window sequences and shapes, M/S, intensity, PNS, TNS. Both decoders are floating

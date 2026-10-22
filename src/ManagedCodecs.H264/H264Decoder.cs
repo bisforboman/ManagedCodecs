@@ -389,7 +389,7 @@ public sealed class H264Decoder : IVideoDecoder
     private static VideoFrame Crop(Picture picture, SequenceParameterSet sps)
     {
         var format = FormatOf(picture);
-        var frame = new VideoFrame(sps.Width, sps.Height, format);
+        var frame = VideoFrame.CreateUninitialized(sps.Width, sps.Height, format);
         var (left, _, top, _) = sps.Crop;
         for (int plane = 0; plane < 3; plane++)
         {

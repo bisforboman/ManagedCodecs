@@ -442,7 +442,7 @@ public sealed class MjpegDecoder : IVideoDecoder
 
         public VideoFrame ToVideoFrame()
         {
-            var frame = new VideoFrame(Header.Width, Header.Height, Format);
+            var frame = VideoFrame.CreateUninitialized(Header.Width, Header.Height, Format);
             for (int plane = 0; plane < Buffers.Length; plane++)
             {
                 var (width, height) = Format.PlaneSize(plane, Header.Width, Header.Height);

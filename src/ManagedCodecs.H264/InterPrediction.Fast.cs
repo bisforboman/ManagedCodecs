@@ -13,7 +13,10 @@ internal static partial class InterPrediction
     public static void PredictLuma(Picture reference, byte[] dest, int stride, int x, int y, int width, int height, int mvX, int mvY) =>
         PredictLuma(reference, x, y, width, height, mvX, mvY, dest.AsSpan((y * stride) + x), stride);
 
-    /// <summary>The same, written to <paramref name="output"/> (the block's top-left) with rows <paramref name="outputStride"/> apart.</summary>
+    /// <summary>
+    /// The same, written to <paramref name="output"/> (the block's top-left) with rows <paramref name="outputStride"/> apart;
+    /// from plane <paramref name="component"/>, which in 4:4:4 can be a chroma one (8.4.2.2: the luma filter).
+    /// </summary>
     /// <remarks>
     /// The scratch buffers are not zeroed: lanes past the block's width may hold anything, and
     /// only the first <c>width</c> bytes of each row are ever stored.
@@ -24,11 +27,11 @@ internal static partial class InterPrediction
     /// <paramref name="y"/>) are then field coordinates.
     /// </remarks>
     [SkipLocalsInit]
-    public static void PredictLuma(Picture reference, int x, int y, int width, int height, int mvX, int mvY, Span<byte> output, int outputStride)
+    public static void PredictLuma(Picture reference, int x, int y, int width, int height, int mvX, int mvY, Span<byte> output, int outputStride, int component = 0)
     {
         int stride = reference.LumaStride;
         int maxY = (reference.HeightInMbs * 16) - 1;
-        ReadOnlySpan<byte> plane = reference.Y;
+        ReadOnlySpan<byte> plane = reference.Plane(component);
         if (reference.Parity >= 0)
         {
             plane = plane[(reference.Parity * stride)..];

@@ -564,6 +564,12 @@ internal sealed partial class PictureDecoder<TPixel>
             return _kind[n] == MbKind.IPcm || (_cbp[n] >> 4) >= least ? 1 : 0;
         }
 
+        // 4:4:4 (like monochrome) has no chroma part: its blocks follow the luma bits.
+        if (_chroma444)
+        {
+            return luma;
+        }
+
         int chroma = 0;
         if (c.Decision(77 + ChromaCond(a, 1) + (2 * ChromaCond(b, 1))) == 1)
         {
@@ -577,11 +583,13 @@ internal sealed partial class PictureDecoder<TPixel>
 
     /// <summary>
     /// ctxIdxInc of coded_block_flag for a block of <paramref name="category"/> at 4x4 position
-    /// (<paramref name="x"/>, <paramref name="y"/>) of the macroblock (chroma: of component <paramref name="component"/>).
+    /// (<paramref name="x"/>, <paramref name="y"/>) of the macroblock, of component
+    /// <paramref name="component"/> (chroma, or in 4:4:4 the luma-shaped blocks of Cb and Cr).
     /// </summary>
     private int CodedBlockFlagInc(int mbAddr, BlockCategory category, int x, int y, int component)
     {
         bool chroma = category is BlockCategory.ChromaDc or BlockCategory.ChromaAc;
+        byte[] counts = chroma ? _totalCoeffChroma : _totalCoeff[component];
         int maxH = chroma ? _mbHeightC : 16;
         int maxW = chroma ? 8 : 16;
         bool currentIntra = !IsInter(mbAddr);
@@ -603,10 +611,13 @@ internal sealed partial class PictureDecoder<TPixel>
             int by = yW >> 2;
             return category switch
             {
-                BlockCategory.LumaDc => _kind[n] == MbKind.Intra16x16 ? _dcCoded[n] & 1 : 0,
+                BlockCategory.LumaDc => _kind[n] == MbKind.Intra16x16 ? (_dcCoded[n] >> component) & 1 : 0,
                 BlockCategory.ChromaDc => _kind[n] != MbKind.PSkip && (_cbp[n] >> 4) != 0 ? (_dcCoded[n] >> (1 + component)) & 1 : 0,
-                BlockCategory.ChromaAc => _totalCoeffChroma[(n * 16) + (component * 8) + (by * 2) + bx] != 0 ? 1 : 0,
-                _ => _totalCoeffLuma[(n * 16) + (by * 4) + bx] != 0 ? 1 : 0,
+                BlockCategory.ChromaAc => counts[(n * 16) + (component * 8) + (by * 2) + bx] != 0 ? 1 : 0,
+
+                // An 8x8 block (4:4:4 only) counts its neighbour only if that is an 8x8 block too (9.3.3.1.1.9).
+                BlockCategory.Luma8x8 => _transform8x8[n] && counts[(n * 16) + (by * 4) + bx] != 0 ? 1 : 0,
+                _ => counts[(n * 16) + (by * 4) + bx] != 0 ? 1 : 0,
             };
         }
 
@@ -618,33 +629,71 @@ internal sealed partial class PictureDecoder<TPixel>
     /// <summary>
     /// residual_block_cabac: coded_block_flag, the significance map and the levels, into
     /// <paramref name="block"/> through <paramref name="scan"/> (the caller clears it). Returns the
-    /// number of nonzero coefficients. 8x8 blocks have no coded_block_flag in 4:2:0: it is
-    /// inferred to be 1. Field macroblocks code the significance map with contexts of their own.
+    /// number of nonzero coefficients. 8x8 blocks have no coded_block_flag outside 4:4:4
+    /// (<paramref name="codedBlockFlagInc"/> -1): it is inferred to be 1. Field macroblocks code
+    /// the significance map with contexts of their own. The luma categories of
+    /// <paramref name="component"/> 1 and 2 are 4:4:4's Cb and Cr blocks (ctxBlockCat 6 to 13).
     /// </summary>
-    private static int CabacResidualBlock(Cabac c, BlockCategory category, int codedBlockFlagInc, bool field, int maxNumCoeff, Span<int> block, ReadOnlySpan<byte> scan)
+    private static int CabacResidualBlock(Cabac c, BlockCategory category, int component, int codedBlockFlagInc, bool field, int maxNumCoeff, Span<int> block, ReadOnlySpan<byte> scan)
     {
         if (category == BlockCategory.Luma8x8)
         {
-            return field
-                ? c.ResidualBlock(-1, 436, 451, Significant8x8FieldInc, Last8x8Inc, 426, 4, maxNumCoeff, block, scan)
-                : c.ResidualBlock(-1, 402, 417, Significant8x8Inc, Last8x8Inc, 426, 4, maxNumCoeff, block, scan);
+            var b = Contexts8x8[(component * 2) + (field ? 1 : 0)];
+            int cbf = codedBlockFlagInc < 0 ? -1 : 1012 + (component * 4) + codedBlockFlagInc;
+            return c.ResidualBlock(cbf, b.Significant, b.Last, field ? Significant8x8FieldInc : Significant8x8Inc, Last8x8Inc, b.Abs, 4, maxNumCoeff, block, scan);
         }
 
         int cat = (int)category;
         bool chromaDc = category == BlockCategory.ChromaDc;
         var inc = !chromaDc ? ScanPositionInc : maxNumCoeff == 4 ? ChromaDcInc : ChromaDc422Inc;
+
+        // Luma, and 4:2:0 or 4:2:2 chroma (component 1 or 2 of ctxBlockCat 3 and 4), take the first contexts.
+        int set = chromaDc || category == BlockCategory.ChromaAc ? 0 : component;
+        if (set == 0)
+        {
+            return c.ResidualBlock(
+                85 + CodedBlockFlagCatOffset[cat] + codedBlockFlagInc,
+                (field ? 277 : 105) + SignificantCatOffset[cat],
+                (field ? 338 : 166) + SignificantCatOffset[cat],
+                inc,
+                inc,
+                227 + AbsLevelCatOffset[cat],
+                chromaDc ? 3 : 4,
+                maxNumCoeff,
+                block,
+                scan);
+        }
+
+        var bases = Contexts4x4[(set * 2) + (field ? 1 : 0)];
         return c.ResidualBlock(
-            85 + CodedBlockFlagCatOffset[cat] + codedBlockFlagInc,
-            (field ? 277 : 105) + SignificantCatOffset[cat],
-            (field ? 338 : 166) + SignificantCatOffset[cat],
+            bases.CodedBlockFlag + CodedBlockFlagCatOffset[cat] + codedBlockFlagInc,
+            bases.Significant + SignificantCatOffset[cat],
+            bases.Last + SignificantCatOffset[cat],
             inc,
             inc,
-            227 + AbsLevelCatOffset[cat],
-            chromaDc ? 3 : 4,
+            bases.Abs + AbsLevelCatOffset[cat],
+            4,
             maxNumCoeff,
             block,
             scan);
     }
+
+    // ctxIdxOffset of coded_block_flag, significant_coeff_flag, last_significant_coeff_flag and
+    // coeff_abs_level_minus1 (Table 9-34) for blocks of ctxBlockCat < 5 by component (luma and
+    // 4:2:0/4:2:2 chroma; 4:4:4 Cb; Cr) and frame or field macroblock, then for 8x8 blocks.
+    private static readonly (int CodedBlockFlag, int Significant, int Last, int Abs)[] Contexts4x4 =
+    [
+        (85, 105, 166, 227), (85, 277, 338, 227),
+        (460, 484, 572, 952), (460, 776, 864, 952),
+        (472, 528, 616, 982), (472, 820, 908, 982),
+    ];
+
+    private static readonly (int Significant, int Last, int Abs)[] Contexts8x8 =
+    [
+        (402, 417, 426), (436, 451, 426),
+        (660, 690, 708), (675, 699, 708),
+        (718, 748, 766), (733, 757, 766),
+    ];
 
     // ctxIdxInc of significant_coeff_flag and last_significant_coeff_flag in 4x4 blocks: the scan
     // position, for chroma DC Min(position / NumC8x8, 2) (NumC8x8 1 in 4:2:0, 2 in 4:2:2).

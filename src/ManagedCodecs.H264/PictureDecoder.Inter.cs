@@ -453,17 +453,29 @@ internal sealed partial class PictureDecoder<TPixel>
 
         FieldStatistics.FromOwnFirstField += _fieldParity >= 0 && reference.Frame == Picture ? 1 : 0;
 
+        // Motion vectors are stored a 4x4 block, references an 8x8 partition: each row and each
+        // partition is written once.
+        var mvXs = _mvX[list].AsSpan(mbAddr * 16, 16);
+        var mvYs = _mvY[list].AsSpan(mbAddr * 16, 16);
         for (int by = y / 4; by < (y + h) / 4; by++)
         {
-            for (int bx = x / 4; bx < (x + w) / 4; bx++)
+            mvXs.Slice((by * 4) + (x / 4), w / 4).Fill((short)mvX);
+            mvYs.Slice((by * 4) + (x / 4), w / 4).Fill((short)mvY);
+        }
+
+        var refIdxs = _refIdx[list].AsSpan(mbAddr * 4, 4);
+        var refIds = _refId[list].AsSpan(mbAddr * 4, 4);
+        var refParities = _refParity[list].AsSpan(mbAddr * 4, 4);
+        var refPics = _refPic[list].AsSpan(mbAddr * 4, 4);
+        for (int py = y / 8; py <= (y + h - 1) / 8; py++)
+        {
+            for (int px = x / 8; px <= (x + w - 1) / 8; px++)
             {
-                _mvX[list][(mbAddr * 16) + (by * 4) + bx] = (short)mvX;
-                _mvY[list][(mbAddr * 16) + (by * 4) + bx] = (short)mvY;
-                int part = (mbAddr * 4) + ((by >> 1) * 2) + (bx >> 1);
-                _refIdx[list][part] = (sbyte)refIdx;
-                _refId[list][part] = referenceId;
-                _refParity[list][part] = (sbyte)reference.Parity;
-                _refPic[list][part] = reference;
+                int part = (py * 2) + px;
+                refIdxs[part] = (sbyte)refIdx;
+                refIds[part] = referenceId;
+                refParities[part] = (sbyte)reference.Parity;
+                refPics[part] = reference;
             }
         }
     }

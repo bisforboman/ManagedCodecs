@@ -343,8 +343,15 @@ internal sealed partial class PictureDecoder<TPixel>
             }
 
             var block = residual.Luma[i];
+            var dest = plane.AsSpan(origin + (y * 4 * stride) + (x * 4));
+            if (IsLossless(mbAddr))
+            {
+                Transform.AddBypass(block, 4, 4, BypassDpcm.None, dest, stride, _bitDepth);
+                continue;
+            }
+
             Transform.Dequantize(block, qp, skipDc: false, slice.Scaling.LevelScale4x4(3 + component)); // Inter Y, Cb or Cr
-            Transform.InverseTransformAdd(block, plane.AsSpan(origin + (y * 4 * stride) + (x * 4)), stride, _bitDepth);
+            Transform.InverseTransformAdd(block, dest, stride, _bitDepth);
         }
     }
 

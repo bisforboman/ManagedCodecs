@@ -11,7 +11,7 @@ then the same approach for H.264 + AAC in MP4.
 | `src/ManagedCodecs.Core` | `VideoFrame`, `PixelFormat`, `Packet`, `Rational`, `IDemuxer`, `IVideoDecoder` |
 | `src/ManagedCodecs.Containers` | `AviDemuxer`, `Mp4Demuxer`, and `Demuxer.Open` to pick one by content |
 | `src/ManagedCodecs.Mjpeg` | `MjpegDecoder`: baseline/extended Huffman JPEG, interlaced AVI1, bit-exact with FFmpeg |
-| `src/ManagedCodecs.H264` | `H264Decoder`: Constrained Baseline, Main, High, High 10, High 4:2:2 and High 4:4:4 Predictive profile H.264 (CAVLC, CABAC, I/P/B, weighted prediction, 8x8 transform, scaling matrices, deblocking, 4:2:0, 4:2:2 and 4:4:4, 8 and 10 bits, progressive and interlaced), bit-exact |
+| `src/ManagedCodecs.H264` | `H264Decoder`: Constrained Baseline, Main, High, High 10, High 4:2:2 and High 4:4:4 Predictive profile H.264 (CAVLC, CABAC, I/P/B, weighted prediction, 8x8 transform, scaling matrices, deblocking, 4:2:0, 4:2:2 and 4:4:4, 8 and 10 bits, lossless, progressive and interlaced), bit-exact |
 | `src/ManagedCodecs.Aac` | `AacDecoder`: AAC LC (mono to 7.1, M/S, intensity, PNS, TNS), within 3e-7 of FFmpeg's float output |
 | `src/Shared` | Source files linked into several codec projects (the VLC decoder) |
 | `tools/ManagedCodecs.Cli` | `mcdec`: decodes a file and times it, to compare with `ffmpeg -benchmark` |
@@ -210,18 +210,27 @@ what the two commands above include and are not comparable with FFmpeg's `bench:
    predicted with the luma intra modes and the luma 6-tap filter, dequantized at their own QP'C
    with their own scaling lists (12 in the PPS), and deblocked with the luma filter at QP_C on the
    luma edges, with CAVLC and CABAC, P and B frames, constrained intra prediction, cropping, MBAFF
-   and 10 bits; I_PCM in 4:4:4 from hand-built streams. Lossless macroblocks
-   (qpprime_y_zero_transform_bypass_flag) and separate colour planes are rejected. x264 before
+   and 10 bits; I_PCM in 4:4:4 from hand-built streams. Separate colour planes are rejected. x264 before
    build 151 derived the context of an 8x8 block's coded_block_flag in 4:4:4 against the spec (a
    neighbour without 8x8 transforms counted as missing); FFmpeg decodes such streams by the encoder's
    version, this decoder by the spec, so they come out differently.
+   Lossless coding (qpprime_y_zero_transform_bypass_flag with QP'Y 0) is checked on libx264's
+   `-qp 0` output: the levels added as the residual with no scaling or transform, Intra_16x16 and
+   chroma DC levels put in place, and the residual of intra blocks predicted vertically or
+   horizontally summed along that direction first (8.5.15; over the whole macroblock for
+   Intra_16x16 and for chroma), in 4:2:0, 4:2:2 and 4:4:4, at 8 and 10 bits (QP_Y -12), with
+   CABAC and CAVLC, the 4x4 and 8x8 transforms, P and B frames and MBAFF. Deblocking treats
+   lossless macroblocks by their QP_Y, as JM and FFmpeg do (libx264's `-qp 0` puts every
+   macroblock at QP 0, so lossless next to lossy macroblocks is not checked). x264 before build 151
+   also predicted lossless Intra_8x8 blocks from unfiltered neighbours; FFmpeg follows it there
+   too, this decoder the spec.
    Produced by neither, so not checked against FFmpeg: I_PCM (decoded from hand-built streams,
    CAVLC and CABAC), memory management operations 2, 3 and 5 (unit tests),
    B sub-macroblock partitions smaller than 8x8, explicit weights for bi-predicted blocks (libx264 weights B frames
    implicitly), cabac_init_idc 1 and 2 (only their tables are checked, against libavc), a Cr QP
    offset other than Cb's (second_chroma_qp_index_offset), and of scaling matrices: lists in the
    SPS, fall-back rule B, useDefaultScalingMatrixFlag and a Cr list of its own (unit tests decode
-   samples with rewritten parameter sets). Still open: lossless coding and separate colour planes, bit depths other than 8 and 10,
+   samples with rewritten parameter sets). Still open: separate colour planes, bit depths other than 8 and 10,
    error concealment, more speed (about 3.2 to 3.3x FFmpeg's time at 720p, with
    libx264's default High output too, and about the same ratio at 10 bits as at 8; 2x on high-bitrate intra content)
 5. ~~AAC-LC decoder~~ done: channel configurations 1 to 7 and program config elements (1 to 8

@@ -346,6 +346,26 @@ F10=(-c:v libx264 -profile:v high444 -pix_fmt yuv444p10le)
 ff -f lavfi -i testsrc2=size=320x240:rate=25,noise=alls=40:allf=t -t 0.2 "${F10[@]}" -g 1 -qp 1 samples/h264-444-10bit-intra-qp1.mp4
 ff -f lavfi -i "testsrc2=size=320x240:rate=25,scroll=h=0.01:v=0.005" -t 1 "${F10[@]}" -bf 3 -refs 3 -x264-params partitions=all:direct=auto samples/h264-444-10bit-b.mp4
 
+# ---- H.264 lossless (transform bypass) ----
+# libx264's -qp 0 sets qpprime_y_zero_transform_bypass_flag (profile High 4:4:4 Predictive, whatever the chroma format)
+# with QP'Y 0 (QP_Y -12 at 10 bits): the levels are the residual, with no scaling or transform, and intra blocks
+# predicted vertically or horizontally sum it first along that direction (over the whole macroblock for Intra_16x16
+# and for chroma). 4:2:0 intra with CABAC and CAVLC, and with P and B frames; 4:2:2 intra (chroma summed over 16 rows);
+# 4:4:4 intra and with B frames, CAVLC too; 4:4:4 at 10 bits; 4x4 transforms only; MBAFF. Noise keeps the levels large.
+LL="testsrc2=size=320x240:rate=25,noise=alls=20:allf=t"
+LM="testsrc2=size=320x240:rate=25,scroll=h=0.01:v=0.005,noise=alls=6:allf=t"
+X=(-c:v libx264 -qp 0)
+ff -f lavfi -i "$LL" -t 0.2 "${X[@]}" -pix_fmt yuv420p -g 1 samples/h264-lossless-intra.mp4
+ff -f lavfi -i "$LL" -t 0.2 "${X[@]}" -pix_fmt yuv420p -g 1 -x264-params cabac=0 samples/h264-lossless-intra-cavlc.mp4
+ff -f lavfi -i "$LM" -t 0.6 "${X[@]}" -pix_fmt yuv420p -bf 2 -refs 2 -x264-params partitions=all samples/h264-lossless-b.mp4
+ff -f lavfi -i "$LL" -t 0.2 "${X[@]}" -pix_fmt yuv422p -g 1 samples/h264-lossless-422-intra.mp4
+ff -f lavfi -i "$LL" -t 0.2 "${X[@]}" -pix_fmt yuv444p -g 1 samples/h264-lossless-444-intra.mp4
+ff -f lavfi -i "$LM" -t 0.6 "${X[@]}" -pix_fmt yuv444p -bf 2 -refs 2 -x264-params partitions=all samples/h264-lossless-444-b.mp4
+ff -f lavfi -i "$LM" -t 0.6 "${X[@]}" -pix_fmt yuv444p -bf 2 -refs 2 -x264-params cabac=0:partitions=all samples/h264-lossless-444-b-cavlc.mp4
+ff -f lavfi -i "$LM" -t 0.6 "${X[@]}" -pix_fmt yuv444p10le -bf 2 -refs 2 samples/h264-lossless-444-10bit.mp4
+ff -f lavfi -i "$LL" -t 0.2 "${X[@]}" -pix_fmt yuv420p -g 1 -x264-params 8x8dct=0 samples/h264-lossless-4x4.mp4
+ff -f lavfi -i "testsrc2=size=320x240:rate=50,noise=alls=10:allf=t" -t 0.4 "${X[@]}" -pix_fmt yuv420p -vf "tinterlace=interleave_top,setfield=tff" -flags +ildct+ilme -bf 2 samples/h264-lossless-mbaff.mp4
+
 # ---- H.264 scaling matrices (High profile) ----
 # libx264 writes them in the PPS only, so absent lists fall back by rule A (Table 7-2). cqm=jvt sends no lists at all:
 # every list is the default one. The custom files give each list its own values (libx264 reads one chroma list per

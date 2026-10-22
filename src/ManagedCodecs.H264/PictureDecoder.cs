@@ -862,9 +862,33 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
 
         var (plane, origin, stride) = ComponentOf(target, component);
         var block = _residuals[component].Luma8x8[b8];
+        if (IsLossless(mbAddr))
+        {
+            int mode = _intra4x4Mode[(mbAddr * 16) + ((b8 >> 1) * 8) + ((b8 & 1) * 2)];
+            Transform.AddBypass(block, 8, 8, DpcmOf(mode), plane.AsSpan(origin + ((b8 >> 1) * 8 * stride) + ((b8 & 1) * 8)), stride, _bitDepth);
+            return;
+        }
+
         Transform.Dequantize8x8(block, qp, slice.Scaling.LevelScale8x8((2 * component) + (IsInter(mbAddr) ? 1 : 0)));
         Transform.InverseTransform8x8Add(block, plane.AsSpan(origin + ((b8 >> 1) * 8 * stride) + ((b8 & 1) * 8)), stride, _bitDepth);
     }
+
+    /// <summary>
+    /// Whether the macroblock is lossless: TransformBypassModeFlag, set when the SPS allows it and
+    /// QP'Y is 0 (7.4.2.1.1), for all three components whatever their QP'C.
+    /// </summary>
+    private bool IsLossless(int mbAddr) => Sps.TransformBypass && _qp[mbAddr] + _qpBdOffset == 0;
+
+    /// <summary>
+    /// How a lossless intra block's residual is summed (8.5.15) for a luma prediction mode
+    /// (Intra4x4, Intra8x8 or Intra16x16: 0 vertical, 1 horizontal); -1, inter, for none.
+    /// </summary>
+    private static BypassDpcm DpcmOf(int lumaMode) => lumaMode switch
+    {
+        0 => BypassDpcm.Vertical,
+        1 => BypassDpcm.Horizontal,
+        _ => BypassDpcm.None,
+    };
 
     /// <summary>The plane, first sample and row stride of a component of a target.</summary>
     private static (TPixel[] Plane, int Origin, int Stride) ComponentOf(MbTarget target, int component) => component switch
@@ -895,6 +919,12 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
         if (is16x16)
         {
             IntraPrediction.Predict16x16(predMode16x16, plane, origin, stride, new IntraNeighbors(LeftRows(0, 16), mbs.B, mbs.C, mbs.D), _bitDepth);
+            if (IsLossless(mbAddr))
+            {
+                AddBypass16x16(mbAddr, residual, counts, predMode16x16, plane.AsSpan(origin), stride);
+                return;
+            }
+
             Span<int> dc = stackalloc int[16];
             residual.LumaDc.CopyTo(dc);
             Transform.InverseLumaDc(dc, qp, levelScale);
@@ -962,10 +992,65 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
             if ((cbpLuma & (1 << (idx >> 2))) != 0 && counts[(mbAddr * 16) + (y * 4) + x] != 0)
             {
                 var block = residual.Luma[(y * 4) + x];
+                if (IsLossless(mbAddr))
+                {
+                    Transform.AddBypass(block, 4, 4, DpcmOf(_intra4x4Mode[(mbAddr * 16) + (y * 4) + x]), plane.AsSpan(offset), stride, _bitDepth);
+                    continue;
+                }
+
                 Transform.Dequantize(block, qp, skipDc: false, levelScale);
                 Transform.InverseTransformAdd(block, plane.AsSpan(offset), stride, _bitDepth);
             }
         }
+    }
+
+    /// <summary>
+    /// The residual of a lossless Intra_16x16 macroblock (8.5.10, 8.5.15): each 4x4 block's levels
+    /// with its DC level in place, summed over the whole 16x16 block for vertical or horizontal prediction.
+    /// </summary>
+    [SkipLocalsInit]
+    private void AddBypass16x16(int mbAddr, Residual residual, byte[] counts, int predMode16x16, Span<TPixel> dest, int stride)
+    {
+        Span<int> r = stackalloc int[256];
+        for (int i = 0; i < 16; i++)
+        {
+            var block = residual.Luma[i];
+            bool coded = counts[(mbAddr * 16) + i] != 0;
+            for (int k = 0; k < 16; k++)
+            {
+                r[((((i >> 2) * 4) + (k >> 2)) * 16) + ((i & 3) * 4) + (k & 3)] = k == 0 ? residual.LumaDc[i] : coded ? block[k] : 0;
+            }
+        }
+
+        Transform.AddBypass(r, 16, 16, DpcmOf(predMode16x16), dest, stride, _bitDepth);
+    }
+
+    /// <summary>
+    /// The chroma residual of a lossless macroblock (4:2:0 or 4:2:2): the levels of each 4x4 block
+    /// with its DC level in place, summed over the whole component for horizontal (1) or vertical
+    /// (2) intra prediction (8.5.11, 8.5.15).
+    /// </summary>
+    [SkipLocalsInit]
+    private void AddChromaBypass(int mbAddr, Residual residual, int c, int intraMode, Span<TPixel> dest, int stride)
+    {
+        Span<int> r = stackalloc int[8 * 16];
+        for (int b = 0; b < _chromaBlocks; b++)
+        {
+            var block = residual.ChromaAc[(c * 8) + b];
+            bool coded = _totalCoeffChroma[(mbAddr * 16) + (c * 8) + b] != 0;
+            for (int k = 0; k < 16; k++)
+            {
+                r[((((b >> 1) * 4) + (k >> 2)) * 8) + ((b & 1) * 4) + (k & 3)] = k == 0 ? residual.ChromaDc[c][b] : coded ? block[k] : 0;
+            }
+        }
+
+        var dpcm = intraMode switch
+        {
+            1 => BypassDpcm.Horizontal,
+            2 => BypassDpcm.Vertical,
+            _ => BypassDpcm.None,
+        };
+        Transform.AddBypass(r[..(8 * _mbHeightC)], 8, _mbHeightC, dpcm, dest, stride, _bitDepth);
     }
 
     /// <summary>
@@ -991,6 +1076,12 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
 
             if (cbpChroma == 0)
             {
+                continue;
+            }
+
+            if (IsLossless(mbAddr))
+            {
+                AddChromaBypass(mbAddr, residual, c, intraMode, plane.AsSpan(origin), stride);
                 continue;
             }
 

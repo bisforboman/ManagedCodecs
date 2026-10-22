@@ -449,9 +449,9 @@ public sealed class H264Decoder : IVideoDecoder
             throw new NotSupportedException("Monochrome video (chroma_format_idc 0) is not supported.");
         }
 
-        if (sps.SeparateColourPlanes || sps.TransformBypass)
+        if (sps.SeparateColourPlanes)
         {
-            throw new NotSupportedException("Separate colour planes and lossless (transform bypass) macroblocks are not supported.");
+            throw new NotSupportedException("Separate colour planes (separate_colour_plane_flag) are not supported.");
         }
 
         if (sps.BitDepthLuma is not (8 or 10) || sps.BitDepthChroma != sps.BitDepthLuma)

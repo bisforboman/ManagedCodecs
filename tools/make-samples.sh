@@ -99,6 +99,56 @@ done
 ff -f lavfi -i "testsrc2=size=320x240:rate=25,scroll=h=0.012:v=-0.007" -t 2 "${BM[@]}" -bf 3 -refs 4 -x264-params weightb=0:b-pyramid=normal:partitions=all samples/h264-b-pyramid.mp4
 ff -f lavfi -i "testsrc2=size=320x240:rate=25,scroll=h=0.013:v=-0.021,noise=alls=12:allf=t" -t 2 "${BM[@]}" -bf 3 -refs 3 -qp 22 -x264-params weightb=0:partitions=all:me=umh:merange=32:direct=auto samples/h264-b-motion.mp4
 ff -f lavfi -i "testsrc2=size=320x240:rate=25,scroll=h=0.01" -t 1 "${BM[@]}" -bf 2 -refs 2 -x264-params weightb=0:slices=4 samples/h264-b-slices.mp4
+# Direct prediction without direct_8x8_inference_flag (each 4x4 block takes its own co-located motion), which libx264
+# never writes: the temporal and the motion (direct=auto: spatial and temporal slices) samples with the flag cleared
+# in the SPS, which changes 9 and 37 of their frames (in libx264's spatial-only samples a still 4x4 block's corner
+# block is still too, so nothing changes). In Main profile (no 8x8 transform) the flag changes only how direct
+# motion is derived, not the parse, so FFmpeg decodes the same stream to its own reference; both levels are below
+# 3.0, where Table A-4 would require the flag.
+for d in temporal motion; do
+  python3 -I - samples/h264-b-$d.mp4 samples/h264-b-no8x8inference-$d.mp4 <<'PY'
+import sys
+data = bytearray(open(sys.argv[1], 'rb').read())
+at = data.find(b'avcC') + 4
+assert data[at] == 1 and data[at + 5] & 0x1f == 1  # one SPS
+length = int.from_bytes(data[at + 6:at + 8], 'big')
+nal = data[at + 8:at + 8 + length]
+rbsp = bytearray(nal[1:].replace(b'\x00\x00\x03', b'\x00\x00'))
+assert rbsp[0] == 77 and rbsp[2] < 30  # Main profile, level below 3.0
+
+pos = 24  # bits: profile_idc, constraint flags, level_idc
+def bit():
+    global pos
+    pos += 1
+    return (rbsp[(pos - 1) >> 3] >> (7 - ((pos - 1) & 7))) & 1
+def ue():
+    zeros = 0
+    while bit() == 0:
+        zeros += 1
+    return (1 << zeros) - 1 + sum(bit() << (zeros - 1 - i) for i in range(zeros))
+ue(); ue()  # seq_parameter_set_id, log2_max_frame_num_minus4
+poc_type = ue()
+assert poc_type == 0
+ue()  # log2_max_pic_order_cnt_lsb_minus4
+ue(); bit(); ue(); ue()  # max_num_ref_frames, gaps flag, width and height in macroblocks
+assert bit() == 1  # frame_mbs_only_flag
+assert (rbsp[pos >> 3] >> (7 - (pos & 7))) & 1 == 1
+rbsp[pos >> 3] &= ~(1 << (7 - (pos & 7)) & 0xff)  # direct_8x8_inference_flag = 0
+
+# Back to a NAL unit with emulation prevention; the length must not change (no box sizes to fix).
+out = bytearray([nal[0]])
+zeros = 0
+for b in rbsp:
+    if zeros >= 2 and b <= 3:
+        out.append(3)
+        zeros = 0
+    out.append(b)
+    zeros = zeros + 1 if b == 0 else 0
+assert len(out) == length
+data[at + 8:at + 8 + length] = out
+open(sys.argv[2], 'wb').write(data)
+PY
+done
 ff -f lavfi -i "testsrc2=size=321x239:rate=25,scroll=v=0.02" -t 1 "${BM[@]}" -bf 2 -refs 2 -x264-params weightb=0 samples/h264-b-odd-size.mp4
 ff -f lavfi -i "testsrc2=size=176x144:rate=25,scroll=h=0.01" -t 3 "${BM[@]}" -bf 3 -refs 4 -g 1000 -x264-params weightb=0:b-pyramid=normal samples/h264-b-long-gop.mp4
 

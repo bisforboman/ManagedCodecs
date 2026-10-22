@@ -169,10 +169,12 @@ what the two commands above include and are not comparable with FFmpeg's `bench:
    slices skipped), and gaps in frame_num from dropped temporal layers. The frames inferred for
    such gaps (8.2.5.2) take their places in the default reference lists and the sliding window;
    no encoder names a reference by such a position, so hand-built streams test that.
+   Direct prediction without direct_8x8_inference_flag, which libx264 never writes, is checked
+   on two libx264 B streams with the flag cleared in their SPS (Main profile, where it changes
+   only how direct motion is derived, and FFmpeg decodes the same rewritten stream).
    Produced by neither, so not checked against FFmpeg: I_PCM (decoded from hand-built streams,
    CAVLC and CABAC), memory management operations 2, 3 and 5 (unit tests),
-   B sub-macroblock partitions smaller than 8x8, direct prediction without
-   direct_8x8_inference_flag, explicit weights for bi-predicted blocks (libx264 weights B frames
+   B sub-macroblock partitions smaller than 8x8, explicit weights for bi-predicted blocks (libx264 weights B frames
    implicitly), cabac_init_idc 1 and 2 (only their tables are checked, against libavc), a Cr QP
    offset other than Cb's (second_chroma_qp_index_offset), and of scaling matrices: lists in the
    SPS, fall-back rule B, useDefaultScalingMatrixFlag and a Cr list of its own (unit tests decode

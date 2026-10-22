@@ -62,7 +62,7 @@ for (int loop = 0; loop < loops; loop++)
     {
         if (packet.StreamIndex == video?.StreamIndex && videoDecoder is not null)
         {
-            videoFrames += videoDecoder.Decode(packet).Count;
+            videoFrames += Release(videoDecoder.Decode(packet));
         }
         else if (packet.StreamIndex == audio?.StreamIndex && audioDecoder is not null)
         {
@@ -73,7 +73,7 @@ for (int loop = 0; loop < loops; loop++)
 
     if (videoDecoder is not null)
     {
-        videoFrames += videoDecoder.Flush().Count; // frames held back for reordering
+        videoFrames += Release(videoDecoder.Flush()); // frames held back for reordering
     }
 
     lastLoop = wall.Elapsed - loopStart;
@@ -93,3 +93,14 @@ if (loops > 1)
 }
 
 return 0;
+
+// Disposes the frames, as a consumer done with them would (pooled planes go back to the decoder), and counts them.
+static int Release(IReadOnlyList<VideoFrame> frames)
+{
+    foreach (var frame in frames)
+    {
+        frame.Dispose();
+    }
+
+    return frames.Count;
+}

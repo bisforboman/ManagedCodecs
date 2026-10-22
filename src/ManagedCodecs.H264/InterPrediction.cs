@@ -24,15 +24,16 @@ internal static partial class InterPrediction
         PredictLumaReference(reference, x, y, width, height, mvX, mvY, dest.AsSpan((y * stride) + x), stride);
 
     /// <summary>
-    /// The same, written to <paramref name="output"/> (the block's top-left). A field view
+    /// The same, written to <paramref name="output"/> (the block's top-left), from plane
+    /// <paramref name="component"/> (a chroma plane in 4:4:4, whose chroma uses the luma filter). A field view
     /// (<see cref="Picture.Field"/>) is a picture of its own: every other row, half the height.
     /// </summary>
-    public static void PredictLumaReference<TPixel>(Picture reference, int x, int y, int width, int height, int mvX, int mvY, Span<TPixel> output, int outputStride)
+    public static void PredictLumaReference<TPixel>(Picture reference, int x, int y, int width, int height, int mvX, int mvY, Span<TPixel> output, int outputStride, int component = 0)
         where TPixel : unmanaged, IBinaryInteger<TPixel>
     {
         var (origin, stride, maxY) = Plane(reference, reference.LumaStride, reference.HeightInMbs * 16);
         int maxX = (reference.WidthInMbs * 16) - 1;
-        TPixel[] src = reference.Plane<TPixel>(0);
+        TPixel[] src = reference.Plane<TPixel>(component);
         int max = Samples.Max<TPixel>(reference.BitDepth);
         int xFrac = mvX & 3;
         int yFrac = mvY & 3;
@@ -117,19 +118,19 @@ internal static partial class InterPrediction
     }
 
     /// <summary>
-    /// A luma block of any sample type: through the row-based <see cref="PredictLuma(Picture, int, int, int, int, int, int, Span{byte}, int)"/>
+    /// A luma block of any sample type: through the row-based <see cref="PredictLuma(Picture, int, int, int, int, int, int, Span{byte}, int, int)"/>
     /// for 8-bit samples, <see cref="PredictLuma16"/> for deeper ones.
     /// </summary>
-    public static void PredictLumaBlock<TPixel>(Picture reference, int x, int y, int width, int height, int mvX, int mvY, Span<TPixel> output, int outputStride)
+    public static void PredictLumaBlock<TPixel>(Picture reference, int x, int y, int width, int height, int mvX, int mvY, Span<TPixel> output, int outputStride, int component = 0)
         where TPixel : unmanaged, IBinaryInteger<TPixel>
     {
         if (typeof(TPixel) == typeof(byte))
         {
-            PredictLuma(reference, x, y, width, height, mvX, mvY, MemoryMarshal.Cast<TPixel, byte>(output), outputStride);
+            PredictLuma(reference, x, y, width, height, mvX, mvY, MemoryMarshal.Cast<TPixel, byte>(output), outputStride, component);
             return;
         }
 
-        PredictLuma16(reference, x, y, width, height, mvX, mvY, MemoryMarshal.Cast<TPixel, ushort>(output), outputStride);
+        PredictLuma16(reference, x, y, width, height, mvX, mvY, MemoryMarshal.Cast<TPixel, ushort>(output), outputStride, component);
     }
 
     /// <summary>A chroma block of any sample type, as <see cref="PredictLumaBlock"/>.</summary>

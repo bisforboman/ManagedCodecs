@@ -322,25 +322,53 @@ ff -f lavfi -i testsrc2=size=320x240:rate=25,noise=alls=40:allf=t -t 0.2 "${T2[@
 ff -f lavfi -i "testsrc2=size=320x240:rate=25,scroll=h=0.01:v=0.005" -t 1 "${T2[@]}" -bf 3 -refs 3 -x264-params partitions=all:direct=auto samples/h264-422-10bit-b.mp4
 ff -f lavfi -i testsrc2=size=320x240:rate=50 -t 1 "${T[@]}" -vf "tinterlace=interleave_top,setfield=tff" -flags +ildct+ilme -bf 3 -refs 3 samples/h264-10bit-mbaff.mp4
 
+# ---- H.264 High 4:4:4 Predictive ----
+# 4:4:4 (chroma_format_idc 3): Cb and Cr coded as luma (Intra16x16 DC/AC, 4x4 and 8x8 blocks, the 8x8 blocks'
+# coded_block_flag sent with CABAC, CABAC contexts 460 to 1023, Table 9-4's 4:4:4 coded_block_pattern), predicted
+# with the luma intra modes and the luma 6-tap filter, and deblocked with the luma filter at their own QPs. Intra with
+# CABAC and CAVLC and at QP 4 on noise; 4x4 transforms only; P and B frames with every partition (CABAC and CAVLC);
+# motion on noise; an odd size (crop units of one sample); constrained intra with a chroma QP offset; libx264's
+# defaults on fades; MBAFF; and 4:4:4 at 10 bits. libx264 writes no transform bypass here (that is -qp 0).
+F=(-c:v libx264 -profile:v high444 -pix_fmt yuv444p)
+ff -f lavfi -i testsrc2=size=320x240:rate=25 -t 0.2 "${F[@]}" -g 1 samples/h264-444-intra.mp4
+ff -f lavfi -i testsrc2=size=320x240:rate=25 -t 0.2 "${F[@]}" -g 1 -x264-params cabac=0 samples/h264-444-intra-cavlc.mp4
+ff -f lavfi -i testsrc2=size=320x240:rate=25,noise=alls=40:allf=t -t 0.2 "${F[@]}" -g 1 -qp 4 samples/h264-444-intra-qp4.mp4
+ff -f lavfi -i testsrc2=size=320x240:rate=25,noise=alls=40:allf=t -t 0.2 "${F[@]}" -g 1 -qp 4 -x264-params cabac=0 samples/h264-444-intra-qp4-cavlc.mp4
+ff -f lavfi -i "testsrc2=size=320x240:rate=25,scroll=h=0.01:v=0.005" -t 1 "${F[@]}" -bf 2 -refs 2 -x264-params 8x8dct=0 samples/h264-444-4x4.mp4
+ff -f lavfi -i "testsrc2=size=320x240:rate=25,scroll=h=0.01:v=0.005" -t 1 "${F[@]}" -bf 3 -refs 3 -x264-params partitions=all:direct=auto samples/h264-444-b.mp4
+ff -f lavfi -i "testsrc2=size=320x240:rate=25,scroll=h=0.01:v=0.005" -t 1 "${F[@]}" -bf 3 -refs 3 -x264-params cabac=0:partitions=all:direct=auto samples/h264-444-b-cavlc.mp4
+ff -f lavfi -i "testsrc2=size=320x240:rate=25,scroll=h=0.013:v=-0.021,noise=alls=12:allf=t" -t 2 "${F[@]}" -bf 3 -refs 3 -qp 22 -x264-params partitions=all:me=umh:merange=32 samples/h264-444-motion.mp4
+ff -f lavfi -i "testsrc2=size=321x239:rate=25,scroll=v=0.02" -t 1 "${F[@]}" -bf 2 -refs 2 samples/h264-444-odd-size.mp4
+ff -f lavfi -i "testsrc2=size=320x240:rate=25,scroll=h=0.02,noise=alls=10:allf=t" -t 1 "${F[@]}" -bf 2 -refs 2 -x264-params constrained-intra=1:chroma-qp-offset=4 samples/h264-444-constrained-intra.mp4
+ff -f lavfi -i "testsrc2=size=320x240:rate=25,fade=in:0:20,fade=out:30:20" -t 2 "${F[@]}" samples/h264-444-default.mp4
+ff -f lavfi -i testsrc2=size=320x240:rate=50 -t 1 "${F[@]}" -vf "tinterlace=interleave_top,setfield=tff" -flags +ildct+ilme -bf 3 -refs 3 samples/h264-444-mbaff.mp4
+F10=(-c:v libx264 -profile:v high444 -pix_fmt yuv444p10le)
+ff -f lavfi -i testsrc2=size=320x240:rate=25,noise=alls=40:allf=t -t 0.2 "${F10[@]}" -g 1 -qp 1 samples/h264-444-10bit-intra-qp1.mp4
+ff -f lavfi -i "testsrc2=size=320x240:rate=25,scroll=h=0.01:v=0.005" -t 1 "${F10[@]}" -bf 3 -refs 3 -x264-params partitions=all:direct=auto samples/h264-444-10bit-b.mp4
+
 # ---- H.264 scaling matrices (High profile) ----
 # libx264 writes them in the PPS only, so absent lists fall back by rule A (Table 7-2). cqm=jvt sends no lists at all:
 # every list is the default one. The custom files give each list its own values (libx264 reads one chroma list per
 # intra and inter, so Cr's list is absent and falls back to Cb's); with CABAC and CAVLC, with large weights at a low
 # QP for wide products, and without the 8x8 transform, where the PPS has 6 lists instead of 8. (This libx264 fails to
 # parse cqm8iy and cqm8py, hence the files.) SPS lists, fall-back rule B, useDefaultScalingMatrixFlag and a Cr list
-# of its own never come from libx264; H264ScalingMatrixTests covers them.
+# of its own never come from libx264; H264ScalingMatrixTests covers them. In 4:4:4 libx264 also sends 8x8 lists for Cb
+# (Cr's again fall back to Cb's): 12 lists in the PPS, with CABAC and CAVLC.
 cqm=$(mktemp -d)
 list() { printf '%s =\n' "$1"; seq -s, "$2" "$3" "$4"; }
 { list INTRA4X4_LUMA 6 3 51; list INTRA4X4_CHROMAU 9 2 39; list INTER4X4_LUMA 12 2 42; list INTER4X4_CHROMAU 30 -1 15
   list INTRA8X8_LUMA 8 2 134; list INTER8X8_LUMA 70 -1 7; } > "$cqm/custom.cfg"
 { list INTRA4X4_LUMA 255 -1 240; list INTRA4X4_CHROMAU 240 1 255; list INTER4X4_LUMA 200 3 245; list INTER4X4_CHROMAU 250 -2 220
   list INTRA8X8_LUMA 255 -2 129; list INTER8X8_LUMA 128 2 254; } > "$cqm/large.cfg"
+{ cat "$cqm/custom.cfg"; list INTRA8X8_CHROMA 100 1 163; list INTER8X8_CHROMA 20 3 209; } > "$cqm/custom444.cfg"
 S="testsrc2=size=320x240:rate=25,scroll=h=0.01:v=0.005"
 ff -f lavfi -i "$S" -t 1 "${H[@]}" -bf 2 -refs 2 -x264-params cqm=jvt samples/h264-cqm-jvt.mp4
 ff -f lavfi -i "$S" -t 1 "${H[@]}" -bf 2 -refs 2 -x264-params "cqmfile=$cqm/custom.cfg:partitions=all" samples/h264-cqm-custom.mp4
 ff -f lavfi -i "$S" -t 1 "${H[@]}" -bf 2 -refs 2 -x264-params "cqmfile=$cqm/custom.cfg:partitions=all:cabac=0" samples/h264-cqm-custom-cavlc.mp4
 ff -f lavfi -i "$S,noise=alls=40:allf=t" -t 0.4 "${H[@]}" -bf 2 -qp 4 -x264-params "cqmfile=$cqm/large.cfg" samples/h264-cqm-large.mp4
 ff -f lavfi -i "$S" -t 1 "${H[@]}" -bf 2 -refs 2 -x264-params "cqmfile=$cqm/custom.cfg:8x8dct=0" samples/h264-cqm-no8x8.mp4
+ff -f lavfi -i "$S" -t 1 "${F[@]}" -bf 2 -refs 2 -x264-params "cqmfile=$cqm/custom444.cfg:partitions=all" samples/h264-444-cqm.mp4
+ff -f lavfi -i "$S" -t 1 "${F[@]}" -bf 2 -refs 2 -x264-params "cqmfile=$cqm/custom444.cfg:partitions=all:cabac=0" samples/h264-444-cqm-cavlc.mp4
 rm -rf "$cqm"
 
 # ---- AAC LC ----

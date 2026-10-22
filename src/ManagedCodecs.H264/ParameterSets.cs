@@ -13,8 +13,11 @@ internal sealed class SequenceParameterSet
 
     public int ChromaFormatIdc { get; internal init; } = 1;
 
-    /// <summary>MbHeightC (6.2): the chroma rows of a macroblock, 8 in 4:2:0 and 16 in 4:2:2.</summary>
+    /// <summary>MbHeightC (6.2): the chroma rows of a macroblock, 8 in 4:2:0 and 16 in 4:2:2 and 4:4:4.</summary>
     public int MbHeightC => ChromaFormatIdc == 1 ? 8 : 16;
+
+    /// <summary>MbWidthC (6.2): the chroma columns of a macroblock, 16 in 4:4:4 and 8 otherwise.</summary>
+    public int MbWidthC => ChromaFormatIdc == 3 ? 16 : 8;
 
     public int BitDepthLuma { get; internal init; } = 8;
 

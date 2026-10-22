@@ -9,14 +9,15 @@ namespace ManagedCodecs.H264;
 /// </summary>
 internal sealed class Picture
 {
-    public Picture(int widthInMbs, int heightInMbs, int mbHeightC = 8, int bitDepth = 8)
+    public Picture(int widthInMbs, int heightInMbs, int mbHeightC = 8, int bitDepth = 8, int mbWidthC = 8)
     {
         WidthInMbs = widthInMbs;
         HeightInMbs = heightInMbs;
         MbHeightC = mbHeightC;
+        MbWidthC = mbWidthC;
         BitDepth = bitDepth;
         LumaStride = widthInMbs * 16;
-        ChromaStride = widthInMbs * 8;
+        ChromaStride = widthInMbs * mbWidthC;
         int lumaSize = LumaStride * heightInMbs * 16;
         int chromaSize = ChromaStride * heightInMbs * mbHeightC;
         _planes = bitDepth > 8
@@ -40,6 +41,7 @@ internal sealed class Picture
         WidthInMbs = frame.WidthInMbs;
         HeightInMbs = frame.HeightInMbs;
         MbHeightC = frame.MbHeightC;
+        MbWidthC = frame.MbWidthC;
         BitDepth = frame.BitDepth;
         LumaStride = frame.LumaStride;
         ChromaStride = frame.ChromaStride;
@@ -80,6 +82,9 @@ internal sealed class Picture
 
     /// <summary>Chroma rows per macroblock: 8 (4:2:0) or 16 (4:2:2).</summary>
     public int MbHeightC { get; }
+
+    /// <summary>Chroma columns per macroblock: 8, or 16 in 4:4:4.</summary>
+    public int MbWidthC { get; }
 
     public int LumaStride { get; }
 

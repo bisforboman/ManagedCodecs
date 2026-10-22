@@ -82,7 +82,9 @@ internal sealed partial class PictureDecoder<TPixel>
             }
             else
             {
-                InternalStrengths(mbAddr, vertical, horizontal);
+                // Edges 1 and 3 of an 8x8-transform macroblock are cleared below unless 4:2:2
+                // chroma needs their bS.
+                InternalStrengths(mbAddr, vertical, horizontal, oddEdges: !_transform8x8[mbAddr] || _mbHeightC == 16);
             }
 
             // 4:2:2 chroma first, while the bS of all four horizontal edges are there (the planes
@@ -244,9 +246,10 @@ internal sealed partial class PictureDecoder<TPixel>
 
     /// <summary>
     /// bS of the internal edges (1..3) of an inter macroblock: <see cref="BoundaryStrength"/> with
-    /// both blocks in the same macroblock, so neither is intra.
+    /// both blocks in the same macroblock, so neither is intra. Without <paramref name="oddEdges"/>,
+    /// edges 1 and 3 are left unset.
     /// </summary>
-    private void InternalStrengths(int mbAddr, Span<byte> vertical, Span<byte> horizontal, int limitY = 4)
+    private void InternalStrengths(int mbAddr, Span<byte> vertical, Span<byte> horizontal, int limitY = 4, bool oddEdges = true)
     {
         // With 8x8 transforms each 4x4 block counts as coded when its 8x8 block is.
         Span<byte> per8x8 = stackalloc byte[16];
@@ -267,7 +270,7 @@ internal sealed partial class PictureDecoder<TPixel>
         int Strength(int p, int q, ReadOnlySpan<byte> coefficients) =>
             (coefficients[p] | coefficients[q]) != 0 ? 2 : MotionStrength(base4x4 + p, base4x4 + q, limitY);
 
-        for (int edge = 1; edge < 4; edge++)
+        for (int edge = oddEdges ? 1 : 2; edge < 4; edge += oddEdges ? 1 : 2)
         {
             for (int k = 0; k < 4; k++)
             {

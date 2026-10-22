@@ -232,7 +232,13 @@ what the two commands above include and are not comparable with FFmpeg's `bench:
    SPS, fall-back rule B, useDefaultScalingMatrixFlag and a Cr list of its own (unit tests decode
    samples with rewritten parameter sets). Still open: separate colour planes, bit depths other than 8 and 10,
    error concealment, more speed (about 3.2 to 3.3x FFmpeg's time at 720p, with
-   libx264's default High output too, and about the same ratio at 10 bits as at 8; 2x on high-bitrate intra content)
+   libx264's default High output too, and about the same ratio at 10 bits as at 8; 2x on high-bitrate intra content). A profile of a
+   720p libx264 default stream (2026-10-22) is flat: CABAC residual decoding takes 14%, deblocking 21%
+   in pieces of at most 2.5% (bS, transposes, the filter), nothing else over 5%. Candidates left, each
+   worth 1 to 2% and so best judged by instruction counts (callgrind) rather than wall time on a
+   cloud VM: output planes allocated without zeroing, fewer whole-picture clears in `Begin`, one
+   transpose for all four vertical luma edges, and deblocking a macroblock row behind decoding
+   (for cache locality, which matters little with a large L2)
 5. ~~AAC-LC decoder~~ done: channel configurations 1 to 7 and program config elements (1 to 8
    channels), all window sequences and shapes, M/S, intensity, PNS, TNS. Both decoders are floating
    point, so the tests compare values: they require 2^-17 (about 7.6e-6) and measure at most 3e-7.

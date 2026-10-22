@@ -53,6 +53,9 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
   on one machine, repeat runs, and don't trust one number. Comparing two builds: interleave their runs and
   alternate which goes first (with the same one first in every pair, an A/A test of one build against itself once
   showed a 10% "regression"), and `DOTNET_TieredCompilation=0` takes JIT tiering out of the noise.
+  Changes of 1 to 2% are below the noise: count instructions instead, `DOTNET_TieredCompilation=0 valgrind
+  --tool=callgrind --smc-check=all dotnet <mcdec.dll> <file> --loops N` (repeats to 1e-6; take loops 4 minus loops
+  1 for the decode alone; about 40 s for a 320x240 sample). It does not see cache effects.
 
 ## Gotchas (each cost time once)
 

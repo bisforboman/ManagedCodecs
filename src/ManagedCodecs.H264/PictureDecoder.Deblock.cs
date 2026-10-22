@@ -361,6 +361,10 @@ internal sealed partial class PictureDecoder<TPixel>
         {
             FilterEdgeVector(Unsafe.As<byte[]>(plane), q0, across, along, length, strengths, segmentShift, indexA, alpha, beta, chroma);
         }
+        else if (typeof(TPixel) == typeof(ushort) && vectorized && Vector128.IsHardwareAccelerated)
+        {
+            FilterEdgeVector16(Unsafe.As<ushort[]>(plane), q0, across, along, length, strengths, segmentShift, indexA, alpha, beta, chroma, bitDepth);
+        }
         else
         {
             FilterEdgeScalar(plane, q0, across, along, length, strengths, segmentShift, indexA, alpha, beta, chroma, bitDepth);
@@ -484,11 +488,60 @@ internal sealed partial class PictureDecoder<TPixel>
         Gather(plane, q0, across, along, length, taps, firstTap, lastTap);
 
         Span<short> lanes = stackalloc short[4 * 16];
-        SetLanes(lanes, 0, length, strengths, segmentShift, indexA, alpha, beta);
-        FilterTaps(taps, length, lanes, chroma);
+        SetLanes(lanes, 0, length, strengths, segmentShift, indexA, alpha, beta, tcShift: 0);
+        FilterTaps(taps, length, lanes, chroma, 255);
 
         // Only p2 .. q2 (luma) or p0, q0 (chroma) can change.
         Scatter(plane, q0, across, along, length, taps, chroma ? 3 : 1, chroma ? 4 : 6);
+    }
+
+    /// <summary>
+    /// <see cref="FilterEdgeVector"/> for samples of more than 8 bits (ushort planes): the taps are
+    /// 16-bit lanes already (10-bit sums stay within them), tC0 scaled to the bit depth, the
+    /// results clipped to its largest value.
+    /// </summary>
+    [SkipLocalsInit]
+    private static void FilterEdgeVector16(ushort[] plane, int q0, int across, int along, int length, ReadOnlySpan<byte> strengths, int segmentShift, int indexA, int alpha, int beta, bool chroma, int bitDepth)
+    {
+        Span<short> taps = stackalloc short[(8 * 16) + 16];
+        int firstTap = chroma ? 2 : 0;
+        int lastTap = chroma ? 5 : 7;
+        for (int k = firstTap; k <= lastTap; k++)
+        {
+            int start = q0 + ((k - 4) * across);
+            var row = taps.Slice(k * 16, length);
+            if (along == 1)
+            {
+                MemoryMarshal.Cast<ushort, short>(plane.AsSpan(start, length)).CopyTo(row);
+                continue;
+            }
+
+            for (int i = 0; i < length; i++)
+            {
+                row[i] = (short)plane[start + (i * along)];
+            }
+        }
+
+        Span<short> lanes = stackalloc short[4 * 16];
+        SetLanes(lanes, 0, length, strengths, segmentShift, indexA, alpha, beta, tcShift: bitDepth - 8);
+        FilterTaps(taps, length, lanes, chroma, (short)((1 << bitDepth) - 1));
+
+        // Only p2 .. q2 (luma) or p0, q0 (chroma) can change.
+        for (int k = chroma ? 3 : 1; k <= (chroma ? 4 : 6); k++)
+        {
+            int start = q0 + ((k - 4) * across);
+            var row = taps.Slice(k * 16, length);
+            if (along == 1)
+            {
+                MemoryMarshal.Cast<short, ushort>(row).CopyTo(plane.AsSpan(start, length));
+                continue;
+            }
+
+            for (int i = 0; i < length; i++)
+            {
+                plane[start + (i * along)] = (ushort)row[i];
+            }
+        }
     }
 
     /// <summary>
@@ -506,6 +559,7 @@ internal sealed partial class PictureDecoder<TPixel>
 
         if (typeof(TPixel) != typeof(byte) || !vectorized || !Vector128.IsHardwareAccelerated)
         {
+            // Deeper samples: each component through FilterEdge (its vector path, if any).
             FilterEdge(cbPlane, q0, across, along, 8, strengths, qpPCb, qpQCb, alphaOffset, betaOffset, chroma: true, vectorized, bitDepth: bitDepth);
             FilterEdge(crPlane, q0, across, along, 8, strengths, qpPCr, qpQCr, alphaOffset, betaOffset, chroma: true, vectorized, bitDepth: bitDepth);
             return;
@@ -525,7 +579,7 @@ internal sealed partial class PictureDecoder<TPixel>
             any |= alpha != 0 && beta != 0;
 
             // alpha 0 (or beta 0) lets no sample of the component pass the filter's test.
-            SetLanes(lanes, c * 8, 8, strengths, 1, indexA, beta == 0 ? 0 : alpha, beta);
+            SetLanes(lanes, c * 8, 8, strengths, 1, indexA, beta == 0 ? 0 : alpha, beta, tcShift: 0);
         }
 
         if (!any)
@@ -548,7 +602,7 @@ internal sealed partial class PictureDecoder<TPixel>
             }
         }
 
-        FilterTaps(taps, 16, lanes, chroma: true);
+        FilterTaps(taps, 16, lanes, chroma: true, 255);
 
         if (across == 1)
         {
@@ -567,9 +621,9 @@ internal sealed partial class PictureDecoder<TPixel>
 
     /// <summary>
     /// The per-lane parameters of <see cref="FilterTaps"/> for lanes first .. first + count - 1:
-    /// bS, tC0, alpha and beta, each a row of 16 in <paramref name="lanes"/>.
+    /// bS, tC0 (scaled by 2^<paramref name="tcShift"/>, BitDepth - 8), alpha and beta, each a row of 16 in <paramref name="lanes"/>.
     /// </summary>
-    private static void SetLanes(Span<short> lanes, int first, int count, ReadOnlySpan<byte> strengths, int segmentShift, int indexA, int alpha, int beta)
+    private static void SetLanes(Span<short> lanes, int first, int count, ReadOnlySpan<byte> strengths, int segmentShift, int indexA, int alpha, int beta, int tcShift)
     {
         // bS and tC0 are the same along a segment (4 luma or 2 chroma samples), alpha and beta
         // along the edge: eight lanes at a time.
@@ -602,7 +656,7 @@ internal sealed partial class PictureDecoder<TPixel>
             }
 
             bs.CopyTo(lanes[(first + lane)..]);
-            tc.CopyTo(lanes[(16 + first + lane)..]);
+            (tc << tcShift).CopyTo(lanes[(16 + first + lane)..]);
             alphaV.CopyTo(lanes[(32 + first + lane)..]);
             betaV.CopyTo(lanes[(48 + first + lane)..]);
         }
@@ -613,20 +667,23 @@ internal sealed partial class PictureDecoder<TPixel>
 
     /// <summary>
     /// The filter (8.7.2.3, 8.7.2.4) on <paramref name="length"/> positions of gathered taps, eight
-    /// 16-bit lanes at a time, with the lane parameters of <see cref="SetLanes"/>.
+    /// 16-bit lanes at a time, with the lane parameters of <see cref="SetLanes"/>. The taps are
+    /// bytes (8-bit samples, widened as they are loaded) or 16-bit samples up to <paramref name="maxSample"/>.
     /// </summary>
-    private static void FilterTaps(Span<byte> taps, int length, ReadOnlySpan<short> lanes, bool chroma)
+    private static void FilterTaps<TTap>(Span<TTap> taps, int length, ReadOnlySpan<short> lanes, bool chroma, short maxSample)
+        where TTap : unmanaged
     {
+        var maxV = Vector128.Create(typeof(TTap) == typeof(byte) ? (short)255 : maxSample);
         for (int h = 0; h < length; h += 8)
         {
             var bs = Vector128.Create(lanes.Slice(h, 8));
             var tc0 = Vector128.Create(lanes.Slice(16 + h, 8));
             var alphaV = Vector128.Create(lanes.Slice(32 + h, 8));
             var betaV = Vector128.Create(lanes.Slice(48 + h, 8));
-            var p1 = Load(taps, 2, h);
-            var p0 = Load(taps, 3, h);
-            var q0v = Load(taps, 4, h);
-            var q1 = Load(taps, 5, h);
+            var p1 = LoadTap(taps, 2, h);
+            var p0 = LoadTap(taps, 3, h);
+            var q0v = LoadTap(taps, 4, h);
+            var q1 = LoadTap(taps, 5, h);
 
             var filter = Vector128.GreaterThan(bs, Vector128<short>.Zero)
                 & Vector128.LessThan(Vector128.Abs(p0 - q0v), alphaV)
@@ -646,27 +703,27 @@ internal sealed partial class PictureDecoder<TPixel>
             {
                 var tc = tc0 + one;
                 var delta = Vector128.Clamp((((q0v - p0) << 2) + (p1 - q1) + four) >> 3, -tc, tc);
-                var p0n = Clip(p0 + delta);
-                var q0n = Clip(q0v - delta);
+                var p0n = Vector128.Clamp(p0 + delta, Vector128<short>.Zero, maxV);
+                var q0n = Vector128.Clamp(q0v - delta, Vector128<short>.Zero, maxV);
                 var p0s = ((p1 << 1) + p0 + q1 + two) >> 2;
                 var q0s = ((q1 << 1) + q0v + p1 + two) >> 2;
-                Store(taps, 3, h, Vector128.ConditionalSelect(filter, Vector128.ConditionalSelect(strong, p0s, p0n), p0));
-                Store(taps, 4, h, Vector128.ConditionalSelect(filter, Vector128.ConditionalSelect(strong, q0s, q0n), q0v));
+                StoreTap(taps, 3, h, maxV, Vector128.ConditionalSelect(filter, Vector128.ConditionalSelect(strong, p0s, p0n), p0));
+                StoreTap(taps, 4, h, maxV, Vector128.ConditionalSelect(filter, Vector128.ConditionalSelect(strong, q0s, q0n), q0v));
                 continue;
             }
 
-            var p3 = Load(taps, 0, h);
-            var p2 = Load(taps, 1, h);
-            var q2 = Load(taps, 6, h);
-            var q3 = Load(taps, 7, h);
+            var p3 = LoadTap(taps, 0, h);
+            var p2 = LoadTap(taps, 1, h);
+            var q2 = LoadTap(taps, 6, h);
+            var q3 = LoadTap(taps, 7, h);
             var ap = Vector128.LessThan(Vector128.Abs(p2 - p0), betaV);
             var aq = Vector128.LessThan(Vector128.Abs(q2 - q0v), betaV);
 
             // bS < 4 (8.7.2.3); the masks are -1 where true, so subtracting them adds one.
             var tcL = tc0 - ap - aq;
             var deltaL = Vector128.Clamp((((q0v - p0) << 2) + (p1 - q1) + four) >> 3, -tcL, tcL);
-            var p0Normal = Clip(p0 + deltaL);
-            var q0Normal = Clip(q0v - deltaL);
+            var p0Normal = Vector128.Clamp(p0 + deltaL, Vector128<short>.Zero, maxV);
+            var q0Normal = Vector128.Clamp(q0v - deltaL, Vector128<short>.Zero, maxV);
             var average = (p0 + q0v + one) >> 1;
             var p1Normal = Vector128.ConditionalSelect(ap, p1 + Vector128.Clamp((p2 + average - (p1 << 1)) >> 1, -tc0, tc0), p1);
             var q1Normal = Vector128.ConditionalSelect(aq, q1 + Vector128.Clamp((q2 + average - (q1 << 1)) >> 1, -tc0, tc0), q1);
@@ -675,10 +732,10 @@ internal sealed partial class PictureDecoder<TPixel>
             if (strongFilter == Vector128<short>.Zero)
             {
                 // Only bS < 4 here, which is every internal edge.
-                Store(taps, 2, h, Vector128.ConditionalSelect(filter, p1Normal, p1));
-                Store(taps, 3, h, Vector128.ConditionalSelect(filter, p0Normal, p0));
-                Store(taps, 4, h, Vector128.ConditionalSelect(filter, q0Normal, q0v));
-                Store(taps, 5, h, Vector128.ConditionalSelect(filter, q1Normal, q1));
+                StoreTap(taps, 2, h, maxV, Vector128.ConditionalSelect(filter, p1Normal, p1));
+                StoreTap(taps, 3, h, maxV, Vector128.ConditionalSelect(filter, p0Normal, p0));
+                StoreTap(taps, 4, h, maxV, Vector128.ConditionalSelect(filter, q0Normal, q0v));
+                StoreTap(taps, 5, h, maxV, Vector128.ConditionalSelect(filter, q1Normal, q1));
                 continue;
             }
 
@@ -693,12 +750,12 @@ internal sealed partial class PictureDecoder<TPixel>
             var q1Strong = Vector128.ConditionalSelect(sq, (p0 + q0v + q1 + q2 + two) >> 2, q1);
             var q2Strong = Vector128.ConditionalSelect(sq, ((q3 << 1) + (q2 * 3) + q1 + q0v + p0 + four) >> 3, q2);
 
-            Store(taps, 1, h, Vector128.ConditionalSelect(strongFilter, p2Strong, p2));
-            Store(taps, 2, h, Vector128.ConditionalSelect(filter, Vector128.ConditionalSelect(strong, p1Strong, p1Normal), p1));
-            Store(taps, 3, h, Vector128.ConditionalSelect(filter, Vector128.ConditionalSelect(strong, p0Strong, p0Normal), p0));
-            Store(taps, 4, h, Vector128.ConditionalSelect(filter, Vector128.ConditionalSelect(strong, q0Strong, q0Normal), q0v));
-            Store(taps, 5, h, Vector128.ConditionalSelect(filter, Vector128.ConditionalSelect(strong, q1Strong, q1Normal), q1));
-            Store(taps, 6, h, Vector128.ConditionalSelect(strongFilter, q2Strong, q2));
+            StoreTap(taps, 1, h, maxV, Vector128.ConditionalSelect(strongFilter, p2Strong, p2));
+            StoreTap(taps, 2, h, maxV, Vector128.ConditionalSelect(filter, Vector128.ConditionalSelect(strong, p1Strong, p1Normal), p1));
+            StoreTap(taps, 3, h, maxV, Vector128.ConditionalSelect(filter, Vector128.ConditionalSelect(strong, p0Strong, p0Normal), p0));
+            StoreTap(taps, 4, h, maxV, Vector128.ConditionalSelect(filter, Vector128.ConditionalSelect(strong, q0Strong, q0Normal), q0v));
+            StoreTap(taps, 5, h, maxV, Vector128.ConditionalSelect(filter, Vector128.ConditionalSelect(strong, q1Strong, q1Normal), q1));
+            StoreTap(taps, 6, h, maxV, Vector128.ConditionalSelect(strongFilter, q2Strong, q2));
         }
     }
 
@@ -857,6 +914,24 @@ internal sealed partial class PictureDecoder<TPixel>
     {
         MemoryMarshal.Write(plane.AsSpan(offset, 8), rows.GetElement(0));
         MemoryMarshal.Write(plane.AsSpan(offset + stride, 8), rows.GetElement(1));
+    }
+
+    private static Vector128<short> LoadTap<TTap>(Span<TTap> taps, int tap, int offset)
+        where TTap : unmanaged =>
+        typeof(TTap) == typeof(byte)
+            ? Load(MemoryMarshal.Cast<TTap, byte>(taps), tap, offset)
+            : Vector128.Create(MemoryMarshal.Cast<TTap, short>(taps).Slice((tap * 16) + offset, 8));
+
+    private static void StoreTap<TTap>(Span<TTap> taps, int tap, int offset, Vector128<short> max, Vector128<short> value)
+        where TTap : unmanaged
+    {
+        if (typeof(TTap) == typeof(byte))
+        {
+            Store(MemoryMarshal.Cast<TTap, byte>(taps), tap, offset, value);
+            return;
+        }
+
+        Vector128.Clamp(value, Vector128<short>.Zero, max).CopyTo(MemoryMarshal.Cast<TTap, short>(taps)[((tap * 16) + offset)..]);
     }
 
     private static Vector128<short> Load(ReadOnlySpan<byte> taps, int tap, int offset) =>

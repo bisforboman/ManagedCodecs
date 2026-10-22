@@ -191,15 +191,16 @@ what the two commands above include and are not comparable with FFmpeg's `bench:
    -12 (QpBdOffset) with dequantization at QP'Y and chroma QPs below 0, Clip1 to 1023, deblocking
    thresholds and weighted-prediction offsets scaled by 4, CAVLC level prefixes of 16 and more,
    at QP_Y -12 on noise, P and B frames, weights, constrained intra prediction, cropping, 4:2:2
-   and MBAFF; I_PCM at 10 bits from hand-built streams. 10-bit samples take the scalar paths for
-   now (the SIMD ones are 8-bit), so they decode slower than 8-bit ones.
+   and MBAFF; I_PCM at 10 bits from hand-built streams. Motion compensation and the deblocking
+   filter have vector paths for 10-bit samples too (32-bit lanes for the 6-tap filter, 16-bit
+   ones for deblocking), each checked against its reference on random 10-bit input.
    Produced by neither, so not checked against FFmpeg: I_PCM (decoded from hand-built streams,
    CAVLC and CABAC), memory management operations 2, 3 and 5 (unit tests),
    B sub-macroblock partitions smaller than 8x8, explicit weights for bi-predicted blocks (libx264 weights B frames
    implicitly), cabac_init_idc 1 and 2 (only their tables are checked, against libavc), a Cr QP
    offset other than Cb's (second_chroma_qp_index_offset), and of scaling matrices: lists in the
    SPS, fall-back rule B, useDefaultScalingMatrixFlag and a Cr list of its own (unit tests decode
-   samples with rewritten parameter sets). Still open: 4:4:4, bit depths other than 8 and 10, SIMD for 10-bit samples,
+   samples with rewritten parameter sets). Still open: 4:4:4, bit depths other than 8 and 10,
    error concealment, more speed (about 3 to 3.5x FFmpeg's time at 720p, with
    libx264's default High output too; 2x on high-bitrate intra content)
 5. ~~AAC-LC decoder~~ done: channel configurations 1 to 7 and program config elements (1 to 8

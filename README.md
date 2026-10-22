@@ -90,27 +90,37 @@ ffmpeg -benchmark -threads 1 -stream_loop 9 -i $f -f null -
 ```
 
 Both time the whole process, demuxing included; mcdec's also includes .NET's startup and JIT (mcdec's `last loop`
-line shows the steady speed without them). A snapshot, made that way (2026-10-21, FFmpeg 6.1, single-threaded on a
-4-core AVX2 Xeon cloud VM, median of three runs; µs per frame, audio frames are 1024 samples):
+line shows the steady speed without them). A snapshot, made that way (2026-10-22, FFmpeg 6.1, single-threaded on a
+4-core AVX2 (and AVX-512) Xeon cloud VM, median of five interleaved runs; µs per frame, audio frames are 1024 samples):
 
 | Sample | Loops | ManagedCodecs | FFmpeg |
 | --- | ---: | ---: | ---: |
-| `testsrc-420.avi` (320x240 MJPEG 4:2:0) | 100 | 330 | 351 |
-| `testsrc-444.avi` (MJPEG 4:4:4) | 100 | 515 | 557 |
-| `noise-q1.avi` (MJPEG, noise at the highest quality) | 100 | 1082 | 1384 |
-| `h264-p-refs.mp4` (320x240 H.264, P frames) | 40 | 712 | 227 |
-| `h264-bench-720p.mp4` (1280x720 H.264) | 10 | 8554 | 2448 |
-| `h264-main-p-refs.mp4` (320x240 H.264 Main, CABAC) | 40 | 881 | 352 |
-| `h264-b-pyramid.mp4` (320x240 H.264 Main, CABAC, B frames) | 20 | 1477 | 513 |
-| `h264-wp-default.mp4` (320x240 H.264, libx264's Main defaults: B frames, weighted prediction) | 20 | 1395 | 383 |
-| `h264-high-default.mp4` (320x240 H.264, libx264's High defaults: also the 8x8 transform) | 20 | 1401 | 402 |
-| `aac-stereo-48k.mp4` (AAC, stereo) | 100 | 60 | 65 |
-| `aac-5.1.mp4` (AAC, 5.1) | 100 | 183 | 93 |
+| `testsrc-420.avi` (320x240 MJPEG 4:2:0) | 100 | 413 | 400 |
+| `testsrc-444.avi` (MJPEG 4:4:4) | 100 | 559 | 471 |
+| `noise-q1.avi` (MJPEG, noise at the highest quality) | 100 | 1040 | 1291 |
+| `h264-p-refs.mp4` (320x240 H.264, P frames) | 40 | 690 | 226 |
+| `h264-bench-720p.mp4` (1280x720 H.264) | 10 | 7992 | 2474 |
+| `h264-main-p-refs.mp4` (320x240 H.264 Main, CABAC) | 40 | 862 | 380 |
+| `h264-b-pyramid.mp4` (320x240 H.264 Main, CABAC, B frames) | 20 | 1589 | 515 |
+| `h264-wp-default.mp4` (320x240 H.264, libx264's Main defaults: B frames, weighted prediction) | 20 | 1918 | 408 |
+| `h264-high-default.mp4` (320x240 H.264, libx264's High defaults: also the 8x8 transform) | 20 | 1355 | 403 |
+| `h264-high-b.mp4` (320x240 H.264 High, B frames, all partitions) | 40 | 1679 | 544 |
+| `h264-10bit-b.mp4` (the same at 10 bits, High 10) | 40 | 1711 | 609 |
+| `h264-high-motion.mp4` (320x240 H.264 High, fast motion and noise, QP 22) | 20 | 5815 | 3055 |
+| `h264-10bit-motion.mp4` (the same at 10 bits, QP 34, which is QP 22's step size) | 20 | 5919 | 3200 |
+| `aac-stereo-48k.mp4` (AAC, stereo) | 100 | 55 | 76 |
+| `aac-5.1.mp4` (AAC, 5.1) | 100 | 182 | 94 |
 
-A 1280x720 libx264 default stream (High, CABAC, B frames; `testsrc2` with noise, 2 s) took 3.0 times FFmpeg's time
-on the same VM (9674 against 3178 µs), down from 4.3 times before the direct prediction and motion compensation
-changes of 2026-10-21. The snapshot before (2026-10-20) had the 720p bench at 7066 against 2352 µs: a VM's speed
-moves from day to day, which is why only same-machine comparisons count.
+The short MJPEG and AAC runs are dominated by .NET's startup and JIT and moved the most (testsrc-420.avi took
+between 263 and 604 µs). At 10 bits the ratio to FFmpeg is about what it is at 8: 2.8 against 3.1 times on the B
+frame pair, 1.85 against 1.9 times on the motion pair; the 10-bit streams cost us 2% more time than their 8-bit
+counterparts, FFmpeg 5 to 12% more.
+
+A 1280x720 libx264 default stream (High, CABAC, B frames; `testsrc2` with noise, 2 s) took 3.3 times FFmpeg's time
+on the same VM (10958 against 3338 µs). On 2026-10-21's VM it took 3.0 times (9674 against 3178 µs), down from 4.3
+times before the direct prediction and motion compensation changes of that day, and `h264-bench-720p.mp4` took 8554
+against 2448 µs (7066 against 2352 the day before): a VM's speed moves from day to day, which is why only
+same-machine comparisons count.
 
 Cloud VMs are noisy (single runs differed by up to a third), so compare before and after on one machine. For
 statistics on the decoder alone there is BenchmarkDotNet, `dotnet run -c Release --project
@@ -201,8 +211,8 @@ what the two commands above include and are not comparable with FFmpeg's `bench:
    offset other than Cb's (second_chroma_qp_index_offset), and of scaling matrices: lists in the
    SPS, fall-back rule B, useDefaultScalingMatrixFlag and a Cr list of its own (unit tests decode
    samples with rewritten parameter sets). Still open: 4:4:4, bit depths other than 8 and 10,
-   error concealment, more speed (about 3 to 3.5x FFmpeg's time at 720p, with
-   libx264's default High output too; 2x on high-bitrate intra content)
+   error concealment, more speed (about 3.2 to 3.3x FFmpeg's time at 720p, with
+   libx264's default High output too, and about the same ratio at 10 bits as at 8; 2x on high-bitrate intra content)
 5. ~~AAC-LC decoder~~ done: channel configurations 1 to 7 and program config elements (1 to 8
    channels), all window sequences and shapes, M/S, intensity, PNS, TNS. Both decoders are floating
    point, so the tests compare values: they require 2^-17 (about 7.6e-6) and measure at most 3e-7.

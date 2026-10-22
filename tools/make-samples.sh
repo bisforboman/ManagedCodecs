@@ -284,6 +284,21 @@ ff -f lavfi -i testsrc2=size=320x256:rate=50 -t 1 "${I[@]}" -bf 2 -refs 2 -x264-
 ff -f lavfi -i testsrc2=size=320x240:rate=50,fade=in:0:40 -t 2 "${I[@]}" samples/h264-mbaff-default.mp4
 # Interlaced-capable parameter sets (frame_mbs_only_flag 0) on progressive frames, with P and B frames.
 ff -f lavfi -i "testsrc2=size=320x240:rate=25,scroll=h=0.01" -t 1 "${H[@]}" -bf 2 -x264-params fake-interlaced=1 samples/h264-fake-interlaced.mp4
+# MBAFF in 4:2:2: field and frame pairs with 16 chroma rows a macroblock, so intra prediction gathers 16 rows of
+# neighbours, and chroma deblocking meets the left and upper pairs line by line as luma does (each chroma line takes
+# its luma line's bS) and filters the upper edge twice under a field pair. Intra with CABAC (cropped), CAVLC and 4x4
+# transforms; P frames, also with all partitions on noise; B frames with temporal and with spatial direct (CAVLC);
+# slices with filter offsets; and libx264's stock interlaced settings on a fade.
+I2=(-vf "tinterlace=interleave_top,setfield=tff" -c:v libx264 -profile:v high422 -pix_fmt yuv422p -flags +ildct+ilme)
+ff -f lavfi -i testsrc2=size=320x240:rate=50 -t 0.4 "${I2[@]}" -g 1 samples/h264-422-mbaff-intra.mp4
+ff -f lavfi -i testsrc2=size=320x256:rate=50 -t 0.4 "${I2[@]}" -g 1 -x264-params cabac=0 samples/h264-422-mbaff-intra-cavlc.mp4
+ff -f lavfi -i testsrc2=size=320x256:rate=50 -t 0.4 "${I2[@]}" -g 1 -x264-params 8x8dct=0 samples/h264-422-mbaff-intra-4x4.mp4
+ff -f lavfi -i testsrc2=size=320x240:rate=50 -t 0.6 "${I2[@]}" -bf 0 -refs 3 samples/h264-422-mbaff-p.mp4
+ff -f lavfi -i testsrc2=size=320x240:rate=50,noise=alls=8:allf=t -t 1 "${I2[@]}" -bf 0 -refs 4 -x264-params partitions=all:me=umh:merange=32 samples/h264-422-mbaff-p-motion.mp4
+ff -f lavfi -i testsrc2=size=320x240:rate=50 -t 1 "${I2[@]}" -bf 3 -refs 3 -x264-params direct=temporal samples/h264-422-mbaff-b-temporal.mp4
+ff -f lavfi -i testsrc2=size=320x256:rate=50 -t 1 "${I2[@]}" -bf 3 -refs 3 -x264-params direct=spatial:cabac=0 samples/h264-422-mbaff-b-spatial-cavlc.mp4
+ff -f lavfi -i testsrc2=size=320x256:rate=50,noise=alls=10:allf=t -t 1 "${I2[@]}" -bf 2 -refs 2 -x264-params slices=4:deblock=2,-1 samples/h264-422-mbaff-slices.mp4
+ff -f lavfi -i testsrc2=size=320x240:rate=50,fade=in:0:40 -t 2 "${I2[@]}" samples/h264-422-mbaff-default.mp4
 
 # ---- H.264 scaling matrices (High profile) ----
 # libx264 writes them in the PPS only, so absent lists fall back by rule A (Table 7-2). cqm=jvt sends no lists at all:

@@ -876,7 +876,7 @@ internal sealed partial class PictureDecoder
             byte[] plane = c == 0 ? target.Cb : target.Cr;
             if (intraMode >= 0)
             {
-                IntraPrediction.PredictChroma(intraMode, plane, origin, stride, new IntraNeighbors(LeftChromaRows(0), mbs.B, mbs.C, mbs.D), LeftChromaRows(4), _mbHeightC);
+                IntraPrediction.PredictChroma(intraMode, plane, origin, stride, new IntraNeighbors(LeftChromaRows(0), mbs.B, mbs.C, mbs.D), LeftChromaBlocks(), _mbHeightC);
             }
 
             if (cbpChroma == 0)

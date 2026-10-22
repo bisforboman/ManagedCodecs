@@ -28,6 +28,59 @@ ff -f lavfi -i testsrc2=size=322x238:rate=25 -t 1 -pix_fmt gray "$frames/f%02d.p
 "$magick_cmd" "$frames"/f*.png -colorspace Gray -type Grayscale -quality 90 "$frames/f%02d.jpg"
 ff -framerate 25 -i "$frames/f%02d.jpg" -c:v copy samples/gray.avi
 rm -rf "$frames"
+# Interlaced MJPEG (AVI1, as capture cards write it): each packet holds a frame's two fields as two JPEG images, each
+# with an AVI1 APP0 segment, in a stream twice their height. FFmpeg's encoder refuses interlacing, so it encodes the
+# fields of a top-field-first source as images of their own, and Python pairs them into packets (field bytes 1, 2)
+# in an AVI of 320x240. FFmpeg's decoder weaves them, the first field on the odd rows (the order it takes for AVI,
+# which does not tell); 4:2:0 and 4:2:2 fields.
+for chroma in 420 422; do
+  ff -f lavfi -i testsrc2=size=320x240:rate=50 -t 0.8 -vf "tinterlace=interleave_top,setfield=tff,separatefields,format=yuvj${chroma}p" \
+    -c:v mjpeg -q:v 3 "$frames.avi"
+  python3 -I - "$frames.avi" "samples/mjpeg-interlaced-$chroma.avi" <<'PY'
+import struct, sys
+data = open(sys.argv[1], 'rb').read()
+
+def chunks(buf, start, end):
+    i = start
+    while i + 8 <= end:
+        fourcc, size = buf[i:i + 4], struct.unpack_from('<I', buf, i + 4)[0]
+        yield fourcc, i + 8, size
+        i += 8 + size + (size & 1)
+
+# The source's fields (one JPEG a chunk), size and rate.
+movi = data.find(b'movi') + 4
+end = movi - 4 + struct.unpack_from('<I', data, movi - 8)[0]
+fields = [data[o:o + n] for c, o, n in chunks(data, movi, end) if c == b'00dc']
+width, field_height = struct.unpack_from('<ii', data, data.find(b'strf') + 12)
+scale, rate = struct.unpack_from('<II', data, data.find(b'strh') + 28)
+height = 2 * field_height
+
+def with_app0(jpeg, field):
+    # APP0 'AVI1': the field byte (1 odd, 2 even) and reserved bytes, after SOI.
+    return jpeg[:2] + b'\xff\xe0' + struct.pack('>H', 16) + b'AVI1' + bytes([field]) + bytes(9) + jpeg[2:]
+
+frames = [with_app0(fields[i], 1) + with_app0(fields[i + 1], 2) for i in range(0, len(fields) - 1, 2)]
+
+def chunk(fourcc, payload):
+    return fourcc + struct.pack('<I', len(payload)) + payload + (b'\0' if len(payload) & 1 else b'')
+
+def lst(kind, payload):
+    return b'LIST' + struct.pack('<I', len(payload) + 4) + kind + payload
+
+biggest = max(map(len, frames))
+avih = struct.pack('<14I', int(1e6 * scale * 2 / rate), 0, 0, 0x10, len(frames), 0, 1, biggest, width, height, 0, 0, 0, 0)
+strh = b'vidsMJPG' + struct.pack('<IHHIIIIIIIIhhhh', 0, 0, 0, 0, scale * 2, rate, 0, len(frames), biggest, 0xFFFFFFFF, 0, 0, 0, width, height)
+strf = struct.pack('<IiiHH4sIiiII', 40, width, height, 1, 24, b'MJPG', width * height * 3, 0, 0, 0, 0)
+hdrl = lst(b'hdrl', chunk(b'avih', avih) + lst(b'strl', chunk(b'strh', strh) + chunk(b'strf', strf)))
+index, offset = b'', 4
+for f in frames:
+    index += b'00dc' + struct.pack('<III', 0x10, offset, len(f))
+    offset += 8 + len(f) + (len(f) & 1)
+body = b'AVI ' + hdrl + lst(b'movi', b''.join(chunk(b'00dc', f) for f in frames)) + chunk(b'idx1', index)
+open(sys.argv[2], 'wb').write(b'RIFF' + struct.pack('<I', len(body)) + body)
+PY
+  rm "$frames.avi"
+done
 
 # ---- MP4 for the demuxer ----
 # The MJPEG remux is decoded end to end; H.264 with B-frames needs the edit list right, MPEG-4 Part 2 carries its

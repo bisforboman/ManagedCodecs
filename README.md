@@ -119,7 +119,10 @@ what the two commands above include and are not comparable with FFmpeg's `bench:
 ## Roadmap
 
 1. ~~MJPEG baseline decoder, bit-exact against FFmpeg (4:2:0, 4:2:2, 4:4:4, gray, restart markers, missing DHT)~~ done;
-   still open: interlaced AVI1 frames (two fields per packet), real camera files
+   interlaced AVI1 frames too (two JPEG fields per packet, recognized as FFmpeg does by being less than 3/4 of the
+   stream's height, so the decoder needs `new MjpegDecoder(video)`), woven with the first field on the odd rows, the
+   order FFmpeg takes for AVI, which does not tell it (`FirstFieldOnTop` gives the other; the AVI1 segment's field
+   byte is ignored, as by FFmpeg). Still open: real camera files, and packets of one field (FFmpeg decodes none)
 2. SIMD: `Span`, `Vector128`/`Vector256` IDCT and colour paths; measure the ratio to FFmpeg.
    Done so far: AVX2 IDCT, DC-only blocks, single-lookup coefficient decoding, buffer reuse.
    Still open: an ARM64 (AdvSimd) IDCT, decoding straight into the output frame

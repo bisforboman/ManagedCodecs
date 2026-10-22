@@ -76,4 +76,12 @@ public class CavlcTablesTests
         codes.Select(c => c.Replace(" ", "", StringComparison.Ordinal))
             .Where(c => c.Length > 0)
             .Sum(c => Math.Pow(2, -c.Length));
+
+    /// <summary>The 4:4:4 coded_block_pattern columns of Table 9-4 map codeNum 0 .. 15 onto every luma pattern once.</summary>
+    [Fact]
+    public void CodedBlockPattern444_IsAPermutation()
+    {
+        Assert.Equal(Enumerable.Range(0, 16), CavlcTables.CodedBlockPatternIntra444.ToArray().Select(v => (int)v).Order());
+        Assert.Equal(Enumerable.Range(0, 16), CavlcTables.CodedBlockPatternInter444.ToArray().Select(v => (int)v).Order());
+    }
 }

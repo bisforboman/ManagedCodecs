@@ -177,6 +177,12 @@ internal static class CavlcTables
         ["111", "110", "101", "100", "011", "010", "001", "0001", "0000 1", "0000 01", "0000 001", "0000 0001", "0000 0000 1", "0000 0000 01", "0000 0000 001"], // zerosLeft > 6
     ];
 
+    /// <summary>coded_block_pattern by codeNum for Intra_4x4 and Intra_8x8 macroblocks in 4:4:4 (Table 9-4, ChromaArrayType 0 or 3): luma bits only.</summary>
+    public static ReadOnlySpan<byte> CodedBlockPatternIntra444 => [15, 0, 7, 11, 13, 14, 3, 5, 10, 12, 1, 2, 4, 8, 6, 9];
+
+    /// <summary>coded_block_pattern by codeNum for inter macroblocks in 4:4:4 (Table 9-4, ChromaArrayType 0 or 3).</summary>
+    public static ReadOnlySpan<byte> CodedBlockPatternInter444 => [0, 1, 2, 4, 8, 3, 5, 10, 12, 15, 7, 11, 13, 14, 6, 9];
+
     /// <summary>coded_block_pattern by codeNum for Intra_4x4 macroblocks (Table 9-4, ChromaArrayType 1 or 2).</summary>
     public static ReadOnlySpan<byte> CodedBlockPatternIntra =>
     [

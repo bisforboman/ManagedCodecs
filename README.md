@@ -222,7 +222,10 @@ Two exceptions to "from the spec only": the MJPEG IDCT reproduces FFmpeg's integ
 in the spec's own layout, were cross-checked against h264bsd (Apache-2.0) by enumerating its decoder.
 The CABAC tables (context initialization, rangeTabLPS, state transitions) are the spec's values,
 transcribed from OpenH264 (BSD-2-Clause) and verified against libavc (Apache-2.0): its precomputed
-context states for every QP and initialization table equal the spec's initialization applied to ours.
+context states for every QP and initialization table equal the spec's initialization applied to ours. Contexts 460
+to 1023 (4:4:4's Cb and Cr residual blocks and the coded_block_flag of 8x8 blocks) repeat the luma contexts of their
+block category; all of them were compared, with the residual contexts below 460, against the tables of JM, the ITU's
+reference software (3740 values, all four initialization tables).
 The AAC Huffman codebooks were cross-checked the same way against the PacketVideo AAC decoder
 from Android (Apache-2.0). AAC's noise substitution uses the Numerical Recipes random generator
 with the seed FFmpeg uses (the spec leaves the generator open), so noise bands match FFmpeg too.

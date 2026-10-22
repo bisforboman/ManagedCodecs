@@ -56,6 +56,61 @@ public class InterPredictionTests
     }
 
     /// <summary>
+    /// The 16-bit paths (<see cref="InterPrediction.PredictLuma16"/>, <see cref="InterPrediction.PredictChroma16"/>)
+    /// against the references on random 10-bit samples, in frames and field views, 4:2:0 and 4:2:2.
+    /// </summary>
+    [Theory]
+    [InlineData(8, -1)]
+    [InlineData(16, -1)]
+    [InlineData(8, 0)]
+    [InlineData(16, 1)]
+    public void Fast16_MatchesReference(int mbHeightC, int parity)
+    {
+        var random = new Random(11 + mbHeightC + parity);
+        var frame = new Picture(3, 2, mbHeightC, bitDepth: 10);
+        for (int c = 0; c < 3; c++)
+        {
+            var plane = frame.Plane<ushort>(c);
+            for (int i = 0; i < plane.Length; i++)
+            {
+                // Mostly anywhere in 0 .. 1023, sometimes pinned to the ends, so the clipping is exercised.
+                plane[i] = (ushort)(random.Next(8) switch { 0 => 0, 1 => 1023, _ => random.Next(1024) });
+            }
+        }
+
+        var reference = parity < 0 ? frame : frame.Field(parity);
+        int pictureHeight = parity < 0 ? 32 : 16;
+        Span<ushort> expected = stackalloc ushort[16 * 16];
+        Span<ushort> actual = stackalloc ushort[16 * 16];
+        for (int n = 0; n < 4000; n++)
+        {
+            var (w, h) = BlockSizes[random.Next(BlockSizes.Length)];
+            int x = (random.Next(0, 3) * 16) + (random.Next(0, 16 / w) * w);
+            int y = (random.Next(0, pictureHeight / 16) * 16) + (random.Next(0, 16 / h) * h);
+            int range = random.Next(4) == 0 ? 400 : 40;
+            int mvX = random.Next(-range, range + 1);
+            int mvY = random.Next(-range, range + 1);
+
+            expected.Clear();
+            actual.Clear();
+            InterPrediction.PredictLumaReference(reference, x, y, w, h, mvX, mvY, expected, 16);
+            InterPrediction.PredictLuma16(reference, x, y, w, h, mvX, mvY, actual, 16);
+            Assert.True(expected.SequenceEqual(actual), $"Luma {w}x{h} at ({x},{y}) mv ({mvX},{mvY})");
+
+            bool tall = mbHeightC == 16;
+            var (cy, ch, cmvY) = tall ? (y, h, mvY * 2) : (y / 2, h / 2, mvY);
+            for (int c = 1; c <= 2; c++)
+            {
+                expected.Clear();
+                actual.Clear();
+                InterPrediction.PredictChromaReference(reference, c, x / 2, cy, w / 2, ch, mvX, cmvY, expected, 16);
+                InterPrediction.PredictChroma16(reference, c, x / 2, cy, w / 2, ch, mvX, cmvY, actual, 16);
+                Assert.True(expected.SequenceEqual(actual), $"Chroma {c} {w}x{h} at ({x},{y}) mv ({mvX},{cmvY})");
+            }
+        }
+    }
+
+    /// <summary>
     /// Field views (MBAFF field macroblocks): every other row of the frame, half its height, with
     /// the edges repeated within the field; vectors cross the field's top and bottom edges.
     /// </summary>

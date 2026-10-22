@@ -117,8 +117,8 @@ internal static partial class InterPrediction
     }
 
     /// <summary>
-    /// A luma block of any sample type: 8-bit samples through the row-based <see cref="PredictLuma(Picture, int, int, int, int, int, int, Span{byte}, int)"/>,
-    /// deeper ones through the reference.
+    /// A luma block of any sample type: through the row-based <see cref="PredictLuma(Picture, int, int, int, int, int, int, Span{byte}, int)"/>
+    /// for 8-bit samples, <see cref="PredictLuma16"/> for deeper ones.
     /// </summary>
     public static void PredictLumaBlock<TPixel>(Picture reference, int x, int y, int width, int height, int mvX, int mvY, Span<TPixel> output, int outputStride)
         where TPixel : unmanaged, IBinaryInteger<TPixel>
@@ -129,7 +129,7 @@ internal static partial class InterPrediction
             return;
         }
 
-        PredictLumaReference(reference, x, y, width, height, mvX, mvY, output, outputStride);
+        PredictLuma16(reference, x, y, width, height, mvX, mvY, MemoryMarshal.Cast<TPixel, ushort>(output), outputStride);
     }
 
     /// <summary>A chroma block of any sample type, as <see cref="PredictLumaBlock"/>.</summary>
@@ -142,7 +142,7 @@ internal static partial class InterPrediction
             return;
         }
 
-        PredictChromaReference(reference, component, x, y, width, height, mvX, mvY, output, outputStride);
+        PredictChroma16(reference, component, x, y, width, height, mvX, mvY, MemoryMarshal.Cast<TPixel, ushort>(output), outputStride);
     }
 
     /// <summary>The rounded average of two predictions (8.4.2.3.1), of any sample type, as <see cref="Average(ReadOnlySpan{byte}, ReadOnlySpan{byte}, int, int, int, Span{byte}, int)"/>.</summary>

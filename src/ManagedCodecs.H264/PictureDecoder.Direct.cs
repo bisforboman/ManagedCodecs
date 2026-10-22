@@ -1,7 +1,7 @@
 namespace ManagedCodecs.H264;
 
 /// <summary>Direct prediction of B_Skip, B_Direct_16x16 and B_Direct_8x8 (H.264 clause 8.4.1.2).</summary>
-internal sealed partial class PictureDecoder
+internal sealed partial class PictureDecoder<TPixel>
 {
     /// <summary>
     /// Derives and stores the motion of 8x8 blocks <paramref name="first"/> .. first + count - 1

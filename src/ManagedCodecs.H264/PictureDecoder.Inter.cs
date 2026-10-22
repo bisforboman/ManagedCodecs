@@ -1,7 +1,9 @@
+using System.Numerics;
+
 namespace ManagedCodecs.H264;
 
 /// <summary>Inter prediction for P and B slices (H.264 clause 8.4).</summary>
-internal sealed partial class PictureDecoder
+internal sealed partial class PictureDecoder<TPixel>
 {
     // Partitions of the 16x16, 16x8 and 8x16 macroblock types (Tables 7-13, 7-14) as (x, y, width, height).
     private static readonly (int X, int Y, int W, int H)[][] MbPartitions =
@@ -59,8 +61,8 @@ internal sealed partial class PictureDecoder
     private bool[] _direct = [];
 
     // Bi-prediction: each list's prediction of one partition before they are averaged.
-    private readonly byte[] _predictionL0 = new byte[16 * 16];
-    private readonly byte[] _predictionL1 = new byte[16 * 16];
+    private readonly TPixel[] _predictionL0 = new TPixel[16 * 16];
+    private readonly TPixel[] _predictionL1 = new TPixel[16 * 16];
 
     private enum PartitionShape
     {
@@ -323,7 +325,7 @@ internal sealed partial class PictureDecoder
 
             var block = residual.Luma[i];
             Transform.Dequantize(block, slice.Qp, skipDc: false, slice.Scaling.LevelScale4x4(3));
-            Transform.InverseTransformAdd(block, Picture.Y.AsSpan(origin + (y * 4 * stride) + (x * 4)), stride);
+            Transform.InverseTransformAdd(block, PlaneY.AsSpan(origin + (y * 4 * stride) + (x * 4)), stride, _bitDepth);
         }
 
         ReconstructChroma(slice, mbAddr, PictureTarget(mbAddr), residual, cbpChroma, intraMode: -1, default);
@@ -479,29 +481,29 @@ internal sealed partial class PictureDecoder
             int mvCY = ChromaMvY(mvY, mbAddr, reference);
             if (weighting.IsDefault)
             {
-                InterPrediction.PredictLuma(reference, lumaX, lumaY, w, h, mvX, mvY, Picture.Y.AsSpan(lumaOut), lumaStride);
-                InterPrediction.PredictChroma(reference, 1, chromaX, chromaY, w / 2, ch, mvX, mvCY, Picture.Cb.AsSpan(chromaOut), chromaStride);
-                InterPrediction.PredictChroma(reference, 2, chromaX, chromaY, w / 2, ch, mvX, mvCY, Picture.Cr.AsSpan(chromaOut), chromaStride);
+                InterPrediction.PredictLumaBlock(reference, lumaX, lumaY, w, h, mvX, mvY, PlaneY.AsSpan(lumaOut), lumaStride);
+                InterPrediction.PredictChromaBlock(reference, 1, chromaX, chromaY, w / 2, ch, mvX, mvCY, PlaneCb.AsSpan(chromaOut), chromaStride);
+                InterPrediction.PredictChromaBlock(reference, 2, chromaX, chromaY, w / 2, ch, mvX, mvCY, PlaneCr.AsSpan(chromaOut), chromaStride);
                 return;
             }
 
-            InterPrediction.PredictLuma(reference, lumaX, lumaY, w, h, mvX, mvY, _predictionL0, 16);
-            WeightOne(_predictionL0, 16, w, h, Picture.Y.AsSpan(lumaOut), lumaStride, weighting, list, 0);
+            InterPrediction.PredictLumaBlock(reference, lumaX, lumaY, w, h, mvX, mvY, _predictionL0, 16);
+            WeightOne(_predictionL0, 16, w, h, PlaneY.AsSpan(lumaOut), lumaStride, weighting, list, 0);
             for (int c = 1; c <= 2; c++)
             {
-                InterPrediction.PredictChroma(reference, c, chromaX, chromaY, w / 2, ch, mvX, mvCY, _predictionL0, 8);
-                WeightOne(_predictionL0, 8, w / 2, ch, Picture.Plane(c).AsSpan(chromaOut), chromaStride, weighting, list, c);
+                InterPrediction.PredictChromaBlock(reference, c, chromaX, chromaY, w / 2, ch, mvX, mvCY, _predictionL0, 8);
+                WeightOne(_predictionL0, 8, w / 2, ch, Picture.Plane<TPixel>(c).AsSpan(chromaOut), chromaStride, weighting, list, c);
             }
 
             return;
         }
 
-        InterPrediction.PredictLuma(ref0!, lumaX, lumaY, w, h, _mvX[0][block], _mvY[0][block], _predictionL0, 16);
-        InterPrediction.PredictLuma(ref1!, lumaX, lumaY, w, h, _mvX[1][block], _mvY[1][block], _predictionL1, 16);
-        var luma = Picture.Y.AsSpan(lumaOut);
+        InterPrediction.PredictLumaBlock(ref0!, lumaX, lumaY, w, h, _mvX[0][block], _mvY[0][block], _predictionL0, 16);
+        InterPrediction.PredictLumaBlock(ref1!, lumaX, lumaY, w, h, _mvX[1][block], _mvY[1][block], _predictionL1, 16);
+        var luma = PlaneY.AsSpan(lumaOut);
         if (weighting.IsDefault)
         {
-            InterPrediction.Average(_predictionL0, _predictionL1, 16, w, h, luma, lumaStride);
+            InterPrediction.AverageBlock(_predictionL0, _predictionL1, 16, w, h, luma, lumaStride);
         }
         else
         {
@@ -512,12 +514,12 @@ internal sealed partial class PictureDecoder
         int mvCY1 = ChromaMvY(_mvY[1][block], mbAddr, ref1!);
         for (int c = 1; c <= 2; c++)
         {
-            InterPrediction.PredictChroma(ref0!, c, chromaX, chromaY, w / 2, ch, _mvX[0][block], mvCY0, _predictionL0, 8);
-            InterPrediction.PredictChroma(ref1!, c, chromaX, chromaY, w / 2, ch, _mvX[1][block], mvCY1, _predictionL1, 8);
-            var chroma = Picture.Plane(c).AsSpan(chromaOut);
+            InterPrediction.PredictChromaBlock(ref0!, c, chromaX, chromaY, w / 2, ch, _mvX[0][block], mvCY0, _predictionL0, 8);
+            InterPrediction.PredictChromaBlock(ref1!, c, chromaX, chromaY, w / 2, ch, _mvX[1][block], mvCY1, _predictionL1, 8);
+            var chroma = Picture.Plane<TPixel>(c).AsSpan(chromaOut);
             if (weighting.IsDefault)
             {
-                InterPrediction.Average(_predictionL0, _predictionL1, 8, w / 2, ch, chroma, chromaStride);
+                InterPrediction.AverageBlock(_predictionL0, _predictionL1, 8, w / 2, ch, chroma, chromaStride);
             }
             else
             {
@@ -651,8 +653,9 @@ internal sealed partial class PictureDecoder
     }
 
     /// <summary>Weighted prediction from one list (8-449, 8-450).</summary>
-    private static void WeightOne(ReadOnlySpan<byte> prediction, int stride, int width, int height, Span<byte> output, int outputStride, PartitionWeights weights, int list, int component)
+    private void WeightOne(ReadOnlySpan<TPixel> prediction, int stride, int width, int height, Span<TPixel> output, int outputStride, PartitionWeights weights, int list, int component)
     {
+        int max = Samples.Max<TPixel>(_bitDepth);
         int logWd = weights.LogWd(component);
         int w = weights.Weight(list, component);
         int o = weights.Offset(list, component);
@@ -661,16 +664,17 @@ internal sealed partial class PictureDecoder
         {
             for (int i = 0; i < width; i++)
             {
-                int p = prediction[(j * stride) + i];
+                int p = int.CreateTruncating(prediction[(j * stride) + i]);
                 int value = logWd >= 1 ? (((p * w) + round) >> logWd) + o : (p * w) + o;
-                output[(j * outputStride) + i] = (byte)Math.Clamp(value, 0, 255);
+                output[(j * outputStride) + i] = TPixel.CreateTruncating(Math.Clamp(value, 0, max));
             }
         }
     }
 
     /// <summary>Weighted bi-prediction (8-451).</summary>
-    private static void WeightBoth(ReadOnlySpan<byte> prediction0, ReadOnlySpan<byte> prediction1, int stride, int width, int height, Span<byte> output, int outputStride, PartitionWeights weights, int component)
+    private void WeightBoth(ReadOnlySpan<TPixel> prediction0, ReadOnlySpan<TPixel> prediction1, int stride, int width, int height, Span<TPixel> output, int outputStride, PartitionWeights weights, int component)
     {
+        int max = Samples.Max<TPixel>(_bitDepth);
         int logWd = weights.LogWd(component);
         int w0 = weights.Weight(0, component);
         int w1 = weights.Weight(1, component);
@@ -679,8 +683,10 @@ internal sealed partial class PictureDecoder
         {
             for (int i = 0; i < width; i++)
             {
-                int value = (((prediction0[(j * stride) + i] * w0) + (prediction1[(j * stride) + i] * w1) + (1 << logWd)) >> (logWd + 1)) + offset;
-                output[(j * outputStride) + i] = (byte)Math.Clamp(value, 0, 255);
+                int p0 = int.CreateTruncating(prediction0[(j * stride) + i]);
+                int p1 = int.CreateTruncating(prediction1[(j * stride) + i]);
+                int value = (((p0 * w0) + (p1 * w1) + (1 << logWd)) >> (logWd + 1)) + offset;
+                output[(j * outputStride) + i] = TPixel.CreateTruncating(Math.Clamp(value, 0, max));
             }
         }
     }

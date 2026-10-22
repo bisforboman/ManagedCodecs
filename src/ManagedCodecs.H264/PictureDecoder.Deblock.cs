@@ -1,3 +1,4 @@
+using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics;
@@ -6,7 +7,7 @@ using System.Runtime.Intrinsics.X86;
 namespace ManagedCodecs.H264;
 
 /// <summary>The deblocking filter (H.264 clause 8.7) for frames.</summary>
-internal sealed partial class PictureDecoder
+internal sealed partial class PictureDecoder<TPixel>
 {
     // Table 8-16: alpha' and beta' by indexA / indexB.
     private static ReadOnlySpan<byte> Alpha =>
@@ -109,13 +110,13 @@ internal sealed partial class PictureDecoder
             for (int edge = 0; edge < 4; edge++)
             {
                 int qpP = edge == 0 && mbX > 0 ? _qp[mbAddr - 1] : qp;
-                FilterEdge(Picture.Y, lumaOrigin + (edge * 4), 1, lumaStride, 16, vertical.Slice(edge * 4, 4), qpP, qp, slice.AlphaOffset, slice.BetaOffset, chroma: false);
+                FilterEdge(PlaneY, lumaOrigin + (edge * 4), 1, lumaStride, 16, vertical.Slice(edge * 4, 4), qpP, qp, slice.AlphaOffset, slice.BetaOffset, chroma: false, bitDepth: _bitDepth);
             }
 
             for (int edge = 0; edge < 4; edge++)
             {
                 int qpP = edge == 0 && mbY > 0 ? _qp[mbAddr - _widthInMbs] : qp;
-                FilterEdge(Picture.Y, lumaOrigin + (edge * 4 * lumaStride), lumaStride, 1, 16, horizontal.Slice(edge * 4, 4), qpP, qp, slice.AlphaOffset, slice.BetaOffset, chroma: false);
+                FilterEdge(PlaneY, lumaOrigin + (edge * 4 * lumaStride), lumaStride, 1, 16, horizontal.Slice(edge * 4, 4), qpP, qp, slice.AlphaOffset, slice.BetaOffset, chroma: false, bitDepth: _bitDepth);
             }
 
             if (_mbHeightC == 16)
@@ -132,13 +133,13 @@ internal sealed partial class PictureDecoder
             for (int edge = 0; edge < 2; edge++)
             {
                 int qpP = edge == 0 ? qpLeft : qp;
-                FilterChromaEdge(Picture.Cb, Picture.Cr, chromaOrigin + (edge * 4), 1, chromaStride, vertical.Slice(edge * 8, 4), ChromaQp(qpP, slice.CbQpOffset), qpCb, ChromaQp(qpP, slice.CrQpOffset), qpCr, slice.AlphaOffset, slice.BetaOffset);
+                FilterChromaEdge(PlaneCb, PlaneCr, chromaOrigin + (edge * 4), 1, chromaStride, vertical.Slice(edge * 8, 4), ChromaQp(qpP, slice.CbQpOffset), qpCb, ChromaQp(qpP, slice.CrQpOffset), qpCr, slice.AlphaOffset, slice.BetaOffset, bitDepth: _bitDepth);
             }
 
             for (int edge = 0; edge < 2; edge++)
             {
                 int qpP = edge == 0 ? qpAbove : qp;
-                FilterChromaEdge(Picture.Cb, Picture.Cr, chromaOrigin + (edge * 4 * chromaStride), chromaStride, 1, horizontal.Slice(edge * 8, 4), ChromaQp(qpP, slice.CbQpOffset), qpCb, ChromaQp(qpP, slice.CrQpOffset), qpCr, slice.AlphaOffset, slice.BetaOffset);
+                FilterChromaEdge(PlaneCb, PlaneCr, chromaOrigin + (edge * 4 * chromaStride), chromaStride, 1, horizontal.Slice(edge * 8, 4), ChromaQp(qpP, slice.CbQpOffset), qpCb, ChromaQp(qpP, slice.CrQpOffset), qpCr, slice.AlphaOffset, slice.BetaOffset, bitDepth: _bitDepth);
             }
         }
     }
@@ -162,14 +163,14 @@ internal sealed partial class PictureDecoder
         {
             int qpP = edge == 0 ? qpLeft : qp;
             var strengths = vertical.Slice(edge * 8, 4);
-            FilterEdge(Picture.Cb, origin + (edge * 4), 1, stride, 16, strengths, ChromaQp(qpP, slice.CbQpOffset), qpCb, slice.AlphaOffset, slice.BetaOffset, chroma: true, segmentShift: 2);
-            FilterEdge(Picture.Cr, origin + (edge * 4), 1, stride, 16, strengths, ChromaQp(qpP, slice.CrQpOffset), qpCr, slice.AlphaOffset, slice.BetaOffset, chroma: true, segmentShift: 2);
+            FilterEdge(PlaneCb, origin + (edge * 4), 1, stride, 16, strengths, ChromaQp(qpP, slice.CbQpOffset), qpCb, slice.AlphaOffset, slice.BetaOffset, chroma: true, segmentShift: 2, bitDepth: _bitDepth);
+            FilterEdge(PlaneCr, origin + (edge * 4), 1, stride, 16, strengths, ChromaQp(qpP, slice.CrQpOffset), qpCr, slice.AlphaOffset, slice.BetaOffset, chroma: true, segmentShift: 2, bitDepth: _bitDepth);
         }
 
         for (int edge = 0; edge < 4; edge++)
         {
             int qpP = edge == 0 ? qpAbove : qp;
-            FilterChromaEdge(Picture.Cb, Picture.Cr, origin + (edge * 4 * stride), stride, 1, horizontal.Slice(edge * 4, 4), ChromaQp(qpP, slice.CbQpOffset), qpCb, ChromaQp(qpP, slice.CrQpOffset), qpCr, slice.AlphaOffset, slice.BetaOffset);
+            FilterChromaEdge(PlaneCb, PlaneCr, origin + (edge * 4 * stride), stride, 1, horizontal.Slice(edge * 4, 4), ChromaQp(qpP, slice.CbQpOffset), qpCb, ChromaQp(qpP, slice.CrQpOffset), qpCr, slice.AlphaOffset, slice.BetaOffset, bitDepth: _bitDepth);
         }
     }
 
@@ -329,9 +330,10 @@ internal sealed partial class PictureDecoder
     /// Filters one edge (8.7.2). <paramref name="q0"/> is the first q0 sample; p samples lie at
     /// -<paramref name="across"/>, -2 * across, ... and the edge runs along <paramref name="along"/>.
     /// <paramref name="strengths"/> holds bS per luma 4x4 segment; chroma samples use bS of segment i / 2,
-    /// or of i / 4 with <paramref name="segmentShift"/> 2 (vertical edges of 4:2:2 chroma).
+    /// or of i / 4 with <paramref name="segmentShift"/> 2 (vertical edges of 4:2:2 chroma). Samples
+    /// of <paramref name="bitDepth"/> bits; the vector version takes 8-bit ones.
     /// </summary>
-    internal static void FilterEdge(byte[] plane, int q0, int across, int along, int length, ReadOnlySpan<byte> strengths, int qpP, int qpQ, int alphaOffset, int betaOffset, bool chroma, bool vectorized = true, int segmentShift = 0)
+    internal static void FilterEdge(TPixel[] plane, int q0, int across, int along, int length, ReadOnlySpan<byte> strengths, int qpP, int qpQ, int alphaOffset, int betaOffset, bool chroma, bool vectorized = true, int segmentShift = 0, int bitDepth = 8)
     {
         if (segmentShift == 0)
         {
@@ -353,18 +355,18 @@ internal sealed partial class PictureDecoder
             return; // no sample can pass |p0 - q0| < alpha
         }
 
-        if (vectorized && Vector128.IsHardwareAccelerated)
+        if (typeof(TPixel) == typeof(byte) && vectorized && Vector128.IsHardwareAccelerated)
         {
-            FilterEdgeVector(plane, q0, across, along, length, strengths, segmentShift, indexA, alpha, beta, chroma);
+            FilterEdgeVector(Unsafe.As<byte[]>(plane), q0, across, along, length, strengths, segmentShift, indexA, alpha, beta, chroma);
         }
         else
         {
-            FilterEdgeScalar(plane, q0, across, along, length, strengths, segmentShift, indexA, alpha, beta, chroma);
+            FilterEdgeScalar(plane, q0, across, along, length, strengths, segmentShift, indexA, alpha, beta, chroma, bitDepth);
         }
     }
 
     /// <summary>The filter of 8.7.2.3 / 8.7.2.4 sample by sample; the reference for the vector version.</summary>
-    private static void FilterEdgeScalar(byte[] plane, int q0, int across, int along, int length, ReadOnlySpan<byte> strengths, int segmentShift, int indexA, int alpha, int beta, bool chroma)
+    private static void FilterEdgeScalar(TPixel[] plane, int q0, int across, int along, int length, ReadOnlySpan<byte> strengths, int segmentShift, int indexA, int alpha, int beta, bool chroma, int bitDepth)
     {
         for (int i = 0; i < length; i++)
         {
@@ -372,7 +374,7 @@ internal sealed partial class PictureDecoder
             if (bS != 0)
             {
                 int pos = q0 + (i * along);
-                FilterSamples(plane, pos - across, across, pos, across, bS, indexA, alpha, beta, chroma);
+                FilterSamples(plane, pos - across, across, pos, across, bS, indexA, alpha, beta, chroma, bitDepth);
             }
         }
     }
@@ -383,12 +385,13 @@ internal sealed partial class PictureDecoder
     /// on in steps of <paramref name="qStep"/> (the two sides differ where an MBAFF frame macroblock
     /// meets a field macroblock).
     /// </summary>
-    private static void FilterSamples(byte[] plane, int p0, int pStep, int q0, int qStep, int bS, int indexA, int alpha, int beta, bool chroma)
+    private static void FilterSamples(TPixel[] plane, int p0, int pStep, int q0, int qStep, int bS, int indexA, int alpha, int beta, bool chroma, int bitDepth)
     {
-        int p0v = plane[p0];
-        int p1 = plane[p0 - pStep];
-        int q0v = plane[q0];
-        int q1 = plane[q0 + qStep];
+        int max = Samples.Max<TPixel>(bitDepth);
+        int p0v = int.CreateTruncating(plane[p0]);
+        int p1 = int.CreateTruncating(plane[p0 - pStep]);
+        int q0v = int.CreateTruncating(plane[q0]);
+        int q1 = int.CreateTruncating(plane[q0 + qStep]);
 
         if (Math.Abs(p0v - q0v) >= alpha || Math.Abs(p1 - p0v) >= beta || Math.Abs(q1 - q0v) >= beta)
         {
@@ -401,20 +404,20 @@ internal sealed partial class PictureDecoder
             {
                 int tc = Tc0[(indexA * 3) + bS - 1] + 1;
                 int delta = Math.Clamp((((q0v - p0v) << 2) + (p1 - q1) + 4) >> 3, -tc, tc);
-                plane[p0] = Clip(p0v + delta);
-                plane[q0] = Clip(q0v - delta);
+                plane[p0] = TPixel.CreateTruncating(Math.Clamp(p0v + delta, 0, max));
+                plane[q0] = TPixel.CreateTruncating(Math.Clamp(q0v - delta, 0, max));
             }
             else
             {
-                plane[p0] = (byte)(((2 * p1) + p0v + q1 + 2) >> 2);
-                plane[q0] = (byte)(((2 * q1) + q0v + p1 + 2) >> 2);
+                plane[p0] = TPixel.CreateTruncating(((2 * p1) + p0v + q1 + 2) >> 2);
+                plane[q0] = TPixel.CreateTruncating(((2 * q1) + q0v + p1 + 2) >> 2);
             }
 
             return;
         }
 
-        int p2 = plane[p0 - (2 * pStep)];
-        int q2 = plane[q0 + (2 * qStep)];
+        int p2 = int.CreateTruncating(plane[p0 - (2 * pStep)]);
+        int q2 = int.CreateTruncating(plane[q0 + (2 * qStep)]);
         bool ap = Math.Abs(p2 - p0v) < beta;
         bool aq = Math.Abs(q2 - q0v) < beta;
 
@@ -423,16 +426,16 @@ internal sealed partial class PictureDecoder
             int tc0 = Tc0[(indexA * 3) + bS - 1];
             int tc = tc0 + (ap ? 1 : 0) + (aq ? 1 : 0);
             int delta = Math.Clamp((((q0v - p0v) << 2) + (p1 - q1) + 4) >> 3, -tc, tc);
-            plane[p0] = Clip(p0v + delta);
-            plane[q0] = Clip(q0v - delta);
+            plane[p0] = TPixel.CreateTruncating(Math.Clamp(p0v + delta, 0, max));
+            plane[q0] = TPixel.CreateTruncating(Math.Clamp(q0v - delta, 0, max));
             if (ap)
             {
-                plane[p0 - pStep] = (byte)(p1 + Math.Clamp((p2 + ((p0v + q0v + 1) >> 1) - (p1 << 1)) >> 1, -tc0, tc0));
+                plane[p0 - pStep] = TPixel.CreateTruncating(p1 + Math.Clamp((p2 + ((p0v + q0v + 1) >> 1) - (p1 << 1)) >> 1, -tc0, tc0));
             }
 
             if (aq)
             {
-                plane[q0 + qStep] = (byte)(q1 + Math.Clamp((q2 + ((p0v + q0v + 1) >> 1) - (q1 << 1)) >> 1, -tc0, tc0));
+                plane[q0 + qStep] = TPixel.CreateTruncating(q1 + Math.Clamp((q2 + ((p0v + q0v + 1) >> 1) - (q1 << 1)) >> 1, -tc0, tc0));
             }
 
             return;
@@ -442,26 +445,26 @@ internal sealed partial class PictureDecoder
         bool small = Math.Abs(p0v - q0v) < ((alpha >> 2) + 2);
         if (ap && small)
         {
-            int p3 = plane[p0 - (3 * pStep)];
-            plane[p0] = (byte)((p2 + (2 * p1) + (2 * p0v) + (2 * q0v) + q1 + 4) >> 3);
-            plane[p0 - pStep] = (byte)((p2 + p1 + p0v + q0v + 2) >> 2);
-            plane[p0 - (2 * pStep)] = (byte)(((2 * p3) + (3 * p2) + p1 + p0v + q0v + 4) >> 3);
+            int p3 = int.CreateTruncating(plane[p0 - (3 * pStep)]);
+            plane[p0] = TPixel.CreateTruncating((p2 + (2 * p1) + (2 * p0v) + (2 * q0v) + q1 + 4) >> 3);
+            plane[p0 - pStep] = TPixel.CreateTruncating((p2 + p1 + p0v + q0v + 2) >> 2);
+            plane[p0 - (2 * pStep)] = TPixel.CreateTruncating(((2 * p3) + (3 * p2) + p1 + p0v + q0v + 4) >> 3);
         }
         else
         {
-            plane[p0] = (byte)(((2 * p1) + p0v + q1 + 2) >> 2);
+            plane[p0] = TPixel.CreateTruncating(((2 * p1) + p0v + q1 + 2) >> 2);
         }
 
         if (aq && small)
         {
-            int q3 = plane[q0 + (3 * qStep)];
-            plane[q0] = (byte)((p1 + (2 * p0v) + (2 * q0v) + (2 * q1) + q2 + 4) >> 3);
-            plane[q0 + qStep] = (byte)((p0v + q0v + q1 + q2 + 2) >> 2);
-            plane[q0 + (2 * qStep)] = (byte)(((2 * q3) + (3 * q2) + q1 + q0v + p0v + 4) >> 3);
+            int q3 = int.CreateTruncating(plane[q0 + (3 * qStep)]);
+            plane[q0] = TPixel.CreateTruncating((p1 + (2 * p0v) + (2 * q0v) + (2 * q1) + q2 + 4) >> 3);
+            plane[q0 + qStep] = TPixel.CreateTruncating((p0v + q0v + q1 + q2 + 2) >> 2);
+            plane[q0 + (2 * qStep)] = TPixel.CreateTruncating(((2 * q3) + (3 * q2) + q1 + q0v + p0v + 4) >> 3);
         }
         else
         {
-            plane[q0] = (byte)(((2 * q1) + q0v + p1 + 2) >> 2);
+            plane[q0] = TPixel.CreateTruncating(((2 * q1) + q0v + p1 + 2) >> 2);
         }
     }
 
@@ -492,19 +495,22 @@ internal sealed partial class PictureDecoder
     /// <see cref="FilterEdge"/> on each component.
     /// </summary>
     [SkipLocalsInit]
-    internal static void FilterChromaEdge(byte[] cb, byte[] cr, int q0, int across, int along, ReadOnlySpan<byte> strengths, int qpPCb, int qpQCb, int qpPCr, int qpQCr, int alphaOffset, int betaOffset, bool vectorized = true)
+    internal static void FilterChromaEdge(TPixel[] cbPlane, TPixel[] crPlane, int q0, int across, int along, ReadOnlySpan<byte> strengths, int qpPCb, int qpQCb, int qpPCr, int qpQCr, int alphaOffset, int betaOffset, bool vectorized = true, int bitDepth = 8)
     {
         if (MemoryMarshal.Read<uint>(strengths) == 0)
         {
             return;
         }
 
-        if (!vectorized || !Vector128.IsHardwareAccelerated)
+        if (typeof(TPixel) != typeof(byte) || !vectorized || !Vector128.IsHardwareAccelerated)
         {
-            FilterEdge(cb, q0, across, along, 8, strengths, qpPCb, qpQCb, alphaOffset, betaOffset, chroma: true, vectorized);
-            FilterEdge(cr, q0, across, along, 8, strengths, qpPCr, qpQCr, alphaOffset, betaOffset, chroma: true, vectorized);
+            FilterEdge(cbPlane, q0, across, along, 8, strengths, qpPCb, qpQCb, alphaOffset, betaOffset, chroma: true, vectorized, bitDepth: bitDepth);
+            FilterEdge(crPlane, q0, across, along, 8, strengths, qpPCr, qpQCr, alphaOffset, betaOffset, chroma: true, vectorized, bitDepth: bitDepth);
             return;
         }
+
+        byte[] cb = Unsafe.As<byte[]>(cbPlane);
+        byte[] cr = Unsafe.As<byte[]>(crPlane);
 
         Span<short> lanes = stackalloc short[4 * 16];
         bool any = false;
@@ -862,6 +868,4 @@ internal sealed partial class PictureDecoder
 
     private static Vector128<short> Clip(Vector128<short> value) =>
         Vector128.Clamp(value, Vector128<short>.Zero, Vector128.Create((short)255));
-
-    private static byte Clip(int value) => (byte)Math.Clamp(value, 0, 255);
 }

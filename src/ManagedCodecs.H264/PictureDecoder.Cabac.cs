@@ -7,7 +7,7 @@ namespace ManagedCodecs.H264;
 /// the syntax elements of I and P slices. The macroblock layer itself is shared with CAVLC; it calls
 /// these methods when the slice has a <see cref="Cabac"/> engine.
 /// </summary>
-internal sealed partial class PictureDecoder
+internal sealed partial class PictureDecoder<TPixel>
 {
     // ctxBlockCatOffset (Table 9-40) for ctxBlockCat 0..4: coded_block_flag,
     // significant_coeff_flag / last_significant_coeff_flag, coeff_abs_level_minus1.

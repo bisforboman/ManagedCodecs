@@ -1,3 +1,4 @@
+using System.Numerics;
 using System.Runtime.CompilerServices;
 
 namespace ManagedCodecs.H264;
@@ -157,11 +158,13 @@ internal static class Transform
 
     /// <summary>
     /// 8x8 inverse transform (8.5.13.2) of scaled coefficients, added to the prediction already
-    /// in <paramref name="dest"/> and clipped (8.5.14).
+    /// in <paramref name="dest"/> and clipped to <paramref name="bitDepth"/> bits (8.5.14).
     /// </summary>
     [SkipLocalsInit]
-    public static void InverseTransform8x8Add(Span<int> d, Span<byte> dest, int stride)
+    public static void InverseTransform8x8Add<TPixel>(Span<int> d, Span<TPixel> dest, int stride, int bitDepth)
+        where TPixel : unmanaged, IBinaryInteger<TPixel>
     {
+        int max = Samples.Max<TPixel>(bitDepth);
         Span<int> g = stackalloc int[64];
 
         // Rows (horizontal) first, then columns.
@@ -176,7 +179,7 @@ internal static class Transform
             Transform8(g, j, 8, m, 0);
             for (int i = 0; i < 8; i++)
             {
-                AddClipped(dest, (i * stride) + j, (m[i] + 32) >> 6);
+                AddClipped(dest, (i * stride) + j, (m[i] + 32) >> 6, max);
             }
         }
     }
@@ -300,10 +303,12 @@ internal static class Transform
 
     /// <summary>
     /// 4x4 inverse transform (8.5.12.2) of scaled coefficients, added to the prediction already
-    /// in <paramref name="dest"/> and clipped (8.5.14).
+    /// in <paramref name="dest"/> and clipped to <paramref name="bitDepth"/> bits (8.5.14).
     /// </summary>
-    public static void InverseTransformAdd(Span<int> d, Span<byte> dest, int stride)
+    public static void InverseTransformAdd<TPixel>(Span<int> d, Span<TPixel> dest, int stride, int bitDepth)
+        where TPixel : unmanaged, IBinaryInteger<TPixel>
     {
+        int max = Samples.Max<TPixel>(bitDepth);
         Span<int> f = stackalloc int[16];
 
         // Rows (horizontal) first.
@@ -334,10 +339,10 @@ internal static class Transform
             int g1 = f0 - f2;
             int g2 = (f1 >> 1) - f3;
             int g3 = f1 + (f3 >> 1);
-            AddClipped(dest, j, (g0 + g3 + 32) >> 6);
-            AddClipped(dest, stride + j, (g1 + g2 + 32) >> 6);
-            AddClipped(dest, (2 * stride) + j, (g1 - g2 + 32) >> 6);
-            AddClipped(dest, (3 * stride) + j, (g0 - g3 + 32) >> 6);
+            AddClipped(dest, j, (g0 + g3 + 32) >> 6, max);
+            AddClipped(dest, stride + j, (g1 + g2 + 32) >> 6, max);
+            AddClipped(dest, (2 * stride) + j, (g1 - g2 + 32) >> 6, max);
+            AddClipped(dest, (3 * stride) + j, (g0 - g3 + 32) >> 6, max);
         }
     }
 
@@ -345,7 +350,8 @@ internal static class Transform
     /// <see cref="InverseTransformAdd"/> for a block whose only nonzero coefficient is the DC
     /// <paramref name="dc"/> (already scaled): every residual sample is then (dc + 32) &gt;&gt; 6.
     /// </summary>
-    public static void AddDc(int dc, Span<byte> dest, int stride)
+    public static void AddDc<TPixel>(int dc, Span<TPixel> dest, int stride, int bitDepth)
+        where TPixel : unmanaged, IBinaryInteger<TPixel>
     {
         int residual = (dc + 32) >> 6;
         if (residual == 0)
@@ -353,17 +359,19 @@ internal static class Transform
             return;
         }
 
+        int max = Samples.Max<TPixel>(bitDepth);
         for (int y = 0; y < 4; y++)
         {
             for (int x = 0; x < 4; x++)
             {
-                AddClipped(dest, (y * stride) + x, residual);
+                AddClipped(dest, (y * stride) + x, residual, max);
             }
         }
     }
 
-    private static void AddClipped(Span<byte> dest, int index, int residual) =>
-        dest[index] = (byte)Math.Clamp(dest[index] + residual, 0, 255);
+    private static void AddClipped<TPixel>(Span<TPixel> dest, int index, int residual, int max)
+        where TPixel : unmanaged, IBinaryInteger<TPixel> =>
+        dest[index] = TPixel.CreateTruncating(Math.Clamp(int.CreateTruncating(dest[index]) + residual, 0, max));
 
     private static void Hadamard4x4(ReadOnlySpan<int> c, Span<int> f)
     {

@@ -1,3 +1,6 @@
+using System.Diagnostics;
+using System.Runtime.CompilerServices;
+
 namespace ManagedCodecs.H264;
 
 /// <summary>
@@ -6,16 +9,19 @@ namespace ManagedCodecs.H264;
 /// </summary>
 internal sealed class Picture
 {
-    public Picture(int widthInMbs, int heightInMbs, int mbHeightC = 8)
+    public Picture(int widthInMbs, int heightInMbs, int mbHeightC = 8, int bitDepth = 8)
     {
         WidthInMbs = widthInMbs;
         HeightInMbs = heightInMbs;
         MbHeightC = mbHeightC;
+        BitDepth = bitDepth;
         LumaStride = widthInMbs * 16;
         ChromaStride = widthInMbs * 8;
-        Y = new byte[LumaStride * heightInMbs * 16];
-        Cb = new byte[ChromaStride * heightInMbs * mbHeightC];
-        Cr = new byte[ChromaStride * heightInMbs * mbHeightC];
+        int lumaSize = LumaStride * heightInMbs * 16;
+        int chromaSize = ChromaStride * heightInMbs * mbHeightC;
+        _planes = bitDepth > 8
+            ? [new ushort[lumaSize], new ushort[chromaSize], new ushort[chromaSize]]
+            : [new byte[lumaSize], new byte[chromaSize], new byte[chromaSize]];
 
         int mbCount = widthInMbs * heightInMbs;
         MvX = [new short[mbCount * 16], new short[mbCount * 16]];
@@ -34,11 +40,10 @@ internal sealed class Picture
         WidthInMbs = frame.WidthInMbs;
         HeightInMbs = frame.HeightInMbs;
         MbHeightC = frame.MbHeightC;
+        BitDepth = frame.BitDepth;
         LumaStride = frame.LumaStride;
         ChromaStride = frame.ChromaStride;
-        Y = frame.Y;
-        Cb = frame.Cb;
-        Cr = frame.Cr;
+        _planes = frame._planes;
         MvX = frame.MvX;
         MvY = frame.MvY;
         RefIdx = frame.RefIdx;
@@ -61,6 +66,8 @@ internal sealed class Picture
     /// </summary>
     public Picture Field(int parity) => parity == 0 ? _top ??= new Picture(this, 0) : _bottom ??= new Picture(this, 1);
 
+    // The Y, Cb and Cr planes: byte[] for 8-bit samples, ushort[] for deeper ones.
+    private readonly Array[] _planes;
     private Picture? _top;
     private Picture? _bottom;
     private readonly Mark[] _marks = new Mark[2];
@@ -78,11 +85,15 @@ internal sealed class Picture
 
     public int ChromaStride { get; }
 
-    public byte[] Y { get; }
+    /// <summary>Bits per sample (luma and chroma alike): 8 with byte planes, more with ushort planes.</summary>
+    public int BitDepth { get; }
 
-    public byte[] Cb { get; }
+    /// <summary>The 8-bit planes (<see cref="BitDepth"/> 8).</summary>
+    public byte[] Y => (byte[])_planes[0];
 
-    public byte[] Cr { get; }
+    public byte[] Cb => (byte[])_planes[1];
+
+    public byte[] Cr => (byte[])_planes[2];
 
     /// <summary>
     /// Identifies the picture decoded into this object; pictures are reused once they stop being
@@ -189,10 +200,12 @@ internal sealed class Picture
 
     public bool IsReference => IsShortTermReference || IsLongTermReference;
 
-    public byte[] Plane(int component) => component switch
+    public byte[] Plane(int component) => (byte[])_planes[component];
+
+    /// <summary>Plane <paramref name="component"/> (0 Y, 1 Cb, 2 Cr) as samples of <typeparamref name="TPixel"/>, byte or ushort as <see cref="BitDepth"/> says.</summary>
+    public TPixel[] Plane<TPixel>(int component)
     {
-        0 => Y,
-        1 => Cb,
-        _ => Cr,
-    };
+        Debug.Assert(_planes[component] is TPixel[], "The sample type does not match the bit depth.");
+        return Unsafe.As<TPixel[]>(_planes[component]);
+    }
 }

@@ -100,5 +100,9 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
   into AVI1 packets in Python). Its decoder takes an image of less than 3/4 of the stream's height (integer division)
   as a field, ignores the AVI1 field byte, and puts the first field on the odd rows unless the decoder's field order
   is tt, tb or bt (`-field_order` as an input option shows it); one field a packet it does not decode at all.
+- H.264 sample code is generic over the sample type (`PictureDecoder<TPixel>`, byte for 8-bit, ushort deeper): the
+  byte SIMD paths are reached through `typeof(TPixel) == typeof(byte)` branches, which the JIT folds per
+  instantiation, and clip bounds come from `Samples.Max<TPixel>` (a constant for byte; a runtime `(1 << bitDepth) - 1`
+  cost intra-heavy streams about 5%).
 - In fragmented MP4, FFmpeg's packet durations are not the file's: its demuxer leaves them unset and libavformat
   fills in the codec frame size (1024 for AAC). Compare with FFmpeg's next dts instead (Mp4ConformanceTests does).

@@ -1,3 +1,4 @@
+using System.Numerics;
 using System.Runtime.CompilerServices;
 
 namespace ManagedCodecs.H264;
@@ -15,17 +16,34 @@ internal enum MbKind : byte
 /// <summary>Per-slice values that later stages (deblocking) need for every macroblock.</summary>
 internal sealed record SliceInfo(int DisableDeblockingFilterIdc, int AlphaOffset, int BetaOffset, int CbQpOffset, int CrQpOffset);
 
+/// <summary>A <see cref="PictureDecoder{TPixel}"/> of either sample type, as <see cref="H264Decoder"/> holds it.</summary>
+internal interface IPictureDecoder
+{
+    SequenceParameterSet Sps { get; }
+
+    Picture Picture { get; }
+
+    bool IsComplete { get; }
+
+    void Begin(Picture picture, SequenceParameterSet sps, int fieldParity = -1, bool secondField = false);
+
+    void DecodeSlice(SliceHeader header, PictureParameterSet pps, BitReader r, IReadOnlyList<Picture> refList0, IReadOnlyList<Picture> refList1);
+
+    void Deblock();
+}
+
 /// <summary>
 /// Decodes the slices of one picture into a <see cref="Picture"/> and keeps the per-macroblock
 /// state that neighbouring macroblocks and the deblocking filter read. One instance serves every
 /// picture of a sequence: <see cref="Begin"/> resets it for the next.
 /// </summary>
 /// <remarks>
-/// Block arrays use raster order inside the macroblock: luma 4x4 block (x, y) is y * 4 + x,
+/// Samples are <typeparamref name="TPixel"/>: byte for 8-bit video, ushort for deeper. Block arrays use raster order inside the macroblock: luma 4x4 block (x, y) is y * 4 + x,
 /// chroma 4x4 block (x, y) of component c (0 = Cb, 1 = Cr) is c * 8 + y * 2 + x (y up to 1 in
 /// 4:2:0, up to 3 in 4:2:2, whose chroma blocks are 8x16 samples).
 /// </remarks>
-internal sealed partial class PictureDecoder
+internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
+    where TPixel : unmanaged, IBinaryInteger<TPixel>
 {
     private readonly int _widthInMbs;
     private readonly int _mbCount;
@@ -33,6 +51,9 @@ internal sealed partial class PictureDecoder
     // MbHeightC (8 or 16) and the chroma 4x4 blocks of a component (4 or 8).
     private readonly int _mbHeightC;
     private readonly int _chromaBlocks;
+
+    // Bits per sample (8 for byte samples, more for ushort ones).
+    private readonly int _bitDepth;
 
     // Per macroblock.
     private readonly int[] _sliceOfMb;
@@ -63,6 +84,7 @@ internal sealed partial class PictureDecoder
         _mbCount = sps.WidthInMbs * sps.HeightInMbs;
         _mbHeightC = sps.MbHeightC;
         _chromaBlocks = _mbHeightC / 2;
+        _bitDepth = sps.BitDepthLuma;
 
         _sliceOfMb = new int[_mbCount];
         Array.Fill(_sliceOfMb, -1);
@@ -81,6 +103,13 @@ internal sealed partial class PictureDecoder
     public SequenceParameterSet Sps { get; private set; }
 
     public Picture Picture { get; private set; } = null!;
+
+    // The current picture's planes as samples of TPixel.
+    private TPixel[] PlaneY => Picture.Plane<TPixel>(0);
+
+    private TPixel[] PlaneCb => Picture.Plane<TPixel>(1);
+
+    private TPixel[] PlaneCr => Picture.Plane<TPixel>(2);
 
     public int DecodedMbCount { get; private set; }
 
@@ -524,18 +553,18 @@ internal sealed partial class PictureDecoder
         {
             for (int x = 0; x < 16; x++)
             {
-                Picture.Y[lumaOrigin + (y * lumaStride) + x] = (byte)r.ReadBits(8);
+                PlaneY[lumaOrigin + (y * lumaStride) + x] = TPixel.CreateTruncating(r.ReadBits(_bitDepth));
             }
         }
 
         var (chromaOrigin, chromaStride) = ChromaPlace(mbAddr);
-        foreach (var plane in new[] { Picture.Cb, Picture.Cr })
+        foreach (var plane in new[] { PlaneCb, PlaneCr })
         {
             for (int y = 0; y < _mbHeightC; y++)
             {
                 for (int x = 0; x < 8; x++)
                 {
-                    plane[chromaOrigin + (y * chromaStride) + x] = (byte)r.ReadBits(8);
+                    plane[chromaOrigin + (y * chromaStride) + x] = TPixel.CreateTruncating(r.ReadBits(_bitDepth));
                 }
             }
         }
@@ -772,7 +801,7 @@ internal sealed partial class PictureDecoder
         int stride = target.YStride;
         var block = residual.Luma8x8[b8];
         Transform.Dequantize8x8(block, qp, slice.Scaling.LevelScale8x8(IsInter(mbAddr) ? 1 : 0));
-        Transform.InverseTransform8x8Add(block, target.Y.AsSpan(target.YOrigin + ((b8 >> 1) * 8 * stride) + ((b8 & 1) * 8)), stride);
+        Transform.InverseTransform8x8Add(block, target.Y.AsSpan(target.YOrigin + ((b8 >> 1) * 8 * stride) + ((b8 & 1) * 8)), stride, _bitDepth);
     }
 
     // ---- Reconstruction ----
@@ -780,12 +809,12 @@ internal sealed partial class PictureDecoder
     {
         int origin = target.YOrigin;
         int stride = target.YStride;
-        byte[] plane = target.Y;
+        TPixel[] plane = target.Y;
         int qp = _qp[mbAddr];
 
         if (is16x16)
         {
-            IntraPrediction.Predict16x16(predMode16x16, plane, origin, stride, new IntraNeighbors(LeftRows(0, 16), mbs.B, mbs.C, mbs.D));
+            IntraPrediction.Predict16x16(predMode16x16, plane, origin, stride, new IntraNeighbors(LeftRows(0, 16), mbs.B, mbs.C, mbs.D), _bitDepth);
             Span<int> dc = stackalloc int[16];
             residual.LumaDc.CopyTo(dc);
             Transform.InverseLumaDc(dc, qp, slice.Scaling.LevelScale4x4(0));
@@ -795,14 +824,14 @@ internal sealed partial class PictureDecoder
                 var dest = plane.AsSpan(origin + ((i >> 2) * 4 * stride) + ((i & 3) * 4));
                 if (_totalCoeffLuma[(mbAddr * 16) + i] == 0)
                 {
-                    Transform.AddDc(dc[i], dest, stride);
+                    Transform.AddDc(dc[i], dest, stride, _bitDepth);
                     continue;
                 }
 
                 var block = residual.Luma[i];
                 block[0] = dc[i];
                 Transform.Dequantize(block, qp, skipDc: true, slice.Scaling.LevelScale4x4(0));
-                Transform.InverseTransformAdd(block, dest, stride);
+                Transform.InverseTransformAdd(block, dest, stride, _bitDepth);
             }
 
             return;
@@ -823,7 +852,7 @@ internal sealed partial class PictureDecoder
                     _ => new IntraNeighbors(true, true, false, true),
                 };
                 int offset8 = origin + (y * 4 * stride) + (x * 4);
-                IntraPrediction.Predict8x8(_intra4x4Mode[(mbAddr * 16) + (y * 4) + x], plane, offset8, stride, n);
+                IntraPrediction.Predict8x8(_intra4x4Mode[(mbAddr * 16) + (y * 4) + x], plane, offset8, stride, n, _bitDepth);
                 AddLuma8x8Residual(slice, mbAddr, target, residual, cbpLuma, b8, qp);
             }
 
@@ -848,13 +877,13 @@ internal sealed partial class PictureDecoder
                 ? (x < 3 ? mbs.B : mbs.C)
                 : x < 3 && BlockIndex(x + 1, y - 1) < idx;
 
-            IntraPrediction.Predict4x4(_intra4x4Mode[(mbAddr * 16) + (y * 4) + x], plane, offset, stride, new IntraNeighbors(left, top, topRight, topLeft));
+            IntraPrediction.Predict4x4(_intra4x4Mode[(mbAddr * 16) + (y * 4) + x], plane, offset, stride, new IntraNeighbors(left, top, topRight, topLeft), _bitDepth);
 
             if ((cbpLuma & (1 << (idx >> 2))) != 0 && _totalCoeffLuma[(mbAddr * 16) + (y * 4) + x] != 0)
             {
                 var block = residual.Luma[(y * 4) + x];
                 Transform.Dequantize(block, qp, skipDc: false, slice.Scaling.LevelScale4x4(0));
-                Transform.InverseTransformAdd(block, plane.AsSpan(offset), stride);
+                Transform.InverseTransformAdd(block, plane.AsSpan(offset), stride, _bitDepth);
             }
         }
     }
@@ -873,10 +902,10 @@ internal sealed partial class PictureDecoder
         {
             int qpc = ChromaQp(_qp[mbAddr], c == 0 ? slice.Pps.ChromaQpIndexOffset : slice.Pps.SecondChromaQpIndexOffset);
             var levelScale = slice.Scaling.LevelScale4x4((intraMode >= 0 ? 1 : 4) + c); // Intra or Inter Cb, Cr
-            byte[] plane = c == 0 ? target.Cb : target.Cr;
+            TPixel[] plane = c == 0 ? target.Cb : target.Cr;
             if (intraMode >= 0)
             {
-                IntraPrediction.PredictChroma(intraMode, plane, origin, stride, new IntraNeighbors(LeftChromaRows(0), mbs.B, mbs.C, mbs.D), LeftChromaBlocks(), _mbHeightC);
+                IntraPrediction.PredictChroma(intraMode, plane, origin, stride, new IntraNeighbors(LeftChromaRows(0), mbs.B, mbs.C, mbs.D), _bitDepth, LeftChromaBlocks(), _mbHeightC);
             }
 
             if (cbpChroma == 0)
@@ -900,14 +929,14 @@ internal sealed partial class PictureDecoder
                 var dest = plane.AsSpan(origin + ((b >> 1) * 4 * stride) + ((b & 1) * 4));
                 if (_totalCoeffChroma[(mbAddr * 16) + (c * 8) + b] == 0)
                 {
-                    Transform.AddDc(dc[b], dest, stride);
+                    Transform.AddDc(dc[b], dest, stride, _bitDepth);
                     continue;
                 }
 
                 var block = residual.ChromaAc[(c * 8) + b];
                 block[0] = dc[b];
                 Transform.Dequantize(block, qpc, skipDc: true, levelScale);
-                Transform.InverseTransformAdd(block, dest, stride);
+                Transform.InverseTransformAdd(block, dest, stride, _bitDepth);
             }
         }
     }

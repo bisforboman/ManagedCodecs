@@ -62,8 +62,8 @@ foreach (var frame in decoder.Flush())
 
 Each frame owns its samples. Frames are `IDisposable`: disposing one when done with it is optional, and gives an
 H.264 frame's planes back to the decoder for a later frame (a `VideoFramePool`), which saves allocating and
-collecting about 1.4 MB a frame at 720p; a disposed frame's samples must not be used again. `new H264Decoder(video) { BorrowFrames = true }` saves the copy that takes (3 to 11% of
-the decoding time at 720p, the most with B frames): its frames point into the decoder's own pictures, valid until the
+collecting about 1.4 MB a frame at 720p; a disposed frame's samples must not be used again. `new H264Decoder(video) { BorrowFrames = true }` saves the copy that takes (with the copied
+frames disposed, about 5% of the decoding time at 720p and 1% at 320x240): its frames point into the decoder's own pictures, valid until the
 next `Decode` or `Flush` call and not to be written. Their planes are the decoder's macroblock-aligned buffers, so
 read them through `GetRow`, or with the frame's `Offsets` and `Strides`. `mcdec --borrow-frames` times it. 10-bit
 video comes out as `PixelFormat.Yuv420P10`, `Yuv422P10` or `Yuv444P10`, a little-endian 16-bit word a sample (strides and offsets
@@ -93,34 +93,38 @@ ffmpeg -benchmark -threads 1 -stream_loop 9 -i $f -f null -
 
 Both time the whole process, demuxing included; mcdec's also includes .NET's startup and JIT (mcdec's `last loop`
 line shows the steady speed without them). mcdec disposes each frame once it has it, as a consumer done with them
-would, so H.264 frames reuse the planes of earlier ones. A snapshot, made that way (2026-10-22, FFmpeg 6.1, single-threaded on a
-4-core AVX2 (and AVX-512) Xeon cloud VM, median of five interleaved runs; µs per frame, audio frames are 1024 samples):
+would, so H.264 frames reuse the planes of earlier ones. A snapshot, made that way (2026-10-22, after the output frame
+pool, FFmpeg 6.1.1, single-threaded on a 4-core AVX2 (and AVX-512) Xeon cloud VM, median of five interleaved runs;
+µs per frame, audio frames are 1024 samples):
 
 | Sample | Loops | ManagedCodecs | FFmpeg |
 | --- | ---: | ---: | ---: |
-| `testsrc-420.avi` (320x240 MJPEG 4:2:0) | 100 | 413 | 400 |
-| `testsrc-444.avi` (MJPEG 4:4:4) | 100 | 559 | 471 |
-| `noise-q1.avi` (MJPEG, noise at the highest quality) | 100 | 1040 | 1291 |
-| `h264-p-refs.mp4` (320x240 H.264, P frames) | 40 | 690 | 226 |
-| `h264-bench-720p.mp4` (1280x720 H.264) | 10 | 7992 | 2474 |
-| `h264-main-p-refs.mp4` (320x240 H.264 Main, CABAC) | 40 | 862 | 380 |
-| `h264-b-pyramid.mp4` (320x240 H.264 Main, CABAC, B frames) | 20 | 1589 | 515 |
-| `h264-wp-default.mp4` (320x240 H.264, libx264's Main defaults: B frames, weighted prediction) | 20 | 1918 | 408 |
-| `h264-high-default.mp4` (320x240 H.264, libx264's High defaults: also the 8x8 transform) | 20 | 1355 | 403 |
-| `h264-high-b.mp4` (320x240 H.264 High, B frames, all partitions) | 40 | 1679 | 544 |
-| `h264-10bit-b.mp4` (the same at 10 bits, High 10) | 40 | 1711 | 609 |
-| `h264-high-motion.mp4` (320x240 H.264 High, fast motion and noise, QP 22) | 20 | 5815 | 3055 |
-| `h264-10bit-motion.mp4` (the same at 10 bits, QP 34, which is QP 22's step size) | 20 | 5919 | 3200 |
-| `aac-stereo-48k.mp4` (AAC, stereo) | 100 | 55 | 76 |
-| `aac-5.1.mp4` (AAC, 5.1) | 100 | 182 | 94 |
+| `testsrc-420.avi` (320x240 MJPEG 4:2:0) | 100 | 294 | 358 |
+| `testsrc-444.avi` (MJPEG 4:4:4) | 100 | 539 | 508 |
+| `noise-q1.avi` (MJPEG, noise at the highest quality) | 100 | 1074 | 1284 |
+| `h264-p-refs.mp4` (320x240 H.264, P frames) | 40 | 682 | 246 |
+| `h264-bench-720p.mp4` (1280x720 H.264) | 10 | 7656 | 2412 |
+| `h264-main-p-refs.mp4` (320x240 H.264 Main, CABAC) | 40 | 864 | 360 |
+| `h264-b-pyramid.mp4` (320x240 H.264 Main, CABAC, B frames) | 20 | 1505 | 506 |
+| `h264-wp-default.mp4` (320x240 H.264, libx264's Main defaults: B frames, weighted prediction) | 20 | 1258 | 374 |
+| `h264-high-default.mp4` (320x240 H.264, libx264's High defaults: also the 8x8 transform) | 20 | 1269 | 368 |
+| `h264-high-b.mp4` (320x240 H.264 High, B frames, all partitions) | 40 | 1645 | 594 |
+| `h264-10bit-b.mp4` (the same at 10 bits, High 10) | 40 | 1947 | 628 |
+| `h264-high-motion.mp4` (320x240 H.264 High, fast motion and noise, QP 22) | 20 | 5906 | 3199 |
+| `h264-10bit-motion.mp4` (the same at 10 bits, QP 34, which is QP 22's step size) | 20 | 6299 | 3285 |
+| `aac-stereo-48k.mp4` (AAC, stereo) | 100 | 56 | 65 |
+| `aac-5.1.mp4` (AAC, 5.1) | 100 | 169 | 88 |
 
-The short MJPEG and AAC runs are dominated by .NET's startup and JIT and moved the most (testsrc-420.avi took
-between 263 and 604 µs). At 10 bits the ratio to FFmpeg is about what it is at 8: 2.8 against 3.1 times on the B
-frame pair, 1.85 against 1.9 times on the motion pair; the 10-bit streams cost us 2% more time than their 8-bit
-counterparts, FFmpeg 5 to 12% more.
+The short MJPEG and AAC runs are dominated by .NET's startup and JIT and move the most from run to run
+(testsrc-420.avi took between 263 and 604 µs in the previous snapshot, 274 to 319 in this one). At 10 bits the ratio
+to FFmpeg is close to the 8-bit one: 3.1 against 2.8 times on the B frame pair, 1.9 against 1.85 times on the
+motion pair; the 10-bit streams took us 7 to 18% more time than their 8-bit counterparts, FFmpeg 3 to 6% more. The
+10-bit rows read 6 to 14% slower than in the previous snapshot while callgrind counts 1.5% fewer instructions for
+`h264-10bit-b.mp4` since then: the VM's day, not the decoder.
 
 A 1280x720 libx264 default stream (High, CABAC, B frames; `testsrc2` with noise, 2 s) took 3.3 times FFmpeg's time
-on the same VM (10958 against 3338 µs). On 2026-10-21's VM it took 3.0 times (9674 against 3178 µs), down from 4.3
+in the previous snapshot (10958 against 3338 µs). One with heavier noise (`testsrc2=size=1280x720:rate=25,noise=alls=10:allf=t`,
+2 s, libx264's defaults), whose residual decoding weighs more, took 2.5 times in this one (33624 against 13680 µs). On 2026-10-21's VM the first took 3.0 times (9674 against 3178 µs), down from 4.3
 times before the direct prediction and motion compensation changes of that day, and `h264-bench-720p.mp4` took 8554
 against 2448 µs (7066 against 2352 the day before): a VM's speed moves from day to day, which is why only
 same-machine comparisons count.
@@ -234,8 +238,9 @@ what the two commands above include and are not comparable with FFmpeg's `bench:
    offset other than Cb's (second_chroma_qp_index_offset), and of scaling matrices: lists in the
    SPS, fall-back rule B, useDefaultScalingMatrixFlag and a Cr list of its own (unit tests decode
    samples with rewritten parameter sets). Still open: separate colour planes, bit depths other than 8 and 10,
-   error concealment, more speed (about 3.2 to 3.3x FFmpeg's time at 720p, with
-   libx264's default High output too, and about the same ratio at 10 bits as at 8; 2x on high-bitrate intra content). A profile of a
+   error concealment, more speed (about 3.2x FFmpeg's time on `h264-bench-720p.mp4`, 2.5 to 3.3x on libx264's
+   default High output at 720p, less the noisier the source, and about the same ratio at 10 bits as at 8; 2x on
+   high-bitrate intra content). A profile of a
    720p libx264 default stream (2026-10-22) is flat: CABAC residual decoding takes 14%, deblocking 21%
    in pieces of at most 2.5% (bS, transposes, the filter), nothing else over 5%. Output planes are allocated
    without zeroing (callgrind: 0.4% fewer instructions on `h264-high-b.mp4`, 2.6% on `testsrc-420.avi`). Looked
@@ -243,7 +248,12 @@ what the two commands above include and are not comparable with FFmpeg's `bench:
    zeros in `_absMvd` and the motion arrays, so each path would clear its own macroblock instead, about as many
    bytes), one transpose for all four vertical luma edges (`FilterEdge` already skips the transposes of edges whose
    bS are all 0, which a whole-macroblock transpose would not), and deblocking a macroblock row behind decoding
-   (for cache locality, which matters little with a large L2)
+   (for cache locality, which matters little with a large L2). Output frames given back with `Dispose` are pooled
+   (gen2 collections over 5 loops of `h264-bench-720p.mp4`: 33 down to 3). Vector 4x4 and 8x8 inverse transforms
+   (#42) were reverted: callgrind counted 1.4% more instructions per loop of `h264-bench-720p.mp4` with them and 0.9%
+   more on `h264-high-b.mp4`, and 24 interleaved runs of the builds before and after showed no difference; the 9 and
+   10% first reported were the VM's noise, more than the two functions' 2% (CAVLC) and 7% (CABAC) of the profile
+   could have given
 5. ~~AAC-LC decoder~~ done: channel configurations 1 to 7 and program config elements (1 to 8
    channels), all window sequences and shapes, M/S, intensity, PNS, TNS. Both decoders are floating
    point, so the tests compare values: they require 2^-17 (about 7.6e-6) and measure at most 3e-7.

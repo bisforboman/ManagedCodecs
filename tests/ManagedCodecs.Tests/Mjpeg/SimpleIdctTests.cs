@@ -33,6 +33,25 @@ public class SimpleIdctTests
         }
     }
 
+    /// <summary>
+    /// The <see cref="System.Runtime.Intrinsics.Vector128"/> path (ARM64's, and x64's without AVX2)
+    /// is called directly, so it runs here too whatever the machine prefers.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(Distributions))]
+    public void Vector128_MatchesScalar(string distribution)
+    {
+        var random = new Random(5678);
+        var block = new short[64];
+        for (int i = 0; i < 20_000; i++)
+        {
+            Fill(block, distribution, random);
+            var expected = Run(SimpleIdct.PutScalar, block);
+            var actual = Run(SimpleIdct.PutVector128, block);
+            Assert.True(expected.AsSpan().SequenceEqual(actual), $"Block {i} ({distribution}) differs: [{string.Join(", ", block)}]");
+        }
+    }
+
     [Fact]
     public void DcOnly_MatchesScalarForEveryDcValue()
     {

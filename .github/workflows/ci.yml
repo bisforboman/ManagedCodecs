@@ -17,12 +17,14 @@ permissions:
 
 jobs:
   # Builds, generates the FFmpeg samples and references (tools/make-samples.sh), and runs every test: once as is and
-  # once with hardware intrinsics off, so the scalar fallbacks of the SIMD paths are checked against FFmpeg too.
+  # once with hardware intrinsics off, so the scalar fallbacks of the SIMD paths are checked against FFmpeg too, and
+  # MJPEG once more without AVX2, for the Vector128 IDCT that ARM64 runs.
   # Ubuntu 24.04's FFmpeg is 6.1, the version the samples, the AAC tolerance and the tool checks were set up with.
   build:
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    # The steps take about 5 minutes; the rest is room for a slow Ubuntu mirror (apt once took 27 minutes).
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
@@ -54,6 +56,11 @@ jobs:
         run: dotnet test ManagedCodecs.slnx -c Release --no-build
         env:
           DOTNET_EnableHWIntrinsic: 0
+
+      - name: Test MJPEG without AVX2 (the Vector128 IDCT, which ARM64 runs)
+        run: dotnet test ManagedCodecs.slnx -c Release --no-build --filter FullyQualifiedName~Mjpeg
+        env:
+          DOTNET_EnableAVX2: 0
 
       - name: mcdec decodes a file with video and audio
         run: dotnet tools/ManagedCodecs.Cli/bin/Release/net10.0/mcdec.dll samples/h264-with-audio.mp4

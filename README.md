@@ -144,8 +144,12 @@ what the two commands above include and are not comparable with FFmpeg's `bench:
    order FFmpeg takes for AVI, which does not tell it (`FirstFieldOnTop` gives the other; the AVI1 segment's field
    byte is ignored, as by FFmpeg). Still open: real camera files, and packets of one field (FFmpeg decodes none)
 2. SIMD: `Span`, `Vector128`/`Vector256` IDCT and colour paths; measure the ratio to FFmpeg.
-   Done so far: AVX2 IDCT, DC-only blocks, single-lookup coefficient decoding, buffer reuse.
-   Still open: an ARM64 (AdvSimd) IDCT, decoding straight into the output frame
+   Done so far: AVX2 IDCT, DC-only blocks, single-lookup coefficient decoding, buffer reuse, and for machines
+   without AVX2 (ARM64 among them) an IDCT in cross-platform `Vector128` operations, so the code ARM64 runs is
+   tested on x64 too (against the scalar IDCT on random blocks, and against FFmpeg with `DOTNET_EnableAVX2=0`, a CI
+   step): with AVX2 off, 43 and 47% fewer instructions than the scalar IDCT on `testsrc-420.avi` and `noise-q1.avi`
+   (callgrind), 16 and 18% less time. It has not run on ARM64 itself, which neither this VM nor CI has.
+   Still open: decoding straight into the output frame
 3. ~~MP4 demuxer (ISO BMFF: `moov`, `trak`, `stbl` sample tables)~~ done: packets, timestamps and
    codec private data match FFmpeg, for video and audio tracks, fragmented files (moof) included. Audio is trimmed by the edit list as FFmpeg trims it: priming
    skipped sample by sample, packets after the edit's end left out. Still open: multi-edit edit lists, trimming

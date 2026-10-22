@@ -21,10 +21,10 @@ public class TransformTests
             var expected = (byte[])prediction.Clone();
             var block = new int[16];
             block[0] = dc;
-            Transform.InverseTransformAdd(block, expected, Stride);
+            Transform.InverseTransformAdd(block, expected.AsSpan(), Stride, bitDepth: 8);
 
             var actual = (byte[])prediction.Clone();
-            Transform.AddDc(dc, actual, Stride);
+            Transform.AddDc(dc, actual.AsSpan(), Stride, bitDepth: 8);
 
             Assert.True(expected.AsSpan().SequenceEqual(actual), $"DC {dc} differs.");
         }

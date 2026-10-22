@@ -55,8 +55,8 @@ public class DeblockingTests
 
             var expected = (byte[])plane.Clone();
             var actual = (byte[])plane.Clone();
-            PictureDecoder.FilterEdge(expected, q0, acrossStep, alongStep, length, strengths, qpP, qpQ, alphaOffset, betaOffset, chroma, vectorized: false, segmentShift);
-            PictureDecoder.FilterEdge(actual, q0, acrossStep, alongStep, length, strengths, qpP, qpQ, alphaOffset, betaOffset, chroma, vectorized: true, segmentShift);
+            PictureDecoder<byte>.FilterEdge(expected, q0, acrossStep, alongStep, length, strengths, qpP, qpQ, alphaOffset, betaOffset, chroma, vectorized: false, segmentShift);
+            PictureDecoder<byte>.FilterEdge(actual, q0, acrossStep, alongStep, length, strengths, qpP, qpQ, alphaOffset, betaOffset, chroma, vectorized: true, segmentShift);
 
             if (!expected.AsSpan().SequenceEqual(plane))
             {
@@ -103,11 +103,11 @@ public class DeblockingTests
 
             var expectedCb = (byte[])cb.Clone();
             var expectedCr = (byte[])cr.Clone();
-            PictureDecoder.FilterEdge(expectedCb, q0, acrossStep, alongStep, 8, strengths, qpPCb, qpQCb, alphaOffset, betaOffset, chroma: true, vectorized: false);
-            PictureDecoder.FilterEdge(expectedCr, q0, acrossStep, alongStep, 8, strengths, qpPCr, qpQCr, alphaOffset, betaOffset, chroma: true, vectorized: false);
+            PictureDecoder<byte>.FilterEdge(expectedCb, q0, acrossStep, alongStep, 8, strengths, qpPCb, qpQCb, alphaOffset, betaOffset, chroma: true, vectorized: false);
+            PictureDecoder<byte>.FilterEdge(expectedCr, q0, acrossStep, alongStep, 8, strengths, qpPCr, qpQCr, alphaOffset, betaOffset, chroma: true, vectorized: false);
             var actualCb = (byte[])cb.Clone();
             var actualCr = (byte[])cr.Clone();
-            PictureDecoder.FilterChromaEdge(actualCb, actualCr, q0, acrossStep, alongStep, strengths, qpPCb, qpQCb, qpPCr, qpQCr, alphaOffset, betaOffset);
+            PictureDecoder<byte>.FilterChromaEdge(actualCb, actualCr, q0, acrossStep, alongStep, strengths, qpPCb, qpQCb, qpPCr, qpQCr, alphaOffset, betaOffset);
 
             if (!expectedCb.AsSpan().SequenceEqual(cb) || !expectedCr.AsSpan().SequenceEqual(cr))
             {

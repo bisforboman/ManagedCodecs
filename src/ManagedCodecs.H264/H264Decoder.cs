@@ -23,7 +23,7 @@ public sealed class H264Decoder : IVideoDecoder
     // borrows them (output is a copy, see Crop, unless BorrowFrames), and so is the per-macroblock
     // state, as long as the picture size stays the same.
     private readonly List<Picture> _pictures = [];
-    private PictureDecoder? _decoder;
+    private IPictureDecoder? _decoder;
     private long _pictureCount;
 
     // frame_num of the last reference picture (PrevRefFrameNum, 7.4.3); -1 before the first.
@@ -256,9 +256,12 @@ public sealed class H264Decoder : IVideoDecoder
             InferGapFrames(header, sps);
         }
 
-        if (_decoder is null || _decoder.Sps.WidthInMbs != sps.WidthInMbs || _decoder.Sps.HeightInMbs != sps.HeightInMbs || _decoder.Sps.MbHeightC != sps.MbHeightC)
+        if (_decoder is null || _decoder.Sps.WidthInMbs != sps.WidthInMbs || _decoder.Sps.HeightInMbs != sps.HeightInMbs
+            || _decoder.Sps.MbHeightC != sps.MbHeightC || _decoder.Sps.BitDepthLuma != sps.BitDepthLuma)
         {
-            _decoder = new PictureDecoder(sps) { Statistics = MbaffStatistics, FieldStatistics = FieldStatistics };
+            _decoder = sps.BitDepthLuma > 8
+                ? new PictureDecoder<ushort>(sps) { Statistics = MbaffStatistics, FieldStatistics = FieldStatistics }
+                : new PictureDecoder<byte>(sps) { Statistics = MbaffStatistics, FieldStatistics = FieldStatistics };
         }
 
         int poc = _order.Next(header, sps);
@@ -326,12 +329,12 @@ public sealed class H264Decoder : IVideoDecoder
     {
         // A picture whose frame was returned by the previous call may be reused: borrowed frames
         // are valid until the next call. One waiting in the output queue may not.
-        bool Fits(Picture p) => p.WidthInMbs == sps.WidthInMbs && p.HeightInMbs == sps.HeightInMbs && p.MbHeightC == sps.MbHeightC;
+        bool Fits(Picture p) => p.WidthInMbs == sps.WidthInMbs && p.HeightInMbs == sps.HeightInMbs && p.MbHeightC == sps.MbHeightC && p.BitDepth == sps.BitDepthLuma;
         _pictures.RemoveAll(p => !Fits(p) && !_references.Contains(p) && !_output.Holds(p));
         var picture = _pictures.Find(p => Fits(p) && !_references.Contains(p) && !_output.Holds(p));
         if (picture is null)
         {
-            picture = new Picture(sps.WidthInMbs, sps.HeightInMbs, sps.MbHeightC);
+            picture = new Picture(sps.WidthInMbs, sps.HeightInMbs, sps.MbHeightC, sps.BitDepthLuma);
             _pictures.Add(picture);
         }
 
@@ -415,7 +418,7 @@ public sealed class H264Decoder : IVideoDecoder
     private static PixelFormat FormatOf(Picture picture) => picture.MbHeightC == 16 ? PixelFormat.Yuv422P : PixelFormat.Yuv420P;
 
     /// <summary>The picture being decoded: its first slice header, its SPS, its decoder and its order count.</summary>
-    private sealed record PictureState(SliceHeader Header, SequenceParameterSet Sps, PictureDecoder Decoder, int Poc, bool SecondField = false);
+    private sealed record PictureState(SliceHeader Header, SequenceParameterSet Sps, IPictureDecoder Decoder, int Poc, bool SecondField = false);
 
     private static void CheckSupported(SequenceParameterSet sps)
     {

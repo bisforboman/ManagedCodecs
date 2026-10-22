@@ -92,10 +92,10 @@ public class MbaffNeighborTests
     {
         var field = new bool[8];
         int[] slices = [0, 0, 0, 0, 1, 1, 1, 1];
-        Assert.Equal(-1, PictureDecoder.AffNeighbor(field, slices, Width, 6, 0, -1, 16, 16).Mb);
-        Assert.Equal(3, PictureDecoder.AffNeighbor(field, slices, Width, 6, 0, -1, 16, 16, anySlice: true).Mb);
-        Assert.Equal(-1, PictureDecoder.AffNeighbor(field, slices, Width, 4, -1, 0, 16, 16, anySlice: true).Mb);
-        Assert.Equal(-1, PictureDecoder.AffNeighbor(field, slices, Width, 6, 16, -1, 16, 16, anySlice: true).Mb);
+        Assert.Equal(-1, PictureDecoder<byte>.AffNeighbor(field, slices, Width, 6, 0, -1, 16, 16).Mb);
+        Assert.Equal(3, PictureDecoder<byte>.AffNeighbor(field, slices, Width, 6, 0, -1, 16, 16, anySlice: true).Mb);
+        Assert.Equal(-1, PictureDecoder<byte>.AffNeighbor(field, slices, Width, 4, -1, 0, 16, 16, anySlice: true).Mb);
+        Assert.Equal(-1, PictureDecoder<byte>.AffNeighbor(field, slices, Width, 6, 16, -1, 16, 16, anySlice: true).Mb);
     }
 
     private static bool[] Layout(int current, bool currentField, int[] neighbors, bool neighborField)
@@ -111,5 +111,5 @@ public class MbaffNeighborTests
     }
 
     private static (int Mb, int X, int Y) Neighbor(bool[] field, int mb, int x, int y, int size = 16) =>
-        PictureDecoder.AffNeighbor(field, new int[8], Width, mb, x, y, size, size);
+        PictureDecoder<byte>.AffNeighbor(field, new int[8], Width, mb, x, y, size, size);
 }

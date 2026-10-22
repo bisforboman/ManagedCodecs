@@ -1,3 +1,6 @@
+using System.Numerics;
+using System.Runtime.InteropServices;
+
 namespace ManagedCodecs.H264;
 
 /// <summary>
@@ -16,29 +19,33 @@ internal static partial class InterPrediction
     /// is at (<paramref name="x"/>, <paramref name="y"/>) in the picture, with a motion vector in
     /// quarter samples, into <paramref name="dest"/> at the same position.
     /// </summary>
-    public static void PredictLumaReference(Picture reference, byte[] dest, int stride, int x, int y, int width, int height, int mvX, int mvY) =>
+    public static void PredictLumaReference<TPixel>(Picture reference, TPixel[] dest, int stride, int x, int y, int width, int height, int mvX, int mvY)
+        where TPixel : unmanaged, IBinaryInteger<TPixel> =>
         PredictLumaReference(reference, x, y, width, height, mvX, mvY, dest.AsSpan((y * stride) + x), stride);
 
     /// <summary>
     /// The same, written to <paramref name="output"/> (the block's top-left). A field view
     /// (<see cref="Picture.Field"/>) is a picture of its own: every other row, half the height.
     /// </summary>
-    public static void PredictLumaReference(Picture reference, int x, int y, int width, int height, int mvX, int mvY, Span<byte> output, int outputStride)
+    public static void PredictLumaReference<TPixel>(Picture reference, int x, int y, int width, int height, int mvX, int mvY, Span<TPixel> output, int outputStride)
+        where TPixel : unmanaged, IBinaryInteger<TPixel>
     {
         var (origin, stride, maxY) = Plane(reference, reference.LumaStride, reference.HeightInMbs * 16);
         int maxX = (reference.WidthInMbs * 16) - 1;
-        byte[] src = reference.Y;
+        TPixel[] src = reference.Plane<TPixel>(0);
+        int max = Samples.Max<TPixel>(reference.BitDepth);
         int xFrac = mvX & 3;
         int yFrac = mvY & 3;
 
-        int S(int sx, int sy) => src[origin + (Math.Clamp(sy, 0, maxY) * stride) + Math.Clamp(sx, 0, maxX)];
+        int S(int sx, int sy) => int.CreateTruncating(src[origin + (Math.Clamp(sy, 0, maxY) * stride) + Math.Clamp(sx, 0, maxX)]);
 
         // Half-sample values before rounding (b1, h1 and j1 of 8.4.2.2.1).
         int B1(int sx, int sy) => Tap(S(sx - 2, sy), S(sx - 1, sy), S(sx, sy), S(sx + 1, sy), S(sx + 2, sy), S(sx + 3, sy));
         int H1(int sx, int sy) => Tap(S(sx, sy - 2), S(sx, sy - 1), S(sx, sy), S(sx, sy + 1), S(sx, sy + 2), S(sx, sy + 3));
         int J1(int sx, int sy) => Tap(B1(sx, sy - 2), B1(sx, sy - 1), B1(sx, sy), B1(sx, sy + 1), B1(sx, sy + 2), B1(sx, sy + 3));
 
-        int Half(int value) => Clip((value + 16) >> 5);
+        int Half(int value) => Math.Clamp((value + 16) >> 5, 0, max);
+        int Center(int j1) => Math.Clamp((j1 + 512) >> 10, 0, max);
 
         for (int j = 0; j < height; j++)
         {
@@ -68,7 +75,7 @@ internal static partial class InterPrediction
                     _ => Avg(Center(J1(gx, gy)), Half(H1(gx + 1, gy))),         // k (3, 2)
                 };
 
-                output[(j * outputStride) + i] = (byte)value;
+                output[(j * outputStride) + i] = TPixel.CreateTruncating(value);
             }
         }
     }
@@ -78,19 +85,21 @@ internal static partial class InterPrediction
     /// a motion vector in eighth chroma samples (8.4.2.2.2): the luma vector in 4:2:0; in 4:2:2,
     /// whose chroma has the luma's rows, its vertical component doubled.
     /// </summary>
-    public static void PredictChromaReference(Picture reference, int component, byte[] dest, int stride, int x, int y, int width, int height, int mvX, int mvY) =>
+    public static void PredictChromaReference<TPixel>(Picture reference, int component, TPixel[] dest, int stride, int x, int y, int width, int height, int mvX, int mvY)
+        where TPixel : unmanaged, IBinaryInteger<TPixel> =>
         PredictChromaReference(reference, component, x, y, width, height, mvX, mvY, dest.AsSpan((y * stride) + x), stride);
 
     /// <summary>The same, written to <paramref name="output"/> (the block's top-left); field views as for luma.</summary>
-    public static void PredictChromaReference(Picture reference, int component, int x, int y, int width, int height, int mvX, int mvY, Span<byte> output, int outputStride)
+    public static void PredictChromaReference<TPixel>(Picture reference, int component, int x, int y, int width, int height, int mvX, int mvY, Span<TPixel> output, int outputStride)
+        where TPixel : unmanaged, IBinaryInteger<TPixel>
     {
         var (origin, stride, maxY) = Plane(reference, reference.ChromaStride, reference.HeightInMbs * reference.MbHeightC);
         int maxX = (reference.WidthInMbs * 8) - 1;
-        byte[] src = reference.Plane(component);
+        TPixel[] src = reference.Plane<TPixel>(component);
         int xFrac = mvX & 7;
         int yFrac = mvY & 7;
 
-        int S(int sx, int sy) => src[origin + (Math.Clamp(sy, 0, maxY) * stride) + Math.Clamp(sx, 0, maxX)];
+        int S(int sx, int sy) => int.CreateTruncating(src[origin + (Math.Clamp(sy, 0, maxY) * stride) + Math.Clamp(sx, 0, maxX)]);
 
         for (int j = 0; j < height; j++)
         {
@@ -102,7 +111,55 @@ internal static partial class InterPrediction
                     + (xFrac * (8 - yFrac) * S(ax + 1, ay))
                     + ((8 - xFrac) * yFrac * S(ax, ay + 1))
                     + (xFrac * yFrac * S(ax + 1, ay + 1));
-                output[(j * outputStride) + i] = (byte)((value + 32) >> 6);
+                output[(j * outputStride) + i] = TPixel.CreateTruncating((value + 32) >> 6);
+            }
+        }
+    }
+
+    /// <summary>
+    /// A luma block of any sample type: 8-bit samples through the row-based <see cref="PredictLuma(Picture, int, int, int, int, int, int, Span{byte}, int)"/>,
+    /// deeper ones through the reference.
+    /// </summary>
+    public static void PredictLumaBlock<TPixel>(Picture reference, int x, int y, int width, int height, int mvX, int mvY, Span<TPixel> output, int outputStride)
+        where TPixel : unmanaged, IBinaryInteger<TPixel>
+    {
+        if (typeof(TPixel) == typeof(byte))
+        {
+            PredictLuma(reference, x, y, width, height, mvX, mvY, MemoryMarshal.Cast<TPixel, byte>(output), outputStride);
+            return;
+        }
+
+        PredictLumaReference(reference, x, y, width, height, mvX, mvY, output, outputStride);
+    }
+
+    /// <summary>A chroma block of any sample type, as <see cref="PredictLumaBlock"/>.</summary>
+    public static void PredictChromaBlock<TPixel>(Picture reference, int component, int x, int y, int width, int height, int mvX, int mvY, Span<TPixel> output, int outputStride)
+        where TPixel : unmanaged, IBinaryInteger<TPixel>
+    {
+        if (typeof(TPixel) == typeof(byte))
+        {
+            PredictChroma(reference, component, x, y, width, height, mvX, mvY, MemoryMarshal.Cast<TPixel, byte>(output), outputStride);
+            return;
+        }
+
+        PredictChromaReference(reference, component, x, y, width, height, mvX, mvY, output, outputStride);
+    }
+
+    /// <summary>The rounded average of two predictions (8.4.2.3.1), of any sample type, as <see cref="Average(ReadOnlySpan{byte}, ReadOnlySpan{byte}, int, int, int, Span{byte}, int)"/>.</summary>
+    public static void AverageBlock<TPixel>(ReadOnlySpan<TPixel> a, ReadOnlySpan<TPixel> b, int stride, int width, int height, Span<TPixel> output, int outputStride)
+        where TPixel : unmanaged, IBinaryInteger<TPixel>
+    {
+        if (typeof(TPixel) == typeof(byte))
+        {
+            Average(MemoryMarshal.Cast<TPixel, byte>(a), MemoryMarshal.Cast<TPixel, byte>(b), stride, width, height, MemoryMarshal.Cast<TPixel, byte>(output), outputStride);
+            return;
+        }
+
+        for (int j = 0; j < height; j++)
+        {
+            for (int i = 0; i < width; i++)
+            {
+                output[(j * outputStride) + i] = TPixel.CreateTruncating((int.CreateTruncating(a[(j * stride) + i]) + int.CreateTruncating(b[(j * stride) + i]) + 1) >> 1);
             }
         }
     }
@@ -113,9 +170,5 @@ internal static partial class InterPrediction
 
     private static int Tap(int e, int f, int g, int h, int i, int j) => e - (5 * f) + (20 * g) + (20 * h) - (5 * i) + j;
 
-    private static int Center(int j1) => Clip((j1 + 512) >> 10);
-
     private static int Avg(int a, int b) => (a + b + 1) >> 1;
-
-    private static int Clip(int value) => Math.Clamp(value, 0, 255);
 }

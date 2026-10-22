@@ -15,7 +15,18 @@ public class H264ConformanceTests
 
     [Theory]
     [MemberData(nameof(Samples))]
-    public void MatchesFfmpegFrameByFrame(string sampleName)
+    public void MatchesFfmpegFrameByFrame(string sampleName) => CompareWithFfmpeg(sampleName, borrowFrames: false);
+
+    /// <summary>
+    /// The same with <see cref="H264Decoder.BorrowFrames"/>: each frame is hashed as it comes
+    /// back, before the next call, which is as long as a borrowed frame is valid. A picture reused
+    /// while its frame still waited for reordering would show as a wrong frame.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(Samples))]
+    public void MatchesFfmpegWithBorrowedFrames(string sampleName) => CompareWithFfmpeg(sampleName, borrowFrames: true);
+
+    private static void CompareWithFfmpeg(string sampleName, bool borrowFrames)
     {
         var lines = File.ReadAllLines(TestSamples.ReferenceOf(sampleName, ".framemd5"));
         var expected = FrameMd5.Parse(lines).Where(e => e.StreamIndex == 0).ToList(); // FFmpeg lists video first
@@ -23,7 +34,7 @@ public class H264ConformanceTests
 
         using var demuxer = Mp4Demuxer.Open(TestSamples.PathOf(sampleName));
         var video = demuxer.Video!;
-        var decoder = new H264Decoder(video);
+        var decoder = new H264Decoder(video) { BorrowFrames = borrowFrames };
 
         int index = 0;
         long firstPts = 0;

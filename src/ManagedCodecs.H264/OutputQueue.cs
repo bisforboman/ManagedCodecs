@@ -6,14 +6,15 @@ namespace ManagedCodecs.H264;
 /// </summary>
 internal sealed class OutputQueue
 {
-    private readonly List<(VideoFrame Frame, int Poc)> _held = [];
+    private readonly List<(VideoFrame Frame, int Poc, Picture? Source)> _held = [];
 
     /// <summary>
     /// Adds a decoded frame and returns those now ready. <paramref name="restart"/> marks a frame
     /// whose order counts start over (IDR, memory_management_control_operation 5): every held frame
     /// goes first. <paramref name="depth"/> is how many frames may wait for reordering.
     /// </summary>
-    public List<VideoFrame> Add(VideoFrame frame, int poc, bool restart, int depth)
+    /// <param name="source">The picture a borrowed frame's samples are in, which must not be reused while the frame waits here.</param>
+    public List<VideoFrame> Add(VideoFrame frame, int poc, bool restart, int depth, Picture? source = null)
     {
         var ready = new List<VideoFrame>();
         if (restart)
@@ -21,9 +22,23 @@ internal sealed class OutputQueue
             Release(ready, _held.Count);
         }
 
-        _held.Add((frame, poc));
+        _held.Add((frame, poc, source));
         Release(ready, _held.Count - depth);
         return ready;
+    }
+
+    /// <summary>Whether a frame waiting here borrows the samples of <paramref name="picture"/>.</summary>
+    public bool Holds(Picture picture)
+    {
+        foreach (var held in _held)
+        {
+            if (held.Source == picture)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>Returns every held frame, in order.</summary>

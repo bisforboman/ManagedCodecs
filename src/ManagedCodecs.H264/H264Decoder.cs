@@ -20,8 +20,9 @@ public sealed class H264Decoder : IVideoDecoder
     private readonly ReferenceList _references = new();
     private readonly int _lengthSize;
 
-    // Pictures are reused once they are no longer references (output is a copy, see Crop), and so
-    // is the per-macroblock state, as long as the picture size stays the same.
+    // Pictures are reused once they are no longer references and no frame waiting for output
+    // borrows them (output is a copy, see Crop, unless BorrowFrames), and so is the per-macroblock
+    // state, as long as the picture size stays the same.
     private readonly List<Picture> _pictures = [];
     private PictureDecoder? _decoder;
     private long _pictureCount;
@@ -54,6 +55,16 @@ public sealed class H264Decoder : IVideoDecoder
     }
 
     /// <summary>
+    /// Return frames that point into the decoder's own pictures instead of copies, which saves a
+    /// copy of every frame (about 5% of the decoding time at 720p). A borrowed frame is valid only
+    /// until the next call to <see cref="Decode"/> or <see cref="Flush"/>, which may decode a new
+    /// picture into the same memory; copy what has to be kept longer. Its planes are the
+    /// decoder's macroblock-aligned buffers (read rows through <see cref="VideoFrame.GetRow"/>, or
+    /// with its offsets and strides), and they must not be written: later pictures predict from them.
+    /// </summary>
+    public bool BorrowFrames { get; init; }
+
+    /// <summary>
     /// Decodes one packet, which holds one picture (MP4 sample), and returns the frames ready for
     /// display. A field picture is half a frame: the first of a pair gives no frame, the second
     /// the whole frame, with the first one's timestamp.
@@ -75,11 +86,11 @@ public sealed class H264Decoder : IVideoDecoder
             picture.Poc = Math.Min(picture.TopPoc, picture.BottomPoc);
         }
 
-        var frame = Crop(picture, state.Sps);
+        var frame = BorrowFrames ? Borrow(picture, state.Sps) : Crop(picture, state.Sps);
         frame.Pts = first.Pts;
 
         bool restart = first.State.Header.IsIdr || first.State.Header.MemoryManagement.Any(op => op.Op == 5);
-        return _output.Add(frame, picture.Poc, restart, ReorderDepth(state.Sps));
+        return _output.Add(frame, picture.Poc, restart, ReorderDepth(state.Sps), BorrowFrames ? picture : null);
     }
 
     public IReadOnlyList<VideoFrame> Flush()
@@ -314,8 +325,10 @@ public sealed class H264Decoder : IVideoDecoder
     /// <summary>A picture of the stream's size that is not a reference, reused when one is free.</summary>
     private Picture TakePicture(SequenceParameterSet sps, int frameNum, int poc)
     {
-        _pictures.RemoveAll(p => (p.WidthInMbs != sps.WidthInMbs || p.HeightInMbs != sps.HeightInMbs) && !_references.Contains(p));
-        var picture = _pictures.Find(p => p.WidthInMbs == sps.WidthInMbs && p.HeightInMbs == sps.HeightInMbs && !_references.Contains(p));
+        // A picture whose frame was returned by the previous call may be reused: borrowed frames
+        // are valid until the next call. One waiting in the output queue may not.
+        _pictures.RemoveAll(p => (p.WidthInMbs != sps.WidthInMbs || p.HeightInMbs != sps.HeightInMbs) && !_references.Contains(p) && !_output.Holds(p));
+        var picture = _pictures.Find(p => p.WidthInMbs == sps.WidthInMbs && p.HeightInMbs == sps.HeightInMbs && !_references.Contains(p) && !_output.Holds(p));
         if (picture is null)
         {
             picture = new Picture(sps.WidthInMbs, sps.HeightInMbs);
@@ -381,6 +394,20 @@ public sealed class H264Decoder : IVideoDecoder
         }
 
         return frame;
+    }
+
+    /// <summary>A frame of the cropped area of <paramref name="picture"/>, in its planes: no copy (<see cref="BorrowFrames"/>).</summary>
+    private static VideoFrame Borrow(Picture picture, SequenceParameterSet sps)
+    {
+        var (left, _, top, _) = sps.Crop;
+        int chromaOffset = ((top >> 1) * picture.ChromaStride) + (left >> 1);
+        return new VideoFrame(
+            sps.Width,
+            sps.Height,
+            PixelFormat.Yuv420P,
+            [picture.Y, picture.Cb, picture.Cr],
+            [picture.LumaStride, picture.ChromaStride, picture.ChromaStride],
+            [(top * picture.LumaStride) + left, chromaOffset, chromaOffset]);
     }
 
     /// <summary>The picture being decoded: its first slice header, its SPS, its decoder and its order count.</summary>

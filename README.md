@@ -60,6 +60,11 @@ foreach (var frame in decoder.Flush())
 }
 ```
 
+Each frame owns its samples. `new H264Decoder(video) { BorrowFrames = true }` saves the copy that takes (3 to 11% of
+the decoding time at 720p, the most with B frames): its frames point into the decoder's own pictures, valid until the
+next `Decode` or `Flush` call and not to be written. Their planes are the decoder's macroblock-aligned buffers, so
+read them through `GetRow`, or with the frame's `Offsets` and `Strides`. `mcdec --borrow-frames` times it.
+
 `AacDecoder.Decode(packet)` returns one `AudioFrame`: the packet's 1024 samples per channel, less the
 `packet.SkipSamples` at its start. The MP4 demuxer sets those from the edit list, so encoder priming is dropped and the
 output matches FFmpeg's default (`Decode(packet.Data.Span)` gives all 1024).

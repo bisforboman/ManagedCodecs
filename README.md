@@ -11,7 +11,7 @@ then the same approach for H.264 + AAC in MP4.
 | `src/ManagedCodecs.Core` | `VideoFrame`, `PixelFormat`, `Packet`, `Rational`, `IDemuxer`, `IVideoDecoder` |
 | `src/ManagedCodecs.Containers` | `AviDemuxer`, `Mp4Demuxer`, and `Demuxer.Open` to pick one by content |
 | `src/ManagedCodecs.Mjpeg` | `MjpegDecoder`: baseline/extended Huffman JPEG, interlaced AVI1, bit-exact with FFmpeg |
-| `src/ManagedCodecs.H264` | `H264Decoder`: Constrained Baseline, Main, High and High 4:2:2 profile H.264 (CAVLC, CABAC, I/P/B, weighted prediction, 8x8 transform, scaling matrices, deblocking, 4:2:0 and 4:2:2, progressive and interlaced), bit-exact |
+| `src/ManagedCodecs.H264` | `H264Decoder`: Constrained Baseline, Main, High, High 10 and High 4:2:2 profile H.264 (CAVLC, CABAC, I/P/B, weighted prediction, 8x8 transform, scaling matrices, deblocking, 4:2:0 and 4:2:2, 8 and 10 bits, progressive and interlaced), bit-exact |
 | `src/ManagedCodecs.Aac` | `AacDecoder`: AAC LC (mono to 7.1, M/S, intensity, PNS, TNS), within 3e-7 of FFmpeg's float output |
 | `src/Shared` | Source files linked into several codec projects (the VLC decoder) |
 | `tools/ManagedCodecs.Cli` | `mcdec`: decodes a file and times it, to compare with `ffmpeg -benchmark` |
@@ -63,7 +63,10 @@ foreach (var frame in decoder.Flush())
 Each frame owns its samples. `new H264Decoder(video) { BorrowFrames = true }` saves the copy that takes (3 to 11% of
 the decoding time at 720p, the most with B frames): its frames point into the decoder's own pictures, valid until the
 next `Decode` or `Flush` call and not to be written. Their planes are the decoder's macroblock-aligned buffers, so
-read them through `GetRow`, or with the frame's `Offsets` and `Strides`. `mcdec --borrow-frames` times it.
+read them through `GetRow`, or with the frame's `Offsets` and `Strides`. `mcdec --borrow-frames` times it. 10-bit
+video comes out as `PixelFormat.Yuv420P10` or `Yuv422P10`, a little-endian 16-bit word a sample (strides and offsets
+count bytes), and always as copies: the decoder keeps those samples as `ushort`, which a frame's byte planes cannot
+borrow.
 
 `AacDecoder.Decode(packet)` returns one `AudioFrame`: the packet's 1024 samples per channel, less the
 `packet.SkipSamples` at its start. The MP4 demuxer sets those from the edit list, so encoder priming is dropped and the
@@ -184,13 +187,19 @@ what the two commands above include and are not comparable with FFmpeg's `bench:
    libx264's MBAFF frames (intra prediction from 16 chroma rows of neighbours, and chroma lines
    across mixed pair edges taking their own luma line's bS) and JM's field pairs, also mixed with
    frame pictures and B pictures.
+   10-bit video (High 10 and High 4:2:2 at 10 bits) is checked on libx264's output too: QP_Y from
+   -12 (QpBdOffset) with dequantization at QP'Y and chroma QPs below 0, Clip1 to 1023, deblocking
+   thresholds and weighted-prediction offsets scaled by 4, CAVLC level prefixes of 16 and more,
+   at QP_Y -12 on noise, P and B frames, weights, constrained intra prediction, cropping, 4:2:2
+   and MBAFF; I_PCM at 10 bits from hand-built streams. 10-bit samples take the scalar paths for
+   now (the SIMD ones are 8-bit), so they decode slower than 8-bit ones.
    Produced by neither, so not checked against FFmpeg: I_PCM (decoded from hand-built streams,
    CAVLC and CABAC), memory management operations 2, 3 and 5 (unit tests),
    B sub-macroblock partitions smaller than 8x8, explicit weights for bi-predicted blocks (libx264 weights B frames
    implicitly), cabac_init_idc 1 and 2 (only their tables are checked, against libavc), a Cr QP
    offset other than Cb's (second_chroma_qp_index_offset), and of scaling matrices: lists in the
    SPS, fall-back rule B, useDefaultScalingMatrixFlag and a Cr list of its own (unit tests decode
-   samples with rewritten parameter sets). Still open: 4:4:4, more than 8 bits,
+   samples with rewritten parameter sets). Still open: 4:4:4, bit depths other than 8 and 10, SIMD for 10-bit samples,
    error concealment, more speed (about 3 to 3.5x FFmpeg's time at 720p, with
    libx264's default High output too; 2x on high-bitrate intra content)
 5. ~~AAC-LC decoder~~ done: channel configurations 1 to 7 and program config elements (1 to 8

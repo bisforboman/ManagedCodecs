@@ -486,8 +486,8 @@ internal sealed partial class PictureDecoder<TPixel>
             bool top = withinPair || (pairY > 0 && (!sameSliceOnly || PairIfAvailable(mbAddr, pairX, pairY - 1) >= 0));
 
             int qp = _qp[mbAddr];
-            int qpCb = ChromaQp(qp, slice.CbQpOffset);
-            int qpCr = ChromaQp(qp, slice.CrQpOffset);
+            int qpCb = ChromaQp(qp, slice.CbQpOffset, _qpBdOffset);
+            int qpCr = ChromaQp(qp, slice.CrQpOffset, _qpBdOffset);
             var (luma, lumaStride) = LumaPlace(mbAddr);
             var (chroma, chromaStride) = ChromaPlace(mbAddr);
             bool transform8x8 = _transform8x8[mbAddr];
@@ -615,8 +615,8 @@ internal sealed partial class PictureDecoder<TPixel>
     private void DeblockMbaffChroma422(SliceInfo slice, int mbAddr, bool left, ReadOnlySpan<byte> leftLines, ReadOnlySpan<byte> vertical, ReadOnlySpan<byte> horizontal, (int P, int PRow, int PStep, int QOffset, int QStep)[] topEdges)
     {
         int qp = _qp[mbAddr];
-        int qpCb = ChromaQp(qp, slice.CbQpOffset);
-        int qpCr = ChromaQp(qp, slice.CrQpOffset);
+        int qpCb = ChromaQp(qp, slice.CbQpOffset, _qpBdOffset);
+        int qpCr = ChromaQp(qp, slice.CrQpOffset, _qpBdOffset);
         var (chroma, chromaStride) = ChromaPlace(mbAddr);
         int chromaRow = Picture.ChromaStride;
         if (left)
@@ -714,8 +714,8 @@ internal sealed partial class PictureDecoder<TPixel>
     {
         int qpAv = (qpP + qpQ + 1) >> 1;
         int indexA = Math.Clamp(qpAv + slice.AlphaOffset, 0, 51);
-        int alpha = Alpha[indexA];
-        int beta = Beta[Math.Clamp(qpAv + slice.BetaOffset, 0, 51)];
+        int alpha = Alpha[indexA] << (_bitDepth - 8);
+        int beta = Beta[Math.Clamp(qpAv + slice.BetaOffset, 0, 51)] << (_bitDepth - 8);
         if (alpha != 0 && beta != 0)
         {
             FilterSamples(plane, p0, pStep, q0, qStep, bS, indexA, alpha, beta, chroma, _bitDepth);
@@ -725,8 +725,8 @@ internal sealed partial class PictureDecoder<TPixel>
     /// <summary>One Cb and one Cr line across an MBAFF macroblock edge, each with its own QP_C.</summary>
     private void FilterMbaffChromaLine(int p0, int pStep, int q0, int qStep, int bS, int qpP, int qpQ, SliceInfo slice)
     {
-        FilterMbaffLine(PlaneCb, p0, pStep, q0, qStep, bS, ChromaQp(qpP, slice.CbQpOffset), ChromaQp(qpQ, slice.CbQpOffset), slice, chroma: true);
-        FilterMbaffLine(PlaneCr, p0, pStep, q0, qStep, bS, ChromaQp(qpP, slice.CrQpOffset), ChromaQp(qpQ, slice.CrQpOffset), slice, chroma: true);
+        FilterMbaffLine(PlaneCb, p0, pStep, q0, qStep, bS, ChromaQp(qpP, slice.CbQpOffset, _qpBdOffset), ChromaQp(qpQ, slice.CbQpOffset, _qpBdOffset), slice, chroma: true);
+        FilterMbaffLine(PlaneCr, p0, pStep, q0, qStep, bS, ChromaQp(qpP, slice.CrQpOffset, _qpBdOffset), ChromaQp(qpQ, slice.CrQpOffset, _qpBdOffset), slice, chroma: true);
     }
 }
 

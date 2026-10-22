@@ -306,7 +306,7 @@ internal sealed partial class PictureDecoder<TPixel>
         {
             for (int b8 = 0; b8 < 4; b8++)
             {
-                AddLuma8x8Residual(slice, mbAddr, PictureTarget(mbAddr), residual, cbpLuma, b8, slice.Qp);
+                AddLuma8x8Residual(slice, mbAddr, PictureTarget(mbAddr), residual, cbpLuma, b8, slice.Qp + _qpBdOffset);
             }
 
             ReconstructChroma(slice, mbAddr, PictureTarget(mbAddr), residual, cbpChroma, intraMode: -1, default);
@@ -324,7 +324,7 @@ internal sealed partial class PictureDecoder<TPixel>
             }
 
             var block = residual.Luma[i];
-            Transform.Dequantize(block, slice.Qp, skipDc: false, slice.Scaling.LevelScale4x4(3));
+            Transform.Dequantize(block, slice.Qp + _qpBdOffset, skipDc: false, slice.Scaling.LevelScale4x4(3));
             Transform.InverseTransformAdd(block, PlaneY.AsSpan(origin + (y * 4 * stride) + (x * 4)), stride, _bitDepth);
         }
 
@@ -658,7 +658,7 @@ internal sealed partial class PictureDecoder<TPixel>
         int max = Samples.Max<TPixel>(_bitDepth);
         int logWd = weights.LogWd(component);
         int w = weights.Weight(list, component);
-        int o = weights.Offset(list, component);
+        int o = weights.Offset(list, component) << (_bitDepth - 8); // offsets are in 8-bit units (8-449)
         int round = logWd >= 1 ? 1 << (logWd - 1) : 0;
         for (int j = 0; j < height; j++)
         {
@@ -678,7 +678,7 @@ internal sealed partial class PictureDecoder<TPixel>
         int logWd = weights.LogWd(component);
         int w0 = weights.Weight(0, component);
         int w1 = weights.Weight(1, component);
-        int offset = (weights.Offset(0, component) + weights.Offset(1, component) + 1) >> 1;
+        int offset = ((weights.Offset(0, component) << (_bitDepth - 8)) + (weights.Offset(1, component) << (_bitDepth - 8)) + 1) >> 1;
         for (int j = 0; j < height; j++)
         {
             for (int i = 0; i < width; i++)

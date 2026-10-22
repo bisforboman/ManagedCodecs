@@ -126,20 +126,20 @@ internal sealed partial class PictureDecoder<TPixel>
 
             // Chroma (4:2:0): edges 0 and 4 use the bS of luma edges 0 and 8; QP_C per component.
             // Cb and Cr are filtered together, all vertical edges first.
-            int qpCb = ChromaQp(qp, slice.CbQpOffset);
-            int qpCr = ChromaQp(qp, slice.CrQpOffset);
+            int qpCb = ChromaQp(qp, slice.CbQpOffset, _qpBdOffset);
+            int qpCr = ChromaQp(qp, slice.CrQpOffset, _qpBdOffset);
             int qpLeft = mbX > 0 ? _qp[mbAddr - 1] : qp;
             int qpAbove = mbY > 0 ? _qp[mbAddr - _widthInMbs] : qp;
             for (int edge = 0; edge < 2; edge++)
             {
                 int qpP = edge == 0 ? qpLeft : qp;
-                FilterChromaEdge(PlaneCb, PlaneCr, chromaOrigin + (edge * 4), 1, chromaStride, vertical.Slice(edge * 8, 4), ChromaQp(qpP, slice.CbQpOffset), qpCb, ChromaQp(qpP, slice.CrQpOffset), qpCr, slice.AlphaOffset, slice.BetaOffset, bitDepth: _bitDepth);
+                FilterChromaEdge(PlaneCb, PlaneCr, chromaOrigin + (edge * 4), 1, chromaStride, vertical.Slice(edge * 8, 4), ChromaQp(qpP, slice.CbQpOffset, _qpBdOffset), qpCb, ChromaQp(qpP, slice.CrQpOffset, _qpBdOffset), qpCr, slice.AlphaOffset, slice.BetaOffset, bitDepth: _bitDepth);
             }
 
             for (int edge = 0; edge < 2; edge++)
             {
                 int qpP = edge == 0 ? qpAbove : qp;
-                FilterChromaEdge(PlaneCb, PlaneCr, chromaOrigin + (edge * 4 * chromaStride), chromaStride, 1, horizontal.Slice(edge * 8, 4), ChromaQp(qpP, slice.CbQpOffset), qpCb, ChromaQp(qpP, slice.CrQpOffset), qpCr, slice.AlphaOffset, slice.BetaOffset, bitDepth: _bitDepth);
+                FilterChromaEdge(PlaneCb, PlaneCr, chromaOrigin + (edge * 4 * chromaStride), chromaStride, 1, horizontal.Slice(edge * 8, 4), ChromaQp(qpP, slice.CbQpOffset, _qpBdOffset), qpCb, ChromaQp(qpP, slice.CrQpOffset, _qpBdOffset), qpCr, slice.AlphaOffset, slice.BetaOffset, bitDepth: _bitDepth);
             }
         }
     }
@@ -155,22 +155,22 @@ internal sealed partial class PictureDecoder<TPixel>
     {
         var (origin, stride) = ChromaPlace(mbAddr);
         int qp = _qp[mbAddr];
-        int qpCb = ChromaQp(qp, slice.CbQpOffset);
-        int qpCr = ChromaQp(qp, slice.CrQpOffset);
+        int qpCb = ChromaQp(qp, slice.CbQpOffset, _qpBdOffset);
+        int qpCr = ChromaQp(qp, slice.CrQpOffset, _qpBdOffset);
         int qpLeft = mbAddr % _widthInMbs > 0 ? _qp[mbAddr - 1] : qp;
         int qpAbove = mbAddr >= _widthInMbs ? _qp[mbAddr - _widthInMbs] : qp;
         for (int edge = 0; edge < 2; edge++)
         {
             int qpP = edge == 0 ? qpLeft : qp;
             var strengths = vertical.Slice(edge * 8, 4);
-            FilterEdge(PlaneCb, origin + (edge * 4), 1, stride, 16, strengths, ChromaQp(qpP, slice.CbQpOffset), qpCb, slice.AlphaOffset, slice.BetaOffset, chroma: true, segmentShift: 2, bitDepth: _bitDepth);
-            FilterEdge(PlaneCr, origin + (edge * 4), 1, stride, 16, strengths, ChromaQp(qpP, slice.CrQpOffset), qpCr, slice.AlphaOffset, slice.BetaOffset, chroma: true, segmentShift: 2, bitDepth: _bitDepth);
+            FilterEdge(PlaneCb, origin + (edge * 4), 1, stride, 16, strengths, ChromaQp(qpP, slice.CbQpOffset, _qpBdOffset), qpCb, slice.AlphaOffset, slice.BetaOffset, chroma: true, segmentShift: 2, bitDepth: _bitDepth);
+            FilterEdge(PlaneCr, origin + (edge * 4), 1, stride, 16, strengths, ChromaQp(qpP, slice.CrQpOffset, _qpBdOffset), qpCr, slice.AlphaOffset, slice.BetaOffset, chroma: true, segmentShift: 2, bitDepth: _bitDepth);
         }
 
         for (int edge = 0; edge < 4; edge++)
         {
             int qpP = edge == 0 ? qpAbove : qp;
-            FilterChromaEdge(PlaneCb, PlaneCr, origin + (edge * 4 * stride), stride, 1, horizontal.Slice(edge * 4, 4), ChromaQp(qpP, slice.CbQpOffset), qpCb, ChromaQp(qpP, slice.CrQpOffset), qpCr, slice.AlphaOffset, slice.BetaOffset, bitDepth: _bitDepth);
+            FilterChromaEdge(PlaneCb, PlaneCr, origin + (edge * 4 * stride), stride, 1, horizontal.Slice(edge * 4, 4), ChromaQp(qpP, slice.CbQpOffset, _qpBdOffset), qpCb, ChromaQp(qpP, slice.CrQpOffset, _qpBdOffset), qpCr, slice.AlphaOffset, slice.BetaOffset, bitDepth: _bitDepth);
         }
     }
 
@@ -348,8 +348,10 @@ internal sealed partial class PictureDecoder<TPixel>
         int qpAv = (qpP + qpQ + 1) >> 1;
         int indexA = Math.Clamp(qpAv + alphaOffset, 0, 51);
         int indexB = Math.Clamp(qpAv + betaOffset, 0, 51);
-        int alpha = Alpha[indexA];
-        int beta = Beta[indexB];
+
+        // alpha', beta' and tC0' scale by 2^(BitDepth - 8) (8-460, 8-461, 8-462).
+        int alpha = Alpha[indexA] << (bitDepth - 8);
+        int beta = Beta[indexB] << (bitDepth - 8);
         if (alpha == 0 || beta == 0)
         {
             return; // no sample can pass |p0 - q0| < alpha
@@ -402,7 +404,7 @@ internal sealed partial class PictureDecoder<TPixel>
         {
             if (bS < 4)
             {
-                int tc = Tc0[(indexA * 3) + bS - 1] + 1;
+                int tc = (Tc0[(indexA * 3) + bS - 1] << (bitDepth - 8)) + 1;
                 int delta = Math.Clamp((((q0v - p0v) << 2) + (p1 - q1) + 4) >> 3, -tc, tc);
                 plane[p0] = TPixel.CreateTruncating(Math.Clamp(p0v + delta, 0, max));
                 plane[q0] = TPixel.CreateTruncating(Math.Clamp(q0v - delta, 0, max));
@@ -423,7 +425,7 @@ internal sealed partial class PictureDecoder<TPixel>
 
         if (bS < 4)
         {
-            int tc0 = Tc0[(indexA * 3) + bS - 1];
+            int tc0 = Tc0[(indexA * 3) + bS - 1] << (bitDepth - 8);
             int tc = tc0 + (ap ? 1 : 0) + (aq ? 1 : 0);
             int delta = Math.Clamp((((q0v - p0v) << 2) + (p1 - q1) + 4) >> 3, -tc, tc);
             plane[p0] = TPixel.CreateTruncating(Math.Clamp(p0v + delta, 0, max));

@@ -6,7 +6,8 @@ namespace ManagedCodecs;
 /// with the size alone owns tight planes: stride equals plane width and offsets are 0. A frame
 /// that wraps a decoder's buffers (H.264's borrowed frames) has wider strides and nonzero
 /// offsets, so read rows through <see cref="GetRow"/> or with <see cref="Offsets"/> and
-/// <see cref="Strides"/>.
+/// <see cref="Strides"/>. Strides and offsets count bytes, which for the 10-bit formats are two a
+/// sample (<see cref="PixelFormatExtensions.BytesPerSample"/>).
 /// </remarks>
 public sealed class VideoFrame
 {
@@ -25,6 +26,7 @@ public sealed class VideoFrame
         for (int i = 0; i < count; i++)
         {
             var (planeWidth, planeHeight) = format.PlaneSize(i, width, height);
+            planeWidth *= format.BytesPerSample();
             Strides[i] = planeWidth;
             Planes[i] = new byte[planeWidth * planeHeight];
         }
@@ -49,6 +51,7 @@ public sealed class VideoFrame
         for (int i = 0; i < count; i++)
         {
             var (planeWidth, planeHeight) = format.PlaneSize(i, width, height);
+            planeWidth *= format.BytesPerSample();
             if (strides[i] < planeWidth || offsets[i] < 0 || offsets[i] + ((planeHeight - 1) * (long)strides[i]) + planeWidth > planes[i].Length)
             {
                 throw new ArgumentException($"Plane {i} does not hold {planeWidth}x{planeHeight} samples at offset {offsets[i]}, stride {strides[i]}.");
@@ -82,13 +85,13 @@ public sealed class VideoFrame
     /// </summary>
     public long Pts { get; set; }
 
-    /// <summary>The visible samples of one row in one plane.</summary>
+    /// <summary>The visible samples of one row in one plane, as bytes (two a sample in the 10-bit formats).</summary>
     public Span<byte> GetRow(int plane, int y)
     {
         var (planeWidth, planeHeight) = Format.PlaneSize(plane, Width, Height);
         ArgumentOutOfRangeException.ThrowIfNegative(y);
         ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(y, planeHeight);
-        return Planes[plane].AsSpan(Offsets[plane] + (y * Strides[plane]), planeWidth);
+        return Planes[plane].AsSpan(Offsets[plane] + (y * Strides[plane]), planeWidth * Format.BytesPerSample());
     }
 
     /// <summary>

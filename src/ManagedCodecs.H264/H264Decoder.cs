@@ -1,14 +1,16 @@
+using System.Runtime.InteropServices;
+
 namespace ManagedCodecs.H264;
 
 /// <summary>
-/// H.264 decoder for Constrained Baseline, Main, High and High 4:2:2 profile streams (CAVLC or
-/// CABAC; I, P and B slices; 8-bit; 4:2:0 or 4:2:2, progressive or interlaced (MBAFF frames, field
-/// pictures)), taking MP4-style samples: length-prefixed NAL units, one picture per sample.
+/// H.264 decoder for Constrained Baseline, Main, High, High 10 and High 4:2:2 profile streams (CAVLC
+/// or CABAC; I, P and B slices; 8 or 10 bits; 4:2:0 or 4:2:2, progressive or interlaced (MBAFF
+/// frames, field pictures)), taking MP4-style samples: length-prefixed NAL units, one picture per sample.
 /// </summary>
 /// <remarks>
 /// Implemented from ITU-T H.264; output is bit-exact with any conforming decoder. Streams that
-/// use other features (FMO, data partitioning, 4:4:4 or monochrome, more than 8 bits) are rejected
-/// with <see cref="NotSupportedException"/>. Frames come out in display order (picture order
+/// use other features (FMO, data partitioning, 4:4:4 or monochrome, bit depths other than 8 and
+/// 10 or differing between luma and chroma) are rejected with <see cref="NotSupportedException"/>. Frames come out in display order (picture order
 /// count, 8.2.1), held back as far as the stream's max_num_reorder_frames says reordering can
 /// reach; <see cref="Flush"/> returns the rest at the end.
 /// </remarks>
@@ -60,6 +62,8 @@ public sealed class H264Decoder : IVideoDecoder
     /// picture into the same memory; copy what has to be kept longer. Its planes are the
     /// decoder's macroblock-aligned buffers (read rows through <see cref="VideoFrame.GetRow"/>, or
     /// with its offsets and strides), and they must not be written: later pictures predict from them.
+    /// Frames of more than 8 bits are copies all the same (the decoder keeps their samples as 16-bit
+    /// words, which a frame's byte planes cannot hold without one).
     /// </summary>
     public bool BorrowFrames { get; init; }
 
@@ -85,11 +89,12 @@ public sealed class H264Decoder : IVideoDecoder
             picture.Poc = Math.Min(picture.TopPoc, picture.BottomPoc);
         }
 
-        var frame = BorrowFrames ? Borrow(picture, state.Sps) : Crop(picture, state.Sps);
+        bool borrow = BorrowFrames && picture.BitDepth == 8;
+        var frame = borrow ? Borrow(picture, state.Sps) : Crop(picture, state.Sps);
         frame.Pts = first.Pts;
 
         bool restart = first.State.Header.IsIdr || first.State.Header.MemoryManagement.Any(op => op.Op == 5);
-        return _output.Add(frame, picture.Poc, restart, ReorderDepth(state.Sps), BorrowFrames ? picture : null);
+        return _output.Add(frame, picture.Poc, restart, ReorderDepth(state.Sps), borrow ? picture : null);
     }
 
     public IReadOnlyList<VideoFrame> Flush()
@@ -391,10 +396,18 @@ public sealed class H264Decoder : IVideoDecoder
             int shiftY = plane == 0 || picture.MbHeightC == 16 ? 0 : 1;
             int stride = plane == 0 ? picture.LumaStride : picture.ChromaStride;
             var (width, height) = format.PlaneSize(plane, sps.Width, sps.Height);
-            byte[] source = picture.Plane(plane);
             for (int y = 0; y < height; y++)
             {
-                source.AsSpan((((top >> shiftY) + y) * stride) + (left >> shiftX), width).CopyTo(frame.GetRow(plane, y));
+                int start = (((top >> shiftY) + y) * stride) + (left >> shiftX);
+                if (picture.BitDepth == 8)
+                {
+                    picture.Plane<byte>(plane).AsSpan(start, width).CopyTo(frame.GetRow(plane, y));
+                }
+                else
+                {
+                    // 16-bit words in memory order, which is little-endian on every platform .NET runs on.
+                    MemoryMarshal.AsBytes(picture.Plane<ushort>(plane).AsSpan(start, width)).CopyTo(frame.GetRow(plane, y));
+                }
             }
         }
 
@@ -415,7 +428,13 @@ public sealed class H264Decoder : IVideoDecoder
             [(top * picture.LumaStride) + left, chromaOffset, chromaOffset]);
     }
 
-    private static PixelFormat FormatOf(Picture picture) => picture.MbHeightC == 16 ? PixelFormat.Yuv422P : PixelFormat.Yuv420P;
+    private static PixelFormat FormatOf(Picture picture) => (picture.MbHeightC, picture.BitDepth) switch
+    {
+        (16, 8) => PixelFormat.Yuv422P,
+        (16, _) => PixelFormat.Yuv422P10,
+        (_, 8) => PixelFormat.Yuv420P,
+        _ => PixelFormat.Yuv420P10,
+    };
 
     /// <summary>The picture being decoded: its first slice header, its SPS, its decoder and its order count.</summary>
     private sealed record PictureState(SliceHeader Header, SequenceParameterSet Sps, IPictureDecoder Decoder, int Poc, bool SecondField = false);
@@ -427,9 +446,9 @@ public sealed class H264Decoder : IVideoDecoder
             throw new NotSupportedException($"chroma_format_idc {sps.ChromaFormatIdc} is not supported (4:2:0 and 4:2:2 only).");
         }
 
-        if (sps.BitDepthLuma != 8 || sps.BitDepthChroma != 8)
+        if (sps.BitDepthLuma is not (8 or 10) || sps.BitDepthChroma != sps.BitDepthLuma)
         {
-            throw new NotSupportedException("Only 8-bit video is supported.");
+            throw new NotSupportedException($"Bit depths {sps.BitDepthLuma} (luma) and {sps.BitDepthChroma} (chroma) are not supported (8 or 10, the same for both).");
         }
     }
 }

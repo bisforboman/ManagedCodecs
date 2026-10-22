@@ -300,6 +300,28 @@ ff -f lavfi -i testsrc2=size=320x256:rate=50 -t 1 "${I2[@]}" -bf 3 -refs 3 -x264
 ff -f lavfi -i testsrc2=size=320x256:rate=50,noise=alls=10:allf=t -t 1 "${I2[@]}" -bf 2 -refs 2 -x264-params slices=4:deblock=2,-1 samples/h264-422-mbaff-slices.mp4
 ff -f lavfi -i testsrc2=size=320x240:rate=50,fade=in:0:40 -t 2 "${I2[@]}" samples/h264-422-mbaff-default.mp4
 
+# ---- H.264 10-bit (High 10, High 4:2:2) ----
+# 10-bit samples: QP_Y from -12 (QpBdOffset), dequantization at QP'Y, Clip1 to 1023, deblocking thresholds and
+# weighted-prediction offsets scaled by 4, 16-bit output. Intra with CABAC and CAVLC; at libx264's -qp 1 (QP_Y about
+# -12) on noise, for negative luma and chroma QPs and levels long enough for CAVLC's level_prefix of 16 and more; P and
+# B frames with every partition (CABAC and CAVLC); motion on noise; an odd size; constrained intra with a chroma QP
+# offset; libx264's defaults on fades (explicit weights with offsets, implicit weights); 4:2:2 at 10 bits; and MBAFF.
+T=(-c:v libx264 -profile:v high10 -pix_fmt yuv420p10le)
+ff -f lavfi -i testsrc2=size=320x240:rate=25 -t 0.2 "${T[@]}" -g 1 samples/h264-10bit-intra.mp4
+ff -f lavfi -i testsrc2=size=320x240:rate=25 -t 0.2 "${T[@]}" -g 1 -x264-params cabac=0 samples/h264-10bit-intra-cavlc.mp4
+ff -f lavfi -i testsrc2=size=320x240:rate=25,noise=alls=40:allf=t -t 0.2 "${T[@]}" -g 1 -qp 1 samples/h264-10bit-intra-qp1.mp4
+ff -f lavfi -i testsrc2=size=320x240:rate=25,noise=alls=40:allf=t -t 0.2 "${T[@]}" -g 1 -qp 1 -x264-params cabac=0 samples/h264-10bit-intra-qp1-cavlc.mp4
+ff -f lavfi -i "testsrc2=size=320x240:rate=25,scroll=h=0.01:v=0.005" -t 1 "${T[@]}" -bf 3 -refs 3 -x264-params partitions=all:direct=auto samples/h264-10bit-b.mp4
+ff -f lavfi -i "testsrc2=size=320x240:rate=25,scroll=h=0.01:v=0.005" -t 1 "${T[@]}" -bf 3 -refs 3 -x264-params cabac=0:partitions=all:direct=auto samples/h264-10bit-b-cavlc.mp4
+ff -f lavfi -i "testsrc2=size=320x240:rate=25,scroll=h=0.013:v=-0.021,noise=alls=12:allf=t" -t 2 "${T[@]}" -bf 3 -refs 3 -qp 34 -x264-params partitions=all:me=umh:merange=32 samples/h264-10bit-motion.mp4
+ff -f lavfi -i "testsrc2=size=321x239:rate=25,scroll=v=0.02" -t 1 "${T[@]}" -bf 2 -refs 2 samples/h264-10bit-odd-size.mp4
+ff -f lavfi -i "testsrc2=size=320x240:rate=25,scroll=h=0.02,noise=alls=10:allf=t" -t 1 "${T[@]}" -bf 2 -refs 2 -x264-params constrained-intra=1:chroma-qp-offset=4 samples/h264-10bit-constrained-intra.mp4
+ff -f lavfi -i "testsrc2=size=320x240:rate=25,fade=in:0:20,fade=out:30:20" -t 2 "${T[@]}" samples/h264-10bit-default.mp4
+T2=(-c:v libx264 -profile:v high422 -pix_fmt yuv422p10le)
+ff -f lavfi -i testsrc2=size=320x240:rate=25,noise=alls=40:allf=t -t 0.2 "${T2[@]}" -g 1 -qp 1 samples/h264-422-10bit-intra-qp1.mp4
+ff -f lavfi -i "testsrc2=size=320x240:rate=25,scroll=h=0.01:v=0.005" -t 1 "${T2[@]}" -bf 3 -refs 3 -x264-params partitions=all:direct=auto samples/h264-422-10bit-b.mp4
+ff -f lavfi -i testsrc2=size=320x240:rate=50 -t 1 "${T[@]}" -vf "tinterlace=interleave_top,setfield=tff" -flags +ildct+ilme -bf 3 -refs 3 samples/h264-10bit-mbaff.mp4
+
 # ---- H.264 scaling matrices (High profile) ----
 # libx264 writes them in the PPS only, so absent lists fall back by rule A (Table 7-2). cqm=jvt sends no lists at all:
 # every list is the default one. The custom files give each list its own values (libx264 reads one chroma list per

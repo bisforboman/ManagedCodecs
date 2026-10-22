@@ -52,8 +52,11 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
     private readonly int _mbHeightC;
     private readonly int _chromaBlocks;
 
-    // Bits per sample (8 for byte samples, more for ushort ones).
+    // Bits per sample (8 for byte samples, more for ushort ones), and QpBdOffset (7-4): QP_Y runs
+    // from -QpBdOffset to 51, dequantization uses QP'Y = QP_Y + QpBdOffset (8.5.12.1), the
+    // deblocking filter QP_Y itself.
     private readonly int _bitDepth;
+    private readonly int _qpBdOffset;
 
     // Per macroblock.
     private readonly int[] _sliceOfMb;
@@ -85,6 +88,7 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
         _mbHeightC = sps.MbHeightC;
         _chromaBlocks = _mbHeightC / 2;
         _bitDepth = sps.BitDepthLuma;
+        _qpBdOffset = 6 * (_bitDepth - 8);
 
         _sliceOfMb = new int[_mbCount];
         Array.Fill(_sliceOfMb, -1);
@@ -206,7 +210,7 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
             Cabac = pps.EntropyCodingModeCabac ? _cabac : null,
         };
 
-        if (slice.Qp is < 0 or > 51)
+        if (slice.Qp < -_qpBdOffset || slice.Qp > 51)
         {
             throw new InvalidDataException($"Slice QP {slice.Qp} is out of range.");
         }
@@ -577,12 +581,13 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
     {
         int delta = slice.Cabac is { } c ? CabacQpDelta(slice, c) : r.ReadSe();
         slice.LastQpDeltaNonZero = delta != 0;
-        if (delta is < -26 or > 25)
+        if (delta < -(26 + (_qpBdOffset / 2)) || delta > 25 + (_qpBdOffset / 2))
         {
             throw new InvalidDataException($"mb_qp_delta {delta} is out of range.");
         }
 
-        slice.Qp = (slice.Qp + delta + 52) % 52;
+        // 7-37: QP_Y wraps within -QpBdOffset .. 51.
+        slice.Qp = ((slice.Qp + delta + 52 + (2 * _qpBdOffset)) % (52 + _qpBdOffset)) - _qpBdOffset;
     }
 
     private void ClearCounts(int mbAddr)
@@ -790,7 +795,7 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
         return (_totalCoeffLuma[i] | _totalCoeffLuma[i + 1] | _totalCoeffLuma[i + 4] | _totalCoeffLuma[i + 5]) != 0;
     }
 
-    /// <summary>Adds the residual of each coded 8x8 block to the luma prediction.</summary>
+    /// <summary>Adds the residual of each coded 8x8 block to the luma prediction; <paramref name="qp"/> is QP'Y.</summary>
     private void AddLuma8x8Residual(SliceState slice, int mbAddr, MbTarget target, Residual residual, int cbpLuma, int b8, int qp)
     {
         if ((cbpLuma & (1 << b8)) == 0 || !Has8x8Coefficients(mbAddr, b8))
@@ -810,7 +815,7 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
         int origin = target.YOrigin;
         int stride = target.YStride;
         TPixel[] plane = target.Y;
-        int qp = _qp[mbAddr];
+        int qp = _qp[mbAddr] + _qpBdOffset; // QP'Y
 
         if (is16x16)
         {
@@ -900,7 +905,8 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
 
         for (int c = 0; c < 2; c++)
         {
-            int qpc = ChromaQp(_qp[mbAddr], c == 0 ? slice.Pps.ChromaQpIndexOffset : slice.Pps.SecondChromaQpIndexOffset);
+            // QP'C (8.5.11): QP_C plus QpBdOffsetC (the same as luma's here: equal bit depths).
+            int qpc = ChromaQp(_qp[mbAddr], c == 0 ? slice.Pps.ChromaQpIndexOffset : slice.Pps.SecondChromaQpIndexOffset, _qpBdOffset) + _qpBdOffset;
             var levelScale = slice.Scaling.LevelScale4x4((intraMode >= 0 ? 1 : 4) + c); // Intra or Inter Cb, Cr
             TPixel[] plane = c == 0 ? target.Cb : target.Cr;
             if (intraMode >= 0)
@@ -941,10 +947,10 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
         }
     }
 
-    /// <summary>QP_C from QP_Y and the chroma offset (Table 8-15).</summary>
-    public static int ChromaQp(int qpY, int offset)
+    /// <summary>QP_C from QP_Y and the chroma offset (8-311, Table 8-15): below 30 (down to -QpBdOffsetC) it is qPI itself.</summary>
+    public static int ChromaQp(int qpY, int offset, int qpBdOffset = 0)
     {
-        int qpi = Math.Clamp(qpY + offset, 0, 51);
+        int qpi = Math.Clamp(qpY + offset, -qpBdOffset, 51);
         return qpi < 30 ? qpi : ChromaQpTable[qpi - 30];
     }
 

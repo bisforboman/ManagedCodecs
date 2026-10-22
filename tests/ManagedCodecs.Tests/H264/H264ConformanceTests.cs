@@ -15,18 +15,28 @@ public class H264ConformanceTests
 
     [Theory]
     [MemberData(nameof(Samples))]
-    public void MatchesFfmpegFrameByFrame(string sampleName) => CompareWithFfmpeg(sampleName, borrowFrames: false);
+    public void MatchesFfmpegFrameByFrame(string sampleName) => CompareWithFfmpeg(sampleName, borrowFrames: false, dispose: false);
+
+    /// <summary>
+    /// The same with every frame disposed as soon as it is hashed, so the decoder writes later
+    /// frames into the planes it gives back: a frame still in use reusing them would show as a
+    /// wrong frame.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(Samples))]
+    public void MatchesFfmpegWithDisposedFrames(string sampleName) => CompareWithFfmpeg(sampleName, borrowFrames: false, dispose: true);
 
     /// <summary>
     /// The same with <see cref="H264Decoder.BorrowFrames"/>: each frame is hashed as it comes
     /// back, before the next call, which is as long as a borrowed frame is valid. A picture reused
-    /// while its frame still waited for reordering would show as a wrong frame.
+    /// while its frame still waited for reordering would show as a wrong frame. The frames are
+    /// disposed too, which must leave the decoder's pictures (later frames' references) alone.
     /// </summary>
     [Theory]
     [MemberData(nameof(Samples))]
-    public void MatchesFfmpegWithBorrowedFrames(string sampleName) => CompareWithFfmpeg(sampleName, borrowFrames: true);
+    public void MatchesFfmpegWithBorrowedFrames(string sampleName) => CompareWithFfmpeg(sampleName, borrowFrames: true, dispose: true);
 
-    private static void CompareWithFfmpeg(string sampleName, bool borrowFrames)
+    private static void CompareWithFfmpeg(string sampleName, bool borrowFrames, bool dispose)
     {
         var lines = File.ReadAllLines(TestSamples.ReferenceOf(sampleName, ".framemd5"));
         var expected = FrameMd5.Parse(lines).Where(e => e.StreamIndex == 0).ToList(); // FFmpeg lists video first
@@ -51,6 +61,10 @@ public class H264ConformanceTests
                 FrameMd5.SameTime(expected[index].Pts - expected[0].Pts, timeBase, frame.Pts - firstPts, video.TimeBase),
                 $"Frame {index}: pts {frame.Pts} ({video.TimeBase}) is not FFmpeg's {expected[index].Pts} ({timeBase}).");
             index++;
+            if (dispose)
+            {
+                frame.Dispose();
+            }
         }
 
         foreach (var packet in demuxer.ReadPackets().Where(p => p.StreamIndex == video.StreamIndex))

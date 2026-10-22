@@ -8,9 +8,19 @@ namespace ManagedCodecs;
 /// offsets, so read rows through <see cref="GetRow"/> or with <see cref="Offsets"/> and
 /// <see cref="Strides"/>. Strides and offsets count bytes, which for the 10-bit formats are two a
 /// sample (<see cref="PixelFormatExtensions.BytesPerSample"/>).
+/// <para>
+/// Disposing a frame is optional. A frame from a <see cref="VideoFramePool"/> (the H.264
+/// decoder's copied frames) then gives its planes back for the next frame, which saves
+/// allocating and collecting them; a disposed frame's samples must not be used again, and
+/// <see cref="Planes"/>, <see cref="GetRow"/> and <see cref="WritePacked"/> throw.
+/// </para>
 /// </remarks>
-public sealed class VideoFrame
+public sealed class VideoFrame : IDisposable
 {
+    private readonly byte[][] _planes;
+    private readonly VideoFramePool? _pool;
+    private bool _disposed;
+
     public VideoFrame(int width, int height, PixelFormat format)
         : this(width, height, format, zeroed: true)
     {
@@ -26,17 +36,24 @@ public sealed class VideoFrame
         Format = format;
 
         int count = format.PlaneCount();
-        Planes = new byte[count][];
+        _planes = new byte[count][];
         Strides = new int[count];
         for (int i = 0; i < count; i++)
         {
             var (planeWidth, planeHeight) = format.PlaneSize(i, width, height);
             planeWidth *= format.BytesPerSample();
             Strides[i] = planeWidth;
-            Planes[i] = zeroed ? new byte[planeWidth * planeHeight] : GC.AllocateUninitializedArray<byte>(planeWidth * planeHeight);
+            _planes[i] = zeroed ? new byte[planeWidth * planeHeight] : GC.AllocateUninitializedArray<byte>(planeWidth * planeHeight);
         }
 
         Offsets = new int[count];
+    }
+
+    /// <summary>A tight frame on planes of <paramref name="pool"/>, which takes them back on <see cref="Dispose"/>.</summary>
+    internal VideoFrame(int width, int height, PixelFormat format, byte[][] planes, int[] strides, VideoFramePool pool)
+        : this(width, height, format, planes, strides, new int[planes.Length])
+    {
+        _pool = pool;
     }
 
     /// <summary>
@@ -72,7 +89,7 @@ public sealed class VideoFrame
         Width = width;
         Height = height;
         Format = format;
-        Planes = planes;
+        _planes = planes;
         Strides = strides;
         Offsets = offsets;
     }
@@ -83,7 +100,7 @@ public sealed class VideoFrame
 
     public PixelFormat Format { get; }
 
-    public byte[][] Planes { get; }
+    public byte[][] Planes => _disposed ? throw new ObjectDisposedException(nameof(VideoFrame)) : _planes;
 
     public int[] Strides { get; }
 
@@ -120,5 +137,20 @@ public sealed class VideoFrame
                 destination.Write(GetRow(plane, y));
             }
         }
+    }
+
+    /// <summary>
+    /// Ends the frame's use of its samples: a pooled frame's planes go back to its pool, to be
+    /// written over by a later frame. Calling it more than once does nothing more.
+    /// </summary>
+    public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+        _pool?.Return(_planes);
     }
 }

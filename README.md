@@ -60,7 +60,9 @@ foreach (var frame in decoder.Flush())
 }
 ```
 
-Each frame owns its samples. `new H264Decoder(video) { BorrowFrames = true }` saves the copy that takes (3 to 11% of
+Each frame owns its samples. Frames are `IDisposable`: disposing one when done with it is optional, and gives an
+H.264 frame's planes back to the decoder for a later frame (a `VideoFramePool`), which saves allocating and
+collecting about 1.4 MB a frame at 720p; a disposed frame's samples must not be used again. `new H264Decoder(video) { BorrowFrames = true }` saves the copy that takes (3 to 11% of
 the decoding time at 720p, the most with B frames): its frames point into the decoder's own pictures, valid until the
 next `Decode` or `Flush` call and not to be written. Their planes are the decoder's macroblock-aligned buffers, so
 read them through `GetRow`, or with the frame's `Offsets` and `Strides`. `mcdec --borrow-frames` times it. 10-bit
@@ -90,7 +92,8 @@ ffmpeg -benchmark -threads 1 -stream_loop 9 -i $f -f null -
 ```
 
 Both time the whole process, demuxing included; mcdec's also includes .NET's startup and JIT (mcdec's `last loop`
-line shows the steady speed without them). A snapshot, made that way (2026-10-22, FFmpeg 6.1, single-threaded on a
+line shows the steady speed without them). mcdec disposes each frame once it has it, as a consumer done with them
+would, so H.264 frames reuse the planes of earlier ones. A snapshot, made that way (2026-10-22, FFmpeg 6.1, single-threaded on a
 4-core AVX2 (and AVX-512) Xeon cloud VM, median of five interleaved runs; µs per frame, audio frames are 1024 samples):
 
 | Sample | Loops | ManagedCodecs | FFmpeg |

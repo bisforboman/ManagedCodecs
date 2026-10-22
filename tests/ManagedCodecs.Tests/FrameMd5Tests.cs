@@ -59,4 +59,25 @@ public class FrameMd5Tests
 
         Assert.Equal("d15ae53931880fd7b724dd7888b4b4ed", FrameMd5.Hash(frame)); // MD5 of bytes 0..5
     }
+
+    [Fact]
+    public void Hash_WrappedPlanes_ReadsTheVisibleRowsAtTheirOffsets()
+    {
+        // The same 2x2 frame as above inside wider planes: luma at row 1, column 1 of a 4-wide
+        // plane, each chroma sample at index 3 of a 2-wide plane; the rest is filler.
+        byte[] luma = [9, 9, 9, 9, 9, 0, 1, 9, 9, 2, 3, 9];
+        byte[] cb = [9, 9, 9, 4];
+        byte[] cr = [9, 9, 9, 5];
+        var frame = new VideoFrame(2, 2, PixelFormat.Yuv420P, [luma, cb, cr], [4, 2, 2], [5, 3, 3]);
+
+        Assert.Equal("d15ae53931880fd7b724dd7888b4b4ed", FrameMd5.Hash(frame));
+        Assert.Equal([2, 3], frame.GetRow(0, 1).ToArray());
+    }
+
+    [Fact]
+    public void WrappedPlanes_MustHoldTheVisibleArea()
+    {
+        // The second luma row would end one sample past the plane.
+        Assert.Throws<ArgumentException>(() => new VideoFrame(2, 2, PixelFormat.Yuv420P, [new byte[7], new byte[1], new byte[1]], [4, 1, 1], [2, 0, 0]));
+    }
 }

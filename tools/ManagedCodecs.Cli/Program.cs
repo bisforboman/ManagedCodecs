@@ -11,8 +11,9 @@ using ManagedCodecs.Mjpeg;
 //   ffmpeg -benchmark -threads 1 -stream_loop 9 -i samples/h264-bench-720p.mp4 -f null -
 if (args.Length == 0 || args.Contains("-h") || args.Contains("--help"))
 {
-    Console.WriteLine("usage: mcdec <file> [--loops N]");
+    Console.WriteLine("usage: mcdec <file> [--loops N] [--borrow-frames]");
     Console.WriteLine("  Demuxes and decodes the file's video and audio N times (default 1), like ffmpeg -stream_loop N-1.");
+    Console.WriteLine("  --borrow-frames: H.264 frames point into the decoder's pictures instead of being copied out.");
     return args.Length == 0 ? 1 : 0;
 }
 
@@ -25,6 +26,7 @@ if (loopsAt >= 0 && (loopsAt + 1 >= args.Length || !int.TryParse(args[loopsAt + 
     return 1;
 }
 
+bool borrowFrames = args.Contains("--borrow-frames");
 var process = Process.GetCurrentProcess();
 var wall = Stopwatch.StartNew();
 var lastLoop = TimeSpan.Zero;
@@ -42,7 +44,7 @@ for (int loop = 0; loop < loops; loop++)
     IVideoDecoder? videoDecoder = video?.Codec switch
     {
         CodecIds.Mjpeg => new MjpegDecoder(),
-        CodecIds.H264 => new H264Decoder(video),
+        CodecIds.H264 => new H264Decoder(video) { BorrowFrames = borrowFrames },
         _ => null,
     };
     IAudioDecoder? audioDecoder = audio?.Codec == CodecIds.Aac ? new AacDecoder(audio) : null;

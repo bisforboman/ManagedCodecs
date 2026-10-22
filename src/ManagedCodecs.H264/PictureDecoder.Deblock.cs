@@ -82,9 +82,9 @@ internal sealed partial class PictureDecoder<TPixel>
             }
             else
             {
-                // Edges 1 and 3 of an 8x8-transform macroblock are cleared below unless 4:2:2
-                // chroma needs their bS.
-                InternalStrengths(mbAddr, vertical, horizontal, oddEdges: !_transform8x8[mbAddr] || _mbHeightC == 16);
+                // Edges 1 and 3 of an 8x8-transform macroblock are cleared below; only 4:2:2 chroma
+                // needs their bS first.
+                InternalStrengths(mbAddr, vertical, horizontal, oddEdges: !_transform8x8[mbAddr] || (_mbHeightC == 16 && !_chroma444));
             }
 
             // 4:2:2 chroma first, while the bS of all four horizontal edges are there (the planes

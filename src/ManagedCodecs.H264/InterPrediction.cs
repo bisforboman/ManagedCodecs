@@ -74,8 +74,9 @@ internal static partial class InterPrediction
     }
 
     /// <summary>
-    /// Predicts a chroma block (4:2:0) at chroma position (<paramref name="x"/>, <paramref name="y"/>)
-    /// with the luma motion vector, which is in eighth chroma samples (8.4.2.2.2).
+    /// Predicts a chroma block at chroma position (<paramref name="x"/>, <paramref name="y"/>) with
+    /// a motion vector in eighth chroma samples (8.4.2.2.2): the luma vector in 4:2:0; in 4:2:2,
+    /// whose chroma has the luma's rows, its vertical component doubled.
     /// </summary>
     public static void PredictChromaReference(Picture reference, int component, byte[] dest, int stride, int x, int y, int width, int height, int mvX, int mvY) =>
         PredictChromaReference(reference, component, x, y, width, height, mvX, mvY, dest.AsSpan((y * stride) + x), stride);
@@ -83,7 +84,7 @@ internal static partial class InterPrediction
     /// <summary>The same, written to <paramref name="output"/> (the block's top-left); field views as for luma.</summary>
     public static void PredictChromaReference(Picture reference, int component, int x, int y, int width, int height, int mvX, int mvY, Span<byte> output, int outputStride)
     {
-        var (origin, stride, maxY) = Plane(reference, reference.ChromaStride, reference.HeightInMbs * 8);
+        var (origin, stride, maxY) = Plane(reference, reference.ChromaStride, reference.HeightInMbs * reference.MbHeightC);
         int maxX = (reference.WidthInMbs * 8) - 1;
         byte[] src = reference.Plane(component);
         int xFrac = mvX & 7;

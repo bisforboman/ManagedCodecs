@@ -7,11 +7,17 @@ public class InterPredictionTests
 {
     private static readonly (int W, int H)[] BlockSizes = [(16, 16), (16, 8), (8, 16), (8, 8), (8, 4), (4, 8), (4, 4)];
 
-    [Fact]
-    public void FastLumaAndChroma_MatchReference()
+    /// <summary>
+    /// In 4:2:0 (<paramref name="mbHeightC"/> 8) and 4:2:2 (16), whose chroma blocks have the luma
+    /// block's height and a vertical vector of twice the luma one in eighth samples.
+    /// </summary>
+    [Theory]
+    [InlineData(8)]
+    [InlineData(16)]
+    public void FastLumaAndChroma_MatchReference(int mbHeightC)
     {
-        var random = new Random(42);
-        var reference = new Picture(3, 2); // 48x32 luma, small so many vectors cross the edges
+        var random = new Random(42 + mbHeightC);
+        var reference = new Picture(3, 2, mbHeightC); // 48x32 luma, small so many vectors cross the edges
         random.NextBytes(reference.Y);
         random.NextBytes(reference.Cb);
         random.NextBytes(reference.Cr);
@@ -32,16 +38,18 @@ public class InterPredictionTests
                 (mvX, mvY) = (mvX & ~7, mvY & ~7);
             }
 
-            var expected = new Picture(3, 2);
-            var actual = new Picture(3, 2);
+            var expected = new Picture(3, 2, mbHeightC);
+            var actual = new Picture(3, 2, mbHeightC);
             InterPrediction.PredictLumaReference(reference, expected.Y, expected.LumaStride, x, y, w, h, mvX, mvY);
             InterPrediction.PredictLuma(reference, actual.Y, actual.LumaStride, x, y, w, h, mvX, mvY);
             Assert.True(expected.Y.AsSpan().SequenceEqual(actual.Y), $"Luma {w}x{h} at ({x},{y}) mv ({mvX},{mvY})");
 
+            bool tall = mbHeightC == 16;
+            var (cy, ch, cmvY) = tall ? (y, h, mvY * 2) : (y / 2, h / 2, mvY);
             for (int c = 1; c <= 2; c++)
             {
-                InterPrediction.PredictChromaReference(reference, c, expected.Plane(c), expected.ChromaStride, x / 2, y / 2, w / 2, h / 2, mvX, mvY);
-                InterPrediction.PredictChroma(reference, c, actual.Plane(c), actual.ChromaStride, x / 2, y / 2, w / 2, h / 2, mvX, mvY);
+                InterPrediction.PredictChromaReference(reference, c, expected.Plane(c), expected.ChromaStride, x / 2, cy, w / 2, ch, mvX, cmvY);
+                InterPrediction.PredictChroma(reference, c, actual.Plane(c), actual.ChromaStride, x / 2, cy, w / 2, ch, mvX, cmvY);
                 Assert.True(expected.Plane(c).AsSpan().SequenceEqual(actual.Plane(c)), $"Chroma {c} {w}x{h} at ({x},{y}) mv ({mvX},{mvY})");
             }
         }

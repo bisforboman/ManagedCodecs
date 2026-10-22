@@ -2,7 +2,7 @@
 
 Pure managed C# media decoders: no native binaries, Native AOT friendly. MJPEG (bit-exact with FFmpeg), H.264
 Constrained Baseline, Main and High (CAVLC and CABAC, I/P/B, weighted prediction, 8x8 transform, scaling matrices,
-MBAFF, field pictures, bit-exact), AAC LC (within 2^-17 of FFmpeg's float output, measured 3e-7), AVI and MP4
+MBAFF, field pictures, progressive 4:2:2, bit-exact), AAC LC (within 2^-17 of FFmpeg's float output, measured 3e-7), AVI and MP4
 demuxing. README.md has the layout, the roadmap and what is not supported yet.
 
 ## Core idea
@@ -48,7 +48,9 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
   move together, by hand while StyleBro is a prerelease. Package versions are central (Directory.Packages.props).
 - **Timing**: `tools/compare.sh <file> <loops>` runs `mcdec` (tools/ManagedCodecs.Cli) and
   `ffmpeg -benchmark -threads 1` on the same file (README, Benchmarking). Cloud VMs are noisy: compare before/after
-  on one machine, repeat runs, and don't trust one number.
+  on one machine, repeat runs, and don't trust one number. Comparing two builds: interleave their runs and
+  alternate which goes first (with the same one first in every pair, an A/A test of one build against itself once
+  showed a 10% "regression"), and `DOTNET_TieredCompilation=0` takes JIT tiering out of the noise.
 
 ## Gotchas (each cost time once)
 

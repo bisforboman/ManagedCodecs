@@ -1,20 +1,21 @@
 namespace ManagedCodecs.H264;
 
 /// <summary>
-/// A decoded picture in macroblock-aligned planes (4:2:0), with its motion field (which direct
+/// A decoded picture in macroblock-aligned planes (4:2:0 or 4:2:2), with its motion field (which direct
 /// prediction of later B pictures reads) and its reference marking state.
 /// </summary>
 internal sealed class Picture
 {
-    public Picture(int widthInMbs, int heightInMbs)
+    public Picture(int widthInMbs, int heightInMbs, int mbHeightC = 8)
     {
         WidthInMbs = widthInMbs;
         HeightInMbs = heightInMbs;
+        MbHeightC = mbHeightC;
         LumaStride = widthInMbs * 16;
         ChromaStride = widthInMbs * 8;
         Y = new byte[LumaStride * heightInMbs * 16];
-        Cb = new byte[ChromaStride * heightInMbs * 8];
-        Cr = new byte[ChromaStride * heightInMbs * 8];
+        Cb = new byte[ChromaStride * heightInMbs * mbHeightC];
+        Cr = new byte[ChromaStride * heightInMbs * mbHeightC];
 
         int mbCount = widthInMbs * heightInMbs;
         MvX = [new short[mbCount * 16], new short[mbCount * 16]];
@@ -32,6 +33,7 @@ internal sealed class Picture
     {
         WidthInMbs = frame.WidthInMbs;
         HeightInMbs = frame.HeightInMbs;
+        MbHeightC = frame.MbHeightC;
         LumaStride = frame.LumaStride;
         ChromaStride = frame.ChromaStride;
         Y = frame.Y;
@@ -68,6 +70,9 @@ internal sealed class Picture
     public int WidthInMbs { get; }
 
     public int HeightInMbs { get; }
+
+    /// <summary>Chroma rows per macroblock: 8 (4:2:0) or 16 (4:2:2).</summary>
+    public int MbHeightC { get; }
 
     public int LumaStride { get; }
 

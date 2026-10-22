@@ -84,6 +84,13 @@ internal sealed partial class PictureDecoder
                 InternalStrengths(mbAddr, vertical, horizontal);
             }
 
+            // 4:2:2 chroma first, while the bS of all four horizontal edges are there (the planes
+            // are independent, so the order does not matter).
+            if (_mbHeightC == 16)
+            {
+                DeblockChroma422(slice, mbAddr, vertical, horizontal);
+            }
+
             // With 8x8 transforms the luma edges inside the 8x8 blocks are not filtered; chroma
             // (4:2:0) filters only edges 0 and 2 anyway.
             if (_transform8x8[mbAddr])
@@ -111,6 +118,11 @@ internal sealed partial class PictureDecoder
                 FilterEdge(Picture.Y, lumaOrigin + (edge * 4 * lumaStride), lumaStride, 1, 16, horizontal.Slice(edge * 4, 4), qpP, qp, slice.AlphaOffset, slice.BetaOffset, chroma: false);
             }
 
+            if (_mbHeightC == 16)
+            {
+                continue;
+            }
+
             // Chroma (4:2:0): edges 0 and 4 use the bS of luma edges 0 and 8; QP_C per component.
             // Cb and Cr are filtered together, all vertical edges first.
             int qpCb = ChromaQp(qp, slice.CbQpOffset);
@@ -128,6 +140,36 @@ internal sealed partial class PictureDecoder
                 int qpP = edge == 0 ? qpAbove : qp;
                 FilterChromaEdge(Picture.Cb, Picture.Cr, chromaOrigin + (edge * 4 * chromaStride), chromaStride, 1, horizontal.Slice(edge * 8, 4), ChromaQp(qpP, slice.CbQpOffset), qpCb, ChromaQp(qpP, slice.CrQpOffset), qpCr, slice.AlphaOffset, slice.BetaOffset);
             }
+        }
+    }
+
+    /// <summary>
+    /// The chroma edges of a 4:2:2 macroblock (8x16 samples a component): each with the bS of the
+    /// luma edge at the corresponding luma samples (8.7.2.1). Vertical edges 0 and 4 run 16 rows,
+    /// four to a luma segment of luma edges 0 and 8; horizontal edges 0, 4, 8 and 12 are at the
+    /// rows of luma edges 0 to 3, which keep their bS with 8x8 transforms too, as chroma's 4x4
+    /// blocks are the height of luma's.
+    /// </summary>
+    private void DeblockChroma422(SliceInfo slice, int mbAddr, ReadOnlySpan<byte> vertical, ReadOnlySpan<byte> horizontal)
+    {
+        var (origin, stride) = ChromaPlace(mbAddr);
+        int qp = _qp[mbAddr];
+        int qpCb = ChromaQp(qp, slice.CbQpOffset);
+        int qpCr = ChromaQp(qp, slice.CrQpOffset);
+        int qpLeft = mbAddr % _widthInMbs > 0 ? _qp[mbAddr - 1] : qp;
+        int qpAbove = mbAddr >= _widthInMbs ? _qp[mbAddr - _widthInMbs] : qp;
+        for (int edge = 0; edge < 2; edge++)
+        {
+            int qpP = edge == 0 ? qpLeft : qp;
+            var strengths = vertical.Slice(edge * 8, 4);
+            FilterEdge(Picture.Cb, origin + (edge * 4), 1, stride, 16, strengths, ChromaQp(qpP, slice.CbQpOffset), qpCb, slice.AlphaOffset, slice.BetaOffset, chroma: true, segmentShift: 2);
+            FilterEdge(Picture.Cr, origin + (edge * 4), 1, stride, 16, strengths, ChromaQp(qpP, slice.CrQpOffset), qpCr, slice.AlphaOffset, slice.BetaOffset, chroma: true, segmentShift: 2);
+        }
+
+        for (int edge = 0; edge < 4; edge++)
+        {
+            int qpP = edge == 0 ? qpAbove : qp;
+            FilterChromaEdge(Picture.Cb, Picture.Cr, origin + (edge * 4 * stride), stride, 1, horizontal.Slice(edge * 4, 4), ChromaQp(qpP, slice.CbQpOffset), qpCb, ChromaQp(qpP, slice.CrQpOffset), qpCr, slice.AlphaOffset, slice.BetaOffset);
         }
     }
 
@@ -286,10 +328,16 @@ internal sealed partial class PictureDecoder
     /// <summary>
     /// Filters one edge (8.7.2). <paramref name="q0"/> is the first q0 sample; p samples lie at
     /// -<paramref name="across"/>, -2 * across, ... and the edge runs along <paramref name="along"/>.
-    /// <paramref name="strengths"/> holds bS per luma 4x4 segment; chroma samples use bS of segment i / 2.
+    /// <paramref name="strengths"/> holds bS per luma 4x4 segment; chroma samples use bS of segment i / 2,
+    /// or of i / 4 with <paramref name="segmentShift"/> 2 (vertical edges of 4:2:2 chroma).
     /// </summary>
-    internal static void FilterEdge(byte[] plane, int q0, int across, int along, int length, ReadOnlySpan<byte> strengths, int qpP, int qpQ, int alphaOffset, int betaOffset, bool chroma, bool vectorized = true)
+    internal static void FilterEdge(byte[] plane, int q0, int across, int along, int length, ReadOnlySpan<byte> strengths, int qpP, int qpQ, int alphaOffset, int betaOffset, bool chroma, bool vectorized = true, int segmentShift = 0)
     {
+        if (segmentShift == 0)
+        {
+            segmentShift = chroma ? 1 : 2; // 2 or 4 samples per segment
+        }
+
         if (MemoryMarshal.Read<uint>(strengths) == 0)
         {
             return; // all four segments have bS 0
@@ -307,18 +355,17 @@ internal sealed partial class PictureDecoder
 
         if (vectorized && Vector128.IsHardwareAccelerated)
         {
-            FilterEdgeVector(plane, q0, across, along, length, strengths, indexA, alpha, beta, chroma);
+            FilterEdgeVector(plane, q0, across, along, length, strengths, segmentShift, indexA, alpha, beta, chroma);
         }
         else
         {
-            FilterEdgeScalar(plane, q0, across, along, length, strengths, indexA, alpha, beta, chroma);
+            FilterEdgeScalar(plane, q0, across, along, length, strengths, segmentShift, indexA, alpha, beta, chroma);
         }
     }
 
     /// <summary>The filter of 8.7.2.3 / 8.7.2.4 sample by sample; the reference for the vector version.</summary>
-    private static void FilterEdgeScalar(byte[] plane, int q0, int across, int along, int length, ReadOnlySpan<byte> strengths, int indexA, int alpha, int beta, bool chroma)
+    private static void FilterEdgeScalar(byte[] plane, int q0, int across, int along, int length, ReadOnlySpan<byte> strengths, int segmentShift, int indexA, int alpha, int beta, bool chroma)
     {
-        int segmentShift = chroma ? 1 : 2; // 2 or 4 samples per segment
         for (int i = 0; i < length; i++)
         {
             int bS = strengths[i >> segmentShift];
@@ -423,7 +470,7 @@ internal sealed partial class PictureDecoder
     /// gathered into rows, filtered in 16-bit lanes with per-lane bS, and written back.
     /// </summary>
     [SkipLocalsInit]
-    private static void FilterEdgeVector(byte[] plane, int q0, int across, int along, int length, ReadOnlySpan<byte> strengths, int indexA, int alpha, int beta, bool chroma)
+    private static void FilterEdgeVector(byte[] plane, int q0, int across, int along, int length, ReadOnlySpan<byte> strengths, int segmentShift, int indexA, int alpha, int beta, bool chroma)
     {
         // taps[k * 16 + i]: sample k (0 = p3, 3 = p0, 4 = q0, 7 = q3) at position i along the edge.
         Span<byte> taps = stackalloc byte[(8 * 16) + 16];
@@ -432,7 +479,7 @@ internal sealed partial class PictureDecoder
         Gather(plane, q0, across, along, length, taps, firstTap, lastTap);
 
         Span<short> lanes = stackalloc short[4 * 16];
-        SetLanes(lanes, 0, length, strengths, chroma ? 1 : 2, indexA, alpha, beta);
+        SetLanes(lanes, 0, length, strengths, segmentShift, indexA, alpha, beta);
         FilterTaps(taps, length, lanes, chroma);
 
         // Only p2 .. q2 (luma) or p0, q0 (chroma) can change.

@@ -24,7 +24,7 @@ references:
   list that cuts more than priming, and only this reference, since its packets after the edit are not demuxed).
 
 The decoder tests pick their samples by content, not by name: the MJPEG test decodes every sample whose demuxed
-codec is MJPEG, and the H.264 test every MP4 whose avcC says Baseline (66), Main (77) or High profile (100). It
+codec is MJPEG, and the H.264 test every MP4 whose avcC says Baseline (66), Main (77), High (100) or High 4:2:2 profile (122). It
 compares timestamps from the first frame's, because framemd5 moves them to start at 0 (`h264-delayed` starts at
 0.4 s). The other MP4 (`mpeg4-bframes`, MPEG-4 Part 2) only feeds the demuxer tests, so its `.framemd5` is unused.
 

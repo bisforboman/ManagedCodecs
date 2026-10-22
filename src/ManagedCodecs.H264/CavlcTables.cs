@@ -107,6 +107,20 @@ internal static class CavlcTables
         "0000 10", "0000 0011", "0000 0010", "0000 000", // TotalCoeff 4
     ];
 
+    /// <summary>coeff_token for chroma DC in 4:2:2 (nC = -2).</summary>
+    public static readonly string[] CoeffTokenChromaDc422 =
+    [
+        "1", "", "", "", // TotalCoeff 0
+        "0001 111", "01", "", "", // TotalCoeff 1
+        "0001 110", "0001 101", "001", "", // TotalCoeff 2
+        "0000 0011 1", "0001 100", "0001 011", "0000 1", // TotalCoeff 3
+        "0000 0011 0", "0000 0010 1", "0001 010", "0000 01", // TotalCoeff 4
+        "0000 0001 11", "0000 0001 10", "0000 0010 0", "0001 001", // TotalCoeff 5
+        "0000 0000 111", "0000 0000 110", "0000 0001 01", "0001 000", // TotalCoeff 6
+        "0000 0000 0111", "0000 0000 0110", "0000 0000 101", "0000 0001 00", // TotalCoeff 7
+        "0000 0000 0011 1", "0000 0000 0101", "0000 0000 0100", "0000 0000 100", // TotalCoeff 8
+    ];
+
     /// <summary>total_zeros by TotalCoeff, indexed by total_zeros (Tables 9-7, 9-8).</summary>
     public static readonly string[][] TotalZeros4x4 =
     [
@@ -135,6 +149,19 @@ internal static class CavlcTables
         ["1", "01", "001", "000"], // TotalCoeff 1
         ["1", "01", "00"], // TotalCoeff 2
         ["1", "0"], // TotalCoeff 3
+    ];
+
+    /// <summary>total_zeros for 4:2:2 chroma DC by TotalCoeff (Table 9-9b).</summary>
+    public static readonly string[][] TotalZerosChromaDc422 =
+    [
+        [], // TotalCoeff 0 has no total_zeros
+        ["1", "010", "011", "0010", "0011", "0001", "0000 1", "0000 0"], // TotalCoeff 1
+        ["000", "01", "001", "100", "101", "110", "111"], // TotalCoeff 2
+        ["000", "001", "01", "10", "110", "111"], // TotalCoeff 3
+        ["110", "00", "01", "10", "111"], // TotalCoeff 4
+        ["00", "01", "10", "11"], // TotalCoeff 5
+        ["00", "01", "1"], // TotalCoeff 6
+        ["0", "1"], // TotalCoeff 7
     ];
 
     /// <summary>run_before by zerosLeft (1..6, then 7 for "more than 6"), indexed by run_before (Table 9-10).</summary>

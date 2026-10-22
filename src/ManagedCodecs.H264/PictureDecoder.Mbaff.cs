@@ -92,15 +92,15 @@ internal sealed partial class PictureDecoder
         int stride = Picture.ChromaStride;
         if (!_pairSlots)
         {
-            return (((mbAddr / _widthInMbs) * 8 * stride) + ((mbAddr % _widthInMbs) * 8), stride);
+            return (((mbAddr / _widthInMbs) * _mbHeightC * stride) + ((mbAddr % _widthInMbs) * 8), stride);
         }
 
         int pair = mbAddr >> 1;
-        int row = (pair / _widthInMbs) * 16;
+        int row = (pair / _widthInMbs) * 2 * _mbHeightC;
         int bottom = mbAddr & 1;
         return _fieldMb[mbAddr]
             ? (((row + bottom) * stride) + ((pair % _widthInMbs) * 8), stride * 2)
-            : (((row + (bottom * 8)) * stride) + ((pair % _widthInMbs) * 8), stride);
+            : (((row + (bottom * _mbHeightC)) * stride) + ((pair % _widthInMbs) * 8), stride);
     }
 
     private MbTarget PictureTarget(int mbAddr)
@@ -123,7 +123,7 @@ internal sealed partial class PictureDecoder
             return AffNeighbor(mbAddr, xN, yN, maxW, maxH);
         }
 
-        int n = NeighborMb(mbAddr, xN, yN, maxW);
+        int n = NeighborMb(mbAddr, xN, yN, maxW, maxH);
         return (n, (xN + maxW) % maxW, (yN + maxH) % maxH);
     }
 
@@ -273,7 +273,7 @@ internal sealed partial class PictureDecoder
         if (!_mbaff || !slice.Pps.ConstrainedIntraPred)
         {
             _leftRows = left ? 0xFFFF : 0;
-            _leftChromaRows = left ? 0xFF : 0;
+            _leftChromaRows = left ? 0xFFFF : 0;
             return;
         }
 

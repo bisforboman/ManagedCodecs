@@ -150,13 +150,13 @@ internal static partial class InterPrediction
     public static void PredictChroma(Picture reference, int component, int x, int y, int width, int height, int mvX, int mvY, Span<byte> output, int outputStride)
     {
         int stride = reference.ChromaStride;
-        int maxY = (reference.HeightInMbs * 8) - 1;
+        int maxY = (reference.HeightInMbs * reference.MbHeightC) - 1;
         ReadOnlySpan<byte> plane = reference.Plane(component);
         if (reference.Parity >= 0)
         {
             plane = plane[(reference.Parity * stride)..];
             stride *= 2;
-            maxY = (reference.HeightInMbs * 4) - 1;
+            maxY = (reference.HeightInMbs * reference.MbHeightC / 2) - 1;
         }
 
         int xFrac = mvX & 7;
@@ -171,7 +171,7 @@ internal static partial class InterPrediction
 
         // As for luma: read the reference directly when the (width + 1) x (height + 1) area is
         // inside it with room for 16-byte loads, else a clamped copy.
-        Span<byte> copy = stackalloc byte[(9 * 9) + 32];
+        Span<byte> copy = stackalloc byte[(9 * 17) + 32]; // up to 8x16 (4:2:2)
         ReadOnlySpan<byte> window = copy;
         int windowStride = 9;
         int origin = 0;

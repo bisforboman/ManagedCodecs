@@ -11,7 +11,7 @@ then the same approach for H.264 + AAC in MP4.
 | `src/ManagedCodecs.Core` | `VideoFrame`, `PixelFormat`, `Packet`, `Rational`, `IDemuxer`, `IVideoDecoder` |
 | `src/ManagedCodecs.Containers` | `AviDemuxer`, `Mp4Demuxer`, and `Demuxer.Open` to pick one by content |
 | `src/ManagedCodecs.Mjpeg` | `MjpegDecoder`: baseline/extended Huffman JPEG, interlaced AVI1, bit-exact with FFmpeg |
-| `src/ManagedCodecs.H264` | `H264Decoder`: Constrained Baseline, Main and High profile H.264 (CAVLC, CABAC, I/P/B, weighted prediction, 8x8 transform, scaling matrices, deblocking), bit-exact |
+| `src/ManagedCodecs.H264` | `H264Decoder`: Constrained Baseline, Main, High and High 4:2:2 profile H.264 (CAVLC, CABAC, I/P/B, weighted prediction, 8x8 transform, scaling matrices, deblocking, interlaced 4:2:0, progressive 4:2:2), bit-exact |
 | `src/ManagedCodecs.Aac` | `AacDecoder`: AAC LC (mono to 7.1, M/S, intensity, PNS, TNS), within 3e-7 of FFmpeg's float output |
 | `src/Shared` | Source files linked into several codec projects (the VLC decoder) |
 | `tools/ManagedCodecs.Cli` | `mcdec`: decodes a file and times it, to compare with `ffmpeg -benchmark` |
@@ -175,13 +175,20 @@ what the two commands above include and are not comparable with FFmpeg's `bench:
    Direct prediction without direct_8x8_inference_flag, which libx264 never writes, is checked
    on two libx264 B streams with the flag cleared in their SPS (Main profile, where it changes
    only how direct motion is derived, and FFmpeg decodes the same rewritten stream).
+   High 4:2:2 (8-bit, progressive) is checked on libx264's 4:2:2 output: 8x16 chroma blocks
+   with the 2x4 chroma DC transform (at QP_C + 3), CAVLC's and CABAC's chroma DC coding of 8
+   levels, chroma intra prediction over 16 rows, chroma motion with quarter-sample vertical
+   vectors and the chroma deblocking edges of 4:2:2 (including those that 8x8 luma transforms
+   skip), with CAVLC and CABAC, the 4x4 and 8x8 transforms, P and B frames, weights, constrained
+   intra prediction and cropping; I_PCM in 4:2:2 from hand-built streams.
    Produced by neither, so not checked against FFmpeg: I_PCM (decoded from hand-built streams,
    CAVLC and CABAC), memory management operations 2, 3 and 5 (unit tests),
    B sub-macroblock partitions smaller than 8x8, explicit weights for bi-predicted blocks (libx264 weights B frames
    implicitly), cabac_init_idc 1 and 2 (only their tables are checked, against libavc), a Cr QP
    offset other than Cb's (second_chroma_qp_index_offset), and of scaling matrices: lists in the
    SPS, fall-back rule B, useDefaultScalingMatrixFlag and a Cr list of its own (unit tests decode
-   samples with rewritten parameter sets). Still open: 4:2:2 and 4:4:4, more than 8 bits,
+   samples with rewritten parameter sets). Still open: interlaced 4:2:2 (MBAFF and field
+   pictures, rejected for now), 4:4:4, more than 8 bits,
    error concealment, more speed (about 3 to 3.5x FFmpeg's time at 720p, with
    libx264's default High output too; 2x on high-bitrate intra content)
 5. ~~AAC-LC decoder~~ done: channel configurations 1 to 7 and program config elements (1 to 8

@@ -1,15 +1,14 @@
 namespace ManagedCodecs.H264;
 
 /// <summary>
-/// H.264 decoder for Constrained Baseline, Main and High profile streams (CAVLC or CABAC; I, P and B
-/// slices; 4:2:0, 8-bit, progressive), taking MP4-style samples: length-prefixed NAL units, one
-/// picture per sample.
+/// H.264 decoder for Constrained Baseline, Main, High and High 4:2:2 profile streams (CAVLC or
+/// CABAC; I, P and B slices; 8-bit; 4:2:0 progressive or interlaced (MBAFF frames, field pictures),
+/// and progressive 4:2:2), taking MP4-style samples: length-prefixed NAL units, one picture per sample.
 /// </summary>
 /// <remarks>
 /// Implemented from ITU-T H.264; output is bit-exact with any conforming decoder. Streams that
-/// use other features (interlacing, FMO, other chroma formats
-/// or bit depths) are rejected with
-/// <see cref="NotSupportedException"/>. Frames come out in display order (picture order
+/// use other features (FMO, data partitioning, 4:4:4 or monochrome, more than 8 bits, interlaced
+/// 4:2:2) are rejected with <see cref="NotSupportedException"/>. Frames come out in display order (picture order
 /// count, 8.2.1), held back as far as the stream's max_num_reorder_frames says reordering can
 /// reach; <see cref="Flush"/> returns the rest at the end.
 /// </remarks>
@@ -257,7 +256,7 @@ public sealed class H264Decoder : IVideoDecoder
             InferGapFrames(header, sps);
         }
 
-        if (_decoder is null || _decoder.Sps.WidthInMbs != sps.WidthInMbs || _decoder.Sps.HeightInMbs != sps.HeightInMbs)
+        if (_decoder is null || _decoder.Sps.WidthInMbs != sps.WidthInMbs || _decoder.Sps.HeightInMbs != sps.HeightInMbs || _decoder.Sps.MbHeightC != sps.MbHeightC)
         {
             _decoder = new PictureDecoder(sps) { Statistics = MbaffStatistics, FieldStatistics = FieldStatistics };
         }
@@ -327,11 +326,12 @@ public sealed class H264Decoder : IVideoDecoder
     {
         // A picture whose frame was returned by the previous call may be reused: borrowed frames
         // are valid until the next call. One waiting in the output queue may not.
-        _pictures.RemoveAll(p => (p.WidthInMbs != sps.WidthInMbs || p.HeightInMbs != sps.HeightInMbs) && !_references.Contains(p) && !_output.Holds(p));
-        var picture = _pictures.Find(p => p.WidthInMbs == sps.WidthInMbs && p.HeightInMbs == sps.HeightInMbs && !_references.Contains(p) && !_output.Holds(p));
+        bool Fits(Picture p) => p.WidthInMbs == sps.WidthInMbs && p.HeightInMbs == sps.HeightInMbs && p.MbHeightC == sps.MbHeightC;
+        _pictures.RemoveAll(p => !Fits(p) && !_references.Contains(p) && !_output.Holds(p));
+        var picture = _pictures.Find(p => Fits(p) && !_references.Contains(p) && !_output.Holds(p));
         if (picture is null)
         {
-            picture = new Picture(sps.WidthInMbs, sps.HeightInMbs);
+            picture = new Picture(sps.WidthInMbs, sps.HeightInMbs, sps.MbHeightC);
             _pictures.Add(picture);
         }
 
@@ -379,17 +379,19 @@ public sealed class H264Decoder : IVideoDecoder
     /// <summary>Copies the visible area (frame cropping, 7.4.2.1.1) into a new frame.</summary>
     private static VideoFrame Crop(Picture picture, SequenceParameterSet sps)
     {
-        var frame = new VideoFrame(sps.Width, sps.Height, PixelFormat.Yuv420P);
+        var format = FormatOf(picture);
+        var frame = new VideoFrame(sps.Width, sps.Height, format);
         var (left, _, top, _) = sps.Crop;
         for (int plane = 0; plane < 3; plane++)
         {
-            int shift = plane == 0 ? 0 : 1;
+            int shiftX = plane == 0 ? 0 : 1;
+            int shiftY = plane == 0 || picture.MbHeightC == 16 ? 0 : 1;
             int stride = plane == 0 ? picture.LumaStride : picture.ChromaStride;
-            var (width, height) = PixelFormat.Yuv420P.PlaneSize(plane, sps.Width, sps.Height);
+            var (width, height) = format.PlaneSize(plane, sps.Width, sps.Height);
             byte[] source = picture.Plane(plane);
             for (int y = 0; y < height; y++)
             {
-                source.AsSpan((((top >> shift) + y) * stride) + (left >> shift), width).CopyTo(frame.GetRow(plane, y));
+                source.AsSpan((((top >> shiftY) + y) * stride) + (left >> shiftX), width).CopyTo(frame.GetRow(plane, y));
             }
         }
 
@@ -400,24 +402,31 @@ public sealed class H264Decoder : IVideoDecoder
     private static VideoFrame Borrow(Picture picture, SequenceParameterSet sps)
     {
         var (left, _, top, _) = sps.Crop;
-        int chromaOffset = ((top >> 1) * picture.ChromaStride) + (left >> 1);
+        int chromaOffset = ((picture.MbHeightC == 16 ? top : top >> 1) * picture.ChromaStride) + (left >> 1);
         return new VideoFrame(
             sps.Width,
             sps.Height,
-            PixelFormat.Yuv420P,
+            FormatOf(picture),
             [picture.Y, picture.Cb, picture.Cr],
             [picture.LumaStride, picture.ChromaStride, picture.ChromaStride],
             [(top * picture.LumaStride) + left, chromaOffset, chromaOffset]);
     }
+
+    private static PixelFormat FormatOf(Picture picture) => picture.MbHeightC == 16 ? PixelFormat.Yuv422P : PixelFormat.Yuv420P;
 
     /// <summary>The picture being decoded: its first slice header, its SPS, its decoder and its order count.</summary>
     private sealed record PictureState(SliceHeader Header, SequenceParameterSet Sps, PictureDecoder Decoder, int Poc, bool SecondField = false);
 
     private static void CheckSupported(SequenceParameterSet sps)
     {
-        if (sps.ChromaFormatIdc != 1)
+        if (sps.ChromaFormatIdc is not (1 or 2))
         {
-            throw new NotSupportedException($"chroma_format_idc {sps.ChromaFormatIdc} is not supported (4:2:0 only).");
+            throw new NotSupportedException($"chroma_format_idc {sps.ChromaFormatIdc} is not supported (4:2:0 and 4:2:2 only).");
+        }
+
+        if (sps.ChromaFormatIdc == 2 && !sps.FrameMbsOnly)
+        {
+            throw new NotSupportedException("Interlaced 4:2:2 (frame_mbs_only_flag 0) is not supported.");
         }
 
         if (sps.BitDepthLuma != 8 || sps.BitDepthChroma != 8)

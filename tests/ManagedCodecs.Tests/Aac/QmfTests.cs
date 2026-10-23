@@ -83,6 +83,46 @@ public class QmfTests
         }
     }
 
+    /// <summary>The FFT-based banks give the spec's sums (<see cref="QmfAnalysisReference"/>, <see cref="QmfSynthesisReference"/>) on random input, slot after slot.</summary>
+    [Fact]
+    public void FastBanks_MatchTheSums()
+    {
+        var random = new Random(11);
+        var (analysis, analysisReference) = (new QmfAnalysis(), new QmfAnalysisReference());
+        var (synthesis, synthesisReference) = (new QmfSynthesis(), new QmfSynthesisReference());
+        var input = new double[32];
+        var (real, imaginary, realReference, imaginaryReference) = (new double[64], new double[64], new double[64], new double[64]);
+        var (output, outputReference) = (new double[64], new double[64]);
+        for (int slot = 0; slot < 50; slot++)
+        {
+            for (int n = 0; n < 32; n++)
+            {
+                input[n] = (random.NextDouble() - 0.5) * 65536;
+            }
+
+            analysis.Process(input, real, imaginary);
+            analysisReference.Process(input, realReference, imaginaryReference);
+            for (int k = 0; k < 32; k++)
+            {
+                Assert.Equal(realReference[k], real[k], 1e-6);
+                Assert.Equal(imaginaryReference[k], imaginary[k], 1e-6);
+            }
+
+            for (int k = 0; k < 64; k++)
+            {
+                real[k] = (random.NextDouble() - 0.5) * 65536;
+                imaginary[k] = (random.NextDouble() - 0.5) * 65536;
+            }
+
+            synthesis.Process(real, imaginary, output);
+            synthesisReference.Process(real, imaginary, outputReference);
+            for (int n = 0; n < 64; n++)
+            {
+                Assert.Equal(outputReference[n], output[n], 1e-6);
+            }
+        }
+    }
+
     private static double[] RoundTrip(Func<double, double> signal)
     {
         var analysis = new QmfAnalysis();

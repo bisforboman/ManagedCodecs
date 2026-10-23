@@ -365,6 +365,12 @@ public sealed class MjpegDecoder : IVideoDecoder
 
     private readonly record struct ScanComponent(int FrameIndex, HuffmanTable Dc, HuffmanTable Ac, ushort[] Quantization);
 
+    /// <summary>
+    /// The largest image decoded, in samples of a plane (16384 x 4096, or 8192 x 8192): JPEG allows 65535 x 65535,
+    /// whose buffers (up to 12 GB) a stream can ask for in a few bytes. Larger images are not supported.
+    /// </summary>
+    private const long MaxSamples = 1 << 26;
+
     /// <summary>Per-frame decode target: one MCU-aligned sample buffer per component.</summary>
     private sealed class FrameState
     {
@@ -386,6 +392,10 @@ public sealed class MjpegDecoder : IVideoDecoder
 
             McusX = DivUp(header.Width, 8 * MaxH);
             McusY = DivUp(header.Height, 8 * MaxV);
+            if ((long)McusX * MaxH * 8 * McusY * MaxV * 8 > MaxSamples)
+            {
+                throw new NotSupportedException($"Images over {MaxSamples} samples ({header.Width} x {header.Height}) are not supported.");
+            }
 
             int count = header.Components.Count;
             Buffers = new byte[count][];

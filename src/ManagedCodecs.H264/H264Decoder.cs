@@ -3,14 +3,15 @@ using System.Runtime.InteropServices;
 namespace ManagedCodecs.H264;
 
 /// <summary>
-/// H.264 decoder for Constrained Baseline, Main, High, High 10 and High 4:2:2 profile streams (CAVLC
-/// or CABAC; I, P and B slices; 8 or 10 bits; 4:2:0 or 4:2:2, progressive or interlaced (MBAFF
-/// frames, field pictures)), taking MP4-style samples: length-prefixed NAL units, one picture per sample.
+/// H.264 decoder for Constrained Baseline, Main, High, High 10, High 4:2:2 and High 4:4:4 Predictive profile streams
+/// (CAVLC or CABAC; I, P and B slices; 8, 9, 10, 12 or 14 bits; monochrome, 4:2:0, 4:2:2 or 4:4:4; lossless;
+/// progressive or interlaced (MBAFF frames, field pictures)), taking MP4-style samples: length-prefixed NAL units, one
+/// picture per sample. It can decode several pictures at once (<see cref="Threads"/>).
 /// </summary>
 /// <remarks>
-/// Implemented from ITU-T H.264; output is bit-exact with any conforming decoder. Streams that
-/// use other features (FMO, data partitioning, 4:4:4 or monochrome, bit depths other than 8 and
-/// 10 or differing between luma and chroma) are rejected with <see cref="NotSupportedException"/>. Frames come out in display order (picture order
+/// Implemented from ITU-T H.264; output is bit-exact with any conforming decoder. Streams that use other features
+/// (slice groups (FMO), data partitioning, separate colour planes, 11 or 13 bits, luma and chroma bit depths that
+/// differ) are rejected with <see cref="NotSupportedException"/>. Frames come out in display order (picture order
 /// count, 8.2.1), held back as far as the stream's max_num_reorder_frames says reordering can
 /// reach; <see cref="Flush"/> returns the rest at the end.
 /// </remarks>

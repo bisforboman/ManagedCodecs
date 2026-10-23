@@ -1,8 +1,9 @@
 # ManagedCodecs
 
-Pure managed C# media codecs: no native binaries, Native AOT friendly.
-The first goal is a baseline MJPEG decoder whose output is **bit-exact** with FFmpeg,
-then the same approach for H.264 + AAC in MP4.
+Pure managed C# media codecs: no native binaries, Native AOT friendly, and running on WebAssembly too. Decoders for
+MJPEG, H.264 (Constrained Baseline up to High 4:4:4 Predictive) and AAC LC, with AVI and MP4 demuxing, every one
+checked against FFmpeg sample by sample: video **bit-exact**, AAC within 2^-17 of FFmpeg's float output. H.264 decodes
+on several threads if asked, and every decoder has an async API.
 
 ## Layout
 
@@ -373,8 +374,11 @@ what the two commands above include and are not comparable with FFmpeg's `bench:
    bS are all 0, which a whole-macroblock transpose would not). Frames are now deblocked a macroblock row behind
    decoding (no measurable change in time, so cache locality matters little with a large L2), so that a reference's
    upper rows become final while the rest is still being decoded: frame threading (`Threads`, under Decoding a file)
-   builds on it. Still open there: MBAFF frames and field pictures report their progress only when done (a picture
-   predicting from one waits for all of it), and P pictures in a chain keep 4 threads busy 2.4 cores' worth. Output frames given back with `Dispose` are pooled
+   builds on it. MBAFF frames and field pictures are deblocked and report their progress by pair rows (32 frame rows)
+   the same way, a field picture's per field: with 4 threads, libx264's MBAFF samples decode 1.8 to 2.2 times as fast
+   as with one (1.3 to 1.4 before). Still open there: a second field waits for its first to finish (they share a
+   decoder), so field-picture streams gain little (JM's 10-frame samples lose), and P pictures in a chain keep 4
+   threads busy 2.4 cores' worth. Output frames given back with `Dispose` are pooled
    (gen2 collections over 5 loops of `h264-bench-720p.mp4`: 33 down to 3). Vector 4x4 and 8x8 inverse transforms
    (#42) were reverted: callgrind counted 1.4% more instructions per loop of `h264-bench-720p.mp4` with them and 0.9%
    more on `h264-high-b.mp4`, and 24 interleaved runs of the builds before and after showed no difference; the 9 and

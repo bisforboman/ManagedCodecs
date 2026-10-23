@@ -454,12 +454,13 @@ internal sealed partial class PictureDecoder<TPixel>
     }
 
     /// <summary>
-    /// The deblocking filter of an MBAFF frame (8.7), macroblock by macroblock in address order,
-    /// sample line by sample line across macroblock edges, where the two sides may differ in
-    /// field/frame mode and so each line can meet another macroblock and another bS.
+    /// The deblocking filter of the pair rows from <paramref name="firstRow"/> up to <paramref name="endRow"/> of an
+    /// MBAFF frame or a field picture (8.7), macroblock by macroblock in address order, sample line by sample line
+    /// across macroblock edges, where the two sides may differ in field/frame mode and so each line can meet another
+    /// macroblock and another bS.
     /// </summary>
     [SkipLocalsInit]
-    private void DeblockMbaff()
+    private void DeblockMbaff(int firstRow, int endRow)
     {
         Span<byte> vertical = stackalloc byte[16];
         Span<byte> horizontal = stackalloc byte[16];
@@ -471,7 +472,7 @@ internal sealed partial class PictureDecoder<TPixel>
         // A field picture filters its own macroblocks only (the other field is another picture).
         int first = Math.Max(_fieldParity, 0);
         int step = _fieldParity >= 0 ? 2 : 1;
-        for (int mbAddr = first; mbAddr < _mbCount; mbAddr += step)
+        for (int mbAddr = (firstRow * 2 * _widthInMbs) + first; mbAddr < endRow * 2 * _widthInMbs; mbAddr += step)
         {
             var slice = _slices[_sliceOfMb[mbAddr]];
             if (slice.DisableDeblockingFilterIdc == 1)

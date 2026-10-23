@@ -12,7 +12,7 @@ namespace ManagedCodecs.Tests.H264;
 public class H264SliceOrderTests
 {
     public static TheoryData<string> Samples() =>
-        new(new[] { "h264-slices.mp4", "h264-main-slices.mp4", "oh-slices-num.mp4" }.Where(ParameterSetRewriter.Exists));
+        new(new[] { "h264-slices.mp4", "h264-main-slices.mp4", "oh-slices-num.mp4", "h264-mbaff-intra-slices.mp4", "h264-mbaff-p-slices.mp4", "h264-mbaff-b-slices-temporal.mp4", "h264-422-mbaff-slices.mp4" }.Where(ParameterSetRewriter.Exists));
 
     [Theory]
     [MemberData(nameof(Samples))]

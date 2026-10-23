@@ -94,6 +94,11 @@ encode-b paff-b-noisy -p InputFile=noisy.yuv -p PicInterlace=2 -p NumberBFrames=
 encode paff-422 -p InputFile=src422.yuv -p YUVFormat=2 -p ProfileIDC=122 -p PicInterlace=1
 encode-b paff-422-b-adaptive -p InputFile=noisy422.yuv -p YUVFormat=2 -p ProfileIDC=122 -p PicInterlace=2 -p NumberBFrames=1 \
   -p IntraPeriod=4 -p SymbolMode=0
+# MBAFF frames (MbInterlace=1: every macroblock pair a field pair; JM refuses the adaptive 2 with PicInterlace=2) next
+# to field pictures, with B pictures: references and co-located pictures of both kinds. JM supports neither its
+# reference reordering nor its POC-based memory management with MBAFF.
+encode-b paff-mbaff -p InputFile=noisy.yuv -p PicInterlace=2 -p MbInterlace=1 -p ReferenceReorder=0 \
+  -p PocMemoryManagement=0 -p NumberBFrames=1 -p IntraPeriod=4
 # 4:0:0 (High; 8 bits, where JM's chroma depth matches luma's): field pairs, and frames switching between frame and
 # field coding with B pictures and CAVLC. Their references are taken as gray (make-samples.sh, by the name).
 encode paff-gray -p InputFile=srcgray.yuv -p YUVFormat=0 -p ProfileIDC=100 -p PicInterlace=1

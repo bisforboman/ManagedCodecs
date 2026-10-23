@@ -88,6 +88,9 @@ public class H264ConformanceTests
             var fields = decoder.FieldStatistics;
             Assert.True(fields.SecondFields > 0 && fields.FromOwnFirstField > 0, $"{fields.SecondFields} field pairs, {fields.FromOwnFirstField} partitions predicted from their own first field.");
             Assert.True(!sampleName.Contains("adaptive", StringComparison.Ordinal) || fields.FramePictures > 0, "No frame pictures between the field pairs.");
+
+            // MBAFF frames between field pictures (JM codes every pair of them as a field pair).
+            Assert.True(!sampleName.Contains("paff-mbaff", StringComparison.Ordinal) || (fields.FramePictures > 0 && decoder.MbaffStatistics.FieldPairs > 0), $"{fields.FramePictures} frame pictures, {decoder.MbaffStatistics.FieldPairs} field macroblock pairs.");
             if (sampleName.Contains("paff-b", StringComparison.Ordinal))
             {
                 // B field pictures: direct prediction in fields, temporal where the sample says so (the CAVLC one is
@@ -101,8 +104,8 @@ public class H264ConformanceTests
             }
         }
 
-        // MBAFF samples must mix field and frame pairs every way they can meet.
-        if (sampleName.Contains("mbaff", StringComparison.Ordinal))
+        // MBAFF samples (libx264's) must mix field and frame pairs every way they can meet.
+        if (sampleName.Contains("mbaff", StringComparison.Ordinal) && !sampleName.Contains("paff", StringComparison.Ordinal))
         {
             var stats = decoder.MbaffStatistics;
             Assert.True(stats.FieldPairs > 0 && stats.FramePairs > 0, $"{stats.FieldPairs} field and {stats.FramePairs} frame pairs.");

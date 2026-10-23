@@ -222,7 +222,7 @@ what the two commands above include and are not comparable with FFmpeg's `bench:
    ones for deblocking), each checked against its reference on random 10-bit input.
    9, 12 and 14 bits (High 10 and High 4:4:4 Predictive) are checked on JM's output (libx264 writes
    only 8 and 10): P and B frames with the 8x8 transform, explicit weights in P and B at 12 bits
-   (bi-predicted blocks too, though JM's B offsets are all 0), CAVLC at 12 and 14 bits, 4:2:2 at
+   (bi-predicted blocks too), CAVLC at 12 and 14 bits, 4:2:2 at
    12 and 4:4:4 at 14, at QPs down to -6 (CAVLC's level_prefix up to 15); I_PCM from hand-built streams, and CAVLC's level_prefix of 16 and more (which only levels
    past about 2048 need, and which JM never writes: it codes such macroblocks as I_PCM) from unit
    tests. Frames come out as `Yuv420P9`, `Yuv422P12`, `Gray14` and the like (FFmpeg's yuv420p9le

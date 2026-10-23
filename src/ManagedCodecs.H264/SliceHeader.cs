@@ -178,7 +178,7 @@ internal sealed class SliceHeader
 
             if ((type == SliceType.P && pps.WeightedPred) || (type == SliceType.B && pps.WeightedBipredIdc == 1))
             {
-                weights = PredWeightTable.Parse(r, type == SliceType.B ? 2 : 1, numRefIdxL0, numRefIdxL1);
+                weights = PredWeightTable.Parse(r, type == SliceType.B ? 2 : 1, numRefIdxL0, numRefIdxL1, chroma: sps.ChromaArrayType != 0);
             }
         }
 
@@ -316,10 +316,11 @@ internal sealed class PredWeightTable
 
     public int Offset(int list, int refIdx, int component) => _offsets[list][(refIdx * 3) + component];
 
-    public static PredWeightTable Parse(BitReader r, int lists, int numRefIdxL0, int numRefIdxL1)
+    /// <param name="chroma">Whether the table has chroma weights: not in monochrome (ChromaArrayType 0), whose chroma ones stay at the default.</param>
+    public static PredWeightTable Parse(BitReader r, int lists, int numRefIdxL0, int numRefIdxL1, bool chroma = true)
     {
         int lumaDenom = r.ReadUe(7, "luma_log2_weight_denom");
-        int chromaDenom = r.ReadUe(7, "chroma_log2_weight_denom");
+        int chromaDenom = chroma ? r.ReadUe(7, "chroma_log2_weight_denom") : 0;
         var weights = new int[2][];
         var offsets = new int[2][];
         for (int list = 0; list < 2; list++)
@@ -344,7 +345,7 @@ internal sealed class PredWeightTable
                     offsets[list][i * 3] = ReadWeight(r, "luma_offset");
                 }
 
-                if (r.ReadFlag())
+                if (chroma && r.ReadFlag())
                 {
                     // chroma_weight_lX_flag
                     for (int j = 1; j <= 2; j++)

@@ -403,8 +403,12 @@ internal sealed partial class PictureDecoder<TPixel>
 
         // 4:4:4 chroma takes the luma intra modes, which read row -1 up to x = 23 too.
         int topWidth = _chroma444 ? 24 : 8;
-        GatherPlane(mbAddr, PlaneCb, _scratchCb, ScratchChromaStride, _mbWidthC, _mbHeightC, topWidth);
-        GatherPlane(mbAddr, PlaneCr, _scratchCr, ScratchChromaStride, _mbWidthC, _mbHeightC, topWidth);
+        if (!_monochrome)
+        {
+            GatherPlane(mbAddr, PlaneCb, _scratchCb, ScratchChromaStride, _mbWidthC, _mbHeightC, topWidth);
+            GatherPlane(mbAddr, PlaneCr, _scratchCr, ScratchChromaStride, _mbWidthC, _mbHeightC, topWidth);
+        }
+
         return new MbTarget(_scratchY, ScratchLumaStride + 1, ScratchLumaStride, _scratchCb, _scratchCr, ScratchChromaStride + 1, ScratchChromaStride);
     }
 
@@ -560,7 +564,7 @@ internal sealed partial class PictureDecoder<TPixel>
                 }
             }
 
-            if (_chroma444)
+            if (_chroma444 || _monochrome)
             {
                 continue;
             }

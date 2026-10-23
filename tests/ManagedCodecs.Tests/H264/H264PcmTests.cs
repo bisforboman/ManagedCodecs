@@ -17,6 +17,9 @@ namespace ManagedCodecs.Tests.H264;
 public class H264PcmTests
 {
     [Theory]
+    [InlineData(false, 0, 8)]
+    [InlineData(true, 0, 8)]
+    [InlineData(true, 0, 10)]
     [InlineData(false, 1, 8)]
     [InlineData(true, 1, 8)]
     [InlineData(false, 2, 8)]
@@ -41,6 +44,8 @@ public class H264PcmTests
         Assert.Equal((32, 16), (frame.Width, frame.Height));
         var expectedFormat = (chromaFormat, bitDepth) switch
         {
+            (0, 8) => PixelFormat.Gray8,
+            (0, _) => PixelFormat.Gray10,
             (3, 8) => PixelFormat.Yuv444P,
             (3, _) => PixelFormat.Yuv444P10,
             (2, 8) => PixelFormat.Yuv422P,
@@ -49,7 +54,8 @@ public class H264PcmTests
             _ => PixelFormat.Yuv420P10,
         };
         Assert.Equal(expectedFormat, frame.Format);
-        for (int plane = 0; plane < 3; plane++)
+        Assert.Equal(chromaFormat == 0 ? 1 : 3, frame.Planes.Length);
+        for (int plane = 0; plane < frame.Planes.Length; plane++)
         {
             int[] samples = bitDepth == 8
                 ? [.. frame.Planes[plane].Select(b => (int)b)]
@@ -61,7 +67,7 @@ public class H264PcmTests
     private static BitWriter Sps(int chromaFormat, int bitDepth)
     {
         var w = new BitWriter();
-        w.Bits(chromaFormat switch { 3 => 244, 2 => 122, _ => bitDepth > 8 ? 110 : 77 }, 8); // profile_idc: High 4:4:4 Predictive, High 4:2:2, High 10 or Main
+        w.Bits(chromaFormat switch { 3 => 244, 2 => 122, 0 when bitDepth == 8 => 100, _ => bitDepth > 8 ? 110 : 77 }, 8); // profile_idc: High 4:4:4 Predictive, High 4:2:2, High, High 10 or Main
         w.Bits(0, 8);  // constraint flags
         w.Bits(30, 8); // level_idc
         w.Ue(0);       // seq_parameter_set_id
@@ -74,7 +80,7 @@ public class H264PcmTests
             }
 
             w.Ue((uint)bitDepth - 8); // bit_depth_luma_minus8
-            w.Ue((uint)bitDepth - 8); // bit_depth_chroma_minus8
+            w.Ue(chromaFormat == 0 ? 10u - (uint)bitDepth : (uint)bitDepth - 8); // bit_depth_chroma_minus8: unused in 4:0:0, so set apart
             w.Bit(0); // qpprime_y_zero_transform_bypass_flag
             w.Bit(0); // seq_scaling_matrix_present_flag
         }
@@ -133,7 +139,7 @@ public class H264PcmTests
     private static void PcmSamples(BitWriter w, int chromaFormat, int bitDepth, int[] values)
     {
         w.AlignWith(0); // pcm_alignment_zero_bit
-        int chroma = chromaFormat switch { 3 => 256, 2 => 128, _ => 64 };
+        int chroma = chromaFormat switch { 0 => 0, 3 => 256, 2 => 128, _ => 64 };
         foreach (var (value, count) in new[] { (values[0], 256), (values[1], chroma), (values[2], chroma) })
         {
             for (int i = 0; i < count; i++)
@@ -149,7 +155,7 @@ public class H264PcmTests
         w.Ue(25); // mb_type I_PCM
         PcmSamples(w, chromaFormat, bitDepth, values);
         w.Ue(3);  // mb_type I_16x16_2_0_0: DC prediction, no coded blocks
-        if (chromaFormat != 3)
+        if (chromaFormat is 1 or 2)
         {
             w.Ue(0); // intra_chroma_pred_mode: DC
         }
@@ -188,7 +194,7 @@ public class H264PcmTests
         e.Decision(7, 0);
         e.Decision(9, 1);
         e.Decision(10, 0);
-        if (chromaFormat != 3)
+        if (chromaFormat is 1 or 2)
         {
             e.Decision(64, 0); // intra_chroma_pred_mode 0: I_PCM and missing neighbours both count 0
         }

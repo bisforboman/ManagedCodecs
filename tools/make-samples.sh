@@ -366,6 +366,26 @@ ff -f lavfi -i "$LM" -t 0.6 "${X[@]}" -pix_fmt yuv444p10le -bf 2 -refs 2 samples
 ff -f lavfi -i "$LL" -t 0.2 "${X[@]}" -pix_fmt yuv420p -g 1 -x264-params 8x8dct=0 samples/h264-lossless-4x4.mp4
 ff -f lavfi -i "testsrc2=size=320x240:rate=50,noise=alls=10:allf=t" -t 0.4 "${X[@]}" -pix_fmt yuv420p -vf "tinterlace=interleave_top,setfield=tff" -flags +ildct+ilme -bf 2 samples/h264-lossless-mbaff.mp4
 
+# ---- H.264 monochrome (4:0:0) ----
+# libx264's gray input gives chroma_format_idc 0 (High, High 10): no chroma planes, no intra_chroma_pred_mode, the
+# coded_block_pattern without a chroma part (Table 9-4's 4:0:0 column, CABAC's chroma bins absent), no chroma weights
+# in pred_weight_table. Intra with CABAC and CAVLC; B frames, CAVLC too; motion; fades with explicit weights in P
+# (weightp=2); odd size; 10 bits intra and with B frames; MBAFF; lossless. FFmpeg's decoder outputs gray as 4:2:0 with
+# flat chroma, so their references are taken with -pix_fmt gray or gray10le below (the same luma, checked).
+G=(-c:v libx264 -profile:v high -pix_fmt gray)
+ff -f lavfi -i testsrc2=size=320x240:rate=25 -t 0.2 "${G[@]}" -g 1 samples/h264-gray-intra.mp4
+ff -f lavfi -i testsrc2=size=320x240:rate=25 -t 0.2 "${G[@]}" -g 1 -x264-params cabac=0 samples/h264-gray-intra-cavlc.mp4
+ff -f lavfi -i "testsrc2=size=320x240:rate=25,scroll=h=0.01:v=0.005" -t 1 "${G[@]}" -bf 3 -refs 3 -x264-params partitions=all:direct=auto samples/h264-gray-b.mp4
+ff -f lavfi -i "testsrc2=size=320x240:rate=25,scroll=h=0.01:v=0.005" -t 1 "${G[@]}" -bf 3 -refs 3 -x264-params cabac=0:partitions=all:direct=auto samples/h264-gray-b-cavlc.mp4
+ff -f lavfi -i "testsrc2=size=320x240:rate=25,scroll=h=0.013:v=-0.021,noise=alls=12:allf=t" -t 2 "${G[@]}" -bf 3 -refs 3 -qp 22 -x264-params partitions=all:me=umh:merange=32 samples/h264-gray-motion.mp4
+ff -f lavfi -i "testsrc2=size=320x240:rate=25,fade=in:0:20,fade=out:30:20" -t 2 "${G[@]}" -refs 3 -x264-params weightp=2 samples/h264-gray-weighted.mp4
+ff -f lavfi -i "testsrc2=size=321x239:rate=25,scroll=v=0.02" -t 1 "${G[@]}" -bf 2 -refs 2 samples/h264-gray-odd-size.mp4
+ff -f lavfi -i testsrc2=size=320x240:rate=50 -t 1 "${G[@]}" -vf "tinterlace=interleave_top,setfield=tff" -flags +ildct+ilme -bf 3 -refs 3 samples/h264-gray-mbaff.mp4
+G10=(-c:v libx264 -profile:v high10 -pix_fmt gray10le)
+ff -f lavfi -i testsrc2=size=320x240:rate=25,noise=alls=40:allf=t -t 0.2 "${G10[@]}" -g 1 -qp 1 samples/h264-gray-10bit-intra-qp1.mp4
+ff -f lavfi -i "testsrc2=size=320x240:rate=25,fade=in:0:20" -t 1 "${G10[@]}" -bf 3 -refs 3 -x264-params partitions=all:direct=auto:weightp=2 samples/h264-gray-10bit-b.mp4
+ff -f lavfi -i "$LM" -t 0.6 "${X[@]}" -pix_fmt gray -bf 2 -refs 2 -x264-params partitions=all samples/h264-gray-lossless.mp4
+
 # ---- H.264 scaling matrices (High profile) ----
 # libx264 writes them in the PPS only, so absent lists fall back by rule A (Table 7-2). cqm=jvt sends no lists at all:
 # every list is the default one. The custom files give each list its own values (libx264 reads one chroma list per
@@ -437,6 +457,10 @@ cp samples/jm/*.mp4 samples/
 # packet, whole; not for aac-edit-trim, whose packets after the edit are not demuxed). name.trim.f32: decoded audio as
 # FFmpeg gives it by default, trimmed by the edit list.
 for f in samples/*.avi samples/*.mp4; do ff -i "$f" -f framemd5 "${f%.*}.framemd5"; done
+for f in samples/h264-gray-*.mp4; do
+  [[ $f == *10bit* ]] && pix=gray10le || pix=gray
+  ff -i "$f" -pix_fmt $pix -f framemd5 "${f%.*}.framemd5"
+done
 for f in samples/*.mp4; do
   ff -copyts -i "$f" -c copy -f framemd5 "${f%.mp4}.packets.framemd5"
   ffprobe -v error -select_streams v:0 -show_packets -show_entries packet=flags -of csv=p=0 "$f" > "${f%.mp4}.packets.flags"

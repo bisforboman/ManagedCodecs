@@ -119,7 +119,7 @@ internal sealed partial class PictureDecoder<TPixel>
                 continue;
             }
 
-            if (_mbHeightC == 16)
+            if (_mbHeightC == 16 || _monochrome)
             {
                 continue;
             }

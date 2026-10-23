@@ -148,7 +148,7 @@ weigh paff-mbaff-wp paff-mbaff explicit
 # ---- Bit depths 9, 12 and 14 (libx264 writes only 8 and 10), and 8 bits for what libx264 never writes ----
 # Progressive frames (176x144, 10 of them) of a moving noisy test pattern, at each depth and chroma format the
 # sample needs (noise=N sets the noise). deep name bits yuvformat [lencod options]: High 10 for 9 bits, High 4:4:4 Predictive above 10 (no
-# other profile allows them), 8x8 transforms, B pictures, CABAC, QP 16 so the levels get large.
+# other profile allows them; High for 8 bits), 8x8 transforms, B pictures, CABAC, QP 16 so the levels get large.
 deep() {
   local name=$1 bits=$2 yuv=$3; shift 3
   wanted "$name" || return 0
@@ -176,7 +176,7 @@ deep 14bit-444 14 3                               # 4:4:4
 
 # ---- 8 bits, through deep: what libx264 never writes ----
 # I_PCM: on heavy noise JM codes macroblocks as I_PCM below about QP 16, all of them below about QP 12; at QP 14 (CAVLC)
-# and 15 (CABAC) about half, next to intra and inter ones in I, P and B pictures.
+# and 15 (CABAC) about half of the P pictures' macroblocks, next to intra and inter ones (few in I pictures, none in B).
 noise=60 deep pcm-cavlc 8 1 -p SymbolMode=0 -p QPISlice=14 -p QPPSlice=14 -p QPBSlice=16
 noise=60 deep pcm 8 1 -p QPISlice=15 -p QPPSlice=15 -p QPBSlice=17
 # cabac_init_idc 1 and 2 throughout (JM's adaptive choice, in the samples above, takes 1 and 2 in some slices).

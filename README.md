@@ -258,11 +258,13 @@ what the two commands above include and are not comparable with FFmpeg's `bench:
    (PAFF) in 4:0:0, alone and mixed with frame pictures, with B pictures and CAVLC; I_PCM from
    hand-built streams. FFmpeg's decoder outputs such streams as 4:2:0 with flat chroma, so the
    references take its Y plane alone (`-vf extractplanes=y`, which leaves the samples as they are).
-   Produced by neither but by JM, so checked against FFmpeg on its streams: I_PCM next to coded
-   macroblocks in I, P and B pictures, with CAVLC and CABAC (also decoded from hand-built
-   streams; JM writes it on heavy noise below about QP 16, where the deblocking filter's alpha is
-   0, so I_PCM's QP 0 in the filter is not reached), cabac_init_idc 1 and 2, and a Cr QP offset
-   other than Cb's (second_chroma_qp_index_offset) in 4:2:0, 4:2:2 and 4:4:4.
+   Produced by neither libx264 nor OpenH264, but by JM, so checked against FFmpeg on its streams:
+   I_PCM next to coded macroblocks in I and P pictures, with CAVLC and CABAC (also decoded from
+   hand-built streams), cabac_init_idc 1 and 2 (JM's adaptive choice takes them in most of its
+   streams; two samples fix each), and a Cr QP offset other than Cb's
+   (second_chroma_qp_index_offset) in 4:2:0, 4:2:2 and 4:4:4. I_PCM's QP 0 in the deblocking filter
+   is not reached: an edge next to it averages 0 with the neighbour's QP, below indexA 16 (alpha 0)
+   for any neighbour under QP 32, and JM writes I_PCM only below about QP 16.
    Produced by none of them, so not checked against FFmpeg: memory management operations 2, 3
    and 5 (unit tests), B sub-macroblock partitions smaller than 8x8, and of scaling matrices: lists in the
    SPS, fall-back rule B, useDefaultScalingMatrixFlag and a Cr list of its own (unit tests decode

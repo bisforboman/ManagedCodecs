@@ -20,18 +20,21 @@ public static class Targets
     /// </summary>
     public static readonly string[] Names = ["file", "h264", "mjpeg", "aac"];
 
-    /// <summary>Runs <paramref name="target"/> on <paramref name="data"/>; true if the input was accepted.</summary>
-    public static bool Run(string target, ReadOnlySpan<byte> data)
+    /// <summary>
+    /// Runs <paramref name="target"/> on <paramref name="data"/>, H.264 with <paramref name="threads"/> threads
+    /// (<see cref="H264Decoder.Threads"/>); true if the input was accepted.
+    /// </summary>
+    public static bool Run(string target, ReadOnlySpan<byte> data, int threads = 1)
     {
         try
         {
             switch (target)
             {
                 case "file":
-                    DecodeFile(data.ToArray());
+                    DecodeFile(data.ToArray(), threads);
                     break;
                 case "h264":
-                    DecodeH264(data);
+                    DecodeH264(data, threads);
                     break;
                 case "mjpeg":
                     new MjpegDecoder().Decode(new Packet(0, 0, data.ToArray(), true, 0, 0, 1)).ToList().ForEach(f => f.Dispose());
@@ -52,14 +55,14 @@ public static class Targets
     }
 
     /// <summary>Demuxes a container file and decodes every packet of the streams there are decoders for.</summary>
-    public static void DecodeFile(byte[] file)
+    public static void DecodeFile(byte[] file, int threads = 1)
     {
         using var demuxer = Demuxer.Open(new MemoryStream(file));
         var video = demuxer.Video;
         var audio = demuxer.Audio;
         IVideoDecoder? videoDecoder = video?.Codec switch
         {
-            CodecIds.H264 => new H264Decoder(video),
+            CodecIds.H264 => new H264Decoder(video) { Threads = threads },
             CodecIds.Mjpeg => new MjpegDecoder(video),
             _ => null,
         };
@@ -82,7 +85,7 @@ public static class Targets
         }
     }
 
-    private static void DecodeH264(ReadOnlySpan<byte> data)
+    private static void DecodeH264(ReadOnlySpan<byte> data, int threads)
     {
         if (data.Length < 2)
         {
@@ -90,7 +93,7 @@ public static class Targets
         }
 
         int configLength = Math.Min(BinaryPrimitives.ReadUInt16BigEndian(data), data.Length - 2);
-        var decoder = new H264Decoder(data.Slice(2, configLength));
+        var decoder = new H264Decoder(data.Slice(2, configLength)) { Threads = threads };
         var rest = data[(2 + configLength)..];
         long sequence = 0;
         while (rest.Length >= 4)

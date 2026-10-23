@@ -12,8 +12,9 @@ using ManagedCodecs.Mjpeg;
 //   ffmpeg -benchmark -threads 1 -stream_loop 9 -i samples/h264-bench-720p.mp4 -f null -
 if (args.Length == 0 || args.Contains("-h") || args.Contains("--help"))
 {
-    Console.WriteLine("usage: mcdec <file> [--loops N] [--borrow-frames] | mcdec --hash [--loops N] <file>...");
+    Console.WriteLine("usage: mcdec <file> [--loops N] [--threads N] [--borrow-frames] | mcdec --hash [--loops N] <file>...");
     Console.WriteLine("  Demuxes and decodes the file's video and audio N times (default 1), like ffmpeg -stream_loop N-1.");
+    Console.WriteLine("  --threads N: decode up to N H.264 pictures at once, each on a thread of its own (default 1).");
     Console.WriteLine("  --borrow-frames: H.264 frames point into the decoder's pictures instead of being copied out.");
     Console.WriteLine("  --hash: prints a SHA-256 of each file's decoded output instead (tools/wasm-check.sh compares them).");
     return args.Length == 0 ? 1 : 0;
@@ -57,6 +58,14 @@ if (loopsAt >= 0 && (loopsAt + 1 >= args.Length || !int.TryParse(args[loopsAt + 
     return 1;
 }
 
+int threads = 1;
+int threadsAt = Array.IndexOf(args, "--threads");
+if (threadsAt >= 0 && (threadsAt + 1 >= args.Length || !int.TryParse(args[threadsAt + 1], out threads) || threads < 1))
+{
+    Console.Error.WriteLine("--threads needs a positive number.");
+    return 1;
+}
+
 bool borrowFrames = args.Contains("--borrow-frames");
 var process = Process.GetCurrentProcess();
 var wall = Stopwatch.StartNew();
@@ -75,7 +84,7 @@ for (int loop = 0; loop < loops; loop++)
     IVideoDecoder? videoDecoder = video?.Codec switch
     {
         CodecIds.Mjpeg => new MjpegDecoder(video),
-        CodecIds.H264 => new H264Decoder(video) { BorrowFrames = borrowFrames },
+        CodecIds.H264 => new H264Decoder(video) { BorrowFrames = borrowFrames, Threads = threads },
         _ => null,
     };
     IAudioDecoder? audioDecoder = audio?.Codec == CodecIds.Aac ? new AacDecoder(audio) : null;

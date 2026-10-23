@@ -41,6 +41,18 @@ public class MalformedInputTests
         await Task.Run(() => Targets.Run(target, data)).WaitAsync(TimeSpan.FromSeconds(30));
     }
 
+    /// <summary>
+    /// The findings again with H.264 on three threads (<c>H264Decoder.Threads</c>): an exception on a decoding thread
+    /// must come out of the decoder as it is, and pictures waiting for a failed one must fail rather than wait.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(Findings))]
+    public async Task Finding_KeepsTheContractWithThreads(string target, string name)
+    {
+        var data = File.ReadAllBytes(Path.Combine(FindingsDirectory, target, name));
+        await Task.Run(() => Targets.Run(target, data, threads: 3)).WaitAsync(TimeSpan.FromSeconds(30));
+    }
+
     // One sample per container and codec path: AVI MJPEG, MP4 with H.264 (CAVLC, CABAC with B frames, field
     // pictures) and AAC, fragmented MP4.
     public static TheoryData<string> SweepSamples() => new(new[]
@@ -55,7 +67,14 @@ public class MalformedInputTests
     /// </summary>
     [Theory]
     [MemberData(nameof(SweepSamples))]
-    public async Task Mutants_KeepTheContract(string sampleName)
+    public Task Mutants_KeepTheContract(string sampleName) => SweepMutants(sampleName, threads: 1);
+
+    /// <summary>The same mutants with H.264 on three threads.</summary>
+    [Theory]
+    [MemberData(nameof(SweepSamples))]
+    public Task Mutants_KeepTheContractWithThreads(string sampleName) => SweepMutants(sampleName, threads: 3);
+
+    private static async Task SweepMutants(string sampleName, int threads)
     {
         var original = File.ReadAllBytes(TestSamples.PathOf(sampleName));
         var random = new Random(sampleName.Length);
@@ -74,7 +93,7 @@ public class MalformedInputTests
                 }
             }
 
-            await Task.Run(() => Targets.Run("file", data)).WaitAsync(TimeSpan.FromSeconds(30));
+            await Task.Run(() => Targets.Run("file", data, threads)).WaitAsync(TimeSpan.FromSeconds(30));
         }
     }
 }

@@ -69,7 +69,7 @@ internal sealed partial class PictureDecoder<TPixel>
         // from its own reference 0 (its motion as stored, not rescaled between frame and field).
         var colPic = slice.RefList1[0];
         int size = Sps.Direct8x8Inference ? 8 : 4;
-        bool checkStill = !zero && colPic.IsShortTermReference && (ref0 == 0 || ref1 == 0);
+        bool checkStill = !zero && slice.Marks.IsShortTerm(colPic) && (ref0 == 0 || ref1 == 0);
         uint colZero = 0;
         int blocks = 0;
         foreach (var (x, y) in DirectBlocks(first, count, size))
@@ -201,7 +201,7 @@ internal sealed partial class PictureDecoder<TPixel>
             int mv0Y;
             int mv1X;
             int mv1Y;
-            if (pic0.IsLongTermReference || pic1.Poc - pic0.Poc == 0)
+            if (slice.Marks.IsLongTerm(pic0) || pic1.Poc - pic0.Poc == 0)
             {
                 (mv0X, mv0Y, mv1X, mv1Y) = (col.MvX, colMvY, 0, 0);
             }
@@ -254,6 +254,10 @@ internal sealed partial class PictureDecoder<TPixel>
             bx = (bx >> 1) * 3;
             by = (by >> 1) * 3;
         }
+
+        // The co-located motion is at most a macroblock row below this one (in frame rows), and so are the co-located
+        // picture's layout (CodedAsFields, Mbaff, FieldMb): with frame threading it may still be being decoded.
+        colPic.WaitForMotion(FrameMbRow(mbAddr) + 1);
 
         int colMb = mbAddr;
         var scale = VerticalScale.OneToOne;

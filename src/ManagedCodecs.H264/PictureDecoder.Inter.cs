@@ -550,6 +550,13 @@ internal sealed partial class PictureDecoder<TPixel>
     /// </summary>
     private void PredictComponent(Picture reference, int c, int mbAddr, int lumaX, int lumaY, int w, int h, int mvX, int mvY, Span<TPixel> output, int outputStride)
     {
+        // With frame threading the reference may still be being decoded: wait for the lowest row this block reads,
+        // three rows below it for the 6-tap filter and one more for the chroma filter's (luma is predicted first).
+        if (c == 0)
+        {
+            reference.WaitForRow(lumaY + (mvY >> 2) + h + 3);
+        }
+
         if (c == 0 || _chroma444)
         {
             InterPrediction.PredictLumaBlock(reference, lumaX, lumaY, w, h, mvX, mvY, output, outputStride, c);
@@ -669,7 +676,7 @@ internal sealed partial class PictureDecoder<TPixel>
 
         int w0 = 32;
         int w1 = 32;
-        if (pic1.Poc != pic0.Poc && !pic0.IsLongTermReference && !pic1.IsLongTermReference)
+        if (pic1.Poc != pic0.Poc && !slice.Marks.IsLongTerm(pic0) && !slice.Marks.IsLongTerm(pic1))
         {
             int tb = Math.Clamp(currentPoc - pic0.Poc, -128, 127);
             int td = Math.Clamp(pic1.Poc - pic0.Poc, -128, 127);

@@ -211,9 +211,14 @@ decoding (no measurable change in time, so cache locality matters little with a 
 upper rows become final while the rest is still being decoded: frame threading (`Threads`, under Decoding a file)
 builds on it. MBAFF frames and field pictures are deblocked and report their progress by pair rows (32 frame rows)
 the same way, a field picture's per field: with 4 threads, libx264's MBAFF samples decode 1.8 to 2.2 times as fast
-as with one (1.3 to 1.4 before). Not yet: a second field waits for its first to finish (they share a
-decoder), so field-picture streams gain little (JM's 10-frame samples lose), and P pictures in a chain keep 4
-threads busy 2.4 cores' worth. Output frames given back with `Dispose` are pooled
+as with one (1.3 to 1.4 before). A frame's second field runs alongside its first, on a decoder of its own, once its
+first field has begun (which resets both fields' state): before, it waited for its first to finish, and JM's field
+samples decoded slower with threads (1.2 times one thread's time with 4; now 0.79). Each picture's thread copies its
+frame out too (6% faster with 4 threads). A profile of a 10 s 720p P chain with 4 threads: each picture's decoding
+takes about 28% longer than with one thread, which four single-threaded decodes at once do not show (so it is the
+references written on other cores, not the machine), threads wait for references' rows about a fifth of their
+time, and are idle (no picture to decode) about as long. More threads than cores fill some of that: 6 threads on
+4 cores were 2 to 16% faster than 4. Output frames given back with `Dispose` are pooled
 (gen2 collections over 5 loops of `h264-bench-720p.mp4`: 33 down to 3). Vector 4x4 and 8x8 inverse transforms
 (#42) were reverted: callgrind counted 1.4% more instructions per loop of `h264-bench-720p.mp4` with them and 0.9%
 more on `h264-high-b.mp4`, and 24 interleaved runs of the builds before and after showed no difference; the 9 and

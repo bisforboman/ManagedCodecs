@@ -85,7 +85,8 @@ public sealed class H264Decoder : IVideoDecoder
     /// more threads decode faster on more cores, and give the same frames. 1, the default, decodes on the calling
     /// thread, as WebAssembly in a browser needs (it has no threads there). With more, <see cref="Decode"/> returns
     /// frames up to that many packets later (<see cref="Flush"/> returns the rest), and <see cref="BorrowFrames"/> is
-    /// not supported.
+    /// not supported. A thread waiting for a reference's rows leaves its core idle, so a few more threads than cores can
+    /// help: on a 4-core VM, 6 decoded a 720p P chain up to 16% faster than 4.
     /// </summary>
     public int Threads
     {
@@ -93,7 +94,7 @@ public sealed class H264Decoder : IVideoDecoder
         init => _threads = value >= 1 ? value : throw new ArgumentOutOfRangeException(nameof(value), value, "At least one thread is needed.");
     }
 
-    /// <summary>For tests of frame threading: sleep up to this many milliseconds after each macroblock row, at random.</summary>
+    /// <summary>For tests of frame threading: sleep up to this many milliseconds before each picture and after each macroblock row, at random.</summary>
     internal int RowDelay { get; init; }
 
     /// <summary>
@@ -136,7 +137,7 @@ public sealed class H264Decoder : IVideoDecoder
 
         // A thread of its own, so that a picture always runs while the later ones that wait for it do: pictures
         // start in decoding order, and wait only for earlier ones. The front end goes on from the headers alone.
-        job.Task = Task.Factory.StartNew(() => Run(job), CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+        job.Task = Task.Factory.StartNew(() => RunAndCrop(job), CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
         _inFlight.Enqueue(job);
         Finish(job);
         Drain(frames, all: false);
@@ -146,7 +147,7 @@ public sealed class H264Decoder : IVideoDecoder
     /// <summary>
     /// <see cref="Decode(Packet)"/> for asynchronous callers. With <see cref="Threads"/> above 1 it awaits what
     /// <see cref="Decode(Packet)"/> would block on: a free decoder (the oldest picture finishing, whose frames it then
-    /// returns), and a first field finishing before its second starts. A change of picture size or format still waits
+    /// returns). A change of picture size or format still waits
     /// for every picture being decoded, blocking. Cancelling stops the waiting, not pictures already started; the
     /// exceptions are those of <see cref="Decode(Packet)"/>, the decoding threads' as they were thrown.
     /// </summary>
@@ -163,11 +164,6 @@ public sealed class H264Decoder : IVideoDecoder
         {
             await WaitForAsync(_inFlight.Peek().Task!, cancellationToken).ConfigureAwait(false);
             DrainOldest(frames);
-        }
-
-        if (_firstField?.Task is { } firstField)
-        {
-            await WaitForAsync(firstField, cancellationToken).ConfigureAwait(false);
         }
 
         frames.AddRange(Decode(packet));
@@ -241,7 +237,16 @@ public sealed class H264Decoder : IVideoDecoder
         var view = state.Header.FieldPic ? state.Picture.Field(state.Header.Parity) : state.Picture;
         try
         {
+            if (state.Decoder.RowDelay > 0)
+            {
+                Thread.Sleep(Random.Shared.Next(state.Decoder.RowDelay + 1)); // tests: pictures (and fields) start late
+            }
+
+            // A first field's Begin resets the whole frame's motion and macroblock state, both fields' slots: its second
+            // field, which may run on a decoder of its own, starts after that.
+            job.FirstField?.Begun.Task.GetAwaiter().GetResult();
             state.Decoder.Begin(state.Picture, state.Sps, state.Header.Parity, state.SecondField);
+            job.Begun.SetResult();
             foreach (var slice in job.Slices)
             {
                 state.Decoder.DecodeSlice(slice.Header, slice.Pps, slice.Reader, slice.List0, slice.List1, slice.Marks);
@@ -257,6 +262,7 @@ public sealed class H264Decoder : IVideoDecoder
         }
         catch
         {
+            job.Begun.TrySetResult(); // a second field waiting for it goes on, and fails on what it reads
             view.ReportFailed();
             throw;
         }
@@ -293,6 +299,22 @@ public sealed class H264Decoder : IVideoDecoder
         _firstField = state.Header.FieldPic && !state.SecondField ? job : null;
     }
 
+    /// <summary>
+    /// A picture on its own thread, and then its frame copied out there too (a frame, or a second field's), so the
+    /// thread that feeds the decoder goes on to the next picture sooner.
+    /// </summary>
+    private void RunAndCrop(PictureJob job)
+    {
+        Run(job);
+        var state = job.State;
+        if (!job.Discard && (!state.Header.FieldPic || state.SecondField))
+        {
+            // A second field can be done before its first (which it need not predict from): the frame is both.
+            job.FirstField?.Task!.GetAwaiter().GetResult();
+            job.Frame = Crop(state.Picture, state.Sps);
+        }
+    }
+
     /// <summary>The frame of a decoded picture into the output queue, and what comes out of it; a first field gives none (its frame comes with the second).</summary>
     private void Output(PictureJob job, List<VideoFrame> frames)
     {
@@ -311,7 +333,7 @@ public sealed class H264Decoder : IVideoDecoder
         }
 
         bool borrow = BorrowFrames && picture.BitDepth == 8;
-        var frame = borrow ? Borrow(picture, state.Sps) : Crop(picture, state.Sps);
+        var frame = job.Frame ?? (borrow ? Borrow(picture, state.Sps) : Crop(picture, state.Sps));
         frame.Pts = job.Pts;
         frames.AddRange(_output.Add(frame, picture.Poc, job.Restart, ReorderDepth(state.Sps), borrow ? picture : null));
     }
@@ -471,10 +493,9 @@ public sealed class H264Decoder : IVideoDecoder
             InferGapFrames(header, sps);
         }
 
-        // The second field goes on in the first one's decoder, which holds the first one's macroblocks, once the
-        // first one is done.
-        _firstField?.Task?.GetAwaiter().GetResult();
-        var decoder = secondField ? _firstField!.State.Decoder : TakeDecoder(sps, frames);
+        // A second field takes a decoder of its own, so it can run while its first is still being decoded: each writes
+        // only its own parity's macroblock slots, and reads the first one's samples as any reference's, row by row.
+        var decoder = TakeDecoder(sps, frames);
 
         int poc = _order.Next(header, sps);
         Picture picture;
@@ -504,7 +525,7 @@ public sealed class H264Decoder : IVideoDecoder
         // A second field's frame is the first one's: its timestamp, and whether it starts a new sequence.
         var state = new PictureState(header, sps, decoder, picture, poc, secondField);
         return secondField
-            ? new PictureJob(state, _firstField!.Pts, _firstField.Restart, _firstField.Discard)
+            ? new PictureJob(state, _firstField!.Pts, _firstField.Restart, _firstField.Discard) { FirstField = _firstField }
             : new PictureJob(state, pts, header.IsIdr || header.MemoryManagement.Any(op => op.Op == 5), _discard);
     }
 
@@ -685,6 +706,15 @@ public sealed class H264Decoder : IVideoDecoder
         public bool Restart { get; } = restart;
 
         public bool Discard { get; } = discard;
+
+        /// <summary>With threads, the frame its thread copied out of the picture once decoded.</summary>
+        public VideoFrame? Frame { get; set; }
+
+        /// <summary>A second field's first field, whose <see cref="Begun"/> it waits for.</summary>
+        public PictureJob? FirstField { get; init; }
+
+        /// <summary>Set once the picture's decoder has begun it (reset its state).</summary>
+        public TaskCompletionSource Begun { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public List<SliceWork> Slices { get; } = [];
 

@@ -50,8 +50,9 @@ says feature by feature which encoder made the samples (libx264, OpenH264, JM) a
 - H.264: separate colour planes, luma and chroma bit depths that differ, monochrome above 10 bits (FFmpeg decodes
   none of these, so checking them needs another reference); error concealment (a damaged picture fails its
   `Decode` call).
-- H.264 speed: 2.3 to 3.6 times FFmpeg's time on one thread (Benchmarking). With threads, a second field waits for
-  its first (they share a decoder), and P pictures in a chain keep 4 threads busy 2.4 cores' worth.
+- H.264 speed: 2.3 to 3.6 times FFmpeg's time on one thread (Benchmarking). With 4 threads a 720p P chain takes
+  about half of one thread's time: each picture decodes about 28% slower than alone (its references were written on
+  other cores) and threads wait for references' rows about a fifth of the time.
 - `ReadPacketsAsync` reads each packet synchronously (it yields the thread between packets).
 
 ## Getting started
@@ -139,8 +140,11 @@ threading): a picture starts while the ones before it are still being decoded, a
 prediction wait only for the rows of theirs they read. The frames are the same as with one thread, but `Decode` returns
 them up to that many packets later (`Flush` returns the rest), and borrowed frames are not supported with threads. On
 `h264-bench-720p.mp4` (one I and 49 P pictures, each predicting from the one before) on a 4-core cloud VM, 2 threads
-take 0.63 of one thread's time and 4 threads 0.47 (`mcdec --threads N`). The default, 1, decodes on the calling thread,
-which WebAssembly in a browser needs; it costs 0.3% more instructions than before frame threading existed (callgrind).
+take 0.73 of one thread's time, 4 threads 0.50 and 6 threads 0.42 (`mcdec --threads N`, medians of five interleaved
+runs): a thread waiting for a reference's rows leaves its core idle, so a few more threads than cores help. The two
+fields of a frame coded as field pictures are decoded at once too (JM's `jm-paff-b.mp4` with 4 threads: 0.79 of one
+thread's time). The default, 1, decodes on the calling thread, which WebAssembly in a browser needs; it costs 0.3% more
+instructions than before frame threading existed (callgrind).
 
 `AacDecoder.Decode(packet)` returns one `AudioFrame`: the packet's 1024 samples per channel, less the
 `packet.SkipSamples` at its start. The MP4 demuxer sets those from the edit list, so encoder priming is dropped and the

@@ -113,6 +113,9 @@ public sealed class AviDemuxer : IDemuxer
     /// </remarks>
     public IEnumerable<Packet> ReadPackets() => Malformed.Guard(ReadPacketsCore(), "AVI");
 
+    /// <inheritdoc/>
+    public IAsyncEnumerable<Packet> ReadPacketsAsync(CancellationToken cancellationToken = default) => AsyncPackets.Of(ReadPackets(), cancellationToken);
+
     private IEnumerable<Packet> ReadPacketsCore()
     {
         string prefix = _videoStreamIndex.ToString("00", CultureInfo.InvariantCulture);

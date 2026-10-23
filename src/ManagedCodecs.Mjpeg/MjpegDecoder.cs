@@ -79,6 +79,16 @@ public sealed class MjpegDecoder : IVideoDecoder
     /// <summary>MJPEG holds no frames back.</summary>
     public IReadOnlyList<VideoFrame> Flush() => [];
 
+    /// <summary>MJPEG decodes on the calling thread and never waits: <see cref="Decode(Packet)"/>, as a completed task.</summary>
+    public ValueTask<IReadOnlyList<VideoFrame>> DecodeAsync(Packet packet, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return new(Decode(packet));
+    }
+
+    /// <inheritdoc/>
+    public ValueTask<IReadOnlyList<VideoFrame>> FlushAsync(CancellationToken cancellationToken = default) => new(Flush());
+
     /// <summary>
     /// Decodes one MJPEG packet's data: one JPEG image, or with the stream's height known, the two
     /// fields of an interlaced frame woven together. Data after the image (or the second field) is

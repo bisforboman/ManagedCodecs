@@ -62,6 +62,30 @@ foreach (var frame in decoder.Flush())
 }
 ```
 
+The same asynchronously, for servers and UI threads: `ReadPacketsAsync`, `DecodeAsync` and `FlushAsync` are on the
+interfaces (with defaults, so other implementations keep working). With `Threads` above 1, `H264Decoder.DecodeAsync`
+awaits the pictures being decoded where `Decode` would block the calling thread; a cancelled token stops the waiting,
+not a picture already started. Reading a packet is still synchronous (the demuxers yield the thread between packets).
+
+```csharp
+IVideoDecoder decoder = new H264Decoder(video) { Threads = 4 };
+await foreach (var packet in demuxer.ReadPacketsAsync(cancellationToken))
+{
+    if (packet.StreamIndex == video.StreamIndex)
+    {
+        foreach (var frame in await decoder.DecodeAsync(packet, cancellationToken))
+        {
+            using (frame) { Show(frame); }
+        }
+    }
+}
+
+foreach (var frame in await decoder.FlushAsync(cancellationToken))
+{
+    using (frame) { Show(frame); }
+}
+```
+
 Each frame owns its samples. Frames are `IDisposable`: disposing one when done with it is optional, and gives an
 H.264 or MJPEG frame's planes back to the decoder for a later frame (a `VideoFramePool`), which saves allocating and
 collecting about 1.4 MB a frame at 720p (MJPEG, `testsrc-420.avi`: 7.7 MB allocated a pass down to 2.0); a disposed

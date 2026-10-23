@@ -1,4 +1,7 @@
+using ManagedCodecs.Containers;
 using ManagedCodecs.Fuzz;
+using ManagedCodecs.H264;
+using ManagedCodecs.Mjpeg;
 
 namespace ManagedCodecs.Tests.Fuzz;
 
@@ -65,6 +68,80 @@ public class MalformedInputTests
     /// Truncations and byte flips anywhere in the file (as the fuzzer would make them, with a fixed seed): each mutant
     /// must keep the contract, and finish within 30 s.
     /// </summary>
+    /// <summary>
+    /// The container findings through the asynchronous API (<see cref="IDemuxer.ReadPacketsAsync"/>,
+    /// <see cref="IVideoDecoder.DecodeAsync"/>, H.264 on three threads): the exceptions must come out of the awaits as
+    /// they are, not wrapped.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(Findings))]
+    public async Task Finding_KeepsTheContractAsynchronously(string target, string name)
+    {
+        if (target != "file")
+        {
+            return;
+        }
+
+        var data = File.ReadAllBytes(Path.Combine(FindingsDirectory, target, name));
+        await DecodeAsynchronously(data).WaitAsync(TimeSpan.FromSeconds(30));
+    }
+
+    /// <summary>The mutants through the asynchronous API, H.264 on three threads.</summary>
+    [Theory]
+    [MemberData(nameof(SweepSamples))]
+    public async Task Mutants_KeepTheContractAsynchronously(string sampleName)
+    {
+        var original = File.ReadAllBytes(TestSamples.PathOf(sampleName));
+        var random = new Random(sampleName.Length);
+        for (int m = 0; m < 40; m++)
+        {
+            var data = (byte[])original.Clone();
+            for (int k = 0, n = random.Next(1, 16); k < n; k++)
+            {
+                data[random.Next(data.Length)] = (byte)random.Next(256);
+            }
+
+            await DecodeAsynchronously(data).WaitAsync(TimeSpan.FromSeconds(30));
+        }
+    }
+
+    // Demuxes and decodes the video of a file through the asynchronous API; only the contract's exceptions may come out.
+    private static async Task DecodeAsynchronously(byte[] file)
+    {
+        try
+        {
+            using var demuxer = Demuxer.Open(new MemoryStream(file));
+            var video = demuxer.Video;
+            IVideoDecoder? decoder = video?.Codec switch
+            {
+                CodecIds.H264 => new H264Decoder(video) { Threads = 3 },
+                CodecIds.Mjpeg => new MjpegDecoder(video),
+                _ => null,
+            };
+            await foreach (var packet in demuxer.ReadPacketsAsync())
+            {
+                if (decoder is not null && packet.StreamIndex == video!.StreamIndex)
+                {
+                    foreach (var frame in await decoder.DecodeAsync(packet))
+                    {
+                        frame.Dispose();
+                    }
+                }
+            }
+
+            if (decoder is not null)
+            {
+                foreach (var frame in await decoder.FlushAsync())
+                {
+                    frame.Dispose();
+                }
+            }
+        }
+        catch (Exception e) when (e is InvalidDataException or NotSupportedException)
+        {
+        }
+    }
+
     [Theory]
     [MemberData(nameof(SweepSamples))]
     public Task Mutants_KeepTheContract(string sampleName) => SweepMutants(sampleName, threads: 1);

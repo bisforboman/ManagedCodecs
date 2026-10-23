@@ -15,7 +15,7 @@ public class H264ConformanceTests
 
     [Theory]
     [MemberData(nameof(Samples))]
-    public void MatchesFfmpegFrameByFrame(string sampleName) => CompareWithFfmpeg(sampleName, borrowFrames: false, dispose: false);
+    public Task MatchesFfmpegFrameByFrame(string sampleName) => CompareWithFfmpeg(sampleName, borrowFrames: false, dispose: false);
 
     /// <summary>
     /// The same with every frame disposed as soon as it is hashed, so the decoder writes later
@@ -24,7 +24,7 @@ public class H264ConformanceTests
     /// </summary>
     [Theory]
     [MemberData(nameof(Samples))]
-    public void MatchesFfmpegWithDisposedFrames(string sampleName) => CompareWithFfmpeg(sampleName, borrowFrames: false, dispose: true);
+    public Task MatchesFfmpegWithDisposedFrames(string sampleName) => CompareWithFfmpeg(sampleName, borrowFrames: false, dispose: true);
 
     /// <summary>
     /// The same with <see cref="H264Decoder.BorrowFrames"/>: each frame is hashed as it comes
@@ -34,7 +34,7 @@ public class H264ConformanceTests
     /// </summary>
     [Theory]
     [MemberData(nameof(Samples))]
-    public void MatchesFfmpegWithBorrowedFrames(string sampleName) => CompareWithFfmpeg(sampleName, borrowFrames: true, dispose: true);
+    public Task MatchesFfmpegWithBorrowedFrames(string sampleName) => CompareWithFfmpeg(sampleName, borrowFrames: true, dispose: true);
 
     /// <summary>
     /// The same with frame threading (<see cref="H264Decoder.Threads"/>), more threads than cores so that they contend,
@@ -42,7 +42,7 @@ public class H264ConformanceTests
     /// </summary>
     [Theory]
     [MemberData(nameof(Samples))]
-    public void MatchesFfmpegWithThreads(string sampleName) =>
+    public Task MatchesFfmpegWithThreads(string sampleName) =>
         CompareWithFfmpeg(sampleName, borrowFrames: false, dispose: true, threads: Environment.ProcessorCount + 1);
 
     /// <summary>
@@ -52,10 +52,20 @@ public class H264ConformanceTests
     /// </summary>
     [Theory]
     [MemberData(nameof(Samples))]
-    public void MatchesFfmpegWithDelayedThreads(string sampleName) =>
+    public Task MatchesFfmpegWithDelayedThreads(string sampleName) =>
         CompareWithFfmpeg(sampleName, borrowFrames: false, dispose: true, threads: 4, rowDelay: 1);
 
-    private static void CompareWithFfmpeg(string sampleName, bool borrowFrames, bool dispose, int threads = 1, int rowDelay = 0)
+    /// <summary>
+    /// The same through the asynchronous API: packets from <see cref="IDemuxer.ReadPacketsAsync"/>, frames from
+    /// <see cref="H264Decoder.DecodeAsync"/> and <see cref="H264Decoder.FlushAsync"/> with two threads, which await the
+    /// pictures being decoded instead of blocking.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(Samples))]
+    public Task MatchesFfmpegAsynchronously(string sampleName) =>
+        CompareWithFfmpeg(sampleName, borrowFrames: false, dispose: true, threads: 2, asynchronous: true);
+
+    private static async Task CompareWithFfmpeg(string sampleName, bool borrowFrames, bool dispose, int threads = 1, int rowDelay = 0, bool asynchronous = false)
     {
         var lines = File.ReadAllLines(TestSamples.ReferenceOf(sampleName, ".framemd5"));
         var expected = FrameMd5.Parse(lines).Where(e => e.StreamIndex == 0).ToList(); // FFmpeg lists video first
@@ -86,17 +96,38 @@ public class H264ConformanceTests
             }
         }
 
-        foreach (var packet in demuxer.ReadPackets().Where(p => p.StreamIndex == video.StreamIndex))
+        if (asynchronous)
         {
-            foreach (var frame in decoder.Decode(packet))
+            await foreach (var packet in demuxer.ReadPacketsAsync())
+            {
+                if (packet.StreamIndex == video.StreamIndex)
+                {
+                    foreach (var frame in await decoder.DecodeAsync(packet))
+                    {
+                        Check(frame);
+                    }
+                }
+            }
+
+            foreach (var frame in await decoder.FlushAsync())
             {
                 Check(frame);
             }
         }
-
-        foreach (var frame in decoder.Flush())
+        else
         {
-            Check(frame);
+            foreach (var packet in demuxer.ReadPackets().Where(p => p.StreamIndex == video.StreamIndex))
+            {
+                foreach (var frame in decoder.Decode(packet))
+                {
+                    Check(frame);
+                }
+            }
+
+            foreach (var frame in decoder.Flush())
+            {
+                Check(frame);
+            }
         }
 
         Assert.Equal(expected.Count, index);

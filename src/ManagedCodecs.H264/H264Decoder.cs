@@ -136,7 +136,7 @@ public sealed class H264Decoder : IVideoDecoder
 
         // A thread of its own, so that a picture always runs while the later ones that wait for it do: pictures
         // start in decoding order, and wait only for earlier ones. The front end goes on from the headers alone.
-        job.Task = Task.Factory.StartNew(() => Run(job), CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+        job.Task = Task.Factory.StartNew(() => RunAndCrop(job), CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
         _inFlight.Enqueue(job);
         Finish(job);
         Drain(frames, all: false);
@@ -298,6 +298,22 @@ public sealed class H264Decoder : IVideoDecoder
         _firstField = state.Header.FieldPic && !state.SecondField ? job : null;
     }
 
+    /// <summary>
+    /// A picture on its own thread, and then its frame copied out there too (a frame, or a second field's), so the
+    /// thread that feeds the decoder goes on to the next picture sooner.
+    /// </summary>
+    private void RunAndCrop(PictureJob job)
+    {
+        Run(job);
+        var state = job.State;
+        if (!job.Discard && (!state.Header.FieldPic || state.SecondField))
+        {
+            // A second field can be done before its first (which it need not predict from): the frame is both.
+            job.FirstField?.Task!.GetAwaiter().GetResult();
+            job.Frame = Crop(state.Picture, state.Sps);
+        }
+    }
+
     /// <summary>The frame of a decoded picture into the output queue, and what comes out of it; a first field gives none (its frame comes with the second).</summary>
     private void Output(PictureJob job, List<VideoFrame> frames)
     {
@@ -316,7 +332,7 @@ public sealed class H264Decoder : IVideoDecoder
         }
 
         bool borrow = BorrowFrames && picture.BitDepth == 8;
-        var frame = borrow ? Borrow(picture, state.Sps) : Crop(picture, state.Sps);
+        var frame = job.Frame ?? (borrow ? Borrow(picture, state.Sps) : Crop(picture, state.Sps));
         frame.Pts = job.Pts;
         frames.AddRange(_output.Add(frame, picture.Poc, job.Restart, ReorderDepth(state.Sps), borrow ? picture : null));
     }
@@ -689,6 +705,9 @@ public sealed class H264Decoder : IVideoDecoder
         public bool Restart { get; } = restart;
 
         public bool Discard { get; } = discard;
+
+        /// <summary>With threads, the frame its thread copied out of the picture once decoded.</summary>
+        public VideoFrame? Frame { get; set; }
 
         /// <summary>A second field's first field, whose <see cref="Begun"/> it waits for.</summary>
         public PictureJob? FirstField { get; init; }

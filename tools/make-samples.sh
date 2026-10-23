@@ -443,6 +443,24 @@ struct.pack_into('>Ii', data, at + 12, 335, 2500)  # segment_duration (movie tim
 open(sys.argv[1], 'wb').write(data)
 PY
 
+# Edit lists of several edits, which FFmpeg's muxer never writes (tools/mp4-edit-list.py rewrites them; durations in
+# the movie timescale, 1000, media times in the track's). Audio: a second edit from 1.5 s, inside a packet (FFmpeg starts
+# it at the next packet, after a second of packets decoded and not shown); and an empty edit between two, which FFmpeg
+# reads as media time -1 (it plays the media's start again). Video, B frames and a keyframe every 12 frames: a second
+# edit starting and ending inside a GOP (decoded from the keyframe before, and on to the second keyframe after its end),
+# and a single edit that ends a second before the track. Both tracks of a file at once.
+ff -f lavfi -i "aevalsrc=0.4*sin(2*PI*440*t)+0.1*sin(2*PI*3000*t)|0.4*sin(2*PI*440*t+0.3):s=48000:d=2" -c:a aac -b:a 48k -aac_pns 0 samples/aac-edits.mp4
+cp samples/aac-edits.mp4 samples/aac-edits-empty.mp4
+python3 -I tools/mp4-edit-list.py samples/aac-edits.mp4 0 510:1024,310:72000
+python3 -I tools/mp4-edit-list.py samples/aac-edits-empty.mp4 0 500:1024,200:-1,300:72704
+ff -f lavfi -i testsrc2=size=320x240:rate=25 -t 2 -c:v libx264 -bf 2 -g 12 samples/h264-edits.mp4
+cp samples/h264-edits.mp4 samples/h264-edit-end.mp4
+python3 -I tools/mp4-edit-list.py samples/h264-edits.mp4 0 200:1024,240:9216
+python3 -I tools/mp4-edit-list.py samples/h264-edit-end.mp4 0 1000:1024
+ff -f lavfi -i "testsrc2=size=320x240:rate=25" -f lavfi -i "sine=frequency=330:sample_rate=48000:duration=2" -t 2 -c:v libx264 -bf 2 -g 12 -c:a aac -ac 2 -aac_pns 0 samples/h264-audio-edits.mp4
+python3 -I tools/mp4-edit-list.py samples/h264-audio-edits.mp4 0 400:1024,400:15360
+python3 -I tools/mp4-edit-list.py samples/h264-audio-edits.mp4 1 400:1024,400:48500
+
 # ---- H.264 from OpenH264 ----
 # Committed in samples/openh264/ (CI has no OpenH264): long-term references and the list modification and memory
 # management operations that come with them, POC type 2, non-reference P frames, slices by size, changing and repeated
@@ -455,9 +473,10 @@ cp samples/openh264/*.mp4 samples/
 cp samples/jm/*.mp4 samples/
 
 # ---- FFmpeg's references ----
-# name.framemd5: decoded frames. name.packets.framemd5: demuxed packets (-copyts keeps the demuxer's own timestamps).
-# name.packets.flags: keyframe flags (framemd5 has no flags column). name.f32: decoded audio, edit list ignored (every
-# packet, whole; not for aac-edit-trim, whose packets after the edit are not demuxed). name.trim.f32: decoded audio as
+# name.framemd5: decoded frames. name.packets.csv: demuxed packets as ffprobe lists them (the demuxer's own timestamps,
+# flags with discard, MD5 of the data); name.packets.framemd5 for the codec private data (and the ADTS packets).
+# name.f32: decoded audio, edit list ignored (every packet, whole; not where the edits leave out packets or repeat
+# them: aac-edit-trim and the samples with several edits). name.trim.f32: decoded audio as
 # FFmpeg gives it by default, trimmed by the edit list. -idct simple: FFmpeg's C IDCT for JPEG, the arithmetic the MJPEG
 # decoder follows; its default picks by CPU, the same results on x64 (SSE2) but not on ARM64 (NEON rounds otherwise).
 for f in samples/*.avi samples/*.mp4; do ff -idct simple -i "$f" -f framemd5 "${f%.*}.framemd5"; done
@@ -466,15 +485,16 @@ for f in samples/*.avi samples/*.mp4; do ff -idct simple -i "$f" -f framemd5 "${
 for f in samples/*gray*.mp4; do ff -i "$f" -vf extractplanes=y -f framemd5 "${f%.*}.framemd5"; done
 for f in samples/*.mp4; do
   ff -copyts -i "$f" -c copy -f framemd5 "${f%.mp4}.packets.framemd5"
-  ffprobe -v error -select_streams v:0 -show_packets -show_entries packet=flags -of csv=p=0 "$f" > "${f%.mp4}.packets.flags"
+  ffprobe -v error -show_packets -show_data_hash MD5 -show_entries packet=stream_index,pts,dts,duration,size,flags,data_hash \
+    -of csv=p=0 "$f" > "${f%.mp4}.packets.csv"
 done
 # Raw AAC: packets as FFmpeg's demuxer gives them (whole ADTS frames), and every decoded sample (no edit list).
 for f in samples/*.aac; do
   ff -copyts -i "$f" -c copy -f framemd5 "${f%.aac}.packets.framemd5"
   ff -i "$f" -f f32le "${f%.aac}.f32"
 done
-for f in samples/aac-*.mp4 samples/h264-with-audio.mp4 samples/fmp4-*.mp4; do
-  [[ $f == samples/aac-edit-trim.mp4 ]] || ff -ignore_editlist 1 -i "$f" -map 0:a:0 -f f32le "${f%.mp4}.f32"
+for f in samples/aac-*.mp4 samples/h264-with-audio.mp4 samples/h264-audio-edits.mp4 samples/fmp4-*.mp4; do
+  [[ $f == samples/aac-edit-trim.mp4 || $f == *edits* ]] || ff -ignore_editlist 1 -i "$f" -map 0:a:0 -f f32le "${f%.mp4}.f32"
   ff -i "$f" -map 0:a:0 -f f32le "${f%.mp4}.trim.f32"
 done
 

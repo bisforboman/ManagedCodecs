@@ -9,21 +9,32 @@ namespace ManagedCodecs.Containers.Mp4;
 /// track fragments of every 'moof' (8.8).
 /// </summary>
 /// <remarks>
-/// Timestamps follow FFmpeg: the edit list's first non-empty edit shifts dts and pts back by
-/// its media time (so H.264 with B-frames starts at pts 0 and a negative dts, and AAC encoder
-/// priming has negative timestamps), and leading empty edits delay them. A fragment's samples
-/// start at its 'tfdt' decode time, or right after the track's previous sample without one.
-/// Negative composition offsets move every pts of their track forward by the largest of them, as
-/// FFmpeg does (which, for 'ctts', looks at all entries but the last two). In audio tracks, the edit also trims: the
-/// priming before its media time is marked in <see cref="Packet.SkipSamples"/>, and packets that
-/// start after its end are left out (the last one's duration is cut, its samples are not), again
-/// as FFmpeg does. Not yet supported: edit lists with more than one non-empty edit (only the first is honoured),
-/// trimming video at the edit's end, compressed 'cmov' headers, and further tracks.
+/// <para>
+/// The edit list is applied as FFmpeg applies it, packet for packet. Each edit's samples come in turn, their times moved
+/// so that its media time falls at its start in the track (so H.264 with B-frames starts at pts 0 and a negative dts,
+/// and AAC encoder priming has negative timestamps); empty edits before the first delay it. Samples an edit needs
+/// decoded but not shown come as <see cref="Packet.Discard"/> packets: in video, those from the keyframe before the
+/// edit's first frame, and those after its end up to the second keyframe past it (the first one with no composition
+/// offsets); in audio, a second of samples before the edit, which primes the decoder. Audio edits take the whole
+/// sample their end falls in; the first edit starts in the sample its media time falls in, whose earlier part
+/// <see cref="Packet.SkipSamples"/> cuts (encoder priming), a later one at the next whole sample (as in FFmpeg, up to a
+/// sample late). Audio durations run up to the next packet's dts, and the last packet's to the end of the edits. An
+/// empty edit after a real one plays the media from its start, as FFmpeg reads its media time, -1.
+/// </para>
+/// <para>
+/// A fragment's samples start at its 'tfdt' decode time, or right after the track's previous sample without one.
+/// Negative composition offsets move every pts of their track forward by the largest of them, as FFmpeg does (which,
+/// for 'ctts', looks at all entries but the last two). Not yet supported: compressed 'cmov' headers, and further
+/// tracks.
+/// </para>
 /// </remarks>
 public sealed class Mp4Demuxer : IDemuxer
 {
     // Bounds the arrays built from a header that claims an absurd number of samples.
     private const int MaxSamples = 1 << 26;
+
+    // Bounds the work of an edit list, each edit of which looks through the samples (real ones have a few edits).
+    private const int MaxEdits = 1024;
 
     private readonly Stream _stream;
     private readonly bool _leaveOpen;
@@ -90,11 +101,12 @@ public sealed class Mp4Demuxer : IDemuxer
                 ReadFragments(stream, tracks);
             }
 
-            var all = new List<Sample>();
+            Sample[] videoSamples = [];
+            Sample[] audioSamples = [];
             if (video is not null)
             {
                 var samples = video.BuildSamples(movieTimescale);
-                all.AddRange(samples);
+                videoSamples = samples;
 
                 long totalDuration = 0;
                 foreach (var sample in samples)
@@ -119,7 +131,7 @@ public sealed class Mp4Demuxer : IDemuxer
             if (audio is not null)
             {
                 var samples = audio.BuildSamples(movieTimescale);
-                all.AddRange(samples);
+                audioSamples = samples;
                 Audio = new AudioStreamInfo(
                     audio.Codec,
                     audio.SampleRate,
@@ -130,9 +142,7 @@ public sealed class Mp4Demuxer : IDemuxer
                     audio.StreamIndex);
             }
 
-            // File order, which is how the tracks are interleaved on disk; each track's own samples
-            // keep their decode order because they are sorted stably within equal offsets.
-            _samples = [.. all.OrderBy(sample => sample.Offset)];
+            _samples = Interleave(videoSamples, audioSamples);
         }
         catch (Exception e) when (Malformed.IsMalformedInput(e))
         {
@@ -143,6 +153,23 @@ public sealed class Mp4Demuxer : IDemuxer
     public VideoStreamInfo? Video { get; }
 
     public AudioStreamInfo? Audio { get; }
+
+    /// <summary>
+    /// The two tracks' samples in file order, which is how they are interleaved on disk, each track's in its own order:
+    /// the next sample is whichever track's next one lies first in the file (an edit can go back to earlier samples).
+    /// </summary>
+    private static Sample[] Interleave(Sample[] first, Sample[] second)
+    {
+        var merged = new Sample[first.Length + second.Length];
+        int a = 0;
+        int b = 0;
+        for (int i = 0; i < merged.Length; i++)
+        {
+            merged[i] = b == second.Length || (a < first.Length && first[a].Offset <= second[b].Offset) ? first[a++] : second[b++];
+        }
+
+        return merged;
+    }
 
     public static Mp4Demuxer Open(string path) => new(File.OpenRead(path));
 
@@ -172,7 +199,7 @@ public sealed class Mp4Demuxer : IDemuxer
             _stream.ReadExactly(data);
             long sequence = sequences.GetValueOrDefault(sample.StreamIndex);
             sequences[sample.StreamIndex] = sequence + 1;
-            yield return new Packet(sample.StreamIndex, sequence, data, sample.IsKeyframe, sample.Dts, sample.Pts, sample.Duration, sample.SkipSamples);
+            yield return new Packet(sample.StreamIndex, sequence, data, sample.IsKeyframe, sample.Dts, sample.Pts, sample.Duration, sample.SkipSamples, sample.Discard);
         }
     }
 
@@ -413,7 +440,7 @@ public sealed class Mp4Demuxer : IDemuxer
         return data;
     }
 
-    private readonly record struct Sample(int StreamIndex, long Offset, int Size, long Dts, long Pts, int Duration, bool IsKeyframe, int SkipSamples = 0);
+    private readonly record struct Sample(int StreamIndex, long Offset, int Size, long Dts, long Pts, int Duration, bool IsKeyframe, int SkipSamples = 0, bool Discard = false);
 
     /// <summary>The parts of one 'trak' needed to build its sample list.</summary>
     private sealed class Track
@@ -625,7 +652,6 @@ public sealed class Mp4Demuxer : IDemuxer
             var durations = new int[count];
             ReadTimes(dts, durations);
 
-            var (shift, mediaTime, end) = EditList(movieTimescale);
             var keyframes = ReadKeyframes(count);
             var compositionOffsets = ReadCompositionOffsets(count);
 
@@ -642,11 +668,11 @@ public sealed class Mp4Demuxer : IDemuxer
                 ptsShift = Math.Max(ptsShift, -fragmentSample.CompositionOffset);
             }
 
-            var samples = new Sample[count + _fragmentSamples.Count];
+            // The samples in media time, in decoding order.
+            var media = new Sample[count + _fragmentSamples.Count];
             for (int i = 0; i < count; i++)
             {
-                long decodeTime = dts[i] - shift;
-                samples[i] = new Sample(StreamIndex, offsets[i], sizes[i], decodeTime, decodeTime + compositionOffsets[i] + ptsShift, durations[i], keyframes[i]);
+                media[i] = new Sample(StreamIndex, offsets[i], sizes[i], dts[i], dts[i] + compositionOffsets[i] + ptsShift, durations[i], keyframes[i]);
             }
 
             // Fragment samples continue from the last sample unless 'tfdt' says where they start.
@@ -654,41 +680,127 @@ public sealed class Mp4Demuxer : IDemuxer
             for (int i = 0; i < _fragmentSamples.Count; i++)
             {
                 var (offset, size, decodeTime, duration, compositionOffset, isKeyframe) = _fragmentSamples[i];
-                long time = (decodeTime >= 0 ? decodeTime : next) - shift;
-                samples[count + i] = new Sample(StreamIndex, offset, size, time, time + compositionOffset + ptsShift, duration, isKeyframe);
-                next = time + shift + duration;
+                long time = decodeTime >= 0 ? decodeTime : next;
+                media[count + i] = new Sample(StreamIndex, offset, size, time, time + compositionOffset + ptsShift, duration, isKeyframe);
+                next = time + duration;
             }
 
-            return _isAudio ? TrimAudio(samples, shift, mediaTime, end) : samples;
+            var edits = Edits(movieTimescale);
+            if (edits.Count == 0)
+            {
+                return media;
+            }
+
+            // FFmpeg keeps an index entry for every sample of its edited track, composition offsets included, in
+            // fragmented files (see Mp4ConformanceTests): that decides where a video edit stops.
+            bool hasCompositionOffsets = _ctts.Length > 0 || _fragmentSamples.Count > 0;
+            var samples = new List<Sample>(media.Length);
+            for (int e = 0; e < edits.Count; e++)
+            {
+                if (samples.Count > MaxSamples)
+                {
+                    throw new NotSupportedException($"The edit list makes more than {MaxSamples} packets.");
+                }
+
+                if (_isAudio)
+                {
+                    AddAudioEdit(media, edits[e], first: e == 0, samples);
+                }
+                else
+                {
+                    AddVideoEdit(media, edits[e], hasCompositionOffsets, samples);
+                }
+            }
+
+            // Audio durations as FFmpeg gives them: up to the next packet's dts where that comes later, else the sample's
+            // own; the last packet's up to the end of the edits (shorter or longer than the sample's). Video keeps its own.
+            var last = edits[^1];
+            long end = last.Duration > 0 ? last.Start + last.Duration : long.MinValue;
+            for (int i = 0; _isAudio && i < samples.Count; i++)
+            {
+                long until = i + 1 < samples.Count ? samples[i + 1].Dts - samples[i].Dts : end - samples[i].Pts;
+                if (until > 0 && until <= int.MaxValue)
+                {
+                    samples[i] = samples[i] with { Duration = (int)until };
+                }
+            }
+
+            return [.. samples];
         }
 
         /// <summary>
-        /// Applies the edit to audio as FFmpeg does: the first <paramref name="mediaTime"/> ticks of
-        /// samples (encoder priming) are marked to be skipped, across packets if they span several;
-        /// packets that start at or after the edit's <paramref name="end"/> are dropped (one starting
-        /// exactly at the end too, as in FFmpeg), and the last
-        /// one's duration is cut to the end (its samples are not: FFmpeg decodes it whole).
+        /// An edit of a video track as FFmpeg reads it: from the keyframe at or before the first sample shown in the
+        /// edit, through the edit's end and on to a keyframe after it (with composition offsets, the second one: B frames
+        /// after the first can still belong to the edit). Samples shown outside the edit are kept to be decoded, marked
+        /// <see cref="Sample.Discard"/>. Times move so that the edit's media time comes at its start in the track.
         /// </summary>
-        private Sample[] TrimAudio(Sample[] samples, long shift, long mediaTime, long end)
+        private static void AddVideoEdit(Sample[] media, Edit edit, bool hasCompositionOffsets, List<Sample> samples)
         {
-            var kept = new List<Sample>(samples.Length);
-            foreach (var sample in samples)
+            long end = edit.Duration > 0 ? edit.MediaTime + edit.Duration : long.MaxValue;
+            int shown = Array.FindIndex(media, sample => sample.Pts >= edit.MediaTime && sample.Pts < end);
+            if (shown < 0)
             {
-                long start = sample.Dts + shift; // media time
-                if (start >= end)
-                {
-                    continue;
-                }
-
-                long skip = Math.Clamp(mediaTime - start, 0, sample.Duration);
-                kept.Add(sample with
-                {
-                    Duration = (int)Math.Min(sample.Duration, end - start),
-                    SkipSamples = checked((int)(SampleRate > 0 && SampleRate != Timescale ? skip * SampleRate / Timescale : skip)),
-                });
+                return;
             }
 
-            return [.. kept];
+            int start = Array.FindLastIndex(media, shown, sample => sample.IsKeyframe);
+            long shift = edit.Start - edit.MediaTime;
+            bool keyframeAfterEnd = false;
+            for (int i = Math.Max(start, 0); i < media.Length; i++)
+            {
+                var sample = media[i];
+                bool inEdit = sample.Pts >= edit.MediaTime && sample.Pts < end;
+                samples.Add(sample with { Dts = sample.Dts + shift, Pts = sample.Pts + shift, Discard = !inEdit });
+                if (edit.Duration > 0 && sample.IsKeyframe && sample.Pts + sample.Duration >= end)
+                {
+                    if (hasCompositionOffsets && !keyframeAfterEnd)
+                    {
+                        keyframeAfterEnd = true;
+                        continue;
+                    }
+
+                    break;
+                }
+            }
+        }
+
+        /// <summary>
+        /// An edit of an audio track as FFmpeg reads it: a second of samples before the edit's media time to be decoded
+        /// and not shown (<see cref="Sample.Discard"/>), then the samples from the edit's media time through the one its
+        /// end falls in, which plays whole. The first edit starts in the sample that holds its media time, whose samples
+        /// before it are skipped (encoder priming, <see cref="Packet.SkipSamples"/>); a later one at the first sample
+        /// from its media time on (so up to a sample late), which comes at the edit's start in the track.
+        /// </summary>
+        private void AddAudioEdit(Sample[] media, Edit edit, bool first, List<Sample> samples)
+        {
+            int Containing(long time) => Array.FindIndex(media, sample => time < sample.Dts + sample.Duration);
+
+            int shown = first ? Containing(edit.MediaTime) : Array.FindIndex(media, sample => sample.Dts >= edit.MediaTime);
+            if (shown < 0)
+            {
+                return;
+            }
+
+            int start = Math.Max(Containing(edit.MediaTime - Timescale), 0);
+            long end = edit.Duration > 0 ? edit.MediaTime + edit.Duration : long.MaxValue;
+            long origin = first ? edit.MediaTime : media[shown].Dts;
+            for (int i = start; i < media.Length; i++)
+            {
+                var sample = media[i];
+                long time = edit.Start + sample.Dts - origin;
+                long skip = first && i == shown ? Math.Clamp(edit.MediaTime - sample.Dts, 0, sample.Duration) : 0;
+                samples.Add(sample with
+                {
+                    Dts = time,
+                    Pts = time,
+                    Discard = i < shown,
+                    SkipSamples = checked((int)(SampleRate > 0 && SampleRate != Timescale ? skip * SampleRate / Timescale : skip)),
+                });
+                if (i >= shown && sample.Dts + sample.Duration >= end)
+                {
+                    break;
+                }
+            }
         }
 
         /// <summary>A sample's size in bytes; past <see cref="int.MaxValue"/> the file is broken (no sample is 2 GB).</summary>
@@ -851,44 +963,55 @@ public sealed class Mp4Demuxer : IDemuxer
             return keyframes;
         }
 
+        /// <summary>An edit: where it starts in the track and its length (in the track's timescale), and its media time.</summary>
+        private readonly record struct Edit(long Start, long MediaTime, long Duration);
+
         /// <summary>
-        /// The first non-empty edit: how far to move timestamps back (its media time, minus the
-        /// length of any empty edits before it), its media time, and where it ends in media time
-        /// (durations converted from the movie timescale, rounded to nearest as FFmpeg does;
-        /// <see cref="long.MaxValue"/> for a zero duration or no edit list).
+        /// The edit list's edits as FFmpeg plays them, durations converted from the movie timescale rounded to nearest (0:
+        /// to the end of the media). Empty edits before the first real one delay it; an empty edit after it plays the
+        /// media from its start for its duration (FFmpeg reads its media time, -1, as the start). None without an edit
+        /// list or a real edit in it.
         /// </summary>
-        private (long Shift, long MediaTime, long End) EditList(uint movieTimescale)
+        private List<Edit> Edits(uint movieTimescale)
         {
-            if (_elst is null || _elst.Length < 8)
+            var edits = new List<Edit>();
+            if (_elst is null || _elst.Length < 8 || movieTimescale == 0)
             {
-                return (0, 0, long.MaxValue);
+                return edits;
             }
 
             bool v1 = _elst[0] == 1;
             int entrySize = v1 ? 20 : 12;
             var entries = Entries(_elst, entrySize, "elst");
-            long empty = 0;
+            if (entries.Length / entrySize > MaxEdits)
+            {
+                throw new NotSupportedException($"Edit lists of more than {MaxEdits} edits are not supported.");
+            }
 
+            long empty = 0;
+            long start = 0;
             for (int e = 0; e < entries.Length / entrySize; e++)
             {
                 var entry = entries[(e * entrySize)..];
                 long duration = v1 ? (long)BinaryPrimitives.ReadUInt64BigEndian(entry) : BinaryPrimitives.ReadUInt32BigEndian(entry);
                 long mediaTime = v1 ? BinaryPrimitives.ReadInt64BigEndian(entry[8..]) : BinaryPrimitives.ReadInt32BigEndian(entry[4..]);
-
-                if (mediaTime == -1)
+                if (mediaTime == -1 && edits.Count == 0)
                 {
                     empty += duration;
                     continue;
                 }
 
-                long delay = movieTimescale > 0 ? (long)((Int128)empty * Timescale / movieTimescale) : 0;
-                long end = duration > 0 && movieTimescale > 0
-                    ? mediaTime + (long)((((Int128)duration * Timescale) + (movieTimescale / 2)) / movieTimescale)
-                    : long.MaxValue;
-                return (mediaTime - delay, Math.Max(mediaTime, 0), end);
+                if (edits.Count == 0)
+                {
+                    start = (long)((Int128)empty * Timescale / movieTimescale);
+                }
+
+                long length = (long)((((Int128)duration * Timescale) + (movieTimescale / 2)) / movieTimescale);
+                edits.Add(new Edit(start, mediaTime, length));
+                start += length;
             }
 
-            return (0, 0, long.MaxValue);
+            return edits;
         }
 
         private void ParseSampleDescription(ReadOnlySpan<byte> stsd)

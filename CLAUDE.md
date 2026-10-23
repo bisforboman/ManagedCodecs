@@ -90,7 +90,11 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
   bitrates in kbit/s, and skips frames under a tight bitrate without leaving frame_num gaps.
 - FFmpeg trims MP4 audio by the edit list asymmetrically: exactly media_time samples at the start (skip-samples side
   data, across packets), but at the end it drops whole packets that start past the edit, cuts the last one's
-  duration (rounded to nearest) and still decodes all its samples.
+  duration (rounded to nearest) and still decodes all its samples. With several edits (docs/conformance.md, MP4) a
+  later audio edit starts at the next whole packet, every edit is preceded by discarded packets (a second of audio;
+  video from the keyframe before), and an empty edit after a real one replays the media's start. `ffmpeg -c copy -f
+  framemd5` rewrites decode timestamps that go back (an edit's discarded packets): compare packets with
+  `ffprobe -show_packets -show_data_hash MD5` (make-samples.sh's `.packets.csv`).
 - MBAFF: with CABAC, end_of_slice_flag comes only after the bottom macroblock of a pair (7.3.4). A skipped top
   macroblock's pair kind comes with the bottom one (CAVLC: the bit after mb_skip_run; CABAC: after the bottom one's
   skip flag), else it is inferred from the left, then the upper pair in the same slice: mark the macroblock as in

@@ -54,7 +54,11 @@ public sealed class AacDecoder : IAudioDecoder
     internal AacStatistics Statistics { get; } = new();
 
     /// <inheritdoc/>
-    public AudioFrame Decode(Packet packet) => Decode(packet.Data.Span).DropStart(packet.SkipSamples);
+    public AudioFrame Decode(Packet packet)
+    {
+        var frame = Decode(packet.Data.Span);
+        return frame.DropStart(packet.Discard ? frame.SampleCount : packet.SkipSamples);
+    }
 
     /// <summary>
     /// Decodes one access unit: a raw one as stored in MP4, or an ADTS frame (header included, as the ADTS demuxer gives

@@ -6,11 +6,13 @@
 # (and it takes a minute a sample), so tools/make-samples.sh only copies them into samples/ and writes their FFmpeg
 # references like any other sample's.
 #
-# Usage: tools/make-jm-samples.sh <JM source tree with lencod built>
+# Usage: tools/make-jm-samples.sh <JM source tree with lencod built> [sample names, to make only those]
 #   (git clone https://github.com/shihuade/JM && make -C lencod CFLAGS="-fcommon -O2"; made with JM 19.0)
 set -euo pipefail
 
-jm=$(cd "${1:?usage: tools/make-jm-samples.sh <JM tree>}" && pwd)
+jm=$(cd "${1:?usage: tools/make-jm-samples.sh <JM tree> [names]}" && pwd)
+only=" ${*:2} "
+wanted() { [[ $only == "  " || $only == *" $1 "* ]]; }
 cd "$(dirname "$0")/.."
 out=$(pwd)/samples/jm
 mkdir -p "$out"
@@ -35,6 +37,7 @@ cp "$jm/bin/encoder_main.cfg" "$work/"
 # writes it).
 encode() {
   local name=$1; shift
+  wanted "$name" || return 0
   (cd "$work" && "$jm/bin/lencod.exe" -d encoder_main.cfg -p InputFile=src.yuv -p SourceWidth=320 -p SourceHeight=256 \
     -p FramesToBeEncoded=10 -p FrameRate=25 -p NumberBFrames=0 -p OutputFile="$name.264" -p ReconFile=rec.yuv "$@" > "$name.log")
   ffmpeg -hide_banner -loglevel error -y -r 25 -i "$work/$name.264" -c copy "$out/jm-$name.mp4"
@@ -43,10 +46,11 @@ encode() {
 # encode-b name [lencod options]: the same with B pictures. A raw stream has no timestamps and FFmpeg gives its
 # packets pts = dts in decoding order, which leaves B pictures out of place (and FFmpeg drops frames). So each packet
 # (a field, or a frame) gets pts from its first slice's pic_order_cnt_lsb, which counts fields here (POC type 0, no
-# wrap in 10 frames), dts four fields behind its position and a field's duration (else the last sample's is 1), as
+# wrap in 10 frames), dts four fields behind its position and a field's duration (else the last sample's is 1; dur=512 gives frames' instead), as
 # setts expressions.
 encode-b() {
   local name=$1; shift
+  wanted "$name" || return 0
   (cd "$work" && "$jm/bin/lencod.exe" -d encoder_main.cfg -p InputFile=src.yuv -p SourceWidth=320 -p SourceHeight=256 \
     -p FramesToBeEncoded=10 -p FrameRate=25 -p OutputFile="$name.264" -p ReconFile=rec.yuv "$@" > "$name.log")
   local poc
@@ -55,7 +59,7 @@ encode-b() {
   local pts=${poc[-1]}
   for ((i = ${#poc[@]} - 2; i >= 0; i--)); do pts="if(eq(N\\,$i)\\,${poc[i]}\\,$pts)"; done
   ffmpeg -hide_banner -loglevel error -y -r 25 -i "$work/$name.264" -c copy \
-    -bsf:v "setts=pts=($pts)*256:dts=(N-4)*256:duration=256:time_base=1/12800" "$out/jm-$name.mp4"
+    -bsf:v "setts=pts=($pts)*256:dts=(N-4)*${dur:-256}:duration=${dur:-256}:time_base=1/12800" "$out/jm-$name.mp4"
 }
 
 encode paff -p PicInterlace=1             # every frame as two field pictures: an I and a P field, then P fields
@@ -77,3 +81,30 @@ encode-b paff-b-noisy -p InputFile=noisy.yuv -p PicInterlace=2 -p NumberBFrames=
 encode paff-422 -p InputFile=src422.yuv -p YUVFormat=2 -p ProfileIDC=122 -p PicInterlace=1
 encode-b paff-422-b-adaptive -p InputFile=noisy422.yuv -p YUVFormat=2 -p ProfileIDC=122 -p PicInterlace=2 -p NumberBFrames=1 \
   -p IntraPeriod=4 -p SymbolMode=0
+
+# ---- Bit depths 9, 12 and 14 (libx264 writes only 8 and 10) ----
+# Progressive frames (176x144, 10 of them) of a moving noisy test pattern, at each depth and chroma format the
+# sample needs. deep name bits yuvformat [lencod options]: High 10 for 9 bits, High 4:4:4 Predictive above 10 (no
+# other profile allows them), 8x8 transforms, B pictures, CABAC, QP 16 so the levels get large.
+deep() {
+  local name=$1 bits=$2 yuv=$3; shift 3
+  wanted "$name" || return 0
+  local pix=(gray yuv420p yuv422p yuv444p)
+  local fmt=${pix[yuv]}
+  [[ $fmt == gray ]] && fmt=gray${bits}le || fmt=${fmt}${bits}le
+  ffmpeg -hide_banner -loglevel error -y -f lavfi -i "testsrc2=size=176x144:rate=25,scroll=h=0.01:v=0.005,noise=alls=8:allf=t" \
+    -frames:v 10 -pix_fmt "$fmt" -f rawvideo "$work/deep-$name.yuv"
+  local profile=244
+  ((bits <= 10 && yuv <= 1)) && profile=110
+  dur=512 encode-b "$name" -p InputFile="deep-$name.yuv" -p SourceWidth=176 -p SourceHeight=144 -p YUVFormat="$yuv" \
+    -p SourceBitDepthLuma="$bits" -p SourceBitDepthChroma="$bits" -p OutputBitDepthLuma="$bits" -p OutputBitDepthChroma="$bits" \
+    -p ProfileIDC="$profile" -p Transform8x8Mode=1 -p NumberBFrames=1 -p QPISlice=16 -p QPPSlice=16 -p QPBSlice=18 "$@"
+}
+deep 9bit 9 1                                     # 9 bits: High 10
+deep 12bit 12 1 -p WeightedPrediction=1 -p WeightedBiprediction=1  # 12 bits, explicit weights in P and B
+deep 12bit-cavlc 12 1 -p SymbolMode=0 -p IntraPeriod=3  # CAVLC
+deep 14bit 14 1 -p QPISlice=-6 -p QPPSlice=-6 -p QPBSlice=-4  # 14 bits at low QP: levels past 2^15
+deep 14bit-cavlc 14 1 -p SymbolMode=0 -p QPISlice=-6 -p QPPSlice=-6 -p QPBSlice=-4  # level_prefix 16 and more
+deep 12bit-422 12 2                               # 4:2:2
+deep 14bit-444 14 3                               # 4:4:4
+# No 4:0:0: JM writes bit_depth_chroma 8 there, and FFmpeg refuses luma and chroma depths that differ.

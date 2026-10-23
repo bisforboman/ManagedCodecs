@@ -378,8 +378,9 @@ internal sealed partial class PictureDecoder<TPixel>
         {
             FilterEdgeVector(Unsafe.As<byte[]>(plane), q0, across, along, length, strengths, segmentShift, indexA, alpha, beta, chroma);
         }
-        else if (typeof(TPixel) == typeof(ushort) && vectorized && Vector128.IsHardwareAccelerated)
+        else if (typeof(TPixel) == typeof(ushort) && vectorized && Vector128.IsHardwareAccelerated && bitDepth <= 12)
         {
+            // 16-bit lanes: the widest sum (8 samples and a rounding term, 8-479) fits up to 12 bits.
             FilterEdgeVector16(Unsafe.As<ushort[]>(plane), q0, across, along, length, strengths, segmentShift, indexA, alpha, beta, chroma, bitDepth);
         }
         else

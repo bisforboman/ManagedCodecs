@@ -17,8 +17,9 @@ Each sample isolates something (the script's comments say what), and next to eac
 references:
 
 - `name.framemd5`: MD5 of every decoded frame, for MJPEG and H.264, which must be bit-exact.
-- `name.packets.framemd5` (with `-copyts`, so the timestamps are the demuxer's own) and `name.packets.flags`
-  (keyframe flags, from ffprobe): every demuxed MP4 packet; for raw AAC (`.aac`, ADTS) the packets alone.
+- `name.packets.csv` (`ffprobe -show_packets -show_data_hash MD5`): every demuxed MP4 packet with the demuxer's own
+  timestamps, its keyframe and discard flags and the MD5 of its data. `name.packets.framemd5` (with `-copyts`) for the
+  codec private data, and for raw AAC (`.aac`, ADTS) the packets.
 - `name.f32`: decoded AAC as 32-bit floats, edit list ignored so it holds 1024 samples for every packet (raw AAC
   has no edit list); AAC is compared by value, within a tolerance.
 - `name.trim.f32`: the same as FFmpeg decodes it by default, trimmed by the edit list (`aac-edit-trim` has an edit

@@ -1,31 +1,32 @@
+using System.Globalization;
 using ManagedCodecs.Containers.Mp4;
 
 namespace ManagedCodecs.Tests.Containers;
 
 /// <summary>
-/// Demuxes every samples/*.mp4 and compares each packet (dts, pts, duration, size, MD5) and the
-/// codec private data with samples/*.packets.framemd5, written by
-/// <c>ffmpeg -copyts -i x.mp4 -c copy -f framemd5</c>, and keyframe flags with
-/// samples/*.packets.flags from ffprobe (framemd5 has no flags column). See samples/README.md.
+/// Demuxes every samples/*.mp4 and compares each packet (dts, pts, duration, size, MD5, keyframe and discard flags)
+/// with samples/*.packets.csv, written by <c>ffprobe -show_packets -show_data_hash MD5</c> (the demuxer's own
+/// timestamps: <c>ffmpeg -c copy -f framemd5</c> makes decode timestamps go forward, which an edit list's discarded
+/// packets don't), and the codec private data with samples/*.packets.framemd5. See samples/README.md.
 /// </summary>
 public class Mp4ConformanceTests
 {
     public static TheoryData<string> Samples() =>
-        new(TestSamples.WithReference(".packets.framemd5").Where(name => name.EndsWith(".mp4", StringComparison.Ordinal)));
+        new(TestSamples.WithReference(".packets.csv").Where(name => name.EndsWith(".mp4", StringComparison.Ordinal)));
 
     [Theory]
     [MemberData(nameof(Samples))]
     public void MatchesFfmpegPacketByPacket(string sampleName)
     {
+        var expected = File.ReadAllLines(TestSamples.ReferenceOf(sampleName, ".packets.csv")).Select(ProbedPacket.Parse).ToList();
         var lines = File.ReadAllLines(TestSamples.ReferenceOf(sampleName, ".packets.framemd5"));
-        var expected = FrameMd5.Parse(lines);
 
         using var demuxer = Mp4Demuxer.Open(TestSamples.PathOf(sampleName));
         var packets = demuxer.ReadPackets().ToList();
         bool fragmented = HasMovieFragments(TestSamples.PathOf(sampleName));
 
-        // framemd5 numbers streams as FFmpeg maps them: video first, then audio.
-        var streams = new List<(int OurIndex, long Count, ReadOnlyMemory<byte> CodecPrivate)>();
+        // framemd5 numbers streams as FFmpeg maps them: video first, then audio; ffprobe by track.
+        var streams = new List<(int Index, long Count, ReadOnlyMemory<byte> CodecPrivate)>();
         if (demuxer.Video is { } video)
         {
             streams.Add((video.StreamIndex, video.FrameCount, video.CodecPrivate));
@@ -36,22 +37,22 @@ public class Mp4ConformanceTests
             streams.Add((audio.StreamIndex, audio.FrameCount, audio.CodecPrivate));
         }
 
-        Assert.Equal(expected.Select(e => e.StreamIndex).Distinct().Count(), streams.Count);
-        for (int ffmpegIndex = 0; ffmpegIndex < streams.Count; ffmpegIndex++)
+        Assert.Equal(expected.Select(e => e.StreamIndex).Distinct().Order(), streams.Select(s => s.Index).Order());
+        for (int mapped = 0; mapped < streams.Count; mapped++)
         {
-            var (ourIndex, count, codecPrivate) = streams[ffmpegIndex];
-            var extradata = FrameMd5.ParseExtradata(lines, ffmpegIndex);
+            var (index, count, codecPrivate) = streams[mapped];
+            var extradata = FrameMd5.ParseExtradata(lines, mapped);
             if (extradata is null)
             {
-                Assert.True(codecPrivate.IsEmpty, $"Stream {ffmpegIndex}: FFmpeg reports no extradata but we found some.");
+                Assert.True(codecPrivate.IsEmpty, $"Stream {index}: FFmpeg reports no extradata but we found some.");
             }
             else
             {
                 Assert.Equal(extradata.Value, (codecPrivate.Length, FrameMd5.Hash(codecPrivate.Span)));
             }
 
-            var theirs = expected.Where(e => e.StreamIndex == ffmpegIndex).ToList();
-            var ours = packets.Where(p => p.StreamIndex == ourIndex).ToList();
+            var theirs = expected.Where(e => e.StreamIndex == index).ToList();
+            var ours = packets.Where(p => p.StreamIndex == index).ToList();
             Assert.Equal(theirs.Count, ours.Count);
             Assert.Equal(theirs.Count, count);
 
@@ -67,14 +68,7 @@ public class Mp4ConformanceTests
                 long duration = !fragmented ? theirs[i].Duration
                     : i + 1 < theirs.Count ? theirs[i + 1].Dts - theirs[i].Dts
                     : p.Duration;
-                Assert.Equal(theirs[i] with { Duration = duration }, new FrameMd5Entry(ffmpegIndex, p.Dts, p.Pts, p.Duration, p.Data.Length, FrameMd5.Hash(p.Data.Span)));
-            }
-
-            // Keyframe flags (ffprobe, video only: "K__" for a keyframe).
-            if (ffmpegIndex == 0 && demuxer.Video is not null)
-            {
-                var flags = File.ReadAllLines(TestSamples.ReferenceOf(sampleName, ".packets.flags"));
-                Assert.Equal(flags.Select(f => f.StartsWith('K')), ours.Select(p => p.IsKeyframe));
+                Assert.Equal(theirs[i] with { Duration = duration }, new ProbedPacket(index, p.Pts, p.Dts, p.Duration, p.Data.Length, p.IsKeyframe, p.Discard, FrameMd5.Hash(p.Data.Span)));
             }
         }
     }
@@ -100,5 +94,24 @@ public class Mp4ConformanceTests
         }
 
         return false;
+    }
+
+    /// <summary>A line of <c>ffprobe -show_packets -show_data_hash MD5 -of csv=p=0</c>: stream, pts, dts, duration, size, flags, hash, then any side data.</summary>
+    private sealed record ProbedPacket(int StreamIndex, long Pts, long Dts, long Duration, int Size, bool IsKeyframe, bool Discard, string Md5)
+    {
+        public static ProbedPacket Parse(string line)
+        {
+            var f = line.Split(',');
+            long Number(string field) => field == "N/A" ? long.MinValue : long.Parse(field, CultureInfo.InvariantCulture); // unset (fragments' durations)
+            return new ProbedPacket(
+                int.Parse(f[0], CultureInfo.InvariantCulture),
+                Number(f[1]),
+                Number(f[2]),
+                Number(f[3]),
+                int.Parse(f[4], CultureInfo.InvariantCulture),
+                f[5][0] == 'K',
+                f[5][1] == 'D',
+                f[6]["MD5:".Length..]);
+        }
     }
 }

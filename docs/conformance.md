@@ -27,8 +27,25 @@ Decoding straight into the output frame: opt-in, `MjpegDecoder.ZeroCopy` (6% few
 
 ISO BMFF (`moov`, `trak`, `stbl` sample tables): packets, timestamps and
 codec private data match FFmpeg, for video and audio tracks, fragmented files (moof) included. Audio is trimmed by the edit list as FFmpeg trims it: priming
-skipped sample by sample, packets after the edit's end left out. Edit lists of more than one edit are not
-supported yet, nor is video trimmed at the edit's end.
+skipped sample by sample, packets after the edit's end left out.
+
+Edit lists of several edits, which FFmpeg's muxer never writes, come from rewritten samples (`tools/mp4-edit-list.py`,
+in `make-samples.sh`): two audio edits, the second from inside a packet; an empty edit between two; two video edits
+starting and ending inside a GOP, with B frames; a video edit that ends a second before the track; and both tracks of
+a file edited. Their packets are compared with `ffprobe -show_packets` (timestamps, durations, keyframe and discard
+flags, MD5), which shows the demuxer's own; `ffmpeg -c copy -f framemd5` keeps decode timestamps going forward, so
+it rewrites those of the packets an edit goes back for. FFmpeg's reading, which these follow:
+
+- Video: an edit is decoded from the keyframe before its first frame, and on to the second keyframe after its end (the
+  first without composition offsets: B frames after the first keyframe can still belong to the edit); the frames
+  shown outside it are discarded. The frames come out exactly as the edit says.
+- Audio: a second of packets before an edit is decoded and discarded, which primes the decoder (the overlap of the
+  filterbank, the noise generator's state). The first edit starts inside the packet its media time falls in (skip
+  samples), a later one at the next whole packet, so up to 1023 samples late; each edit takes the whole packet its
+  end falls in. Packet durations run up to the next packet's dts where that comes later, and the last one's to the
+  end of the edits, longer than 1024 if need be.
+- An empty edit after a real one plays the media from its start for its duration, FFmpeg reading its media time, -1,
+  as a time like any other (the spec has it as a gap).
 
 ## H.264
 

@@ -22,8 +22,9 @@ public class AacConformanceTests
 
     /// <summary>
     /// The audio FFmpeg gives by default (name.trim.f32), with the edit list applied: the priming
-    /// before its media time skipped and the packets after its end left out. Every sample must
-    /// come out, no more and no fewer.
+    /// before its media time skipped, the packets after its end left out, and with several edits
+    /// each one's packets in turn, those decoded before an edit only to prime it not shown. Every
+    /// sample must come out, no more and no fewer.
     /// </summary>
     [Theory]
     [MemberData(nameof(TrimmedSamples))]
@@ -39,7 +40,7 @@ public class AacConformanceTests
         foreach (var packet in demuxer.ReadPackets().Where(p => p.StreamIndex == audio.StreamIndex))
         {
             var decoded = decoder.Decode(packet);
-            Assert.Equal(Math.Max(0, 1024 - packet.SkipSamples), decoded.SampleCount);
+            Assert.Equal(packet.Discard ? 0 : Math.Max(0, 1024 - packet.SkipSamples), decoded.SampleCount);
             for (int i = 0; i < decoded.SampleCount; i++)
             {
                 for (int c = 0; c < channels; c++)

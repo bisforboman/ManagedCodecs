@@ -68,9 +68,17 @@ public sealed class MjpegDecoder : IVideoDecoder
     /// </remarks>
     public bool ZeroCopy { get; init; }
 
-    /// <summary>Decodes one MJPEG packet; every packet is a complete frame, so exactly one comes out.</summary>
+    /// <summary>
+    /// Decodes one MJPEG packet; every packet is a complete frame, so exactly one comes out, none for a
+    /// <see cref="Packet.Discard"/> packet (which, every image standing alone, is not decoded at all).
+    /// </summary>
     public IReadOnlyList<VideoFrame> Decode(Packet packet)
     {
+        if (packet.Discard)
+        {
+            return [];
+        }
+
         var frame = Decode(packet.Data.Span);
         frame.Pts = packet.Pts;
         return [frame];

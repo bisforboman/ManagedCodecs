@@ -43,6 +43,11 @@ public static class CodecIds
 /// Audio: how many decoded samples (per channel) at the start of this packet come before the
 /// presentation starts, such as encoder priming that an edit list cuts off; the decoder drops them.
 /// </param>
+/// <param name="Discard">
+/// To be decoded but not shown: a packet an edit list leaves out that later ones need, such as the frames from the
+/// keyframe before an edit's start, or audio before it (whose decoding primes the next frames). The decoders decode it
+/// and return nothing for it (no frame, or an empty <see cref="AudioFrame"/>). Its timestamps follow the edit's.
+/// </param>
 public readonly record struct Packet(
     int StreamIndex,
     long Sequence,
@@ -51,7 +56,8 @@ public readonly record struct Packet(
     long Dts,
     long Pts,
     long Duration,
-    int SkipSamples = 0);
+    int SkipSamples = 0,
+    bool Discard = false);
 
 /// <summary>Basic facts about a container's video stream.</summary>
 /// <param name="Codec">
@@ -120,7 +126,7 @@ public interface IVideoDecoder
     /// <summary>
     /// Decodes one packet and returns the frames that are now ready to be shown, in display
     /// order. Each frame's <see cref="VideoFrame.Pts"/> is the <see cref="Packet.Pts"/> of the
-    /// packet it was coded in.
+    /// packet it was coded in; a <see cref="Packet.Discard"/> packet's frame is decoded but never returned.
     /// </summary>
     IReadOnlyList<VideoFrame> Decode(Packet packet);
 
@@ -154,7 +160,8 @@ public interface IAudioDecoder
 
     /// <summary>
     /// Decodes one packet and drops its first <see cref="Packet.SkipSamples"/> samples, so the
-    /// output starts where the container says presentation starts. A packet can come out empty.
+    /// output starts where the container says presentation starts, or all of them for a
+    /// <see cref="Packet.Discard"/> packet. A packet can come out empty.
     /// </summary>
     AudioFrame Decode(Packet packet);
 }

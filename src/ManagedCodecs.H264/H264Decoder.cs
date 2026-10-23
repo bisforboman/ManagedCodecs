@@ -43,6 +43,9 @@ public sealed class H264Decoder : IVideoDecoder
     private readonly PictureOrder _order = new();
     private readonly OutputQueue _output = new();
 
+    // Whether the packet being parsed is to be decoded and not shown (Packet.Discard).
+    private bool _discard;
+
     /// <param name="codecPrivate">The AVCDecoderConfigurationRecord ('avcC') from the container.</param>
     public H264Decoder(ReadOnlySpan<byte> codecPrivate)
     {
@@ -103,14 +106,17 @@ public sealed class H264Decoder : IVideoDecoder
     /// planes back to the decoder for a later frame, which saves allocating (and collecting)
     /// them: about 4 to 7% of the decoding time at 720p.
     /// </remarks>
-    public IReadOnlyList<VideoFrame> Decode(Packet packet) => Decode(packet.Data.Span, packet.Pts);
+    public IReadOnlyList<VideoFrame> Decode(Packet packet) => Decode(packet.Data.Span, packet.Pts, packet.Discard);
 
     /// <summary>
     /// Decodes one picture's length-prefixed NAL units from <paramref name="data"/>, which need not outlive the call
     /// (the decoder copies what it keeps), as <see cref="Decode(Packet)"/> does; the frame that comes from it gets
     /// <paramref name="pts"/>.
     /// </summary>
-    public IReadOnlyList<VideoFrame> Decode(ReadOnlySpan<byte> data, long pts)
+    public IReadOnlyList<VideoFrame> Decode(ReadOnlySpan<byte> data, long pts) => Decode(data, pts, discard: false);
+
+    /// <summary>A picture's NAL units; a <paramref name="discard"/> picture (<see cref="Packet.Discard"/>) is decoded and gives no frame.</summary>
+    private List<VideoFrame> Decode(ReadOnlySpan<byte> data, long pts, bool discard)
     {
         if (BorrowFrames && Threads > 1)
         {
@@ -118,6 +124,7 @@ public sealed class H264Decoder : IVideoDecoder
         }
 
         var frames = new List<VideoFrame>();
+        _discard = discard;
         var job = ParsePicture(data, pts, frames);
         if (Threads == 1)
         {
@@ -296,6 +303,13 @@ public sealed class H264Decoder : IVideoDecoder
         }
 
         var picture = state.Picture;
+        if (job.Discard)
+        {
+            // It still takes its place in the output order, so that the frames around it come out as they would with it.
+            frames.AddRange(_output.Add(null, picture.Poc, job.Restart, ReorderDepth(state.Sps)));
+            return;
+        }
+
         bool borrow = BorrowFrames && picture.BitDepth == 8;
         var frame = borrow ? Borrow(picture, state.Sps) : Crop(picture, state.Sps);
         frame.Pts = job.Pts;
@@ -490,8 +504,8 @@ public sealed class H264Decoder : IVideoDecoder
         // A second field's frame is the first one's: its timestamp, and whether it starts a new sequence.
         var state = new PictureState(header, sps, decoder, picture, poc, secondField);
         return secondField
-            ? new PictureJob(state, _firstField!.Pts, _firstField.Restart)
-            : new PictureJob(state, pts, header.IsIdr || header.MemoryManagement.Any(op => op.Op == 5));
+            ? new PictureJob(state, _firstField!.Pts, _firstField.Restart, _firstField.Discard)
+            : new PictureJob(state, pts, header.IsIdr || header.MemoryManagement.Any(op => op.Op == 5), _discard);
     }
 
     /// <summary>
@@ -659,15 +673,18 @@ public sealed class H264Decoder : IVideoDecoder
 
     /// <summary>
     /// A picture parsed from a packet, to be decoded: its state and slices, the frames it predicts from, and for its
-    /// output frame the timestamp (a second field's frame takes the first field's) and whether it restarts the order.
+    /// output frame the timestamp (a second field's frame takes the first field's), whether it restarts the order and
+    /// whether it is shown at all (a second field's frame goes as the first field's packet says).
     /// </summary>
-    private sealed class PictureJob(PictureState state, long pts, bool restart)
+    private sealed class PictureJob(PictureState state, long pts, bool restart, bool discard)
     {
         public PictureState State { get; } = state;
 
         public long Pts { get; } = pts;
 
         public bool Restart { get; } = restart;
+
+        public bool Discard { get; } = discard;
 
         public List<SliceWork> Slices { get; } = [];
 

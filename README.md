@@ -38,14 +38,13 @@ says feature by feature which encoder made the samples (libx264, OpenH264, JM) a
   (`Threads`).
 - **AAC LC**: mono to 7.1 and program config elements, every window sequence and shape, M/S and intensity stereo,
   PNS, TNS; within 2^-17 of FFmpeg's float output (measured: 3e-7). Encoder priming is trimmed by the MP4 edit list.
-- **Containers**: AVI (video), MP4 (video and audio tracks, fragmented files too) and raw AAC (ADTS), with packets and
-  timestamps as FFmpeg's demuxers give them.
+- **Containers**: AVI (video), MP4 (video and audio tracks, fragmented files too, edit lists of several edits)
+  and raw AAC (ADTS), with packets and timestamps as FFmpeg's demuxers give them.
 - **Throughout**: an async API, malformed input that ends in `InvalidDataException` or `NotSupportedException`
   (fuzzed), and the same output on x64, ARM64 and WebAssembly (CI checks all three).
 
 ### Open
 
-- MP4: edit lists of more than one edit, and video trimmed at the edit's end.
 - AAC: HE-AAC (SBR, PS). In ADTS: frames of several raw data blocks, and channel configuration 0.
 - MJPEG: files from real cameras (the samples are all FFmpeg's), and packets holding one field (FFmpeg decodes none).
 - H.264: separate colour planes, luma and chroma bit depths that differ, monochrome above 10 bits (FFmpeg decodes
@@ -147,6 +146,11 @@ which WebAssembly in a browser needs; it costs 0.3% more instructions than befor
 `packet.SkipSamples` at its start. The MP4 demuxer sets those from the edit list, so encoder priming is dropped and the
 output matches FFmpeg's default (`Decode(packet.Data.Span)` gives all 1024).
 
+An edit list can also leave packets out, repeat them, or need some decoded only to be able to decode others: the MP4
+demuxer gives every packet FFmpeg's does, those to be decoded and not shown marked `Packet.Discard` (the frames from
+the keyframe before an edit's start, audio before it, which primes the decoder). Each decoder decodes such a packet and
+returns nothing for it, no frame or an empty `AudioFrame`, so playing every packet gives what FFmpeg plays.
+
 ### Malformed input
 
 Damaged, truncated or hostile files make the demuxers and decoders throw `InvalidDataException` (or
@@ -168,7 +172,7 @@ fixed.
 
 The libraries run unchanged on `browser-wasm`. `tools/wasm-check.sh [aot]` decodes every sample there, under
 Node, and natively (`mcdec --hash`, a SHA-256 of each file's decoded frames and audio samples), and fails unless the
-output is the same. All 274 sample files agree, interpreted or compiled ahead of time, and CI's `wasm` job runs the
+output is the same. All 279 sample files agree, interpreted or compiled ahead of time, and CI's `wasm` job runs the
 AOT build on every pull request. The native build is the one checked against FFmpeg, so the wasm output matches
 FFmpeg as well. `tools/ManagedCodecs.Wasm` needs the `wasm-tools` workload (`dotnet workload install wasm-tools`),
 so it is not part of `ManagedCodecs.slnx`.

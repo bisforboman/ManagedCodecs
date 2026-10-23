@@ -209,4 +209,52 @@ public class DeblockingTests
 
         return plane;
     }
+
+    /// <summary>
+    /// The Vector128 transposes of vertical edges (what ARM64 runs; x64 takes SSE2's) against their definition on
+    /// random planes: tap k, lane i is byte k of row i (rows 0-7 from the top start, 8-15 from the bottom one), and
+    /// writing the taps back changes those 8 bytes of 16 rows and nothing else.
+    /// </summary>
+    [Fact]
+    public void VectorTransposes_MatchTheirDefinition()
+    {
+        const int Stride = 40;
+        var random = new Random(23);
+        for (int n = 0; n < 2_000; n++)
+        {
+            var plane = new byte[Stride * 40];
+            random.NextBytes(plane);
+            int top = random.Next(Stride - 8) + (random.Next(8) * Stride);
+            int bottom = random.Next(2) == 0 ? top : top + (8 * Stride); // chroma: the same 8 rows twice
+            var taps = new byte[8 * 16];
+            PictureDecoder<byte>.TransposeInVector128(plane, top, plane, bottom, Stride, taps);
+            for (int k = 0; k < 8; k++)
+            {
+                for (int i = 0; i < 16; i++)
+                {
+                    int row = i < 8 ? top + (i * Stride) : bottom + ((i - 8) * Stride);
+                    Assert.Equal(plane[row + k], taps[(k * 16) + i]);
+                }
+            }
+
+            if (bottom == top)
+            {
+                continue;
+            }
+
+            var newTaps = new byte[8 * 16];
+            random.NextBytes(newTaps);
+            var expected = (byte[])plane.Clone();
+            for (int k = 0; k < 8; k++)
+            {
+                for (int i = 0; i < 16; i++)
+                {
+                    expected[(i < 8 ? top + (i * Stride) : bottom + ((i - 8) * Stride)) + k] = newTaps[(k * 16) + i];
+                }
+            }
+
+            PictureDecoder<byte>.TransposeOutVector128(newTaps, plane, top, plane, bottom, Stride);
+            Assert.Equal(expected, plane);
+        }
+    }
 }

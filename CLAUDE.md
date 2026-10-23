@@ -124,6 +124,9 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
 - Deeper than 10 bits: JM codes macroblocks as I_PCM below about QP -6 at 14 bits (so its streams never reach CAVLC's
   level_prefix 16), segfaults with `EnableIPCM=0`, and writes 4:0:0 with 8-bit chroma, which FFmpeg refuses ("Different
   chroma and luma bit depth"). 16-bit SIMD lanes hold sums of eight 12-bit samples, not 14-bit ones.
+- ARM64 (CI's `build-arm64`): FFmpeg's default JPEG IDCT there is NEON, which rounds unlike its C one; references
+  take `-idct simple` (the same as the default on x64). An `Sse2.`/`Avx2.` call reached behind only
+  `Vector128.IsHardwareAccelerated` throws PlatformNotSupportedException on ARM64: dispatch inside the function.
 - Counting macroblock kinds (I_PCM, sub-8x8 partitions) per picture: FFmpeg's `-debug mb_type` grids come out after
   later frames' headers, so they can't be matched to picture types; count in the decoder with a temporary counter.
 - In fragmented MP4, FFmpeg's packet durations are not the file's: its demuxer leaves them unset and libavformat

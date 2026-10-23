@@ -278,7 +278,8 @@ from Android (Apache-2.0). For spectral band replication (HE-AAC), whose specifi
 and 3GPP TS 26.404) is out of the sandbox's reach, the same decoder's SBR sources stand in for it as JM did for MBAFF:
 read for the syntax and the clauses its comments cite, its Huffman codebooks enumerated from its decoding trees, its
 precomputed band tables used to check the spec's formulas; the arithmetic is written from the formulas, in double
-precision, and no code was copied. AAC's noise substitution uses the Numerical Recipes random generator
+precision, and no code was copied. The QMF banks' 640-tap window is libxaac's (Apache-2.0, in the spec's order),
+whose even taps equal the PacketVideo decoder's own analysis table to the digits it gives. AAC's noise substitution uses the Numerical Recipes random generator
 with the seed FFmpeg uses (the spec leaves the generator open), so noise bands match FFmpeg too.
 For MBAFF (the neighbour table 6-4, the field scans, the field CABAC context maps, the order of the
 deblocking filter's field edges and the co-located field or frame of direct prediction) the ITU's reference decoder, JM (royalty-free, from the ITU), stood

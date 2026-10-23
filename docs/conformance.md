@@ -247,6 +247,11 @@ frequency tables follow the spec's formulas; its start and stop bands match the 
 tables, and the tables derived from every header a 44.1 kHz stream can send hold together (a unit test). The FDK
 encoder's headers use bs_freq_scale 2 and 3 (3 in the low-bitrate pair): scale 1, and the linear master table of 0, are
 checked only for consistency.
+The QMF banks (32-band analysis, 64-band synthesis) are written as the spec's sums. Analysis followed by synthesis with
+the upper 32 bands empty, SBR's output where it adds nothing, gives the core's signal at twice the rate: unit gain
+across the core's band to the window's ripple (about 1e-3; the bank is nearly, not perfectly, reconstructing), a delay
+of 578 output samples, and no fractional delay (unit tests; reading samples in the wrong order, the window's odd taps
+or a kernel offset by one breaks them). Their delay against FFmpeg's output waits for the decoded SBR.
 ## ADTS (raw AAC)
 
 Raw AAC files (ADTS, `AdtsDemuxer`) demux packet by packet as FFmpeg's

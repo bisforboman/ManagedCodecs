@@ -5,8 +5,9 @@ Test media is generated locally with FFmpeg and is not committed (see `.gitignor
 no OpenH264, so those few small files are committed and `tools/make-samples.sh` copies them here and writes their
 references like any other sample's. `tools/make-openh264-samples.sh <openh264 tree>` makes them again. The same
 goes for `jm/`: field pictures (PAFF), also next to MBAFF frames, in 4:0:0 and weighted afterwards by
-`tools/h264-add-weights.py`, 9-, 12- and 14-bit video, I_PCM, cabac_init_idc 1 and 2, chroma QP offsets of their own and scaling lists in the SPS and PPS from JM's encoder, made again by `tools/make-jm-samples.sh <JM tree>`. From the
-repository root:
+`tools/h264-add-weights.py`, 9-, 12- and 14-bit video, I_PCM, cabac_init_idc 1 and 2, chroma QP offsets of their own and scaling lists in the SPS and PPS from JM's encoder, made again by `tools/make-jm-samples.sh <JM tree>`. And for `heaac/`: HE-AAC (spectral band
+replication, parametric stereo) from the Fraunhofer FDK encoder, made again by `tools/make-heaac-samples.sh <fdk-aac
+tree>`. From the repository root:
 
 ```
 tools/make-samples.sh

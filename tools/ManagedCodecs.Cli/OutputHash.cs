@@ -53,7 +53,18 @@ public static class OutputHash
             }
             else if (packet.StreamIndex == audio?.StreamIndex && audioDecoder is not null)
             {
-                foreach (var channel in audioDecoder.Decode(packet).Samples)
+                AudioFrame decoded;
+                try
+                {
+                    decoded = audioDecoder.Decode(packet);
+                }
+                catch (NotSupportedException)
+                {
+                    audioDecoder = null; // audio not decoded yet (HE-AAC): the rest of the file goes on without it
+                    continue;
+                }
+
+                foreach (var channel in decoded.Samples)
                 {
                     sha.AppendData(MemoryMarshal.AsBytes(channel.AsSpan()));
                 }

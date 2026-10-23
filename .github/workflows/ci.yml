@@ -23,7 +23,7 @@ jobs:
   build:
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-24.04
-    # The steps take about 5 minutes; the rest is room for a slow Ubuntu mirror (apt once took 27 minutes).
+    # The steps take about 5 minutes; the rest is room for a slow Ubuntu mirror on a cache miss (apt once took 27 minutes).
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -32,10 +32,31 @@ jobs:
         with:
           dotnet-version: 10.0.x
 
-      - name: Install FFmpeg and ImageMagick
+      # The packages (about 50 MB) come from the Actions cache, not the Ubuntu mirror, which once took 27 minutes. The
+      # key is the list of package files apt would fetch now, versions included, so a new version on the mirror
+      # makes a new cache entry (the older one's files restored, only the new ones downloaded).
+      - name: List the FFmpeg and ImageMagick packages to fetch
+        id: apt
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends ffmpeg imagemagick
+          sudo apt-get install --print-uris -qq --no-install-recommends ffmpeg imagemagick | awk '{print $2}' | sort > "$RUNNER_TEMP/apt-files.txt"
+          echo "key=apt-${{ runner.os }}-${{ runner.arch }}-$(sha256sum "$RUNNER_TEMP/apt-files.txt" | cut -c1-16)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/apt-archives
+          key: ${{ steps.apt.outputs.key }}
+          restore-keys: apt-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Install FFmpeg and ImageMagick
+        run: |
+          mkdir -p ~/apt-archives/partial
+          sudo apt-get install -y --no-install-recommends -o Dir::Cache::Archives="$HOME/apt-archives" \
+            -o APT::Keep-Downloaded-Packages=true ffmpeg imagemagick
+          # apt leaves its lock and partial/ to root and _apt; the cache saves the directory as the runner's user.
+          sudo rm -rf ~/apt-archives/partial ~/apt-archives/lock
+          sudo chown -R "$(id -u):$(id -g)" ~/apt-archives
+          ls ~/apt-archives | wc -l
           ffmpeg -hide_banner -version | head -1
 
       - name: Format (StyleBro)
@@ -90,10 +111,31 @@ jobs:
         with:
           dotnet-version: 10.0.x
 
-      - name: Install FFmpeg and ImageMagick
+      # The packages (about 50 MB) come from the Actions cache, not the Ubuntu mirror, which once took 27 minutes. The
+      # key is the list of package files apt would fetch now, versions included, so a new version on the mirror
+      # makes a new cache entry (the older one's files restored, only the new ones downloaded).
+      - name: List the FFmpeg and ImageMagick packages to fetch
+        id: apt
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends ffmpeg imagemagick
+          sudo apt-get install --print-uris -qq --no-install-recommends ffmpeg imagemagick | awk '{print $2}' | sort > "$RUNNER_TEMP/apt-files.txt"
+          echo "key=apt-${{ runner.os }}-${{ runner.arch }}-$(sha256sum "$RUNNER_TEMP/apt-files.txt" | cut -c1-16)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/apt-archives
+          key: ${{ steps.apt.outputs.key }}
+          restore-keys: apt-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Install FFmpeg and ImageMagick
+        run: |
+          mkdir -p ~/apt-archives/partial
+          sudo apt-get install -y --no-install-recommends -o Dir::Cache::Archives="$HOME/apt-archives" \
+            -o APT::Keep-Downloaded-Packages=true ffmpeg imagemagick
+          # apt leaves its lock and partial/ to root and _apt; the cache saves the directory as the runner's user.
+          sudo rm -rf ~/apt-archives/partial ~/apt-archives/lock
+          sudo chown -R "$(id -u):$(id -g)" ~/apt-archives
+          ls ~/apt-archives | wc -l
           ffmpeg -hide_banner -version | head -1
 
       - name: Generate samples
@@ -112,7 +154,7 @@ jobs:
 
   # The decoders on WebAssembly (browser-wasm, compiled ahead of time as a web app would ship them, run by Node):
   # tools/wasm-check.sh decodes every sample there and natively and fails unless the output is the same. It takes the
-  # samples from the build job rather than installing FFmpeg again (the Ubuntu mirror once took 27 minutes).
+  # samples from the build job rather than installing FFmpeg too.
   wasm:
     needs: build
     runs-on: ubuntu-24.04

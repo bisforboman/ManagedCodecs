@@ -262,13 +262,16 @@ what the two commands above include and are not comparable with FFmpeg's `bench:
    I_PCM next to coded macroblocks in I and P pictures, with CAVLC and CABAC (also decoded from
    hand-built streams), cabac_init_idc 1 and 2 (JM's adaptive choice takes them in most of its
    streams; two samples fix each), and a Cr QP offset other than Cb's
-   (second_chroma_qp_index_offset) in 4:2:0, 4:2:2 and 4:4:4. I_PCM's QP 0 in the deblocking filter
+   (second_chroma_qp_index_offset) in 4:2:0, 4:2:2 and 4:4:4; B sub-macroblock partitions smaller
+   than 8x8 (in every JM sample with B pictures, CAVLC and CABAC, frames and fields); and scaling
+   matrices as libx264 never sends them: lists in the SPS (fall-back rule A there), in both with
+   picture lists absent (rule B), useDefaultScalingMatrixFlag, Cb's and Cr's lists of their own,
+   and 4:4:4's 8x8 chroma lists (8 to 11). I_PCM's QP 0 in the deblocking filter
    is not reached: an edge next to it averages 0 with the neighbour's QP, below indexA 16 (alpha 0)
    for any neighbour under QP 32, and JM writes I_PCM only below about QP 16.
    Produced by none of them, so not checked against FFmpeg: memory management operations 2, 3
-   and 5 (unit tests), B sub-macroblock partitions smaller than 8x8, and of scaling matrices: lists in the
-   SPS, fall-back rule B, useDefaultScalingMatrixFlag and a Cr list of its own (unit tests decode
-   samples with rewritten parameter sets). Still open: separate colour planes, luma and chroma bit depths that differ,
+   and 5 (unit tests; JM writes 1 and OpenH264 1, 4 and 6). The scaling matrix unit tests (samples
+   with rewritten parameter sets) stay as a second check. Still open: separate colour planes, luma and chroma bit depths that differ,
    error concealment, more speed (about 3.2x FFmpeg's time on `h264-bench-720p.mp4`, 2.5 to 3.3x on libx264's
    default High output at 720p, less the noisier the source, and about the same ratio at 10 bits as at 8; 2x on
    high-bitrate intra content). A profile of a

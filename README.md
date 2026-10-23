@@ -216,9 +216,9 @@ what the two commands above include and are not comparable with FFmpeg's `bench:
    filter have vector paths for 10-bit samples too (32-bit lanes for the 6-tap filter, 16-bit
    ones for deblocking), each checked against its reference on random 10-bit input.
    9, 12 and 14 bits (High 10 and High 4:4:4 Predictive) are checked on JM's output (libx264 writes
-   only 8 and 10): P and B frames with the 8x8 transform, explicit weights in P and B at 12 bits,
-   CAVLC at 12 and 14 bits, 4:2:2 at 12 and 4:4:4 at 14, at QPs down to -6 (14-bit levels past
-   2^15); I_PCM from hand-built streams, and CAVLC's level_prefix of 16 and more (which only levels
+   only 8 and 10): P and B frames with the 8x8 transform, explicit weights in P and B at 12 bits
+   (bi-predicted blocks too, though JM's B offsets are all 0), CAVLC at 12 and 14 bits, 4:2:2 at
+   12 and 4:4:4 at 14, at QPs down to -6 (CAVLC's level_prefix up to 15); I_PCM from hand-built streams, and CAVLC's level_prefix of 16 and more (which only levels
    past about 2048 need, and which JM never writes: it codes such macroblocks as I_PCM) from unit
    tests. Frames come out as `Yuv420P9`, `Yuv422P12`, `Gray14` and the like (FFmpeg's yuv420p9le
    and so on). Deblocking takes its 16-bit lanes up to 12 bits (the strong filter sums eight
@@ -255,8 +255,8 @@ what the two commands above include and are not comparable with FFmpeg's `bench:
    not checked (libx264 does not write them; the field code is the one 4:2:0 uses, with no chroma).
    Produced by neither, so not checked against FFmpeg: I_PCM (decoded from hand-built streams,
    CAVLC and CABAC), memory management operations 2, 3 and 5 (unit tests),
-   B sub-macroblock partitions smaller than 8x8, explicit weights for bi-predicted blocks (libx264 weights B frames
-   implicitly), cabac_init_idc 1 and 2 (only their tables are checked, against libavc), a Cr QP
+   B sub-macroblock partitions smaller than 8x8, explicit offsets for bi-predicted blocks (libx264 weights B frames
+   implicitly; JM's 12-bit sample weights them explicitly, with offsets 0), cabac_init_idc 1 and 2 (only their tables are checked, against libavc), a Cr QP
    offset other than Cb's (second_chroma_qp_index_offset), and of scaling matrices: lists in the
    SPS, fall-back rule B, useDefaultScalingMatrixFlag and a Cr list of its own (unit tests decode
    samples with rewritten parameter sets). Still open: separate colour planes, luma and chroma bit depths that differ,

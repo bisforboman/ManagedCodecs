@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The decoders on browser-wasm, run by Node (tools/wasm-check.sh). Needs the wasm-tools workload
+    (dotnet workload install wasm-tools), so it is not in ManagedCodecs.slnx: building the solution doesn't need it.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RuntimeIdentifier>browser-wasm</RuntimeIdentifier>
+    <RootNamespace>ManagedCodecs.Wasm</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <WasmMainJSPath>main.mjs</WasmMainJSPath>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\ManagedCodecs.Cli\OutputHash.cs" Link="OutputHash.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\ManagedCodecs.Containers\ManagedCodecs.Containers.csproj" />
+    <ProjectReference Include="..\..\src\ManagedCodecs.Mjpeg\ManagedCodecs.Mjpeg.csproj" />
+    <ProjectReference Include="..\..\src\ManagedCodecs.H264\ManagedCodecs.H264.csproj" />
+    <ProjectReference Include="..\..\src\ManagedCodecs.Aac\ManagedCodecs.Aac.csproj" />
+  </ItemGroup>
+
+</Project>

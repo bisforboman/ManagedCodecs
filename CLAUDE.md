@@ -135,5 +135,11 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
   sandbox needs `AFL_SKIP_BIN_CHECK=1 AFL_SKIP_CPUFREQ=1 AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES=1` (fuzz.sh sets them),
   and the `sharpfuzz` global tool lives in `~/.dotnet/tools`, which is not on PATH by default. Many crash files are
   one bug: group them by the top frame of the stack before fixing.
+- WebAssembly (`tools/ManagedCodecs.Wasm`, `tools/wasm-check.sh`): a browser-wasm build needs the `wasm-tools`
+  workload even without AOT (NETSDK1147), hence the project is outside the solution. `dotnet new wasmconsole` needs
+  a NuGet search host the sandbox blocks: the project is written by hand. The browser has no MD5 (SHA-256 works),
+  Emscripten's file system doesn't see the host's (files come in through `[JSImport]` from main.mjs), and the runtime
+  prints `MONO_WASM:` notes on stdout under Node (it can't fetch its symbol file). `dotnet publish` puts the app in
+  `bin/Release/net10.0/browser-wasm/AppBundle`, whatever `-o` says.
 - In fragmented MP4, FFmpeg's packet durations are not the file's: its demuxer leaves them unset and libavformat
   fills in the codec frame size (1024 for AAC). Compare with FFmpeg's next dts instead (Mp4ConformanceTests does).

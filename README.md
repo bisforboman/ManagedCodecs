@@ -18,6 +18,7 @@ then the same approach for H.264 + AAC in MP4.
 | `tools/make-samples.sh` | Generates the test samples and FFmpeg's references |
 | `tools/compare.sh` | Times mcdec and FFmpeg on the same file |
 | `tools/ManagedCodecs.Fuzz`, `tools/fuzz.sh` | Fuzzing targets for SharpFuzz and AFL++ (see Malformed input) |
+| `tools/ManagedCodecs.Wasm`, `tools/wasm-check.sh` | The decoders on WebAssembly, checked against the native build (see WebAssembly) |
 | `tests/ManagedCodecs.Tests` | Unit tests and FFmpeg conformance tests (framemd5 for frames and packets) |
 | `benchmarks/ManagedCodecs.Benchmarks` | BenchmarkDotNet decode benchmark |
 
@@ -91,6 +92,35 @@ and decodes every track; the others feed one decoder its configuration and packe
 The sweep and the first 20-minute runs of each target found sample sizes and durations over `int`, AVI chunks past
 the end of the file, a zero image width or channel count, an `mb_type` code over `int` and huge MJPEG images, all
 fixed.
+
+### WebAssembly
+
+The libraries run unchanged on `browser-wasm`. `tools/wasm-check.sh [aot]` decodes every sample there, under
+Node, and natively (`mcdec --hash`, a SHA-256 of each file's decoded frames and audio samples), and fails unless the
+output is the same. All 272 sample files agree, interpreted or compiled ahead of time, and CI's `wasm` job runs the
+AOT build on every pull request. The native build is the one checked against FFmpeg, so the wasm output matches
+FFmpeg as well. `tools/ManagedCodecs.Wasm` needs the `wasm-tools` workload (`dotnet workload install wasm-tools`),
+so it is not part of `ManagedCodecs.slnx`.
+
+On wasm, `Vector128` is accelerated (WebAssembly's 128-bit SIMD, on by default) and `Vector256` is not, so the paths
+written for ARM64 run there, such as the MJPEG `Vector128` IDCT and the H.264 deblocking transposes.
+`Environment.ProcessorCount` is 1, and there are no threads without the experimental multithreaded runtime, so the
+decoders must stay usable on one thread.
+
+Time per decode: the mean of 10 decodes of a file already in memory (`--loops 10` to `mcdec --hash` and to the wasm
+tool), the median of 3 interleaved runs. Node 22, SDK 10.0.113, a 4-core cloud VM; native is the x64 JIT with AVX2
+(mcdec turns tiered compilation off).
+
+| Sample | Native | wasm AOT | wasm interpreter |
+| --- | --- | --- | --- |
+| testsrc-420.avi (MJPEG, 50 frames) | 40 ms | 97 ms | 413 ms |
+| h264-with-audio.mp4 (H.264 Main, 73 frames, and AAC) | 80 ms | 105 ms | 582 ms |
+| h264-high-b.mp4 (H.264 High with B frames, 25 frames) | 51 ms | 106 ms | 623 ms |
+| aac-stereo-48k.mp4 (AAC LC, 95 frames) | 5.5 ms | 14 ms | 51 ms |
+| jm-paff-b.mp4 (H.264 field pictures, 10 frames) | 23 ms | 49 ms | 272 ms |
+
+AOT (`-p:RunAOTCompilation=true`, two minutes more to build) takes 1.3 to 2.5 times the native time, the interpreter
+7 to 12 times.
 
 ## Benchmarking
 

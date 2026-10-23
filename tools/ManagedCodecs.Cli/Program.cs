@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using ManagedCodecs;
 using ManagedCodecs.Aac;
+using ManagedCodecs.Cli;
 using ManagedCodecs.Containers;
 using ManagedCodecs.H264;
 using ManagedCodecs.Mjpeg;
@@ -11,10 +12,21 @@ using ManagedCodecs.Mjpeg;
 //   ffmpeg -benchmark -threads 1 -stream_loop 9 -i samples/h264-bench-720p.mp4 -f null -
 if (args.Length == 0 || args.Contains("-h") || args.Contains("--help"))
 {
-    Console.WriteLine("usage: mcdec <file> [--loops N] [--borrow-frames]");
+    Console.WriteLine("usage: mcdec <file> [--loops N] [--borrow-frames] | mcdec --hash <file>...");
     Console.WriteLine("  Demuxes and decodes the file's video and audio N times (default 1), like ffmpeg -stream_loop N-1.");
     Console.WriteLine("  --borrow-frames: H.264 frames point into the decoder's pictures instead of being copied out.");
+    Console.WriteLine("  --hash: prints a SHA-256 of each file's decoded output instead (tools/wasm-check.sh compares them).");
     return args.Length == 0 ? 1 : 0;
+}
+
+if (args[0] == "--hash")
+{
+    foreach (var file in args.Skip(1))
+    {
+        Console.WriteLine(OutputHash.Line(file, File.ReadAllBytes(file)));
+    }
+
+    return 0;
 }
 
 string path = args[0];

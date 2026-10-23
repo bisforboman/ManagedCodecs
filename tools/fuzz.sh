@@ -4,7 +4,7 @@
 # Usage: tools/fuzz.sh <file|h264|mjpeg|aac> <minutes> [work dir]
 #   Needs afl-fuzz (apt install afl++) and the SharpFuzz tool (dotnet tool install --global SharpFuzz.CommandLine).
 #   Findings end up in <work dir>/<target>/out/default/crashes and hangs; reproduce one with
-#   dotnet tools/ManagedCodecs.Fuzz/bin/Release/net10.0/ManagedCodecs.Fuzz.dll <target> <file>,
+#   dotnet tools/ManagedCodecs.Fuzz/bin/Debug/net10.0/ManagedCodecs.Fuzz.dll <target> <file>,
 #   and once fixed, keep it in tests/ManagedCodecs.Tests/Fuzz/Findings/<target>/ (MalformedInputTests replays them).
 set -euo pipefail
 

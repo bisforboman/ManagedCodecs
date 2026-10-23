@@ -150,8 +150,10 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
   done (`Picture.WaitForRow`, `WaitForMotion`), and never marking state (the front end marks later pictures
   meanwhile; read `MarkSnapshot`). Rows (pair rows of MBAFF frames and field pictures, a field picture's per field)
   are final one row after they are deblocked (the next row's top edge filters
-  their bottom). A race passes the threaded conformance tests by luck unless the random per-row delays
-  (`MatchesFfmpegWithDelayedThreads`) make pictures overtake: check a new wait by breaking it and seeing that test fail
-  (the co-located motion wait is the exception, covered in practice by the motion compensation waits before it).
+  their bottom). A race passes the threaded conformance tests by luck unless the random delays (`RowDelay`: before
+  each picture and after each row; `MatchesFfmpegWithDelayedThreads`) make pictures overtake: check a new wait by
+  breaking it and seeing that test fail (the co-located motion wait is the exception, covered in practice by the motion
+  compensation waits before it). A frame's second field runs on a decoder of its own alongside its first: it waits for
+  the first's `Begin` (which resets both fields' slots), and its frame is copied out only once the first is done.
 - In fragmented MP4, FFmpeg's packet durations are not the file's: its demuxer leaves them unset and libavformat
   fills in the codec frame size (1024 for AAC). Compare with FFmpeg's next dts instead (Mp4ConformanceTests does).

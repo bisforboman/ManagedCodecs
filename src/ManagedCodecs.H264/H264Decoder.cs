@@ -85,7 +85,8 @@ public sealed class H264Decoder : IVideoDecoder
     /// more threads decode faster on more cores, and give the same frames. 1, the default, decodes on the calling
     /// thread, as WebAssembly in a browser needs (it has no threads there). With more, <see cref="Decode"/> returns
     /// frames up to that many packets later (<see cref="Flush"/> returns the rest), and <see cref="BorrowFrames"/> is
-    /// not supported.
+    /// not supported. A thread waiting for a reference's rows leaves its core idle, so a few more threads than cores can
+    /// help: on a 4-core VM, 6 decoded a 720p P chain up to 16% faster than 4.
     /// </summary>
     public int Threads
     {
@@ -146,7 +147,7 @@ public sealed class H264Decoder : IVideoDecoder
     /// <summary>
     /// <see cref="Decode(Packet)"/> for asynchronous callers. With <see cref="Threads"/> above 1 it awaits what
     /// <see cref="Decode(Packet)"/> would block on: a free decoder (the oldest picture finishing, whose frames it then
-    /// returns), and a first field finishing before its second starts. A change of picture size or format still waits
+    /// returns). A change of picture size or format still waits
     /// for every picture being decoded, blocking. Cancelling stops the waiting, not pictures already started; the
     /// exceptions are those of <see cref="Decode(Packet)"/>, the decoding threads' as they were thrown.
     /// </summary>

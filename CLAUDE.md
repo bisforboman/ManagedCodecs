@@ -39,8 +39,8 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
   FFmpeg's AAC: no pulse data). A second encoder covers some: OpenH264 (`tools/make-openh264-samples.sh`, its
   streams committed in `samples/openh264/`) writes long-term references, MMCO 4 and 6, POC type 2, SVC, and
   frame_num gaps once temporal layers are dropped. A third, JM (`tools/make-jm-samples.sh`, committed in
-  `samples/jm/`), writes field pictures (PAFF), alone or mixed with frame pictures, also in 4:2:2, and bit depths
-  9, 12 and 14 (`tools/make-jm-samples.sh <JM tree> <names>` makes only those samples). Cover
+  `samples/jm/`), writes field pictures (PAFF), alone or mixed with frame pictures or MBAFF frames, also in 4:2:2
+  and 4:0:0, and bit depths 9, 12 and 14; `tools/h264-add-weights.py` weights its field pictures afterwards (`tools/make-jm-samples.sh <JM tree> <names>` makes only those samples). Cover
   the rest with unit tests and say so in the docs.
   `tests/ManagedCodecs.Tests/H264/ParameterSetRewriter.cs` rewrites a sample's SPS and PPS for such tests.
   `tests/ManagedCodecs.Tests/H264/CabacEncoder.cs` (a CABAC encoder and bit writer) builds such H.264 streams.
@@ -100,7 +100,10 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
   the packet rate (compare with `-f framemd5` or add `-fps_mode passthrough`); its frame takes the first field's pts.
   JM's encoder: `make -C lencod CFLAGS="-fcommon -O2"`, `PicInterlace=1` (fields) or `2` (adaptive), about a minute
   for 10 frames at 320x256; it crashes with `WeightedPrediction=1` or `WeightedBiprediction=2` and field pictures,
-  and refuses `PicInterlace=2` with `MbInterlace=2`. With `PicInterlace=2` it codes a clean testsrc2 source's frames
+  and refuses `PicInterlace=2` with `MbInterlace=2` (`MbInterlace=1` works, every pair a field pair, with
+  `ReferenceReorder=0 PocMemoryManagement=0`); in 4:0:0 it exits 100 after writing the stream. In field pictures
+  without num_ref_idx_active_override_flag the active count is the PPS default as it is (FFmpeg and JM; not
+  doubled). With `PicInterlace=2` it codes a clean testsrc2 source's frames
   all as frames in 4:2:2 (`YUVFormat=2`): check `field_pic_flag` in `trace_headers`, and add noise. Remuxing a raw stream with B pictures gives pts = dts in
   decoding order (FFmpeg then drops frames): `make-jm-samples.sh` sets pts from pic_order_cnt_lsb with `setts`.
 - Interlaced MJPEG: FFmpeg's encoder refuses interlacing (make-samples.sh encodes fields as images and pairs them

@@ -2,7 +2,8 @@
 # Encodes the H.264 samples in samples/jm/ with JM's encoder (lencod, the ITU-T reference software), which writes
 # what libx264 and OpenH264 never do: field pictures (PAFF), each field of a frame its own picture, in pairs whose
 # second field predicts from the first, pictures that switch between frame and field coding, and B field pictures
-# whose direct prediction looks into fields and frames, in 4:2:0 and 4:2:2; and bit depths 9, 12 and 14. These files
+# whose direct prediction looks into fields and frames, in 4:2:0, 4:2:2 and 4:0:0, also next to MBAFF frames, and
+# weighted afterwards by tools/h264-add-weights.py; and bit depths 9, 12 and 14. These files
 # are committed: CI has no JM (and it takes a minute a sample), so tools/make-samples.sh only copies them into samples/
 # and writes their FFmpeg references like any other sample's.
 #
@@ -11,13 +12,14 @@
 set -euo pipefail
 
 jm=$(cd "${1:?usage: tools/make-jm-samples.sh <JM tree> [names]}" && pwd)
+tools=$(cd "$(dirname "$0")" && pwd)
 only=" ${*:2} "
 wanted() { [[ $only == "  " || $only == *" $1 "* ]]; }
 cd "$(dirname "$0")/.."
 out=$(pwd)/samples/jm
 mkdir -p "$out"
 work=$(mktemp -d)
-trap 'rm -rf "$work"' EXIT
+[[ -n ${KEEP_WORK:-} ]] && echo "work: $work" || trap 'rm -rf "$work"' EXIT  # KEEP_WORK=1 keeps the logs and raw streams
 
 # 320x256, 10 interlaced frames (20 fields of moving test pattern, top field first).
 ffmpeg -hide_banner -loglevel error -y -f lavfi -i "testsrc2=size=320x256:rate=50" -vf tinterlace=interleave_top \
@@ -66,13 +68,38 @@ encode-b() {
   local name=$1; shift
   wanted "$name" || return 0
   lencod "$name" "$@"
-  local poc
+  mux-b "$name"
+}
+
+# mux-b name: $work/name.264, with B pictures, into samples/jm/jm-name.mp4 (encode-b's timestamps).
+mux-b() {
+  local name=$1 poc
   poc=($(ffmpeg -hide_banner -i "$work/$name.264" -c copy -bsf:v trace_headers -f null - 2>&1 |
     awk '/first_mb_in_slice/ { first = ($NF == 0) } /pic_order_cnt_lsb/ && first { print $NF }'))
   local pts=${poc[-1]}
   for ((i = ${#poc[@]} - 2; i >= 0; i--)); do pts="if(eq(N\\,$i)\\,${poc[i]}\\,$pts)"; done
   ffmpeg -hide_banner -loglevel error -y -r 25 -i "$work/$name.264" -c copy \
     -bsf:v "setts=pts=($pts)*256:dts=(N-4)*${dur:-256}:duration=${dur:-256}:time_base=1/12800" "$out/jm-$name.mp4"
+}
+
+# weigh name base implicit|explicit: samples/jm/jm-base.mp4 with weighted prediction turned on afterwards by
+# tools/h264-add-weights.py (JM crashes when it weights field pictures itself): weighted_bipred_idc 2, or explicit
+# weights for P and B slices, a pred_weight_table in each slice header. JM's own decoder must decode the result exactly
+# as FFmpeg does, else the rewrite is wrong.
+weigh() {
+  local name=$1 base=$2 mode=$3
+  wanted "$name" || return 0
+  ffmpeg -hide_banner -loglevel error -y -i "$out/jm-$base.mp4" -c copy -bsf:v h264_mp4toannexb -f h264 "$work/$base-in.264"
+  python3 "$tools/h264-add-weights.py" "$mode" "$work/$base-in.264" "$work/$name.264"
+  (cd "$work" && "$jm/bin/ldecod.exe" -i "$name.264" -o "$name-jm.yuv" > "$name-ldecod.log" 2>&1)
+  ffmpeg -hide_banner -loglevel error -y -i "$work/$name.264" -fps_mode passthrough -f rawvideo "$work/$name-ff.yuv"
+  cmp "$work/$name-jm.yuv" "$work/$name-ff.yuv"
+  if ffmpeg -hide_banner -i "$work/$name.264" -c copy -bsf:v trace_headers -f null - 2>&1 |
+    awk '/ slice_type / && $NF % 5 == 1 { b = 1 } END { exit !b }'; then
+    mux-b "$name"
+  else
+    ffmpeg -hide_banner -loglevel error -y -r 25 -i "$work/$name.264" -c copy "$out/jm-$name.mp4"
+  fi
 }
 
 encode paff -p PicInterlace=1             # every frame as two field pictures: an I and a P field, then P fields
@@ -104,6 +131,18 @@ encode-b paff-mbaff -p InputFile=noisy.yuv -p PicInterlace=2 -p MbInterlace=1 -p
 encode paff-gray -p InputFile=srcgray.yuv -p YUVFormat=0 -p ProfileIDC=100 -p PicInterlace=1
 encode-b paff-gray-b-adaptive -p InputFile=noisygray.yuv -p YUVFormat=0 -p ProfileIDC=100 -p PicInterlace=2 \
   -p NumberBFrames=1 -p IntraPeriod=4 -p SymbolMode=0
+
+# Weighted prediction in field pictures, added to the samples above (see weigh): implicit weights from field order
+# counts in B fields over fields and frames, and next to MBAFF frames; explicit weights in P fields with CAVLC (four
+# slices a field) and CABAC, in B fields with CAVLC and over frames and fields, and next to MBAFF frames (whose field
+# macroblocks take a frame index's weights for both its fields).
+weigh paff-b-adaptive-implicit paff-b-adaptive implicit
+weigh paff-mbaff-implicit paff-mbaff implicit
+weigh paff-cavlc-wp paff-cavlc explicit
+weigh paff-wp paff explicit
+weigh paff-b-cavlc-wp paff-b-cavlc explicit
+weigh paff-b-adaptive-wp paff-b-adaptive explicit
+weigh paff-mbaff-wp paff-mbaff explicit
 
 # ---- Bit depths 9, 12 and 14 (libx264 writes only 8 and 10) ----
 # Progressive frames (176x144, 10 of them) of a moving noisy test pattern, at each depth and chroma format the

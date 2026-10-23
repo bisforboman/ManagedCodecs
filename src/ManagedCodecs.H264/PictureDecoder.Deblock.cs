@@ -785,16 +785,7 @@ internal sealed partial class PictureDecoder<TPixel>
             // p1 .. q1 but takes all eight; they lie inside this macroblock and its left neighbour.
             // With 8 rows the lanes 8-15 repeat rows 0-7 and are not used.
             int start = q0 - 4;
-            int bottom = length == 16 ? start + (8 * along) : start;
-            if (Sse2.IsSupported)
-            {
-                TransposeIn(plane, start, plane, bottom, along, taps);
-            }
-            else
-            {
-                TransposeInVector128(plane, start, plane, bottom, along, taps);
-            }
-
+            TransposeIn(plane, start, plane, length == 16 ? start + (8 * along) : start, along, taps);
             return;
         }
 
@@ -827,15 +818,7 @@ internal sealed partial class PictureDecoder<TPixel>
     {
         if (across == 1 && length == 16 && firstTap == 1 && Vector128.IsHardwareAccelerated)
         {
-            if (Sse2.IsSupported)
-            {
-                TransposeOut(taps, plane, q0 - 4, plane, q0 - 4 + (8 * along), along);
-            }
-            else
-            {
-                TransposeOutVector128(taps, plane, q0 - 4, plane, q0 - 4 + (8 * along), along);
-            }
-
+            TransposeOut(taps, plane, q0 - 4, plane, q0 - 4 + (8 * along), along);
             return;
         }
 
@@ -870,8 +853,21 @@ internal sealed partial class PictureDecoder<TPixel>
     /// <paramref name="bottomStart"/>, become the 8 tap rows of 16 lanes, by interleaving at 8, 16,
     /// 32 and 64 bits.
     /// </summary>
-    [SkipLocalsInit]
     private static void TransposeIn(byte[] top, int topStart, byte[] bottom, int bottomStart, int stride, Span<byte> taps)
+    {
+        if (Sse2.IsSupported)
+        {
+            TransposeInSse2(top, topStart, bottom, bottomStart, stride, taps);
+        }
+        else
+        {
+            TransposeInVector128(top, topStart, bottom, bottomStart, stride, taps);
+        }
+    }
+
+    /// <summary><see cref="TransposeIn"/> with SSE2's unpacks.</summary>
+    [SkipLocalsInit]
+    private static void TransposeInSse2(byte[] top, int topStart, byte[] bottom, int bottomStart, int stride, Span<byte> taps)
     {
         Span<Vector128<byte>> pairs = stackalloc Vector128<byte>[8];
         for (int k = 0; k < 4; k++)
@@ -910,8 +906,21 @@ internal sealed partial class PictureDecoder<TPixel>
     }
 
     /// <summary>The inverse of <see cref="TransposeIn"/>: writes all 8 bytes of each of the 16 rows.</summary>
-    [SkipLocalsInit]
     private static void TransposeOut(ReadOnlySpan<byte> taps, byte[] top, int topStart, byte[] bottom, int bottomStart, int stride)
+    {
+        if (Sse2.IsSupported)
+        {
+            TransposeOutSse2(taps, top, topStart, bottom, bottomStart, stride);
+        }
+        else
+        {
+            TransposeOutVector128(taps, top, topStart, bottom, bottomStart, stride);
+        }
+    }
+
+    /// <summary><see cref="TransposeOut"/> with SSE2's unpacks.</summary>
+    [SkipLocalsInit]
+    private static void TransposeOutSse2(ReadOnlySpan<byte> taps, byte[] top, int topStart, byte[] bottom, int bottomStart, int stride)
     {
         Span<Vector128<ushort>> low = stackalloc Vector128<ushort>[4];
         Span<Vector128<ushort>> high = stackalloc Vector128<ushort>[4];
@@ -943,8 +952,8 @@ internal sealed partial class PictureDecoder<TPixel>
     }
 
     /// <summary>
-    /// <see cref="TransposeIn"/> with <see cref="VectorZip"/> for SSE2's unpacks: what machines without SSE2 (ARM64)
-    /// run, and tested against the scalar gather on x64.
+    /// <see cref="TransposeInSse2"/> with <see cref="VectorZip"/> for SSE2's unpacks: what machines without SSE2 (ARM64)
+    /// run, and tested against the transpose's definition on x64.
     /// </summary>
     [SkipLocalsInit]
     internal static void TransposeInVector128(byte[] top, int topStart, byte[] bottom, int bottomStart, int stride, Span<byte> taps)
@@ -982,7 +991,7 @@ internal sealed partial class PictureDecoder<TPixel>
         }
     }
 
-    /// <summary><see cref="TransposeOut"/> with <see cref="VectorZip"/>, as <see cref="TransposeInVector128"/>.</summary>
+    /// <summary><see cref="TransposeOutSse2"/> with <see cref="VectorZip"/>, as <see cref="TransposeInVector128"/>.</summary>
     [SkipLocalsInit]
     internal static void TransposeOutVector128(ReadOnlySpan<byte> taps, byte[] top, int topStart, byte[] bottom, int bottomStart, int stride)
     {

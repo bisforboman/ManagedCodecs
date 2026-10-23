@@ -24,6 +24,9 @@ public sealed class MjpegDecoder : IVideoDecoder
     // Sample buffers of the previous frame, reused while the layout stays the same.
     private FrameState? _previous;
 
+    // The planes of output frames, back from frames the caller disposed.
+    private readonly VideoFramePool _framePool = new();
+
     // The stream's height, from the container; 0 when unknown (no field detection).
     private readonly int _streamHeight;
 
@@ -53,6 +56,18 @@ public sealed class MjpegDecoder : IVideoDecoder
     /// </summary>
     public bool FirstFieldOnTop { get; init; }
 
+    /// <summary>
+    /// Decode each image straight into the planes of its output frame, saving the copy out of the decoder's buffers.
+    /// The frame's planes are then a whole number of MCUs wide and high: read its rows through
+    /// <see cref="VideoFrame.GetRow"/>, or with its <see cref="VideoFrame.Strides"/>. The frame owns them as any frame
+    /// does (unlike H.264's borrowed frames, it stays valid). Interlaced packets are woven into a frame all the same.
+    /// </summary>
+    /// <remarks>
+    /// Either way, disposing a frame when done with it gives its planes back for a later frame, which saves allocating
+    /// them.
+    /// </remarks>
+    public bool ZeroCopy { get; init; }
+
     /// <summary>Decodes one MJPEG packet; every packet is a complete frame, so exactly one comes out.</summary>
     public IReadOnlyList<VideoFrame> Decode(Packet packet)
     {
@@ -73,14 +88,14 @@ public sealed class MjpegDecoder : IVideoDecoder
     {
         var first = DecodeImage(packet, out int end);
         int height = first.Header.Height;
-        if (_streamHeight == 0 || height >= _streamHeight * 3 / 4)
+        if (!IsField(height))
         {
-            return first.ToVideoFrame();
+            return first.Rented ? new VideoFrame(first.Header.Width, height, first.Format, first.Buffers, first.BufferStrides, _framePool) : first.ToVideoFrame(_framePool);
         }
 
-        // A field: weave it into a frame of twice its height, then decode the second field
-        // (into the same buffers, so the first is copied out before).
-        var frame = new VideoFrame(first.Header.Width, 2 * height, first.Format);
+        // A field: weave it into a frame of twice its height (each field writes every other row of it), then decode the
+        // second field (into the same buffers, so the first is copied out before).
+        var frame = _framePool.Rent(first.Header.Width, 2 * height, first.Format);
         for (int plane = 0; plane < frame.Planes.Length; plane++)
         {
             if (first.Format.PlaneSize(plane, frame.Width, frame.Height).Height != 2 * first.Format.PlaneSize(plane, frame.Width, height).Height)
@@ -107,6 +122,9 @@ public sealed class MjpegDecoder : IVideoDecoder
     }
 
     private static ReadOnlySpan<byte> SecondImageStart => [0xFF, JpegMarker.Soi];
+
+    // An image of less than 3/4 of the stream's height is a field, as FFmpeg tells them.
+    private bool IsField(int height) => _streamHeight != 0 && height < _streamHeight * 3 / 4;
 
     /// <summary>Decodes one JPEG image into the sample buffers; <paramref name="end"/> is the offset just past its EOI.</summary>
     private FrameState DecodeImage(ReadOnlySpan<byte> packet, out int end)
@@ -141,8 +159,13 @@ public sealed class MjpegDecoder : IVideoDecoder
                         throw new InvalidDataException("More than one SOF segment.");
                     }
 
-                    frame = new FrameState(JpegFrameHeader.Parse(segment.Marker, payload), _previous);
-                    _previous = frame;
+                    {
+                        // A frame decoded in place takes planes of its own from the pool; else the decoder's buffers.
+                        var header = JpegFrameHeader.Parse(segment.Marker, payload);
+                        frame = new FrameState(header, _previous, ZeroCopy && !IsField(header.Height) ? _framePool : null);
+                        _previous = frame.Rented ? null : frame;
+                    }
+
                     break;
                 case JpegMarker.Sos:
                     if (frame is null)
@@ -374,7 +397,8 @@ public sealed class MjpegDecoder : IVideoDecoder
     /// <summary>Per-frame decode target: one MCU-aligned sample buffer per component.</summary>
     private sealed class FrameState
     {
-        public FrameState(JpegFrameHeader header, FrameState? previous)
+        /// <param name="pool">Where to rent the sample buffers when the frame is to be decoded in place, else null.</param>
+        public FrameState(JpegFrameHeader header, FrameState? previous, VideoFramePool? pool = null)
         {
             Header = header;
             Format = header.ToPixelFormat();
@@ -398,18 +422,33 @@ public sealed class MjpegDecoder : IVideoDecoder
             }
 
             int count = header.Components.Count;
-            Buffers = new byte[count][];
             BufferStrides = new int[count];
+            var sizes = new int[count];
             for (int i = 0; i < count; i++)
             {
                 var c = header.Components[i];
                 BufferStrides[i] = McusX * c.HorizontalSampling * 8;
-                int size = BufferStrides[i] * McusY * c.VerticalSampling * 8;
-                Buffers[i] = previous is not null && i < previous.Buffers.Length && previous.Buffers[i].Length == size && previous.BufferStrides[i] == BufferStrides[i]
+                sizes[i] = BufferStrides[i] * McusY * c.VerticalSampling * 8;
+            }
+
+            if (pool is not null)
+            {
+                Buffers = pool.RentPlanes(sizes);
+                Rented = true;
+                return;
+            }
+
+            Buffers = new byte[count][];
+            for (int i = 0; i < count; i++)
+            {
+                Buffers[i] = previous is not null && i < previous.Buffers.Length && previous.Buffers[i].Length == sizes[i] && previous.BufferStrides[i] == BufferStrides[i]
                     ? previous.Buffers[i]
-                    : new byte[size];
+                    : new byte[sizes[i]];
             }
         }
+
+        /// <summary>Whether the buffers are rented for an output frame (decoding in place) rather than the decoder's own.</summary>
+        public bool Rented { get; }
 
         public JpegFrameHeader Header { get; }
 
@@ -450,9 +489,9 @@ public sealed class MjpegDecoder : IVideoDecoder
             return (DivUp(width, 8), DivUp(height, 8));
         }
 
-        public VideoFrame ToVideoFrame()
+        public VideoFrame ToVideoFrame(VideoFramePool pool)
         {
-            var frame = VideoFrame.CreateUninitialized(Header.Width, Header.Height, Format);
+            var frame = pool.Rent(Header.Width, Header.Height, Format);
             for (int plane = 0; plane < Buffers.Length; plane++)
             {
                 var (width, height) = Format.PlaneSize(plane, Header.Width, Header.Height);

@@ -46,6 +46,25 @@ public sealed class VideoFramePool
         return new VideoFrame(width, height, format, planes, strides, this);
     }
 
+    /// <summary>
+    /// Planes of these lengths, for a decoder to write a frame into before it wraps them (with their own strides) in a
+    /// frame of this pool: from the free list, or new and uninitialized.
+    /// </summary>
+    internal byte[][] RentPlanes(int[] lengths)
+    {
+        var planes = Take(lengths);
+        if (planes is null)
+        {
+            planes = new byte[lengths.Length][];
+            for (int i = 0; i < lengths.Length; i++)
+            {
+                planes[i] = GC.AllocateUninitializedArray<byte>(lengths[i]);
+            }
+        }
+
+        return planes;
+    }
+
     /// <summary>Planes of exactly these lengths from the free list, or null.</summary>
     private byte[][]? Take(int[] lengths)
     {

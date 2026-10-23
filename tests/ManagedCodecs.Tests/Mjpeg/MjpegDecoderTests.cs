@@ -127,4 +127,30 @@ public class MjpegDecoderTests
     {
         Assert.Throws<NotSupportedException>(() => new MjpegDecoder(Stream(16)).Decode(TwoBlockGrayJpeg(restartMarkers: false)));
     }
+
+    /// <summary>
+    /// <see cref="MjpegDecoder.ZeroCopy"/> frames are the planes the image was decoded into, whole MCUs wide and high (an odd
+    /// size shows it), and a disposed frame's planes come back for the next one.
+    /// </summary>
+    [Fact]
+    public void ZeroCopy_DecodesIntoTheFramesPlanesAndReusesThem()
+    {
+        if (TestSamples.Directory is null || !File.Exists(TestSamples.PathOf("testsrc-odd.avi")))
+        {
+            return;
+        }
+
+        using var demuxer = ManagedCodecs.Containers.Demuxer.Open(TestSamples.PathOf("testsrc-odd.avi"));
+        var video = demuxer.Video!;
+        var decoder = new MjpegDecoder(video) { ZeroCopy = true };
+        var packets = demuxer.ReadPackets().Where(p => p.StreamIndex == video.StreamIndex).Take(2).ToList();
+
+        var first = decoder.Decode(packets[0].Data.Span);
+        Assert.True(first.Planes[0].Length > first.Strides[0] * first.Height, $"Luma plane of {first.Planes[0].Length} bytes for {first.Width} x {first.Height}: not padded to whole MCUs.");
+        var planes = first.Planes;
+        first.Dispose();
+
+        var second = decoder.Decode(packets[1].Data.Span);
+        Assert.Same(planes[0], second.Planes[0]);
+    }
 }

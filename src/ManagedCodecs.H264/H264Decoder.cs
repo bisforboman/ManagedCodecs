@@ -102,7 +102,14 @@ public sealed class H264Decoder : IVideoDecoder
     /// planes back to the decoder for a later frame, which saves allocating (and collecting)
     /// them: about 4 to 7% of the decoding time at 720p.
     /// </remarks>
-    public IReadOnlyList<VideoFrame> Decode(Packet packet)
+    public IReadOnlyList<VideoFrame> Decode(Packet packet) => Decode(packet.Data.Span, packet.Pts);
+
+    /// <summary>
+    /// Decodes one picture's length-prefixed NAL units from <paramref name="data"/>, which need not outlive the call
+    /// (the decoder copies what it keeps), as <see cref="Decode(Packet)"/> does; the frame that comes from it gets
+    /// <paramref name="pts"/>.
+    /// </summary>
+    public IReadOnlyList<VideoFrame> Decode(ReadOnlySpan<byte> data, long pts)
     {
         if (BorrowFrames && Threads > 1)
         {
@@ -110,7 +117,7 @@ public sealed class H264Decoder : IVideoDecoder
         }
 
         var frames = new List<VideoFrame>();
-        var job = ParsePicture(packet.Data.Span, packet.Pts, frames);
+        var job = ParsePicture(data, pts, frames);
         if (Threads == 1)
         {
             Run(job);

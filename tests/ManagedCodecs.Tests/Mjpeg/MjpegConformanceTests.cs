@@ -16,7 +16,25 @@ public class MjpegConformanceTests
 
     [Theory]
     [MemberData(nameof(Samples))]
-    public void MatchesFfmpegFrameByFrame(string sampleName)
+    public void MatchesFfmpegFrameByFrame(string sampleName) => CompareWithFfmpeg(sampleName, zeroCopy: false, dispose: false);
+
+    /// <summary>
+    /// The same with every frame disposed once hashed, so that later frames are decoded into its planes: a frame still
+    /// read after its planes went back would show as a wrong frame.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(Samples))]
+    public void MatchesFfmpegWithDisposedFrames(string sampleName) => CompareWithFfmpeg(sampleName, zeroCopy: false, dispose: true);
+
+    /// <summary>
+    /// The same with <see cref="MjpegDecoder.ZeroCopy"/>: frames decoded into their own MCU-padded planes, read through
+    /// their strides, and disposed, so that the next ones reuse the planes.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(Samples))]
+    public void MatchesFfmpegWithZeroCopy(string sampleName) => CompareWithFfmpeg(sampleName, zeroCopy: true, dispose: true);
+
+    private static void CompareWithFfmpeg(string sampleName, bool zeroCopy, bool dispose)
     {
         var lines = File.ReadAllLines(TestSamples.ReferenceOf(sampleName, ".framemd5"));
         var expected = FrameMd5.Parse(lines).Where(e => e.StreamIndex == 0).ToList(); // FFmpeg lists video first
@@ -24,7 +42,7 @@ public class MjpegConformanceTests
 
         using var demuxer = Demuxer.Open(TestSamples.PathOf(sampleName));
         var video = demuxer.Video!;
-        var decoder = new MjpegDecoder(video); // the stream's height tells interlaced packets (two fields) apart
+        var decoder = new MjpegDecoder(video) { ZeroCopy = zeroCopy }; // the stream's height tells interlaced packets (two fields) apart
 
         int index = 0;
         foreach (var packet in demuxer.ReadPackets().Where(p => p.StreamIndex == video.StreamIndex))
@@ -36,6 +54,10 @@ public class MjpegConformanceTests
                 FrameMd5.SameTime(expected[index].Pts, timeBase, packet.Pts, video.TimeBase),
                 $"Frame {index}: pts {packet.Pts} ({video.TimeBase}) is not FFmpeg's {expected[index].Pts} ({timeBase}).");
             index++;
+            if (dispose)
+            {
+                frame.Dispose();
+            }
         }
 
         Assert.Equal(expected.Count, index);

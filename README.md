@@ -23,6 +23,38 @@ on several threads if asked, and every decoder has an async API.
 | `tests/ManagedCodecs.Tests` | Unit tests and FFmpeg conformance tests (framemd5 for frames and packets) |
 | `benchmarks/ManagedCodecs.Benchmarks` | BenchmarkDotNet decode benchmark |
 
+## Status
+
+Every decoder is checked against FFmpeg, on samples generated to isolate one feature each; where an encoder never
+writes a feature, unit tests and hand-built or rewritten streams cover it. [docs/conformance.md](docs/conformance.md)
+says feature by feature which encoder made the samples (libx264, OpenH264, JM) and what is not checked.
+
+- **MJPEG**: baseline and extended Huffman JPEG in 4:2:0, 4:2:2, 4:4:4 and gray, restart markers, missing Huffman
+  tables, interlaced AVI1 frames; bit-exact. A vector IDCT (AVX2, and `Vector128` for ARM64 and WebAssembly), and
+  output straight into the frame's planes (`ZeroCopy`).
+- **H.264**: Constrained Baseline to High 4:4:4 Predictive. CAVLC and CABAC; I, P and B pictures; weighted
+  prediction, the 8x8 transform, scaling matrices; MBAFF frames and field pictures; monochrome, 4:2:0, 4:2:2 and
+  4:4:4; 8, 9, 10, 12 and 14 bits; lossless. Bit-exact on streams from libx264, OpenH264 and JM. Frame threading
+  (`Threads`).
+- **AAC LC**: mono to 7.1 and program config elements, every window sequence and shape, M/S and intensity stereo,
+  PNS, TNS; within 2^-17 of FFmpeg's float output (measured: 3e-7). Encoder priming is trimmed by the MP4 edit list.
+- **Containers**: AVI (video), MP4 (video and audio tracks, fragmented files too) and raw AAC (ADTS), with packets and
+  timestamps as FFmpeg's demuxers give them.
+- **Throughout**: an async API, malformed input that ends in `InvalidDataException` or `NotSupportedException`
+  (fuzzed), and the same output on x64, ARM64 and WebAssembly (CI checks all three).
+
+### Open
+
+- MP4: edit lists of more than one edit, and video trimmed at the edit's end.
+- AAC: HE-AAC (SBR, PS). In ADTS: frames of several raw data blocks, and channel configuration 0.
+- MJPEG: files from real cameras (the samples are all FFmpeg's), and packets holding one field (FFmpeg decodes none).
+- H.264: separate colour planes, luma and chroma bit depths that differ, monochrome above 10 bits (FFmpeg decodes
+  none of these, so checking them needs another reference); error concealment (a damaged picture fails its
+  `Decode` call).
+- H.264 speed: 2.3 to 3.6 times FFmpeg's time on one thread (Benchmarking). With threads, a second field waits for
+  its first (they share a decoder), and P pictures in a chain keep 4 threads busy 2.4 cores' worth.
+- `ReadPacketsAsync` reads each packet synchronously (it yields the thread between packets).
+
 ## Getting started
 
 Requires the .NET 10 SDK. The tests also need samples made with FFmpeg (with libx264) and ImageMagick:
@@ -180,46 +212,34 @@ ffmpeg -benchmark -threads 1 -stream_loop 9 -i $f -f null -
 
 Both time the whole process, demuxing included; mcdec's also includes .NET's startup and JIT (mcdec's `last loop`
 line shows the steady speed without them). mcdec disposes each frame once it has it, as a consumer done with them
-would, so H.264 frames reuse the planes of earlier ones. A snapshot, made that way (2026-10-22, after the output frame
-pool, FFmpeg 6.1.1, single-threaded on a 4-core AVX2 (and AVX-512) Xeon cloud VM, median of five interleaved runs;
-µs per frame, audio frames are 1024 samples):
+would, so H.264 frames reuse the planes of earlier ones. A snapshot, made that way (2026-10-23, FFmpeg 6.1.1,
+single-threaded on a 4-core 2.8 GHz Xeon cloud VM with AVX2 and AVX-512; the median of five runs interleaved with
+FFmpeg's, the order alternating; µs per frame, audio frames are 1024 samples):
 
-| Sample | Loops | ManagedCodecs | FFmpeg |
-| --- | ---: | ---: | ---: |
-| `testsrc-420.avi` (320x240 MJPEG 4:2:0) | 100 | 294 | 358 |
-| `testsrc-444.avi` (MJPEG 4:4:4) | 100 | 539 | 508 |
-| `noise-q1.avi` (MJPEG, noise at the highest quality) | 100 | 1074 | 1284 |
-| `h264-p-refs.mp4` (320x240 H.264, P frames) | 40 | 682 | 246 |
-| `h264-bench-720p.mp4` (1280x720 H.264) | 10 | 7656 | 2412 |
-| `h264-main-p-refs.mp4` (320x240 H.264 Main, CABAC) | 40 | 864 | 360 |
-| `h264-b-pyramid.mp4` (320x240 H.264 Main, CABAC, B frames) | 20 | 1505 | 506 |
-| `h264-wp-default.mp4` (320x240 H.264, libx264's Main defaults: B frames, weighted prediction) | 20 | 1258 | 374 |
-| `h264-high-default.mp4` (320x240 H.264, libx264's High defaults: also the 8x8 transform) | 20 | 1269 | 368 |
-| `h264-high-b.mp4` (320x240 H.264 High, B frames, all partitions) | 40 | 1645 | 594 |
-| `h264-10bit-b.mp4` (the same at 10 bits, High 10) | 40 | 1947 | 628 |
-| `h264-high-motion.mp4` (320x240 H.264 High, fast motion and noise, QP 22) | 20 | 5906 | 3199 |
-| `h264-10bit-motion.mp4` (the same at 10 bits, QP 34, which is QP 22's step size) | 20 | 6299 | 3285 |
-| `aac-stereo-48k.mp4` (AAC, stereo)¹ | 100 | 54 | 100 |
-| `aac-5.1.mp4` (AAC, 5.1)¹ | 100 | 151 | 129 |
+| Sample | Loops | ManagedCodecs | FFmpeg | Ratio |
+| --- | ---: | ---: | ---: | ---: |
+| `testsrc-420.avi` (320x240 MJPEG 4:2:0) | 100 | 287 | 408 | 0.70 |
+| `testsrc-444.avi` (MJPEG 4:4:4) | 100 | 548 | 602 | 0.91 |
+| `noise-q1.avi` (MJPEG, noise at the highest quality) | 100 | 1064 | 1288 | 0.83 |
+| `h264-p-refs.mp4` (320x240 H.264, P frames) | 40 | 726 | 280 | 2.60 |
+| `h264-bench-720p.mp4` (1280x720 H.264) | 10 | 10222 | 2854 | 3.58 |
+| `h264-main-p-refs.mp4` (320x240 H.264 Main, CABAC) | 40 | 1026 | 446 | 2.30 |
+| `h264-b-pyramid.mp4` (320x240 H.264 Main, CABAC, B frames) | 20 | 1574 | 602 | 2.61 |
+| `h264-wp-default.mp4` (320x240 H.264, libx264's Main defaults: B frames, weighted prediction) | 20 | 1385 | 454 | 3.05 |
+| `h264-high-default.mp4` (320x240 H.264, libx264's High defaults: also the 8x8 transform) | 20 | 1472 | 475 | 3.10 |
+| `h264-high-b.mp4` (320x240 H.264 High, B frames, all partitions) | 40 | 1716 | 631 | 2.72 |
+| `h264-10bit-b.mp4` (the same at 10 bits, High 10) | 40 | 2072 | 636 | 3.26 |
+| `h264-high-motion.mp4` (320x240 H.264 High, fast motion and noise, QP 22) | 20 | 6100 | 3179 | 1.92 |
+| `h264-10bit-motion.mp4` (the same at 10 bits, QP 34, which is QP 22's step size) | 20 | 6442 | 3156 | 2.04 |
+| `aac-stereo-48k.mp4` (AAC, stereo) | 100 | 45 | 86 | 0.52 |
+| `aac-5.1.mp4` (AAC, 5.1) | 100 | 138 | 123 | 1.13 |
 
-¹ Remeasured on 2026-10-23's VM, after the AAC filterbank's FFT and windowing went to vectors (median of five runs
-interleaved with FFmpeg's and with the build before the change, which took 72 and 177 µs). Without startup (mcdec's
-`last loop` line, 500 loops, six interleaved runs) 5.1 takes 93 µs a frame against 128 before (medians; best 86 against
-121); callgrind counts 23% fewer instructions for its decode.
-
-The short MJPEG and AAC runs are dominated by .NET's startup and JIT and move the most from run to run
-(testsrc-420.avi took between 263 and 604 µs in the previous snapshot, 274 to 319 in this one). At 10 bits the ratio
-to FFmpeg is close to the 8-bit one: 3.1 against 2.8 times on the B frame pair, 1.9 against 1.85 times on the
-motion pair; the 10-bit streams took us 7 to 18% more time than their 8-bit counterparts, FFmpeg 3 to 6% more. The
-10-bit rows read 6 to 14% slower than in the previous snapshot while callgrind counts 1.5% fewer instructions for
-`h264-10bit-b.mp4` since then: the VM's day, not the decoder.
-
-A 1280x720 libx264 default stream (High, CABAC, B frames; `testsrc2` with noise, 2 s) took 3.3 times FFmpeg's time
-in the previous snapshot (10958 against 3338 µs). One with heavier noise (`testsrc2=size=1280x720:rate=25,noise=alls=10:allf=t`,
-2 s, libx264's defaults), whose residual decoding weighs more, took 2.5 times in this one (33624 against 13680 µs). On 2026-10-21's VM the first took 3.0 times (9674 against 3178 µs), down from 4.3
-times before the direct prediction and motion compensation changes of that day, and `h264-bench-720p.mp4` took 8554
-against 2448 µs (7066 against 2352 the day before): a VM's speed moves from day to day, which is why only
-same-machine comparisons count.
+The short MJPEG and AAC runs are mostly .NET's startup and JIT: without them (`last loop`), `aac-5.1.mp4` takes about
+90 µs a frame. H.264 takes 2.3 to 3.6 times FFmpeg's time, less on noisier content, whose residual decoding weighs
+more; at 10 bits the ratio is close to the 8-bit one. A VM's speed moves from day to day, and FFmpeg's and ours do
+not move together: the previous snapshot (2026-10-22, in the history of this file) had `h264-bench-720p.mp4` at
+7656 µs against 2412, while callgrind counts 1.5% more instructions for `h264-p-refs.mp4` since then. Only
+comparisons made on one machine at one time count.
 
 Cloud VMs are noisy (single runs differed by up to a third), so compare before and after on one machine. For
 statistics on the decoder alone there is BenchmarkDotNet, `dotnet run -c Release --project
@@ -227,38 +247,6 @@ benchmarks/ManagedCodecs.Benchmarks` (`--filter *H264*` or `*Aac*` for one codec
 into memory, from `samples/testsrc-420.avi`, `samples/h264-bench-720p.mp4` and `samples/aac-5.1.mp4` (or the files
 in `MANAGEDCODECS_SAMPLE`, `MANAGEDCODECS_H264_SAMPLE` and `MANAGEDCODECS_AAC_SAMPLE`), so its numbers leave out
 what the two commands above include and are not comparable with FFmpeg's `bench:` line.
-
-## Status
-
-Every decoder is checked against FFmpeg, on samples generated to isolate one feature each; where an encoder never
-writes a feature, unit tests and hand-built or rewritten streams cover it. [docs/conformance.md](docs/conformance.md)
-says feature by feature which encoder made the samples (libx264, OpenH264, JM) and what is not checked.
-
-- **MJPEG**: baseline and extended Huffman JPEG in 4:2:0, 4:2:2, 4:4:4 and gray, restart markers, missing Huffman
-  tables, interlaced AVI1 frames; bit-exact. A vector IDCT (AVX2, and `Vector128` for ARM64 and WebAssembly), and
-  output straight into the frame's planes (`ZeroCopy`).
-- **H.264**: Constrained Baseline to High 4:4:4 Predictive. CAVLC and CABAC; I, P and B pictures; weighted
-  prediction, the 8x8 transform, scaling matrices; MBAFF frames and field pictures; monochrome, 4:2:0, 4:2:2 and
-  4:4:4; 8, 9, 10, 12 and 14 bits; lossless. Bit-exact on streams from libx264, OpenH264 and JM. Frame threading
-  (`Threads`).
-- **AAC LC**: mono to 7.1 and program config elements, every window sequence and shape, M/S and intensity stereo,
-  PNS, TNS; within 2^-17 of FFmpeg's float output (measured: 3e-7). Encoder priming is trimmed by the MP4 edit list.
-- **Containers**: AVI (video), MP4 (video and audio tracks, fragmented files too) and raw AAC (ADTS), with packets and
-  timestamps as FFmpeg's demuxers give them.
-- **Throughout**: an async API, malformed input that ends in `InvalidDataException` or `NotSupportedException`
-  (fuzzed), and the same output on x64, ARM64 and WebAssembly (CI checks all three).
-
-### Open
-
-- MP4: edit lists of more than one edit, and video trimmed at the edit's end.
-- AAC: HE-AAC (SBR, PS). In ADTS: frames of several raw data blocks, and channel configuration 0.
-- MJPEG: files from real cameras (the samples are all FFmpeg's), and packets holding one field (FFmpeg decodes none).
-- H.264: separate colour planes, luma and chroma bit depths that differ, monochrome above 10 bits (FFmpeg decodes
-  none of these, so checking them needs another reference); error concealment (a damaged picture fails its
-  `Decode` call).
-- H.264 speed: SPEED_PLACEHOLDER. With threads, a second field waits for its first (they share a decoder), and
-  P pictures in a chain keep 4 threads busy 2.4 cores' worth.
-- `ReadPacketsAsync` reads each packet synchronously (it yields the thread between packets).
 
 ## License note
 

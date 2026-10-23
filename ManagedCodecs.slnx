@@ -11,6 +11,7 @@
   </Folder>
   <Folder Name="/tools/">
     <Project Path="tools/ManagedCodecs.Cli/ManagedCodecs.Cli.csproj" />
+    <Project Path="tools/ManagedCodecs.Fuzz/ManagedCodecs.Fuzz.csproj" />
   </Folder>
   <Folder Name="/benchmarks/">
     <Project Path="benchmarks/ManagedCodecs.Benchmarks/ManagedCodecs.Benchmarks.csproj" />

@@ -15,6 +15,12 @@
     <Using Include="Xunit" />
   </ItemGroup>
 
+  <!-- The fuzz targets (tools/ManagedCodecs.Fuzz) and the inputs it found, replayed by MalformedInputTests. -->
+  <ItemGroup>
+    <Compile Include="..\..\tools\ManagedCodecs.Fuzz\Targets.cs" Link="Fuzz\Targets.cs" />
+    <None Include="Fuzz\Findings\**" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\..\src\ManagedCodecs.Core\ManagedCodecs.Core.csproj" />
     <ProjectReference Include="..\..\src\ManagedCodecs.Containers\ManagedCodecs.Containers.csproj" />

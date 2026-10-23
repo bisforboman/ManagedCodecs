@@ -42,95 +42,102 @@ public sealed class Mp4Demuxer : IDemuxer
         _stream = stream;
         _leaveOpen = leaveOpen;
 
-        var moov = ReadMoov(stream, out bool hasFragments);
-        uint movieTimescale = 0;
-        Track? video = null;
-        Track? audio = null;
-        int trackIndex = 0;
-        ReadOnlySpan<byte> mvex = default;
-
-        ReadOnlySpan<byte> boxes = moov;
-        while (NextBox(ref boxes, out uint type, out var payload))
+        try
         {
-            if (type == Box.Mvhd)
+            var moov = ReadMoov(stream, out bool hasFragments);
+            uint movieTimescale = 0;
+            Track? video = null;
+            Track? audio = null;
+            int trackIndex = 0;
+            ReadOnlySpan<byte> mvex = default;
+
+            ReadOnlySpan<byte> boxes = moov;
+            while (NextBox(ref boxes, out uint type, out var payload))
             {
-                movieTimescale = ReadUInt32(payload, payload.Length > 0 && payload[0] == 1 ? 20 : 12);
-            }
-            else if (type == Box.Trak)
-            {
-                uint handler = HandlerType(payload);
-                if (video is null && handler == Box.Vide)
+                if (type == Box.Mvhd)
                 {
-                    video = new Track(payload, isAudio: false) { StreamIndex = trackIndex };
+                    movieTimescale = ReadUInt32(payload, payload.Length > 0 && payload[0] == 1 ? 20 : 12);
                 }
-                else if (audio is null && handler == Box.Soun)
+                else if (type == Box.Trak)
                 {
-                    audio = new Track(payload, isAudio: true) { StreamIndex = trackIndex };
+                    uint handler = HandlerType(payload);
+                    if (video is null && handler == Box.Vide)
+                    {
+                        video = new Track(payload, isAudio: false) { StreamIndex = trackIndex };
+                    }
+                    else if (audio is null && handler == Box.Soun)
+                    {
+                        audio = new Track(payload, isAudio: true) { StreamIndex = trackIndex };
+                    }
+
+                    trackIndex++;
+                }
+                else if (type == Box.Mvex)
+                {
+                    mvex = payload;
+                }
+            }
+
+            if (video is null && audio is null)
+            {
+                throw new InvalidDataException("MP4 file has no video or audio track.");
+            }
+
+            if (hasFragments)
+            {
+                Track?[] tracks = [video, audio];
+                ReadTrackExtends(mvex, tracks);
+                ReadFragments(stream, tracks);
+            }
+
+            var all = new List<Sample>();
+            if (video is not null)
+            {
+                var samples = video.BuildSamples(movieTimescale);
+                all.AddRange(samples);
+
+                long totalDuration = 0;
+                foreach (var sample in samples)
+                {
+                    totalDuration += sample.Duration;
                 }
 
-                trackIndex++;
+                double fps = totalDuration > 0 ? samples.Length * (double)video.Timescale / totalDuration : 0;
+
+                // ReadPackets skips empty samples, so the frame count does too.
+                Video = new VideoStreamInfo(
+                    video.Codec,
+                    video.Width,
+                    video.Height,
+                    fps,
+                    samples.Count(sample => sample.Size > 0),
+                    new Rational(1, checked((int)video.Timescale)),
+                    video.CodecPrivate,
+                    video.StreamIndex);
             }
-            else if (type == Box.Mvex)
+
+            if (audio is not null)
             {
-                mvex = payload;
-            }
-        }
-
-        if (video is null && audio is null)
-        {
-            throw new InvalidDataException("MP4 file has no video or audio track.");
-        }
-
-        if (hasFragments)
-        {
-            Track?[] tracks = [video, audio];
-            ReadTrackExtends(mvex, tracks);
-            ReadFragments(stream, tracks);
-        }
-
-        var all = new List<Sample>();
-        if (video is not null)
-        {
-            var samples = video.BuildSamples(movieTimescale);
-            all.AddRange(samples);
-
-            long totalDuration = 0;
-            foreach (var sample in samples)
-            {
-                totalDuration += sample.Duration;
+                var samples = audio.BuildSamples(movieTimescale);
+                all.AddRange(samples);
+                Audio = new AudioStreamInfo(
+                    audio.Codec,
+                    audio.SampleRate,
+                    audio.Channels,
+                    samples.Count(sample => sample.Size > 0),
+                    new Rational(1, checked((int)audio.Timescale)),
+                    audio.CodecPrivate,
+                    audio.StreamIndex);
             }
 
-            double fps = totalDuration > 0 ? samples.Length * (double)video.Timescale / totalDuration : 0;
-
-            // ReadPackets skips empty samples, so the frame count does too.
-            Video = new VideoStreamInfo(
-                video.Codec,
-                video.Width,
-                video.Height,
-                fps,
-                samples.Count(sample => sample.Size > 0),
-                new Rational(1, checked((int)video.Timescale)),
-                video.CodecPrivate,
-                video.StreamIndex);
+            // File order, which is how the tracks are interleaved on disk; each track's own samples
+            // keep their decode order because they are sorted stably within equal offsets.
+            _samples = [.. all.OrderBy(sample => sample.Offset)];
         }
-
-        if (audio is not null)
+        catch (Exception e) when (Malformed.IsMalformedInput(e))
         {
-            var samples = audio.BuildSamples(movieTimescale);
-            all.AddRange(samples);
-            Audio = new AudioStreamInfo(
-                audio.Codec,
-                audio.SampleRate,
-                audio.Channels,
-                samples.Count(sample => sample.Size > 0),
-                new Rational(1, checked((int)audio.Timescale)),
-                audio.CodecPrivate,
-                audio.StreamIndex);
+            throw Malformed.Wrap(e, "MP4");
         }
-
-        // File order, which is how the tracks are interleaved on disk; each track's own samples
-        // keep their decode order because they are sorted stably within equal offsets.
-        _samples = [.. all.OrderBy(sample => sample.Offset)];
     }
 
     public VideoStreamInfo? Video { get; }
@@ -139,7 +146,9 @@ public sealed class Mp4Demuxer : IDemuxer
 
     public static Mp4Demuxer Open(string path) => new(File.OpenRead(path));
 
-    public IEnumerable<Packet> ReadPackets()
+    public IEnumerable<Packet> ReadPackets() => Malformed.Guard(ReadPacketsCore(), "MP4");
+
+    private IEnumerable<Packet> ReadPacketsCore()
     {
         var sequences = new Dictionary<int, long>();
         for (int i = 0; i < _samples.Length; i++)
@@ -579,7 +588,7 @@ public sealed class Mp4Demuxer : IDemuxer
                     int compositionOffset = (trunFlags & 0x800) != 0 ? (int)ReadNext(trun, ref p, "trun") : 0;
 
                     bool isKeyframe = _isAudio || (sampleFlags & 0x10000) == 0; // sample_is_non_sync_sample
-                    _fragmentSamples.Add((dataOffset, checked((int)size), i == 0 ? decodeTime : -1, checked((int)duration), compositionOffset, isKeyframe));
+                    _fragmentSamples.Add((dataOffset, SampleSize(size), i == 0 ? decodeTime : -1, checked((int)duration), compositionOffset, isKeyframe));
                     dataOffset += size;
                 }
 
@@ -679,6 +688,10 @@ public sealed class Mp4Demuxer : IDemuxer
             return [.. kept];
         }
 
+        /// <summary>A sample's size in bytes; past <see cref="int.MaxValue"/> the file is broken (no sample is 2 GB).</summary>
+        private static int SampleSize(uint size) =>
+            size <= int.MaxValue ? (int)size : throw new InvalidDataException($"Sample size {size} is too large.");
+
         private int[] ReadSizes(int count)
         {
             var sizes = new int[count];
@@ -687,14 +700,14 @@ public sealed class Mp4Demuxer : IDemuxer
                 uint constant = ReadUInt32(_stsz, 4);
                 if (constant != 0)
                 {
-                    Array.Fill(sizes, checked((int)constant));
+                    Array.Fill(sizes, SampleSize(constant));
                     return sizes;
                 }
 
                 Require(_stsz, 12 + (4 * count), "stsz");
                 for (int i = 0; i < count; i++)
                 {
-                    sizes[i] = checked((int)ReadUInt32(_stsz, 12 + (4 * i)));
+                    sizes[i] = SampleSize(ReadUInt32(_stsz, 12 + (4 * i)));
                 }
 
                 return sizes;

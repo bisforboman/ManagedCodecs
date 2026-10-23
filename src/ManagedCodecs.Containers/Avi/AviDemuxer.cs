@@ -32,65 +32,72 @@ public sealed class AviDemuxer : IDemuxer
         _stream = stream;
         _leaveOpen = leaveOpen;
 
-        _stream.Position = 0;
-        var (riff, riffSize) = ReadChunkHeader(_stream);
-        if (riff != "RIFF" || ReadFourCC(_stream) != "AVI ")
+        try
         {
-            throw new InvalidDataException("Not an AVI file.");
-        }
-
-        long riffEnd = Math.Min(8 + (long)riffSize, _stream.Length);
-        HeaderInfo? header = null;
-
-        long pos = 12;
-        while (pos + 8 <= riffEnd)
-        {
-            _stream.Position = pos;
-            var (id, size) = ReadChunkHeader(_stream);
-            long dataStart = pos + 8;
-            long dataEnd = Math.Min(dataStart + size, riffEnd);
-
-            if (id == "LIST" && size >= 4)
+            _stream.Position = 0;
+            var (riff, riffSize) = ReadChunkHeader(_stream);
+            if (riff != "RIFF" || ReadFourCC(_stream) != "AVI ")
             {
-                string type = ReadFourCC(_stream);
-                if (type == "hdrl")
-                {
-                    header = ParseHeaderList(dataStart + 4, dataEnd);
-                }
-                else if (type == "movi" && _moviStart == 0)
-                {
-                    _moviStart = dataStart + 4;
-                    _moviEnd = dataEnd;
-                }
+                throw new InvalidDataException("Not an AVI file.");
             }
 
-            pos = NextChunk(pos, size);
-        }
+            long riffEnd = Math.Min(8 + (long)riffSize, _stream.Length);
+            HeaderInfo? header = null;
 
-        if (header is null)
+            long pos = 12;
+            while (pos + 8 <= riffEnd)
+            {
+                _stream.Position = pos;
+                var (id, size) = ReadChunkHeader(_stream);
+                long dataStart = pos + 8;
+                long dataEnd = Math.Min(dataStart + size, riffEnd);
+
+                if (id == "LIST" && size >= 4)
+                {
+                    string type = ReadFourCC(_stream);
+                    if (type == "hdrl")
+                    {
+                        header = ParseHeaderList(dataStart + 4, dataEnd);
+                    }
+                    else if (type == "movi" && _moviStart == 0)
+                    {
+                        _moviStart = dataStart + 4;
+                        _moviEnd = dataEnd;
+                    }
+                }
+
+                pos = NextChunk(pos, size);
+            }
+
+            if (header is null)
+            {
+                throw new InvalidDataException("AVI file has no 'hdrl' header list.");
+            }
+
+            if (header.VideoStreamIndex < 0)
+            {
+                throw new InvalidDataException("AVI file has no video stream.");
+            }
+
+            if (_moviStart == 0)
+            {
+                throw new InvalidDataException("AVI file has no 'movi' list.");
+            }
+
+            _videoStreamIndex = header.VideoStreamIndex;
+
+            // Like FFmpeg, take the time base from the stream header (dwScale / dwRate) and fall
+            // back to the main header's frame duration. Each chunk is one tick.
+            var timeBase = header.Scale > 0 && header.Rate > 0
+                ? Rational.Reduce(header.Scale, header.Rate)
+                : Rational.Reduce(header.MicrosecondsPerFrame, 1_000_000);
+            double fps = timeBase.Numerator > 0 ? 1 / timeBase.ToDouble() : 0;
+            Video = new VideoStreamInfo(NormalizeCodec(header.Codec), header.Width, header.Height, fps, header.TotalFrames, timeBase, ReadOnlyMemory<byte>.Empty, _videoStreamIndex);
+        }
+        catch (Exception e) when (Malformed.IsMalformedInput(e))
         {
-            throw new InvalidDataException("AVI file has no 'hdrl' header list.");
+            throw Malformed.Wrap(e, "AVI");
         }
-
-        if (header.VideoStreamIndex < 0)
-        {
-            throw new InvalidDataException("AVI file has no video stream.");
-        }
-
-        if (_moviStart == 0)
-        {
-            throw new InvalidDataException("AVI file has no 'movi' list.");
-        }
-
-        _videoStreamIndex = header.VideoStreamIndex;
-
-        // Like FFmpeg, take the time base from the stream header (dwScale / dwRate) and fall
-        // back to the main header's frame duration. Each chunk is one tick.
-        var timeBase = header.Scale > 0 && header.Rate > 0
-            ? Rational.Reduce(header.Scale, header.Rate)
-            : Rational.Reduce(header.MicrosecondsPerFrame, 1_000_000);
-        double fps = timeBase.Numerator > 0 ? 1 / timeBase.ToDouble() : 0;
-        Video = new VideoStreamInfo(NormalizeCodec(header.Codec), header.Width, header.Height, fps, header.TotalFrames, timeBase, ReadOnlyMemory<byte>.Empty, _videoStreamIndex);
     }
 
     public VideoStreamInfo Video { get; }
@@ -100,7 +107,13 @@ public sealed class AviDemuxer : IDemuxer
 
     public static AviDemuxer Open(string path) => new(File.OpenRead(path));
 
-    public IEnumerable<Packet> ReadPackets()
+    /// <remarks>
+    /// Packets come one at a time, so a file that breaks off inside a chunk gives the packets before it, then
+    /// <see cref="InvalidDataException"/> (FFmpeg stops there without an error).
+    /// </remarks>
+    public IEnumerable<Packet> ReadPackets() => Malformed.Guard(ReadPacketsCore(), "AVI");
+
+    private IEnumerable<Packet> ReadPacketsCore()
     {
         string prefix = _videoStreamIndex.ToString("00", CultureInfo.InvariantCulture);
         long sequence = 0;
@@ -131,6 +144,11 @@ public sealed class AviDemuxer : IDemuxer
 
                 if (isVideoChunk && size > 0)
                 {
+                    if (pos + 8 + size > _stream.Length)
+                    {
+                        throw new InvalidDataException($"The chunk at offset {pos} runs past the end of the file.");
+                    }
+
                     var data = new byte[size];
                     _stream.ReadExactly(data);
                     yield return new Packet(_videoStreamIndex, sequence, data, IsKeyframe: true, Dts: sequence, Pts: sequence, Duration: 1);

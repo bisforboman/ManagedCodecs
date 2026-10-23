@@ -107,19 +107,20 @@ written for ARM64 run there, such as the MJPEG `Vector128` IDCT and the H.264 de
 `Environment.ProcessorCount` is 1, and there are no threads without the experimental multithreaded runtime, so the
 decoders must stay usable on one thread.
 
-Time per decode, the mean of 10 decodes after loading the file (Node 22, SDK 10.0.113, a 4-core cloud VM; native is
-the x64 JIT with AVX2):
+Time per decode: the mean of 10 decodes of a file already in memory (`--loops 10` to `mcdec --hash` and to the wasm
+tool), the median of 3 interleaved runs. Node 22, SDK 10.0.113, a 4-core cloud VM; native is the x64 JIT with AVX2
+(mcdec turns tiered compilation off).
 
 | Sample | Native | wasm AOT | wasm interpreter |
 | --- | --- | --- | --- |
-| testsrc-420.avi (MJPEG, 50 frames) | 63 ms | 95 ms | 421 ms |
-| h264-with-audio.mp4 (H.264 Main, 73 frames, and AAC) | 89 ms | 97 ms | 545 ms |
-| h264-high-b.mp4 (H.264 High with B frames, 25 frames) | 61 ms | 126 ms | 610 ms |
-| aac-stereo-48k.mp4 (AAC LC, 95 frames) | 7 ms | 14 ms | 50 ms |
-| jm-paff-b.mp4 (H.264 field pictures, 10 frames) | 34 ms | 48 ms | 251 ms |
+| testsrc-420.avi (MJPEG, 50 frames) | 40 ms | 97 ms | 413 ms |
+| h264-with-audio.mp4 (H.264 Main, 73 frames, and AAC) | 80 ms | 105 ms | 582 ms |
+| h264-high-b.mp4 (H.264 High with B frames, 25 frames) | 51 ms | 106 ms | 623 ms |
+| aac-stereo-48k.mp4 (AAC LC, 95 frames) | 5.5 ms | 14 ms | 51 ms |
+| jm-paff-b.mp4 (H.264 field pictures, 10 frames) | 23 ms | 49 ms | 272 ms |
 
-AOT (`-p:RunAOTCompilation=true`, two minutes more to build) is about 1 to 2 times the native time, and the
-interpreter 6 to 9 times.
+AOT (`-p:RunAOTCompilation=true`, two minutes more to build) takes 1.3 to 2.5 times the native time, the interpreter
+7 to 12 times.
 
 ## Benchmarking
 

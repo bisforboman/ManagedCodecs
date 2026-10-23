@@ -12,7 +12,7 @@ using ManagedCodecs.Mjpeg;
 //   ffmpeg -benchmark -threads 1 -stream_loop 9 -i samples/h264-bench-720p.mp4 -f null -
 if (args.Length == 0 || args.Contains("-h") || args.Contains("--help"))
 {
-    Console.WriteLine("usage: mcdec <file> [--loops N] [--borrow-frames] | mcdec --hash <file>...");
+    Console.WriteLine("usage: mcdec <file> [--loops N] [--borrow-frames] | mcdec --hash [--loops N] <file>...");
     Console.WriteLine("  Demuxes and decodes the file's video and audio N times (default 1), like ffmpeg -stream_loop N-1.");
     Console.WriteLine("  --borrow-frames: H.264 frames point into the decoder's pictures instead of being copied out.");
     Console.WriteLine("  --hash: prints a SHA-256 of each file's decoded output instead (tools/wasm-check.sh compares them).");
@@ -21,9 +21,28 @@ if (args.Length == 0 || args.Contains("-h") || args.Contains("--help"))
 
 if (args[0] == "--hash")
 {
-    foreach (var file in args.Skip(1))
+    // --hash [--loops N] <file>...: N decodes of each file after reading it, their mean time on stderr, as
+    // tools/ManagedCodecs.Wasm prints it on WebAssembly (README, WebAssembly).
+    var files = args.Skip(1).ToList();
+    int decodes = 1;
+    if (files.Count >= 2 && files[0] == "--loops")
     {
-        Console.WriteLine(OutputHash.Line(file, File.ReadAllBytes(file)));
+        decodes = int.Parse(files[1]);
+        files.RemoveRange(0, 2);
+    }
+
+    foreach (var file in files)
+    {
+        var data = File.ReadAllBytes(file);
+        var watch = Stopwatch.StartNew();
+        string line = "";
+        for (int i = 0; i < decodes; i++)
+        {
+            line = OutputHash.Line(file, data);
+        }
+
+        Console.WriteLine(line);
+        Console.Error.WriteLine($"{file}: {watch.Elapsed.TotalMilliseconds / decodes:F1} ms a decode");
     }
 
     return 0;

@@ -22,6 +22,11 @@ public sealed record JpegFrameHeader(byte Marker, int Precision, int Width, int 
             throw new InvalidDataException("SOF segment shorter than its component count.");
         }
 
+        if (width == 0)
+        {
+            throw new InvalidDataException("SOF segment with a width of 0.");
+        }
+
         if (height == 0)
         {
             throw new NotSupportedException("Height defined by a DNL marker is not supported.");

@@ -17,6 +17,7 @@ then the same approach for H.264 + AAC in MP4.
 | `tools/ManagedCodecs.Cli` | `mcdec`: decodes a file and times it, to compare with `ffmpeg -benchmark` |
 | `tools/make-samples.sh` | Generates the test samples and FFmpeg's references |
 | `tools/compare.sh` | Times mcdec and FFmpeg on the same file |
+| `tools/ManagedCodecs.Fuzz`, `tools/fuzz.sh` | Fuzzing targets for SharpFuzz and AFL++ (see Malformed input) |
 | `tests/ManagedCodecs.Tests` | Unit tests and FFmpeg conformance tests (framemd5 for frames and packets) |
 | `benchmarks/ManagedCodecs.Benchmarks` | BenchmarkDotNet decode benchmark |
 
@@ -73,6 +74,23 @@ borrow.
 `AacDecoder.Decode(packet)` returns one `AudioFrame`: the packet's 1024 samples per channel, less the
 `packet.SkipSamples` at its start. The MP4 demuxer sets those from the edit list, so encoder priming is dropped and the
 output matches FFmpeg's default (`Decode(packet.Data.Span)` gives all 1024).
+
+### Malformed input
+
+Damaged, truncated or hostile files make the demuxers and decoders throw `InvalidDataException` (or
+`NotSupportedException` for a valid stream using something not implemented), never another exception, and they
+neither hang nor allocate without bound: an MJPEG image over 2^26 samples is refused, and an AVI chunk running past
+the end of the file is an error rather than an allocation. A truncated file throws where the data runs
+out (FFmpeg stops quietly instead); packets already returned stay valid. There is no error concealment yet: a
+damaged H.264 picture fails its `Decode` call.
+
+`tools/fuzz.sh <file|h264|mjpeg|aac> <minutes>` checks this with AFL++ through SharpFuzz (`file` demuxes a whole file
+and decodes every track; the others feed one decoder its configuration and packets), with seeds taken from
+`samples/`. Inputs that once broke the contract are kept in `tests/ManagedCodecs.Tests/Fuzz/Findings/<target>/`, and
+`MalformedInputTests` replays them, along with a fixed-seed sweep of truncations and byte flips over a few samples.
+The sweep and the first 20-minute runs of each target found sample sizes and durations over `int`, AVI chunks past
+the end of the file, a zero image width or channel count, an `mb_type` code over `int` and huge MJPEG images, all
+fixed.
 
 ## Benchmarking
 

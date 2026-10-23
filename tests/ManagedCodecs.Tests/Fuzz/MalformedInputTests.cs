@@ -33,10 +33,12 @@ public class MalformedInputTests
 
     [Theory]
     [MemberData(nameof(Findings))]
-    public void Finding_KeepsTheContract(string target, string name)
+    public async Task Finding_KeepsTheContract(string target, string name)
     {
         var data = File.ReadAllBytes(Path.Combine(FindingsDirectory, target, name));
-        Assert.True(Task.Run(() => Targets.Run(target, data)).Wait(TimeSpan.FromSeconds(30)), "Did not finish in 30 s.");
+
+        // WaitAsync throws TimeoutException for a hang.
+        await Task.Run(() => Targets.Run(target, data)).WaitAsync(TimeSpan.FromSeconds(30));
     }
 
     // One sample per container and codec path: AVI MJPEG, MP4 with H.264 (CAVLC, CABAC with B frames, field
@@ -48,12 +50,12 @@ public class MalformedInputTests
     }.Where(name => TestSamples.Directory is not null && File.Exists(TestSamples.PathOf(name))));
 
     /// <summary>
-    /// Truncations, byte flips in the whole file and in one packet's data (as the fuzzer would make them, with a
-    /// fixed seed): each mutant must keep the contract.
+    /// Truncations and byte flips anywhere in the file (as the fuzzer would make them, with a fixed seed): each mutant
+    /// must keep the contract, and finish within 30 s.
     /// </summary>
     [Theory]
     [MemberData(nameof(SweepSamples))]
-    public void Mutants_KeepTheContract(string sampleName)
+    public async Task Mutants_KeepTheContract(string sampleName)
     {
         var original = File.ReadAllBytes(TestSamples.PathOf(sampleName));
         var random = new Random(sampleName.Length);
@@ -72,8 +74,7 @@ public class MalformedInputTests
                 }
             }
 
-            int mutant = m;
-            Assert.True(Task.Run(() => Targets.Run("file", data)).Wait(TimeSpan.FromSeconds(30)), $"Mutant {mutant} did not finish in 30 s.");
+            await Task.Run(() => Targets.Run("file", data)).WaitAsync(TimeSpan.FromSeconds(30));
         }
     }
 }

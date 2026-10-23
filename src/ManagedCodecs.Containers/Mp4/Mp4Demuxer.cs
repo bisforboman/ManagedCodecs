@@ -588,7 +588,7 @@ public sealed class Mp4Demuxer : IDemuxer
                     int compositionOffset = (trunFlags & 0x800) != 0 ? (int)ReadNext(trun, ref p, "trun") : 0;
 
                     bool isKeyframe = _isAudio || (sampleFlags & 0x10000) == 0; // sample_is_non_sync_sample
-                    _fragmentSamples.Add((dataOffset, SampleSize(size), i == 0 ? decodeTime : -1, checked((int)duration), compositionOffset, isKeyframe));
+                    _fragmentSamples.Add((dataOffset, SampleSize(size), i == 0 ? decodeTime : -1, SampleDuration(duration), compositionOffset, isKeyframe));
                     dataOffset += size;
                 }
 
@@ -692,6 +692,9 @@ public sealed class Mp4Demuxer : IDemuxer
         private static int SampleSize(uint size) =>
             size <= int.MaxValue ? (int)size : throw new InvalidDataException($"Sample size {size} is too large.");
 
+        private static int SampleDuration(uint duration) =>
+            duration <= int.MaxValue ? (int)duration : throw new InvalidDataException($"Sample duration {duration} is too large.");
+
         private int[] ReadSizes(int count)
         {
             var sizes = new int[count];
@@ -785,7 +788,7 @@ public sealed class Mp4Demuxer : IDemuxer
             for (int e = 0; e < stts.Length / 8 && sample < dts.Length; e++)
             {
                 uint count = ReadUInt32(stts, e * 8);
-                int delta = (int)ReadUInt32(stts, (e * 8) + 4);
+                int delta = SampleDuration(ReadUInt32(stts, (e * 8) + 4));
                 for (uint n = 0; n < count && sample < dts.Length; n++)
                 {
                     dts[sample] = time;

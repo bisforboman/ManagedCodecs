@@ -27,7 +27,10 @@ internal interface IPictureDecoder
 
     void Begin(Picture picture, SequenceParameterSet sps, int fieldParity = -1, bool secondField = false);
 
-    void DecodeSlice(SliceHeader header, PictureParameterSet pps, BitReader r, IReadOnlyList<Picture> refList0, IReadOnlyList<Picture> refList1);
+    void DecodeSlice(SliceHeader header, PictureParameterSet pps, BitReader r, IReadOnlyList<Picture> refList0, IReadOnlyList<Picture> refList1, MarkSnapshot marks);
+
+    /// <summary>For tests of frame threading: sleep up to this many milliseconds after each macroblock row, at random.</summary>
+    int RowDelay { get; set; }
 
     void Deblock();
 }
@@ -135,6 +138,8 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
 
     public int DecodedMbCount { get; private set; }
 
+    public int RowDelay { get; set; }
+
     /// <summary>
     /// Starts decoding into <paramref name="picture"/>, forgetting the previous picture's state: a
     /// frame, or the field of parity <paramref name="fieldParity"/>. The second field of a frame
@@ -147,6 +152,7 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
         DecodedMbCount = 0;
         _decodedPrefix = 0;
         _deblockedRows = 0;
+        _reportedRows = 0;
         _slices.Clear();
         _fieldParity = fieldParity;
         _pairSlots = fieldParity >= 0;
@@ -211,7 +217,7 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
     private int MbStep => _fieldParity >= 0 ? 2 : 1;
 
     /// <summary>slice_data (7.3.4).</summary>
-    public void DecodeSlice(SliceHeader header, PictureParameterSet pps, BitReader r, IReadOnlyList<Picture> refList0, IReadOnlyList<Picture> refList1)
+    public void DecodeSlice(SliceHeader header, PictureParameterSet pps, BitReader r, IReadOnlyList<Picture> refList0, IReadOnlyList<Picture> refList1, MarkSnapshot marks)
     {
         int sliceNum = _slices.Count;
         _mbaff = header.Mbaff;
@@ -224,7 +230,7 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
             _scaling = (Sps, pps, ScalingMatrix.For(Sps, pps));
         }
 
-        var slice = new SliceState(header, pps, sliceNum, refList0, refList1)
+        var slice = new SliceState(header, pps, sliceNum, refList0, refList1, marks)
         {
             Scaling = _scaling.Matrix,
             Qp = pps.PicInitQp + header.SliceQpDelta,
@@ -306,7 +312,7 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
     }
 
     /// <summary>State that lives for one slice.</summary>
-    private sealed class SliceState(SliceHeader header, PictureParameterSet pps, int number, IReadOnlyList<Picture> refList0, IReadOnlyList<Picture> refList1)
+    private sealed class SliceState(SliceHeader header, PictureParameterSet pps, int number, IReadOnlyList<Picture> refList0, IReadOnlyList<Picture> refList1, MarkSnapshot marks)
     {
         public SliceHeader Header { get; } = header;
 
@@ -317,6 +323,9 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
         public IReadOnlyList<Picture> RefList0 { get; } = refList0;
 
         public IReadOnlyList<Picture> RefList1 { get; } = refList1;
+
+        /// <summary>The marking of the lists' pictures when the lists were built.</summary>
+        public MarkSnapshot Marks { get; } = marks;
 
         /// <summary>QP_Y of the previous macroblock in the slice (QP_Y,PRED).</summary>
         public int Qp { get; set; }

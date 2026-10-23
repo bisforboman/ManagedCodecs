@@ -82,27 +82,12 @@ public sealed class H264Decoder : IVideoDecoder
     /// </remarks>
     public IReadOnlyList<VideoFrame> Decode(Packet packet)
     {
-        var state = DecodePicture(packet.Data.Span);
-        if (state.Header.FieldPic && !state.SecondField)
-        {
-            _firstField = (state, packet.Pts);
-            return [];
-        }
-
-        var first = state.SecondField ? _firstField!.Value : (State: state, packet.Pts);
-        _firstField = null;
-        var picture = state.Decoder.Picture;
-        if (state.SecondField)
-        {
-            picture.Poc = Math.Min(picture.TopPoc, picture.BottomPoc);
-        }
-
-        bool borrow = BorrowFrames && picture.BitDepth == 8;
-        var frame = borrow ? Borrow(picture, state.Sps) : Crop(picture, state.Sps);
-        frame.Pts = first.Pts;
-
-        bool restart = first.State.Header.IsIdr || first.State.Header.MemoryManagement.Any(op => op.Op == 5);
-        return _output.Add(frame, picture.Poc, restart, ReorderDepth(state.Sps), borrow ? picture : null);
+        var frames = new List<VideoFrame>();
+        var job = ParsePicture(packet.Data.Span, packet.Pts);
+        Run(job);
+        Finish(job);
+        Output(job, frames);
+        return frames;
     }
 
     public IReadOnlyList<VideoFrame> Flush()
@@ -113,6 +98,81 @@ public sealed class H264Decoder : IVideoDecoder
         }
 
         return _output.Flush();
+    }
+
+    /// <summary>Decodes the job's slices into its picture and deblocks it, then reports it done (or failed) to pictures that predict from it.</summary>
+    private static void Run(PictureJob job)
+    {
+        var state = job.State;
+        var view = state.Header.FieldPic ? state.Picture.Field(state.Header.Parity) : state.Picture;
+        try
+        {
+            state.Decoder.Begin(state.Picture, state.Sps, state.Header.Parity, state.SecondField);
+            foreach (var slice in job.Slices)
+            {
+                state.Decoder.DecodeSlice(slice.Header, slice.Pps, slice.Reader, slice.List0, slice.List1, slice.Marks);
+            }
+
+            if (!state.Decoder.IsComplete)
+            {
+                throw new InvalidDataException("The picture is missing macroblocks (error concealment is not supported).");
+            }
+
+            state.Decoder.Deblock();
+            view.ReportDone();
+        }
+        catch
+        {
+            view.ReportFailed();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// What follows a picture in decoding order, from its headers alone: reference marking, the frame order count of a
+    /// frame whose second field this was, and the first field a second one is to pair with.
+    /// </summary>
+    private void Finish(PictureJob job)
+    {
+        var state = job.State;
+        var picture = state.Picture;
+        if (state.Header.NalRefIdc != 0)
+        {
+            if (state.Header.FieldPic)
+            {
+                _references.MarkField(state.Header, picture, state.Sps, state.SecondField);
+            }
+            else
+            {
+                _references.Mark(state.Header, picture, state.Sps);
+            }
+
+            // PrevRefFrameNum (7.4.3); after memory_management_control_operation 5 it is 0.
+            _prevRefFrameNum = state.Header.MemoryManagement.Any(op => op.Op == 5) ? 0 : state.Header.FrameNum;
+        }
+
+        if (state.SecondField)
+        {
+            picture.Poc = Math.Min(picture.TopPoc, picture.BottomPoc);
+        }
+
+        _firstField = state.Header.FieldPic && !state.SecondField ? job : null;
+    }
+
+    /// <summary>The frame of a decoded picture into the output queue, and what comes out of it; a first field gives none (its frame comes with the second).</summary>
+    private void Output(PictureJob job, List<VideoFrame> frames)
+    {
+        var state = job.State;
+        if (state.Header.FieldPic && !state.SecondField)
+        {
+            return;
+        }
+
+        var picture = state.Picture;
+        bool borrow = BorrowFrames && picture.BitDepth == 8;
+        var frame = borrow ? Borrow(picture, state.Sps) : Crop(picture, state.Sps);
+        frame.Pts = job.Pts;
+        frames.AddRange(_output.Add(frame, picture.Poc, job.Restart, ReorderDepth(state.Sps), borrow ? picture : null));
     }
 
     /// <summary>
@@ -156,9 +216,10 @@ public sealed class H264Decoder : IVideoDecoder
         return Math.Clamp(maxDpbMbs / (sps.WidthInMbs * sps.HeightInMbs), 1, 16);
     }
 
-    private PictureState DecodePicture(ReadOnlySpan<byte> packet)
+    /// <summary>Parses a packet's NAL units: parameter sets, and the slices of its picture with their reference lists.</summary>
+    private PictureJob ParsePicture(ReadOnlySpan<byte> packet, long pts)
     {
-        PictureState? current = null;
+        PictureJob? current = null;
         int pos = 0;
         while (pos < packet.Length)
         {
@@ -179,20 +240,14 @@ public sealed class H264Decoder : IVideoDecoder
                 throw new InvalidDataException($"NAL unit length {length} overruns the packet.");
             }
 
-            current = HandleNal(NalUnit.Parse(packet.Slice(pos, length)), current);
+            current = HandleNal(NalUnit.Parse(packet.Slice(pos, length)), current, pts);
             pos += length;
         }
 
-        if (current is null)
-        {
-            throw new InvalidDataException("The packet contains no picture.");
-        }
-
-        FinishPicture(current);
-        return current;
+        return current ?? throw new InvalidDataException("The packet contains no picture.");
     }
 
-    private PictureState? HandleNal(NalUnit nal, PictureState? current)
+    private PictureJob? HandleNal(NalUnit nal, PictureJob? current, long pts = 0)
     {
         switch (nal.Type)
         {
@@ -218,20 +273,25 @@ public sealed class H264Decoder : IVideoDecoder
 
                     if (current is null)
                     {
-                        current = StartPicture(header, sps);
+                        current = StartPicture(header, sps, pts);
                     }
-                    else if (header.FrameNum != current.Header.FrameNum || current.Sps != sps)
+                    else if (header.FrameNum != current.State.Header.FrameNum || current.State.Sps != sps)
                     {
                         throw new NotSupportedException("A packet holding more than one picture is not supported.");
                     }
 
                     var (list0, list1) = header.Type switch
                     {
-                        SliceType.P => (_references.BuildList(header, current.Sps), []),
-                        SliceType.B => _references.BuildLists(header, current.Sps, current.Poc),
+                        SliceType.P => (_references.BuildList(header, sps), []),
+                        SliceType.B => _references.BuildLists(header, sps, current.State.Poc),
                         _ => (new List<Picture>(), new List<Picture>()),
                     };
-                    current.Decoder.DecodeSlice(header, pps, reader, list0, list1);
+                    foreach (var picture in list0.Concat(list1))
+                    {
+                        current.Uses.Add(picture.Frame);
+                    }
+
+                    current.Slices.Add(new SliceWork(header, pps, reader, list0, list1, new MarkSnapshot(list0.Concat(list1))));
                     break;
                 }
 
@@ -248,7 +308,7 @@ public sealed class H264Decoder : IVideoDecoder
     /// <summary>How often MBAFF frames used field and frame pairs and mixed them, so tests can check samples exercise them.</summary>
     internal MbaffStatistics MbaffStatistics { get; } = new();
 
-    private PictureState StartPicture(SliceHeader header, SequenceParameterSet sps)
+    private PictureJob StartPicture(SliceHeader header, SequenceParameterSet sps, long pts)
     {
         // The second field of a frame (7.4.1.2.4): the other parity right after the first, with its
         // frame_num, not IDR, and a reference if and only if the first one is.
@@ -269,19 +329,14 @@ public sealed class H264Decoder : IVideoDecoder
             InferGapFrames(header, sps);
         }
 
-        if (_decoder is null || _decoder.Sps.WidthInMbs != sps.WidthInMbs || _decoder.Sps.HeightInMbs != sps.HeightInMbs
-            || _decoder.Sps.ChromaFormatIdc != sps.ChromaFormatIdc || _decoder.Sps.BitDepthLuma != sps.BitDepthLuma)
-        {
-            _decoder = sps.BitDepthLuma > 8
-                ? new PictureDecoder<ushort>(sps) { Statistics = MbaffStatistics, FieldStatistics = FieldStatistics }
-                : new PictureDecoder<byte>(sps) { Statistics = MbaffStatistics, FieldStatistics = FieldStatistics };
-        }
+        // The second field goes on in the first one's decoder, which holds the first one's macroblocks.
+        var decoder = secondField ? _firstField!.State.Decoder : TakeDecoder(sps);
 
         int poc = _order.Next(header, sps);
         Picture picture;
         if (secondField)
         {
-            picture = _firstField!.Value.State.Decoder.Picture;
+            picture = _firstField!.State.Picture;
             if (header.BottomField)
             {
                 picture.BottomPoc = poc;
@@ -302,12 +357,29 @@ public sealed class H264Decoder : IVideoDecoder
             (picture.TopPoc, picture.BottomPoc) = _order.Fields;
         }
 
-        _decoder.Begin(picture, sps, header.Parity, secondField);
-        return new PictureState(header, sps, _decoder, poc, secondField);
+        // A second field's frame is the first one's: its timestamp, and whether it starts a new sequence.
+        var state = new PictureState(header, sps, decoder, picture, poc, secondField);
+        return secondField
+            ? new PictureJob(state, _firstField!.Pts, _firstField.Restart)
+            : new PictureJob(state, pts, header.IsIdr || header.MemoryManagement.Any(op => op.Op == 5));
     }
 
-    // The first field of a frame being decoded as two field pictures, and its packet's timestamp.
-    private (PictureState State, long Pts)? _firstField;
+    /// <summary>A decoder for pictures of the stream's size and format: the one of the previous picture, or a new one.</summary>
+    private IPictureDecoder TakeDecoder(SequenceParameterSet sps)
+    {
+        if (_decoder is null || _decoder.Sps.WidthInMbs != sps.WidthInMbs || _decoder.Sps.HeightInMbs != sps.HeightInMbs
+            || _decoder.Sps.ChromaFormatIdc != sps.ChromaFormatIdc || _decoder.Sps.BitDepthLuma != sps.BitDepthLuma)
+        {
+            _decoder = sps.BitDepthLuma > 8
+                ? new PictureDecoder<ushort>(sps) { Statistics = MbaffStatistics, FieldStatistics = FieldStatistics }
+                : new PictureDecoder<byte>(sps) { Statistics = MbaffStatistics, FieldStatistics = FieldStatistics };
+        }
+
+        return _decoder;
+    }
+
+    // The first field of a frame being decoded as two field pictures.
+    private PictureJob? _firstField;
 
     /// <summary>How often field pictures were decoded, so tests can check samples exercise them.</summary>
     internal FieldStatistics FieldStatistics { get; } = new();
@@ -331,6 +403,7 @@ public sealed class H264Decoder : IVideoDecoder
         {
             var picture = TakePicture(sps, frameNum, _order.NextInferred(frameNum, sps));
             picture.IsNonExisting = true;
+            picture.ReportDone();
             _references.MarkNonExisting(picture, sps);
         }
 
@@ -364,33 +437,8 @@ public sealed class H264Decoder : IVideoDecoder
         picture.IsLongTermReference = false;
         picture.LongTermFrameIdx = 0;
         picture.IsNonExisting = false;
+        picture.ResetProgress();
         return picture;
-    }
-
-    private void FinishPicture(PictureState state)
-    {
-        if (!state.Decoder.IsComplete)
-        {
-            throw new InvalidDataException("The picture is missing macroblocks (error concealment is not supported).");
-        }
-
-        state.Decoder.Deblock();
-
-        var picture = state.Decoder.Picture;
-        if (state.Header.NalRefIdc != 0)
-        {
-            if (state.Header.FieldPic)
-            {
-                _references.MarkField(state.Header, picture, state.Sps, state.SecondField);
-            }
-            else
-            {
-                _references.Mark(state.Header, picture, state.Sps);
-            }
-
-            // PrevRefFrameNum (7.4.3); after memory_management_control_operation 5 it is 0.
-            _prevRefFrameNum = state.Header.MemoryManagement.Any(op => op.Op == 5) ? 0 : state.Header.FrameNum;
-        }
     }
 
     /// <summary>Copies the visible area (frame cropping, 7.4.2.1.1) into a new frame.</summary>
@@ -448,8 +496,28 @@ public sealed class H264Decoder : IVideoDecoder
     private static PixelFormat FormatOf(Picture picture) =>
         PixelFormatExtensions.Of(picture.MbWidthC == 16 ? 3 : picture.MbHeightC switch { 0 => 0, 16 => 2, _ => 1 }, picture.BitDepth);
 
-    /// <summary>The picture being decoded: its first slice header, its SPS, its decoder and its order count.</summary>
-    private sealed record PictureState(SliceHeader Header, SequenceParameterSet Sps, IPictureDecoder Decoder, int Poc, bool SecondField = false);
+    /// <summary>The picture being decoded: its first slice header, its SPS, its decoder, its frame and its order count.</summary>
+    private sealed record PictureState(SliceHeader Header, SequenceParameterSet Sps, IPictureDecoder Decoder, Picture Picture, int Poc, bool SecondField = false);
+
+    /// <summary>A slice to decode, with its reference lists and their marking when they were built.</summary>
+    private sealed record SliceWork(SliceHeader Header, PictureParameterSet Pps, BitReader Reader, List<Picture> List0, List<Picture> List1, MarkSnapshot Marks);
+
+    /// <summary>
+    /// A picture parsed from a packet, to be decoded: its state and slices, the frames it predicts from, and for its
+    /// output frame the timestamp (a second field's frame takes the first field's) and whether it restarts the order.
+    /// </summary>
+    private sealed class PictureJob(PictureState state, long pts, bool restart)
+    {
+        public PictureState State { get; } = state;
+
+        public long Pts { get; } = pts;
+
+        public bool Restart { get; } = restart;
+
+        public List<SliceWork> Slices { get; } = [];
+
+        public HashSet<Picture> Uses { get; } = [];
+    }
 
     private static void CheckSupported(SequenceParameterSet sps)
     {

@@ -39,6 +39,9 @@ internal sealed partial class PictureDecoder<TPixel>
     private int _decodedPrefix;
     private int _deblockedRows;
 
+    // Decoded macroblock rows last reported to the picture's progress (frame threading).
+    private int _reportedRows;
+
     /// <summary>
     /// Deblocks the frame's rows that decoding no longer needs unfiltered: a row once the row below it is decoded, as
     /// intra prediction reads the row above as it was before filtering, and filtering a row changes all of it (its
@@ -59,10 +62,25 @@ internal sealed partial class PictureDecoder<TPixel>
         }
         while (_decodedPrefix < _mbCount && _sliceOfMb[_decodedPrefix] >= 0);
 
-        int rows = Math.Max(_deblockedRows, (_decodedPrefix / _widthInMbs) - 1);
+        int decodedRows = _decodedPrefix / _widthInMbs;
+        int rows = Math.Max(_deblockedRows, decodedRows - 1);
         DeblockRows(_deblockedRows, rows);
         _deblockedRows = rows;
+
+        // Rows are final once the row below them is deblocked too: its top edge filters their last rows.
+        if (decodedRows != _reportedRows)
+        {
+            _reportedRows = decodedRows;
+            Picture.ReportProgress(decodedRows, 16 * Math.Max(0, _deblockedRows - 1));
+            if (RowDelay > 0)
+            {
+                Thread.Sleep(Random.Shared.Next(RowDelay + 1));
+            }
+        }
     }
+
+    /// <summary>The macroblock row of the frame that holds (the bottom of) macroblock <paramref name="mbAddr"/>.</summary>
+    private int FrameMbRow(int mbAddr) => !_pairSlots ? mbAddr / _widthInMbs : (2 * ((mbAddr >> 1) / _widthInMbs)) + 1;
 
     /// <summary>Filters what is left of the picture, macroblock by macroblock in raster order (8.7).</summary>
     public void Deblock()

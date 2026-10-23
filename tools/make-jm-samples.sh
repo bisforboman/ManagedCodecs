@@ -144,7 +144,7 @@ weigh paff-b-cavlc-wp paff-b-cavlc explicit
 weigh paff-b-adaptive-wp paff-b-adaptive explicit
 weigh paff-mbaff-wp paff-mbaff explicit
 
-# ---- Bit depths 9, 12 and 14 (libx264 writes only 8 and 10) ----
+# ---- Bit depths 9, 12 and 14 (libx264 writes only 8 and 10), and 8 bits for what libx264 never writes ----
 # Progressive frames (176x144, 10 of them) of a moving noisy test pattern, at each depth and chroma format the
 # sample needs (noise=N sets the noise). deep name bits yuvformat [lencod options]: High 10 for 9 bits, High 4:4:4 Predictive above 10 (no
 # other profile allows them), 8x8 transforms, B pictures, CABAC, QP 16 so the levels get large.
@@ -153,11 +153,12 @@ deep() {
   wanted "$name" || return 0
   local pix=(gray yuv420p yuv422p yuv444p)
   local fmt=${pix[yuv]}
-  [[ $fmt == gray ]] && fmt=gray${bits}le || fmt=${fmt}${bits}le
+  if ((bits > 8)); then [[ $fmt == gray ]] && fmt=gray${bits}le || fmt=${fmt}${bits}le; fi
   ffmpeg -hide_banner -loglevel error -y -f lavfi -i "testsrc2=size=176x144:rate=25,scroll=h=0.01:v=0.005,noise=alls=${noise:-8}:allf=t" \
     -frames:v 10 -pix_fmt "$fmt" -f rawvideo "$work/deep-$name.yuv"
   local profile=244
   ((bits <= 10 && yuv <= 1)) && profile=110
+  ((bits == 8 && yuv <= 1)) && profile=100
   dur=512 encode-b "$name" -p InputFile="deep-$name.yuv" -p SourceWidth=176 -p SourceHeight=144 -p YUVFormat="$yuv" \
     -p SourceBitDepthLuma="$bits" -p SourceBitDepthChroma="$bits" -p OutputBitDepthLuma="$bits" -p OutputBitDepthChroma="$bits" \
     -p ProfileIDC="$profile" -p Transform8x8Mode=1 -p NumberBFrames=1 -p QPISlice=16 -p QPPSlice=16 -p QPBSlice=18 "$@"
@@ -171,3 +172,17 @@ noise=40 deep 14bit-cavlc 14 1 -p SymbolMode=0 -p QPISlice=-6 -p QPPSlice=-6 -p 
 deep 12bit-422 12 2                               # 4:2:2
 deep 14bit-444 14 3                               # 4:4:4
 # No 4:0:0: JM writes bit_depth_chroma 8 there, and FFmpeg refuses luma and chroma depths that differ.
+
+# ---- 8 bits, through deep: what libx264 never writes ----
+# I_PCM: on heavy noise JM codes macroblocks as I_PCM below about QP 16, all of them below about QP 12; at QP 14 (CAVLC)
+# and 15 (CABAC) about half, next to intra and inter ones in I, P and B pictures.
+noise=60 deep pcm-cavlc 8 1 -p SymbolMode=0 -p QPISlice=14 -p QPPSlice=14 -p QPBSlice=16
+noise=60 deep pcm 8 1 -p QPISlice=15 -p QPPSlice=15 -p QPBSlice=17
+# cabac_init_idc 1 and 2 throughout (JM's adaptive choice, in the samples above, takes 1 and 2 in some slices).
+deep cabac-init1 8 1 -p ContextInitMethod=0 -p FixedModelNumber=1
+deep cabac-init2 8 1 -p ContextInitMethod=0 -p FixedModelNumber=2
+# Cb and Cr QP offsets of their own (chroma_qp_index_offset -3, second_chroma_qp_index_offset 4): dequantization
+# and deblocking, in 4:2:0, 4:2:2 and 4:4:4 (where chroma takes the luma filter at QP_C).
+deep chroma-qp 8 1 -p CbQPOffset=-3 -p CrQPOffset=4
+deep chroma-qp-422 8 2 -p CbQPOffset=-3 -p CrQPOffset=4
+deep chroma-qp-444 8 3 -p CbQPOffset=-3 -p CrQPOffset=4

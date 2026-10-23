@@ -1,3 +1,7 @@
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+using System.Runtime.Intrinsics;
+
 namespace ManagedCodecs.Aac;
 
 /// <summary>Window sequences of ics_info (Table 4.153).</summary>
@@ -21,6 +25,12 @@ internal sealed class Filterbank
     public static readonly double[] KbdLong = Kbd(1024, 4);
     public static readonly double[] KbdShort = Kbd(128, 6);
 
+    // The falling halves, w[2n - 1 - i] for i = 0 .. n - 1, so that windowing multiplies element by element.
+    private static readonly double[] SineLongFall = [.. SineLong.Reverse()];
+    private static readonly double[] SineShortFall = [.. SineShort.Reverse()];
+    private static readonly double[] KbdLongFall = [.. KbdLong.Reverse()];
+    private static readonly double[] KbdShortFall = [.. KbdShort.Reverse()];
+
     private readonly double[] _overlap = new double[1024];
     private readonly double[] _time = new double[2048];
     private readonly double[] _shortTime = new double[256];
@@ -30,24 +40,21 @@ internal sealed class Filterbank
     public void Synthesize(WindowSequence sequence, int shape, ReadOnlySpan<double> spectrum, Span<float> output)
     {
         double[] longRise = _previousShape == 1 ? KbdLong : SineLong;
-        double[] longFall = shape == 1 ? KbdLong : SineLong;
+        double[] longFall = shape == 1 ? KbdLongFall : SineLongFall;
         double[] shortRisePrevious = _previousShape == 1 ? KbdShort : SineShort;
-        double[] shortCurrent = shape == 1 ? KbdShort : SineShort;
-        var z = _time;
+        double[] shortRise = shape == 1 ? KbdShort : SineShort;
+        double[] shortFall = shape == 1 ? KbdShortFall : SineShortFall;
+        var z = _time.AsSpan();
 
         if (sequence == WindowSequence.EightShort)
         {
-            Array.Clear(z);
+            z.Clear();
             for (int w = 0; w < 8; w++)
             {
                 Imdct.Inverse(spectrum.Slice(w * 128, 128), _shortTime);
-                double[] rise = w == 0 ? shortRisePrevious : shortCurrent;
                 int start = 448 + (w * 128);
-                for (int n = 0; n < 128; n++)
-                {
-                    z[start + n] += _shortTime[n] * rise[n];
-                    z[start + 128 + n] += _shortTime[128 + n] * shortCurrent[127 - n];
-                }
+                Vectors.MultiplyAdd(z.Slice(start, 128), _shortTime.AsSpan(0, 128), w == 0 ? shortRisePrevious : shortRise);
+                Vectors.MultiplyAdd(z.Slice(start + 128, 128), _shortTime.AsSpan(128, 128), shortFall);
             }
         }
         else
@@ -56,53 +63,29 @@ internal sealed class Filterbank
             switch (sequence)
             {
                 case WindowSequence.OnlyLong:
-                    for (int n = 0; n < 1024; n++)
-                    {
-                        z[n] *= longRise[n];
-                        z[1024 + n] *= longFall[1023 - n];
-                    }
-
+                    Vectors.Multiply(z[..1024], longRise);
+                    Vectors.Multiply(z[1024..], longFall);
                     break;
 
                 case WindowSequence.LongStart:
-                    for (int n = 0; n < 1024; n++)
-                    {
-                        z[n] *= longRise[n];
-                    }
-
-                    // 448 ones, a falling short window, then zeros.
-                    for (int n = 0; n < 128; n++)
-                    {
-                        z[1472 + n] *= shortCurrent[127 - n];
-                    }
-
-                    Array.Clear(z, 1600, 448);
+                    // The rising long window; then 448 ones, a falling short window, and zeros.
+                    Vectors.Multiply(z[..1024], longRise);
+                    Vectors.Multiply(z.Slice(1472, 128), shortFall);
+                    z.Slice(1600, 448).Clear();
                     break;
 
                 case WindowSequence.LongStop:
                     // Zeros, a rising short window, 448 ones, then the falling long window.
-                    Array.Clear(z, 0, 448);
-                    for (int n = 0; n < 128; n++)
-                    {
-                        z[448 + n] *= shortRisePrevious[n];
-                    }
-
-                    for (int n = 0; n < 1024; n++)
-                    {
-                        z[1024 + n] *= longFall[1023 - n];
-                    }
-
+                    z[..448].Clear();
+                    Vectors.Multiply(z.Slice(448, 128), shortRisePrevious);
+                    Vectors.Multiply(z[1024..], longFall);
                     break;
             }
         }
 
         const double Scale = 1.0 / 32768;
-        for (int n = 0; n < 1024; n++)
-        {
-            output[n] = (float)((z[n] + _overlap[n]) * Scale);
-            _overlap[n] = z[1024 + n];
-        }
-
+        Vectors.AddScaleToSingle(z[..1024], _overlap, Scale, output);
+        z[1024..].CopyTo(_overlap);
         _previousShape = shape;
     }
 
@@ -226,6 +209,20 @@ internal static class Imdct
         }
     }
 
+    /// <summary>The FFT of <see cref="Inverse"/> (length 512 or 64), for tests: the vector one, or <paramref name="scalar"/>.</summary>
+    internal static void Fft(Span<double> re, Span<double> im, bool scalar)
+    {
+        var plan = re.Length == Long.Size / 2 ? Long : Short;
+        if (scalar)
+        {
+            plan.FftScalar(re, im);
+        }
+        else
+        {
+            plan.Fft(re, im);
+        }
+    }
+
     /// <summary>The definition, term by term (O(N^2)); the reference for <see cref="Inverse"/>.</summary>
     public static void InverseReference(ReadOnlySpan<double> spec, Span<double> output)
     {
@@ -306,7 +303,23 @@ internal static class Imdct
                 _rootCos[t] = Math.Cos(2 * Math.PI * t / length);
                 _rootSin[t] = -Math.Sin(2 * Math.PI * t / length);
             }
+
+            // The same roots stage by stage, contiguous: a stage of half-span `span` uses roots k * length / (2 span)
+            // for k < span, kept from index span - 1 on.
+            _stageCos = new double[length];
+            _stageSin = new double[length];
+            for (int span = 1; span < length; span *= 2)
+            {
+                for (int k = 0; k < span; k++)
+                {
+                    _stageCos[span - 1 + k] = _rootCos[k * (length / (2 * span))];
+                    _stageSin[span - 1 + k] = _rootSin[k * (length / (2 * span))];
+                }
+            }
         }
+
+        private readonly double[] _stageCos;
+        private readonly double[] _stageSin;
 
         public int Size { get; }
 
@@ -318,8 +331,110 @@ internal static class Imdct
 
         public double[] PostSin { get; }
 
-        /// <summary>Forward FFT, X[l] = sum of x[j] e^(-2 pi i j l / length), in place.</summary>
+        /// <summary>
+        /// Forward FFT, X[l] = sum of x[j] e^(-2 pi i j l / length), in place: <see cref="FftScalar"/> with the butterflies
+        /// of a stage several at a time where the stage is wide enough. Each lane does the scalar arithmetic in the same
+        /// order (no fused multiply-add), so the result is the same to the bit.
+        /// </summary>
+        [SkipLocalsInit]
         public void Fft(Span<double> re, Span<double> im)
+        {
+            int length = re.Length;
+            BitReverse(re, im);
+            ref double r = ref MemoryMarshal.GetReference(re);
+            ref double i = ref MemoryMarshal.GetReference(im);
+            ref double cos = ref MemoryMarshal.GetArrayDataReference(_stageCos);
+            ref double sin = ref MemoryMarshal.GetArrayDataReference(_stageSin);
+            for (int span = 1; span < length; span *= 2)
+            {
+                int k0 = span - 1;
+                if (Vector256.IsHardwareAccelerated && span >= Vector256<double>.Count)
+                {
+                    for (int start = 0; start < length; start += 2 * span)
+                    {
+                        for (int k = 0; k < span; k += Vector256<double>.Count)
+                        {
+                            var c = Vector256.LoadUnsafe(ref cos, (nuint)(k0 + k));
+                            var s = Vector256.LoadUnsafe(ref sin, (nuint)(k0 + k));
+                            nuint a = (nuint)(start + k);
+                            nuint b = a + (nuint)span;
+                            var rb = Vector256.LoadUnsafe(ref r, b);
+                            var ib = Vector256.LoadUnsafe(ref i, b);
+                            var ra = Vector256.LoadUnsafe(ref r, a);
+                            var ia = Vector256.LoadUnsafe(ref i, a);
+                            var tr = (rb * c) - (ib * s);
+                            var ti = (rb * s) + (ib * c);
+                            (ra - tr).StoreUnsafe(ref r, b);
+                            (ia - ti).StoreUnsafe(ref i, b);
+                            (ra + tr).StoreUnsafe(ref r, a);
+                            (ia + ti).StoreUnsafe(ref i, a);
+                        }
+                    }
+                }
+                else if (Vector128.IsHardwareAccelerated && span >= Vector128<double>.Count)
+                {
+                    for (int start = 0; start < length; start += 2 * span)
+                    {
+                        for (int k = 0; k < span; k += Vector128<double>.Count)
+                        {
+                            var c = Vector128.LoadUnsafe(ref cos, (nuint)(k0 + k));
+                            var s = Vector128.LoadUnsafe(ref sin, (nuint)(k0 + k));
+                            nuint a = (nuint)(start + k);
+                            nuint b = a + (nuint)span;
+                            var rb = Vector128.LoadUnsafe(ref r, b);
+                            var ib = Vector128.LoadUnsafe(ref i, b);
+                            var ra = Vector128.LoadUnsafe(ref r, a);
+                            var ia = Vector128.LoadUnsafe(ref i, a);
+                            var tr = (rb * c) - (ib * s);
+                            var ti = (rb * s) + (ib * c);
+                            (ra - tr).StoreUnsafe(ref r, b);
+                            (ia - ti).StoreUnsafe(ref i, b);
+                            (ra + tr).StoreUnsafe(ref r, a);
+                            (ia + ti).StoreUnsafe(ref i, a);
+                        }
+                    }
+                }
+                else
+                {
+                    for (int start = 0; start < length; start += 2 * span)
+                    {
+                        for (int k = 0; k < span; k++)
+                        {
+                            double c = Unsafe.Add(ref cos, k0 + k);
+                            double s = Unsafe.Add(ref sin, k0 + k);
+                            int a = start + k;
+                            int b = a + span;
+                            double rb = Unsafe.Add(ref r, b);
+                            double ib = Unsafe.Add(ref i, b);
+                            double tr = (rb * c) - (ib * s);
+                            double ti = (rb * s) + (ib * c);
+                            double ra = Unsafe.Add(ref r, a);
+                            double ia = Unsafe.Add(ref i, a);
+                            Unsafe.Add(ref r, b) = ra - tr;
+                            Unsafe.Add(ref i, b) = ia - ti;
+                            Unsafe.Add(ref r, a) = ra + tr;
+                            Unsafe.Add(ref i, a) = ia + ti;
+                        }
+                    }
+                }
+            }
+        }
+
+        private void BitReverse(Span<double> re, Span<double> im)
+        {
+            for (int i = 0; i < re.Length; i++)
+            {
+                int j = _bitReverse[i];
+                if (j > i)
+                {
+                    (re[i], re[j]) = (re[j], re[i]);
+                    (im[i], im[j]) = (im[j], im[i]);
+                }
+            }
+        }
+
+        /// <summary>The FFT one butterfly at a time, with the roots by stride: the reference for <see cref="Fft"/>.</summary>
+        public void FftScalar(Span<double> re, Span<double> im)
         {
             int length = re.Length;
             for (int i = 0; i < length; i++)
@@ -352,6 +467,99 @@ internal static class Imdct
                     }
                 }
             }
+        }
+    }
+}
+
+/// <summary>Element-wise double loops of the filterbank, several elements at a time; each the scalar arithmetic, to the bit.</summary>
+internal static class Vectors
+{
+    /// <summary>a[n] *= w[n].</summary>
+    public static void Multiply(Span<double> a, ReadOnlySpan<double> w)
+    {
+        ref double x = ref MemoryMarshal.GetReference(a);
+        ref double y = ref MemoryMarshal.GetReference(w);
+        int n = 0;
+        if (Vector256.IsHardwareAccelerated)
+        {
+            for (; n <= a.Length - Vector256<double>.Count; n += Vector256<double>.Count)
+            {
+                (Vector256.LoadUnsafe(ref x, (nuint)n) * Vector256.LoadUnsafe(ref y, (nuint)n)).StoreUnsafe(ref x, (nuint)n);
+            }
+        }
+        else if (Vector128.IsHardwareAccelerated)
+        {
+            for (; n <= a.Length - Vector128<double>.Count; n += Vector128<double>.Count)
+            {
+                (Vector128.LoadUnsafe(ref x, (nuint)n) * Vector128.LoadUnsafe(ref y, (nuint)n)).StoreUnsafe(ref x, (nuint)n);
+            }
+        }
+
+        for (; n < a.Length; n++)
+        {
+            a[n] *= w[n];
+        }
+    }
+
+    /// <summary>a[n] += b[n] * w[n].</summary>
+    public static void MultiplyAdd(Span<double> a, ReadOnlySpan<double> b, ReadOnlySpan<double> w)
+    {
+        ref double x = ref MemoryMarshal.GetReference(a);
+        ref double u = ref MemoryMarshal.GetReference(b);
+        ref double y = ref MemoryMarshal.GetReference(w);
+        int n = 0;
+        if (Vector256.IsHardwareAccelerated)
+        {
+            for (; n <= a.Length - Vector256<double>.Count; n += Vector256<double>.Count)
+            {
+                (Vector256.LoadUnsafe(ref x, (nuint)n) + (Vector256.LoadUnsafe(ref u, (nuint)n) * Vector256.LoadUnsafe(ref y, (nuint)n))).StoreUnsafe(ref x, (nuint)n);
+            }
+        }
+        else if (Vector128.IsHardwareAccelerated)
+        {
+            for (; n <= a.Length - Vector128<double>.Count; n += Vector128<double>.Count)
+            {
+                (Vector128.LoadUnsafe(ref x, (nuint)n) + (Vector128.LoadUnsafe(ref u, (nuint)n) * Vector128.LoadUnsafe(ref y, (nuint)n))).StoreUnsafe(ref x, (nuint)n);
+            }
+        }
+
+        for (; n < a.Length; n++)
+        {
+            a[n] += b[n] * w[n];
+        }
+    }
+
+    /// <summary>output[n] = (float)((a[n] + b[n]) * scale).</summary>
+    public static void AddScaleToSingle(ReadOnlySpan<double> a, ReadOnlySpan<double> b, double scale, Span<float> output)
+    {
+        ref double x = ref MemoryMarshal.GetReference(a);
+        ref double y = ref MemoryMarshal.GetReference(b);
+        ref float o = ref MemoryMarshal.GetReference(output);
+        int n = 0;
+        if (Vector256.IsHardwareAccelerated)
+        {
+            var sv = Vector256.Create(scale);
+            for (; n <= a.Length - (2 * Vector256<double>.Count); n += 2 * Vector256<double>.Count)
+            {
+                var low = (Vector256.LoadUnsafe(ref x, (nuint)n) + Vector256.LoadUnsafe(ref y, (nuint)n)) * sv;
+                var high = (Vector256.LoadUnsafe(ref x, (nuint)(n + 4)) + Vector256.LoadUnsafe(ref y, (nuint)(n + 4))) * sv;
+                Vector256.Narrow(low, high).StoreUnsafe(ref o, (nuint)n);
+            }
+        }
+        else if (Vector128.IsHardwareAccelerated)
+        {
+            var sv = Vector128.Create(scale);
+            for (; n <= a.Length - (2 * Vector128<double>.Count); n += 2 * Vector128<double>.Count)
+            {
+                var low = (Vector128.LoadUnsafe(ref x, (nuint)n) + Vector128.LoadUnsafe(ref y, (nuint)n)) * sv;
+                var high = (Vector128.LoadUnsafe(ref x, (nuint)(n + 2)) + Vector128.LoadUnsafe(ref y, (nuint)(n + 2))) * sv;
+                Vector128.Narrow(low, high).StoreUnsafe(ref o, (nuint)n);
+            }
+        }
+
+        for (; n < a.Length; n++)
+        {
+            output[n] = (float)((a[n] + b[n]) * scale);
         }
     }
 }

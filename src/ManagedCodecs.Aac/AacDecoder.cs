@@ -3,18 +3,20 @@ using ManagedCodecs.Aac.Sbr;
 namespace ManagedCodecs.Aac;
 
 /// <summary>
-/// AAC LC decoder (ISO/IEC 14496-3 subpart 4) for raw access units as stored in MP4, or ADTS frames: one
-/// packet in, 1024 samples per channel out.
+/// AAC LC and HE-AAC decoder (ISO/IEC 14496-3 subpart 4, and spectral band replication of 4.6.18) for raw access units
+/// as stored in MP4, or ADTS frames: one packet in, 1024 samples per channel out, or with SBR 2048 at twice the rate.
 /// </summary>
 /// <remarks>
 /// Supports single and channel pair elements, LFE, M/S and intensity stereo, perceptual noise
 /// substitution, TNS, pulse data, long and short windows with sine and KBD shapes, and channel
 /// configurations 0 (program config element, channels in bitstream order) to 7. Output is in the
 /// WAVE / FFmpeg channel order (5.1: FL FR FC LFE BL BR; configuration 7: FL FR FC LFE BL BR SL SR). Not supported: other object types (Main, SSR, LTP),
-/// coupling channel elements, 960-sample frames, and spectral band replication (HE-AAC): its signalling (in the config,
-/// or only by its data) and data are read, but <see cref="Decode(ReadOnlySpan{byte})"/> refuses to output it yet. Every packet yields 1024 samples, encoder
-/// priming included; the container's timestamps (negative for priming) and the last packet's
-/// duration say what to trim.
+/// coupling channel elements, 960-sample frames, and downsampled SBR. Spectral band replication is signalled in the
+/// config or only by its data (from the first access unit on, which <see cref="SampleRate"/> then follows); every channel
+/// goes through it, an LFE without a high band. Parametric stereo (HE-AAC v2) is read but not decoded: the mono core comes
+/// out with SBR. Every packet yields its samples whole, encoder priming included; the container's timestamps (negative
+/// for priming) and the last packet's duration say what to trim, and <see cref="Decode(Packet)"/> drops what
+/// <see cref="Packet.SkipSamples"/> says, running on into the next packets if it is more than one packet's.
 /// </remarks>
 public sealed class AacDecoder : IAudioDecoder
 {
@@ -38,6 +40,16 @@ public sealed class AacDecoder : IAudioDecoder
     // SBR state of each SCE and CPE (by their order in the access unit), once SBR data comes.
     private readonly List<SbrElement> _sbr = [];
 
+    // With SBR: each channel's (in bitstream order) QMF banks and HF state, and the SCE or CPE it is in this access unit
+    // (-1 for an LFE) and its place there.
+    private SbrChannel[]? _sbrChannels;
+    private readonly int[] _channelElement;
+    private readonly int[] _channelInElement;
+    private readonly float[] _core = new float[1024];
+
+    // Samples still to drop at the start of the next packets, from a Packet.SkipSamples larger than its packet's output.
+    private int _pendingSkip;
+
     public AacDecoder(ReadOnlySpan<byte> audioSpecificConfig)
     {
         _config = AudioSpecificConfig.Parse(audioSpecificConfig);
@@ -45,6 +57,12 @@ public sealed class AacDecoder : IAudioDecoder
         _filterbanks = [.. Enumerable.Range(0, channels).Select(_ => new Filterbank())];
         _streams = [.. Enumerable.Range(0, channels).Select(_ => new ChannelStream())];
         _outputOrder = OutputOrder(_config.ChannelConfiguration, channels);
+        _channelElement = new int[channels];
+        _channelInElement = new int[channels];
+        if (_config.SbrPresent && _config.SbrRate == _config.SampleRate)
+        {
+            throw new NotSupportedException("Downsampled SBR (at the core's own rate) is not supported.");
+        }
     }
 
     public AacDecoder(AudioStreamInfo stream)
@@ -52,7 +70,8 @@ public sealed class AacDecoder : IAudioDecoder
     {
     }
 
-    public int SampleRate => _config.SampleRate;
+    /// <summary>The output's sample rate: with SBR twice the core's (or the rate the config gives it), known for SBR signalled only by its data once the first access unit is decoded.</summary>
+    public int SampleRate => HasSbr ? _config.SbrRate : _config.SampleRate;
 
     public int Channels => _config.Channels;
 
@@ -72,7 +91,15 @@ public sealed class AacDecoder : IAudioDecoder
     public AudioFrame Decode(Packet packet)
     {
         var frame = Decode(packet.Data.Span);
-        return frame.DropStart(packet.Discard ? frame.SampleCount : packet.SkipSamples);
+        if (packet.Discard)
+        {
+            return frame.DropStart(frame.SampleCount);
+        }
+
+        int skip = _pendingSkip + packet.SkipSamples;
+        int dropped = Math.Min(skip, frame.SampleCount);
+        _pendingSkip = skip - dropped;
+        return frame.DropStart(dropped);
     }
 
     /// <summary>
@@ -95,6 +122,11 @@ public sealed class AacDecoder : IAudioDecoder
             }
 
             packet = packet[adts.HeaderLength..];
+        }
+
+        foreach (var sbr in _sbr)
+        {
+            sbr?.StartFrame();
         }
 
         var r = new AacBitReader(packet);
@@ -121,6 +153,7 @@ public sealed class AacDecoder : IAudioDecoder
                     r.Read(4); // element_instance_tag
                     CheckChannels(channel + 1);
                     DecodeIndividualStream(r, _streams[channel], commonWindow: false);
+                    (_channelElement[channel], _channelInElement[channel]) = (element, 0);
                     channel++;
                     elementChannels = 1;
                     break;
@@ -129,6 +162,8 @@ public sealed class AacDecoder : IAudioDecoder
                     r.Read(4);
                     CheckChannels(channel + 2);
                     DecodeChannelPair(r, _streams[channel], _streams[channel + 1]);
+                    (_channelElement[channel], _channelInElement[channel]) = (element, 0);
+                    (_channelElement[channel + 1], _channelInElement[channel + 1]) = (element, 1);
                     channel += 2;
                     elementChannels = 2;
                     break;
@@ -182,14 +217,14 @@ public sealed class AacDecoder : IAudioDecoder
             }
         }
 
-        if (HasSbr && !SbrParseOnly)
-        {
-            throw new NotSupportedException("HE-AAC (spectral band replication) is not supported yet.");
-        }
-
         if (channel != _config.Channels)
         {
             throw new InvalidDataException($"The access unit has {channel} channels, the configuration {_config.Channels}.");
+        }
+
+        if (HasSbr && !SbrParseOnly)
+        {
+            return DecodeWithSbr();
         }
 
         var frame = new AudioFrame(_config.SampleRate, _config.Channels, 1024);
@@ -199,6 +234,26 @@ public sealed class AacDecoder : IAudioDecoder
             var stream = _streams[source];
             ApplyTns(stream);
             _filterbanks[source].Synthesize(stream.Info.WindowSequence, stream.Info.WindowShape, stream.Spectrum, frame.Samples[output]);
+        }
+
+        return frame;
+    }
+
+    // Each channel's core output through SBR, 2048 samples at its rate: an SCE's or CPE's with its SBR data of this access
+    // unit, an LFE's (and any channel's without SBR data) with no high band.
+    private AudioFrame DecodeWithSbr()
+    {
+        _sbrChannels ??= [.. Enumerable.Range(0, _config.Channels).Select(_ => new SbrChannel())];
+        var frame = new AudioFrame(SampleRate, _config.Channels, 2048);
+        for (int output = 0; output < _config.Channels; output++)
+        {
+            int source = _outputOrder[output];
+            var stream = _streams[source];
+            ApplyTns(stream);
+            _filterbanks[source].Synthesize(stream.Info.WindowSequence, stream.Info.WindowShape, stream.Spectrum, _core);
+            int element = _channelElement[source];
+            var sbr = element >= 0 && element < _sbr.Count ? _sbr[element] : null;
+            _sbrChannels[source].Process(sbr, _channelInElement[source], _core, frame.Samples[output], Statistics);
         }
 
         return frame;
@@ -990,4 +1045,26 @@ internal sealed class AacStatistics
 
     /// <summary>The bs_freq_scale values seen, as bits.</summary>
     public int SbrFrequencyScales { get; set; }
+
+    /// <summary>The bs_limiter_bands and bs_limiter_gains values seen, as bits, and headers without frequency interpolation.</summary>
+    public int SbrLimiterBands { get; set; }
+
+    public int SbrLimiterGains { get; set; }
+
+    public int SbrUninterpolatedHeaders { get; set; }
+
+    /// <summary>Noise bands (per channel and frame) whose chirp factor is not 0, so that the HF generator filters them.</summary>
+    public int SbrChirpBands { get; set; }
+
+    /// <summary>Envelopes that start on a transient or right after one (no noise, no smoothing).</summary>
+    public int SbrTransientEnvelopes { get; set; }
+
+    /// <summary>Envelopes whose gains are smoothed over time.</summary>
+    public int SbrSmoothedEnvelopes { get; set; }
+
+    /// <summary>Sinusoids added, per subband and envelope.</summary>
+    public int SbrSinusoids { get; set; }
+
+    /// <summary>Gains the limiter cut, per subband and envelope.</summary>
+    public int SbrLimitedGains { get; set; }
 }

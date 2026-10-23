@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Globalization;
 using System.Text;
 
 namespace ManagedCodecs.Containers.Mp4;
@@ -20,6 +21,11 @@ namespace ManagedCodecs.Containers.Mp4;
 /// <see cref="Packet.SkipSamples"/> cuts (encoder priming), a later one at the next whole sample (as in FFmpeg, up to a
 /// sample late). Audio durations run up to the next packet's dts, and the last packet's to the end of the edits. An
 /// empty edit after a real one plays the media from its start, as FFmpeg reads its media time, -1.
+/// </para>
+/// <para>
+/// Without an edit list, the encoder delay of an iTunes-style 'iTunSMPB' tag (the FDK encoder's fdkaac writes one) is
+/// cut from the start of the audio, as FFmpeg cuts it: its first packet's <see cref="Packet.SkipSamples"/>, which can
+/// run on into the next packets.
 /// </para>
 /// <para>
 /// A fragment's samples start at its 'tfdt' decode time, or right after the track's previous sample without one.
@@ -60,6 +66,7 @@ public sealed class Mp4Demuxer : IDemuxer
             Track? video = null;
             Track? audio = null;
             int trackIndex = 0;
+            int priming = 0;
             ReadOnlySpan<byte> mvex = default;
 
             ReadOnlySpan<byte> boxes = moov;
@@ -86,6 +93,10 @@ public sealed class Mp4Demuxer : IDemuxer
                 else if (type == Box.Mvex)
                 {
                     mvex = payload;
+                }
+                else if (type == Box.Udta)
+                {
+                    priming = ITunesPriming(payload);
                 }
             }
 
@@ -131,6 +142,11 @@ public sealed class Mp4Demuxer : IDemuxer
             if (audio is not null)
             {
                 var samples = audio.BuildSamples(movieTimescale);
+                if (priming > 0 && !audio.HasEditList && samples.Length > 0)
+                {
+                    samples[0] = samples[0] with { SkipSamples = priming };
+                }
+
                 audioSamples = samples;
                 Audio = new AudioStreamInfo(
                     audio.Codec,
@@ -151,6 +167,41 @@ public sealed class Mp4Demuxer : IDemuxer
     }
 
     public VideoStreamInfo? Video { get; }
+
+    /// <summary>
+    /// The encoder delay an iTunes-style tag gives, in decoded samples (moov/udta/meta/ilst, a '----' item named
+    /// iTunSMPB whose text is " 00000000 delay padding length ..." in hexadecimal), or 0 without one; FFmpeg takes delays
+    /// from 1 to 16383.
+    /// </summary>
+    private static int ITunesPriming(ReadOnlySpan<byte> udta)
+    {
+        // 'meta' is a full box: version and flags before its children.
+        if (!FindChild(udta, Box.Meta, out var meta) || meta.Length < 4 || !FindChild(meta[4..], Box.Ilst, out var ilst))
+        {
+            return 0;
+        }
+
+        while (NextBox(ref ilst, out uint type, out var item))
+        {
+            if (type != Box.Freeform || !FindChild(item, Box.ItemName, out var name) || name.Length < 4 || !name[4..].SequenceEqual("iTunSMPB"u8))
+            {
+                continue;
+            }
+
+            // 'data': type and locale (8 bytes), then the text.
+            if (!FindChild(item, Box.Data, out var data) || data.Length < 8)
+            {
+                return 0;
+            }
+
+            string[] fields = Encoding.Latin1.GetString(data[8..]).Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            return fields.Length >= 4 && int.TryParse(fields[1], NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture, out int delay) && delay is > 0 and < 16384
+                ? delay
+                : 0;
+        }
+
+        return 0;
+    }
 
     public AudioStreamInfo? Audio { get; }
 
@@ -635,6 +686,8 @@ public sealed class Mp4Demuxer : IDemuxer
             pos += 4;
             return value;
         }
+
+        public bool HasEditList => _elst is not null;
 
         public Sample[] BuildSamples(uint movieTimescale)
         {
@@ -1309,6 +1362,12 @@ public sealed class Mp4Demuxer : IDemuxer
         public const uint Esds = 0x65736473;
         public const uint Jpeg = 0x6A706567;
         public const uint Mjpa = 0x6D6A7061;
+        public const uint Udta = 0x75647461;
+        public const uint Meta = 0x6D657461;
+        public const uint Ilst = 0x696C7374;
+        public const uint Freeform = 0x2D2D2D2D; // '----'
+        public const uint ItemName = 0x6E616D65; // 'name'
+        public const uint Data = 0x64617461;
 
         public static string Name(uint type)
         {

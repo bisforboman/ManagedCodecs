@@ -25,6 +25,16 @@ internal sealed class SbrElement(int channels, int sampleRate)
     /// <summary>Whether this frame's data was read: SBR waits for a header after a start or reset.</summary>
     public bool HasFrame { get; private set; }
 
+    /// <summary>Whether this frame's header changed the frequency tables, which restarts the HF adjustment's state.</summary>
+    public bool Reset { get; private set; }
+
+    /// <summary>Clears <see cref="HasFrame"/> and <see cref="Reset"/> before an access unit, for an element whose SBR data may not come.</summary>
+    public void StartFrame()
+    {
+        HasFrame = false;
+        Reset = false;
+    }
+
     /// <summary>
     /// Reads sbr_extension_data of <paramref name="bits"/> bits, after its extension_type (a fill element's payload past
     /// its 4-bit type); the bits after the SBR data, which pad it to whole bytes, are left for the caller to skip.
@@ -41,9 +51,13 @@ internal sealed class SbrElement(int channels, int sampleRate)
         {
             var header = SbrHeader.Parse(r);
             statistics.SbrHeaders++;
+            statistics.SbrLimiterBands |= 1 << header.LimiterBands;
+            statistics.SbrLimiterGains |= 1 << header.LimiterGains;
+            statistics.SbrUninterpolatedHeaders += header.InterpolateFrequency ? 0 : 1;
             if (header.NeedsReset(Header))
             {
                 Frequencies = new SbrFrequencies(header, sampleRate);
+                Reset = true;
                 statistics.SbrResets++;
                 statistics.SbrFrequencyScales |= 1 << header.FrequencyScale;
             }
@@ -72,6 +86,8 @@ internal sealed class SbrElement(int channels, int sampleRate)
             throw new InvalidDataException($"SBR data runs {r.Position - end} bits past its extension payload.");
         }
 
+        Dequantize(Frequencies);
+
         statistics.SbrFrames++;
         statistics.SbrMostUnreadBits = Math.Max(statistics.SbrMostUnreadBits, end - r.Position);
         statistics.SbrCoupledFrames += Coupling ? 1 : 0;
@@ -85,6 +101,72 @@ internal sealed class SbrElement(int channels, int sampleRate)
             }
         }
     }
+
+    // 4.6.18.3.5: an envelope value v is an energy of 64 * 2^(v / a) (a = 2 at 1.5 dB steps, 1 at 3 dB), a noise floor
+    // value q a noise-to-signal ratio of 2^(6 - q). A coupled pair's left channel codes the level, its right one the
+    // balance b (in the level's steps, 12 for equal), whose ratio r = 2^(b / a - 12) splits the pair's energy as
+    // r / (1 + r) and 1 / (1 + r); its noise floors likewise, with r = 2^(b - 12). Powers of 2 by ScaleB, so that the
+    // result is the same on every runtime.
+    private void Dequantize(SbrFrequencies frequencies)
+    {
+        for (int ch = 0; ch < Channels.Length; ch++)
+        {
+            Channels[ch].DecodeValues(frequencies, balance: Coupling && ch == 1);
+        }
+
+        if (!Coupling)
+        {
+            foreach (var channel in Channels)
+            {
+                bool fine = channel.AmpResolution == 0;
+                for (int l = 0; l < channel.NumEnvelopes; l++)
+                {
+                    for (int k = 0; k < frequencies.Bands(channel.FrequencyResolution[l]); k++)
+                    {
+                        channel.EnvelopeEnergy[l][k] = 64 * Power(channel.EnvelopeValue[l][k], fine);
+                    }
+                }
+
+                for (int l = 0; l < channel.NumNoiseFloors; l++)
+                {
+                    for (int k = 0; k < frequencies.NoiseBands; k++)
+                    {
+                        channel.NoiseRatio[l][k] = Math.ScaleB(1.0, 6 - channel.NoiseValue[l][k]);
+                    }
+                }
+            }
+
+            return;
+        }
+
+        var (left, right) = (Channels[0], Channels[1]);
+        bool coupledFine = left.AmpResolution == 0;
+        for (int l = 0; l < left.NumEnvelopes; l++)
+        {
+            for (int k = 0; k < frequencies.Bands(left.FrequencyResolution[l]); k++)
+            {
+                double level = 128 * Power(left.EnvelopeValue[l][k], coupledFine);
+                double ratio = Math.ScaleB(Power(right.EnvelopeValue[l][k], coupledFine), -12);
+                left.EnvelopeEnergy[l][k] = level * ratio / (1 + ratio);
+                right.EnvelopeEnergy[l][k] = level / (1 + ratio);
+            }
+        }
+
+        for (int l = 0; l < left.NumNoiseFloors; l++)
+        {
+            for (int k = 0; k < frequencies.NoiseBands; k++)
+            {
+                double level = Math.ScaleB(1.0, 7 - left.NoiseValue[l][k]);
+                double ratio = Math.ScaleB(1.0, right.NoiseValue[l][k] - 12);
+                left.NoiseRatio[l][k] = level * ratio / (1 + ratio);
+                right.NoiseRatio[l][k] = level / (1 + ratio);
+            }
+        }
+    }
+
+    // 2^(v / 2) at 1.5 dB steps (an odd v takes a factor of the square root of 2), 2^v at 3 dB.
+    private static double Power(int value, bool fine) =>
+        fine ? Math.ScaleB((value & 1) != 0 ? Math.Sqrt(2) : 1.0, value >> 1) : Math.ScaleB(1.0, value);
 
     // sbr_single_channel_element (Table 4.64).
     private void ReadSingle(AacBitReader r, SbrHeader header, SbrFrequencies frequencies)

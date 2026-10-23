@@ -30,6 +30,17 @@ public class QmfTests
         }
     }
 
+    /// <summary>The kernels' cos and sin, computed without Math.Cos and Math.Sin, agree with them to double precision.</summary>
+    [Fact]
+    public void Trig_MatchesTheLibrary()
+    {
+        for (int m = -70000; m <= 70000; m += 7)
+        {
+            Assert.Equal(Math.Cos(Math.PI * (m % 512) / 256), QmfTrig.CosPi256(m), 1e-15);
+            Assert.Equal(Math.Sin(Math.PI * (m % 512) / 256), QmfTrig.SinPi256(m), 1e-15);
+        }
+    }
+
     /// <summary>
     /// Tones at random frequencies and phases below 0.9 of the core's Nyquist frequency come out as the same tones at
     /// twice the rate, to the window's ripple: the bank is nearly, not perfectly, reconstructing (about 1e-3 in gain).

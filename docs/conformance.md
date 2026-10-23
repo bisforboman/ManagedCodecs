@@ -277,8 +277,14 @@ starting an envelope late, balances not doubled, noise floor time deltas, the li
 floor) fail it; not caught: epsilon 1 in the gains (it matters only in near-silent bands), the prediction's 1e-6
 relaxation, and dropping a last patch of fewer than 3 subbands (no sample's band layout leaves one). The samples are
 checked to use what they are named for: filtering by the HF generator, cut gains, transient envelopes, sinusoids, and
-in the header sample smoothing, no interpolation and its limiter settings. Parametric stereo is not decoded: HE-AAC v2
-comes out as its mono core with SBR, of which only the sample count is checked.
+in the header sample smoothing, no interpolation and its limiter settings. Parametric stereo is not decoded yet: HE-AAC
+v2 comes out as its mono core with SBR, of which only the sample count is checked. Its data is read (`PsData`): every
+frame of the v2 sample to the end of its extension, less than a byte of padding left (the FDK encoder sends 20 bands,
+fine IID quantization, ICC in 20 bands, no IPD or OPD; reading the envelopes' IID and ICC interleaved instead of IID
+first fails it on the third frame). Its codebooks are enumerated from PacketVideo's decoding trees and checked to be
+complete prefix codes. Time deltas across a change between 10 and 20 bands take the previous values at the other
+resolution as PacketVideo does (no sample changes resolution); 34 bands are refused, and the extension (IPD, OPD) is
+skipped, as the spec's baseline decoder skips it.
 ## ADTS (raw AAC)
 
 Raw AAC files (ADTS, `AdtsDemuxer`) demux packet by packet as FFmpeg's

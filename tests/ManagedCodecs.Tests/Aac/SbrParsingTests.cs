@@ -183,5 +183,35 @@ public class SbrParsingTests
         }
 
         Assert.Equal(sampleName.StartsWith("heaacv2", StringComparison.Ordinal), stats.SbrParametricStereoFrames > 0);
+        if (sampleName.StartsWith("heaacv2", StringComparison.Ordinal))
+        {
+            // Parametric stereo in every frame, read to the end of its extension (less than a byte of padding left):
+            // the FDK encoder's 20 bands with fine IID (iid_mode 4) and ICC in 20 bands (icc_mode 1), no IPD or OPD.
+            Assert.Equal(packets, stats.PsFrames);
+            Assert.InRange(stats.PsMostUnreadBits, 0, 7);
+            Assert.True(stats.PsHeaders > 0 && stats.PsEnvelopes > 0 && stats.PsTimeDeltas > 0, $"{stats.PsHeaders} headers, {stats.PsEnvelopes} envelopes, {stats.PsTimeDeltas} time deltas.");
+            Assert.Equal((1 << 4, 1 << 1, 0), (stats.PsIidModes, stats.PsIccModes, stats.PsExtensions));
+        }
+        else
+        {
+            Assert.Equal(0, stats.PsFrames);
+        }
+    }
+
+    [Fact]
+    public void PsCodebooks_ArePrefixFreeAndComplete()
+    {
+        (string[] Book, int Largest)[] books =
+        [
+            (PsTables.IidTime, 14), (PsTables.IidFrequency, 14), (PsTables.IidFineTime, 30), (PsTables.IidFineFrequency, 30),
+            (PsTables.IccTime, 7), (PsTables.IccFrequency, 7),
+        ];
+        foreach (var (book, largest) in books)
+        {
+            Assert.Equal((2 * largest) + 1, book.Length);
+            _ = new Vlc(book);
+            Assert.Equal(1.0, book.Sum(code => Math.Pow(2, -code.Length)), precision: 12);
+            Assert.Equal(book.Min(code => code.Length), book[largest].Length);
+        }
     }
 }

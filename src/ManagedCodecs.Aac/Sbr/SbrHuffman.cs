@@ -17,7 +17,7 @@ internal sealed class SbrHuffman
     private readonly Vlc _vlc;
     private readonly int _largest;
 
-    private SbrHuffman(string[] codes)
+    internal SbrHuffman(string[] codes)
     {
         _vlc = new Vlc(codes);
         _largest = codes.Length / 2;

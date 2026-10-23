@@ -25,6 +25,11 @@ internal sealed class SbrElement(int channels, int sampleRate)
     /// <summary>Whether this frame's data was read: SBR waits for a header after a start or reset.</summary>
     public bool HasFrame { get; private set; }
 
+    /// <summary>A mono element's parametric stereo data, once any comes; <see cref="HasPs"/> says whether this frame's did.</summary>
+    public PsData? Ps { get; private set; }
+
+    public bool HasPs { get; private set; }
+
     /// <summary>Whether this frame's header changed the frequency tables, which restarts the HF adjustment's state.</summary>
     public bool Reset { get; private set; }
 
@@ -33,6 +38,7 @@ internal sealed class SbrElement(int channels, int sampleRate)
     {
         HasFrame = false;
         Reset = false;
+        HasPs = false;
     }
 
     /// <summary>
@@ -80,7 +86,7 @@ internal sealed class SbrElement(int channels, int sampleRate)
             ReadPair(r, Header, Frequencies);
         }
 
-        ReadExtendedData(r, statistics);
+        ReadExtendedData(r, end, statistics);
         if (r.Position > end)
         {
             throw new InvalidDataException($"SBR data runs {r.Position - end} bits past its extension payload.");
@@ -228,8 +234,9 @@ internal sealed class SbrElement(int channels, int sampleRate)
         right.ReadHarmonics(r, frequencies);
     }
 
-    // bs_extended_data (Table 4.64): extensions of a counted number of bytes; parametric stereo is noted and skipped.
-    private static void ReadExtendedData(AacBitReader r, AacStatistics statistics)
+    // bs_extended_data (Table 4.64): extensions of a counted number of bytes, each a 2-bit id and its data; a mono
+    // element's parametric stereo (id 2) is read, the rest skipped.
+    private void ReadExtendedData(AacBitReader r, int end, AacStatistics statistics)
     {
         if (!r.ReadFlag())
         {
@@ -243,11 +250,28 @@ internal sealed class SbrElement(int channels, int sampleRate)
         }
 
         int bits = 8 * count;
-        if (bits >= 2 && r.Peek(2) == ExtensionPs)
+        if (r.Position + bits > end)
         {
-            statistics.SbrParametricStereoFrames++;
+            throw new InvalidDataException("SBR extended data runs past its extension payload.");
         }
 
-        r.Skip(bits);
+        int extensionEnd = r.Position + bits;
+        while (extensionEnd - r.Position > 7)
+        {
+            int id = r.Read(2);
+            if (id == ExtensionPs && channels == 1)
+            {
+                statistics.SbrParametricStereoFrames++;
+                Ps ??= new PsData();
+                HasPs = Ps.Read(r, extensionEnd - r.Position, statistics);
+            }
+            else
+            {
+                r.Skip(extensionEnd - r.Position);
+            }
+        }
+
+        statistics.PsMostUnreadBits = Math.Max(statistics.PsMostUnreadBits, extensionEnd - r.Position);
+        r.Skip(extensionEnd - r.Position);
     }
 }

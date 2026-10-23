@@ -42,8 +42,8 @@ says feature by feature which encoder made the samples (libx264, OpenH264, JM) a
   or by an iTunSMPB tag without one.
 - **HE-AAC** (spectral band replication, at twice the core's rate): signalled in the config or only by its data, mono
   to 5.1, coupled pairs; within 1e-6 of FFmpeg's float output where its single precision is not the limit (see
-  docs/conformance.md). Parametric stereo (HE-AAC v2) is read but not decoded: such streams come out as their mono
-  core with SBR.
+  docs/conformance.md). Parametric stereo (HE-AAC v2) is read (10 and 20 bands) but not decoded yet: such streams
+  come out as their mono core with SBR.
 - **Containers**: AVI (video), MP4 (video and audio tracks, fragmented files too, edit lists of several edits)
   and raw AAC (ADTS), with packets and timestamps as FFmpeg's demuxers give them.
 - **Throughout**: an async API, malformed input that ends in `InvalidDataException` or `NotSupportedException`

@@ -102,6 +102,12 @@ public interface IDemuxer : IDisposable
     /// are in decode order. <see cref="Packet.StreamIndex"/> tells them apart.
     /// </summary>
     IEnumerable<Packet> ReadPackets();
+
+    /// <summary>
+    /// <see cref="ReadPackets"/> as an asynchronous sequence, for <c>await foreach</c>. Reading a packet is synchronous (the
+    /// demuxers read from a seekable stream); between packets the thread is yielded and cancellation checked.
+    /// </summary>
+    IAsyncEnumerable<Packet> ReadPacketsAsync(CancellationToken cancellationToken = default) => AsyncPackets.Of(ReadPackets(), cancellationToken);
 }
 
 /// <summary>
@@ -120,6 +126,24 @@ public interface IVideoDecoder
 
     /// <summary>At the end of the stream: returns the frames still held back, in display order.</summary>
     IReadOnlyList<VideoFrame> Flush();
+
+    /// <summary>
+    /// <see cref="Decode"/> for asynchronous callers: a decoder that would block the calling thread (H.264 with
+    /// several threads, waiting for a picture to finish) awaits instead. Cancelling stops the waiting, not the decoding of
+    /// a picture already started. Exceptions are the ones <see cref="Decode"/> throws.
+    /// </summary>
+    ValueTask<IReadOnlyList<VideoFrame>> DecodeAsync(Packet packet, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return new(Decode(packet));
+    }
+
+    /// <summary><see cref="Flush"/> for asynchronous callers, awaiting where it would block.</summary>
+    ValueTask<IReadOnlyList<VideoFrame>> FlushAsync(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return new(Flush());
+    }
 }
 
 /// <summary>Turns one compressed packet into one block of audio samples.</summary>

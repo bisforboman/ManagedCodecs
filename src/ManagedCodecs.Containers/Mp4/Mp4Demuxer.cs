@@ -148,6 +148,9 @@ public sealed class Mp4Demuxer : IDemuxer
 
     public IEnumerable<Packet> ReadPackets() => Malformed.Guard(ReadPacketsCore(), "MP4");
 
+    /// <inheritdoc/>
+    public IAsyncEnumerable<Packet> ReadPacketsAsync(CancellationToken cancellationToken = default) => AsyncPackets.Of(ReadPackets(), cancellationToken);
+
     private IEnumerable<Packet> ReadPacketsCore()
     {
         var sequences = new Dictionary<int, long>();

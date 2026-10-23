@@ -135,6 +135,67 @@ public sealed class H264Decoder : IVideoDecoder
         return frames;
     }
 
+    /// <summary>
+    /// <see cref="Decode(Packet)"/> for asynchronous callers. With <see cref="Threads"/> above 1 it awaits what
+    /// <see cref="Decode(Packet)"/> would block on: a free decoder (the oldest picture finishing, whose frames it then
+    /// returns), and a first field finishing before its second starts. A change of picture size or format still waits
+    /// for every picture being decoded, blocking. Cancelling stops the waiting, not pictures already started; the
+    /// exceptions are those of <see cref="Decode(Packet)"/>, the decoding threads' as they were thrown.
+    /// </summary>
+    public async ValueTask<IReadOnlyList<VideoFrame>> DecodeAsync(Packet packet, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (Threads == 1)
+        {
+            return Decode(packet);
+        }
+
+        var frames = new List<VideoFrame>();
+        while (_inFlight.Count >= Threads)
+        {
+            await WaitForAsync(_inFlight.Peek().Task!, cancellationToken).ConfigureAwait(false);
+            DrainOldest(frames);
+        }
+
+        if (_firstField?.Task is { } firstField)
+        {
+            await WaitForAsync(firstField, cancellationToken).ConfigureAwait(false);
+        }
+
+        frames.AddRange(Decode(packet));
+        return frames;
+    }
+
+    /// <summary>
+    /// <see cref="Flush"/> for asynchronous callers: awaits each picture still being decoded instead of blocking.
+    /// Cancelled, it drops the frames of pictures it had already waited for (cancelling a flush abandons the stream).
+    /// </summary>
+    public async ValueTask<IReadOnlyList<VideoFrame>> FlushAsync(CancellationToken cancellationToken = default)
+    {
+        var frames = new List<VideoFrame>();
+        while (_inFlight.TryPeek(out var job))
+        {
+            await WaitForAsync(job.Task!, cancellationToken).ConfigureAwait(false);
+            DrainOldest(frames);
+        }
+
+        frames.AddRange(Flush());
+        return frames;
+    }
+
+    /// <summary>
+    /// Waits for a picture's thread to end, either way (what it threw comes out where its picture is output), or for
+    /// cancellation.
+    /// </summary>
+    private static async Task WaitForAsync(Task task, CancellationToken cancellationToken)
+    {
+        await task.WaitAsync(cancellationToken).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+        if (!task.IsCompleted)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+        }
+    }
+
     public IReadOnlyList<VideoFrame> Flush()
     {
         var frames = new List<VideoFrame>();

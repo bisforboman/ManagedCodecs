@@ -9,6 +9,7 @@
   <ItemGroup>
     <InternalsVisibleTo Include="ManagedCodecs.H264" />
     <InternalsVisibleTo Include="ManagedCodecs.Mjpeg" />
+    <InternalsVisibleTo Include="ManagedCodecs.Containers" />
   </ItemGroup>
 
 </Project>

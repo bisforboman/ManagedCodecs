@@ -281,7 +281,7 @@ internal sealed partial class PictureDecoder<TPixel>
     {
         int cbp = slice.Cabac is { } cabac
             ? CabacCbp(cabac, mbAddr)
-            : (_chroma444 ? CavlcTables.CodedBlockPatternInter444 : CavlcTables.CodedBlockPatternInter)[r.ReadUe(_chroma444 ? 15 : 47, "coded_block_pattern")];
+            : (_noChromaSyntax ? CavlcTables.CodedBlockPatternInter444 : CavlcTables.CodedBlockPatternInter)[r.ReadUe(_noChromaSyntax ? 15 : 47, "coded_block_pattern")];
         int cbpLuma = cbp & 15;
         int cbpChroma = cbp >> 4;
         _cbp[mbAddr] = (byte)cbp;
@@ -310,6 +310,11 @@ internal sealed partial class PictureDecoder<TPixel>
         {
             AddInterResidual(slice, mbAddr, target, cbpLuma, 1);
             AddInterResidual(slice, mbAddr, target, cbpLuma, 2);
+            return;
+        }
+
+        if (_monochrome)
+        {
             return;
         }
 
@@ -502,7 +507,7 @@ internal sealed partial class PictureDecoder<TPixel>
         int refIdx1 = _refIdx[1][part];
         var weighting = Weighting(slice, field ? refIdx0 >> 1 : refIdx0, field ? refIdx1 >> 1 : refIdx1, bi, mbAddr, ref0, ref1);
 
-        for (int c = 0; c < 3; c++)
+        for (int c = 0; c < (_monochrome ? 1 : 3); c++)
         {
             // A chroma block's size: 4:2:0 halves both sides, 4:2:2 the width, 4:4:4 neither.
             bool lumaLike = c == 0 || _chroma444;

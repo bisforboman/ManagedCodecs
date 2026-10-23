@@ -13,11 +13,14 @@ internal sealed class SequenceParameterSet
 
     public int ChromaFormatIdc { get; internal init; } = 1;
 
-    /// <summary>MbHeightC (6.2): the chroma rows of a macroblock, 8 in 4:2:0 and 16 in 4:2:2 and 4:4:4.</summary>
-    public int MbHeightC => ChromaFormatIdc == 1 ? 8 : 16;
+    /// <summary>MbHeightC (6.2): the chroma rows of a macroblock, 8 in 4:2:0 and 16 in 4:2:2 and 4:4:4, 0 in monochrome (4:0:0).</summary>
+    public int MbHeightC => ChromaFormatIdc switch { 0 => 0, 1 => 8, _ => 16 };
 
-    /// <summary>MbWidthC (6.2): the chroma columns of a macroblock, 16 in 4:4:4 and 8 otherwise.</summary>
-    public int MbWidthC => ChromaFormatIdc == 3 ? 16 : 8;
+    /// <summary>MbWidthC (6.2): the chroma columns of a macroblock, 16 in 4:4:4, 0 in monochrome and 8 otherwise.</summary>
+    public int MbWidthC => ChromaFormatIdc switch { 0 => 0, 3 => 16, _ => 8 };
+
+    /// <summary>ChromaArrayType (7.4.2.1.1): chroma_format_idc, or 0 with separate colour planes (which are rejected).</summary>
+    public int ChromaArrayType => SeparateColourPlanes ? 0 : ChromaFormatIdc;
 
     public int BitDepthLuma { get; internal init; } = 8;
 

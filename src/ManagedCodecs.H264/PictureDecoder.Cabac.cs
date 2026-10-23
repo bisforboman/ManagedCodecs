@@ -565,7 +565,7 @@ internal sealed partial class PictureDecoder<TPixel>
         }
 
         // 4:4:4 (like monochrome) has no chroma part: its blocks follow the luma bits.
-        if (_chroma444)
+        if (_noChromaSyntax)
         {
             return luma;
         }

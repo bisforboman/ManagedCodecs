@@ -400,7 +400,7 @@ public sealed class H264Decoder : IVideoDecoder
         var format = FormatOf(picture);
         var frame = _framePool.Rent(sps.Width, sps.Height, format);
         var (left, _, top, _) = sps.Crop;
-        for (int plane = 0; plane < 3; plane++)
+        for (int plane = 0; plane < format.PlaneCount(); plane++)
         {
             int shiftX = plane == 0 || picture.MbWidthC == 16 ? 0 : 1;
             int shiftY = plane == 0 || picture.MbHeightC == 16 ? 0 : 1;
@@ -428,18 +428,27 @@ public sealed class H264Decoder : IVideoDecoder
     private static VideoFrame Borrow(Picture picture, SequenceParameterSet sps)
     {
         var (left, _, top, _) = sps.Crop;
+        int lumaOffset = (top * picture.LumaStride) + left;
+        var format = FormatOf(picture);
+        if (format.PlaneCount() == 1)
+        {
+            return new VideoFrame(sps.Width, sps.Height, format, [picture.Y], [picture.LumaStride], [lumaOffset]);
+        }
+
         int chromaOffset = ((picture.MbHeightC == 16 ? top : top >> 1) * picture.ChromaStride) + (picture.MbWidthC == 16 ? left : left >> 1);
         return new VideoFrame(
             sps.Width,
             sps.Height,
-            FormatOf(picture),
+            format,
             [picture.Y, picture.Cb, picture.Cr],
             [picture.LumaStride, picture.ChromaStride, picture.ChromaStride],
-            [(top * picture.LumaStride) + left, chromaOffset, chromaOffset]);
+            [lumaOffset, chromaOffset, chromaOffset]);
     }
 
     private static PixelFormat FormatOf(Picture picture) => (picture.MbWidthC == 16 ? 3 : picture.MbHeightC, picture.BitDepth) switch
     {
+        (0, 8) => PixelFormat.Gray8,
+        (0, _) => PixelFormat.Gray10,
         (3, 8) => PixelFormat.Yuv444P,
         (3, _) => PixelFormat.Yuv444P10,
         (16, 8) => PixelFormat.Yuv422P,
@@ -453,19 +462,14 @@ public sealed class H264Decoder : IVideoDecoder
 
     private static void CheckSupported(SequenceParameterSet sps)
     {
-        if (sps.ChromaFormatIdc == 0)
-        {
-            throw new NotSupportedException("Monochrome video (chroma_format_idc 0) is not supported.");
-        }
-
         if (sps.SeparateColourPlanes)
         {
             throw new NotSupportedException("Separate colour planes (separate_colour_plane_flag) are not supported.");
         }
 
-        if (sps.BitDepthLuma is not (8 or 10) || sps.BitDepthChroma != sps.BitDepthLuma)
+        if (sps.BitDepthLuma is not (8 or 10) || (sps.ChromaFormatIdc != 0 && sps.BitDepthChroma != sps.BitDepthLuma))
         {
-            throw new NotSupportedException($"Bit depths {sps.BitDepthLuma} (luma) and {sps.BitDepthChroma} (chroma) are not supported (8 or 10, the same for both).");
+            throw new NotSupportedException($"Bit depths {sps.BitDepthLuma} (luma) and {sps.BitDepthChroma} (chroma) are not supported (8 or 10, the same for both unless monochrome).");
         }
     }
 }

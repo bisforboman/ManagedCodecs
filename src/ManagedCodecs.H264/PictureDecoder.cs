@@ -56,6 +56,11 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
     private readonly int _chromaBlocks;
     private readonly bool _chroma444;
 
+    // Monochrome (ChromaArrayType 0): no chroma at all. It shares 4:4:4's syntax where chroma
+    // would be (no intra_chroma_pred_mode, coded_block_pattern without a chroma part).
+    private readonly bool _monochrome;
+    private readonly bool _noChromaSyntax;
+
     // Bits per sample (8 for byte samples, more for ushort ones), and QpBdOffset (7-4): QP_Y runs
     // from -QpBdOffset to 51, dequantization uses QP'Y = QP_Y + QpBdOffset (8.5.12.1), the
     // deblocking filter QP_Y itself.
@@ -96,6 +101,8 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
         _mbHeightC = sps.MbHeightC;
         _chromaBlocks = _mbHeightC / 2;
         _chroma444 = sps.ChromaFormatIdc == 3;
+        _monochrome = sps.ChromaFormatIdc == 0;
+        _noChromaSyntax = _chroma444 || _monochrome;
         _bitDepth = sps.BitDepthLuma;
         _qpBdOffset = 6 * (_bitDepth - 8);
 
@@ -456,7 +463,7 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
             // Table 7-11: mb_type 1..24 encode the prediction mode and both CBP parts.
             int t = mbType - 1;
             predMode16x16 = t % 4;
-            cbpChroma = _chroma444 ? 0 : (t / 4) % 3; // 4:4:4 has no chroma part (7.4.5)
+            cbpChroma = _noChromaSyntax ? 0 : (t / 4) % 3; // 4:4:4 and 4:0:0 have no chroma part (7.4.5)
             cbpLuma = t >= 12 ? 15 : 0;
             modes.Fill(-1);
         }
@@ -494,14 +501,14 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
         }
 
         // 4:4:4 predicts Cb and Cr with the luma modes: there is no intra_chroma_pred_mode.
-        int chromaPredMode = _chroma444 ? 0 : slice.Cabac is { } cabac ? CabacChromaPredMode(cabac, mbAddr) : r.ReadUe(3, "intra_chroma_pred_mode");
+        int chromaPredMode = _noChromaSyntax ? 0 : slice.Cabac is { } cabac ? CabacChromaPredMode(cabac, mbAddr) : r.ReadUe(3, "intra_chroma_pred_mode");
         _chromaPredMode[mbAddr] = (byte)chromaPredMode;
 
         if (!is16x16)
         {
             int cbp = slice.Cabac is { } cabacCbp
                 ? CabacCbp(cabacCbp, mbAddr)
-                : (_chroma444 ? CavlcTables.CodedBlockPatternIntra444 : CavlcTables.CodedBlockPatternIntra)[r.ReadUe(_chroma444 ? 15 : 47, "coded_block_pattern")];
+                : (_noChromaSyntax ? CavlcTables.CodedBlockPatternIntra444 : CavlcTables.CodedBlockPatternIntra)[r.ReadUe(_noChromaSyntax ? 15 : 47, "coded_block_pattern")];
             cbpLuma = cbp & 15;
             cbpChroma = cbp >> 4;
         }
@@ -531,7 +538,7 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
             ReconstructIntraLuma(slice, mbAddr, target, is16x16, predMode16x16, cbpLuma, neighbors, 1);
             ReconstructIntraLuma(slice, mbAddr, target, is16x16, predMode16x16, cbpLuma, neighbors, 2);
         }
-        else
+        else if (!_monochrome)
         {
             ReconstructChroma(slice, mbAddr, target, residual, cbpChroma, intraMode: chromaPredMode, neighbors);
         }

@@ -41,7 +41,9 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
   frame_num gaps once temporal layers are dropped. A third, JM (`tools/make-jm-samples.sh`, committed in
   `samples/jm/`), writes field pictures (PAFF), alone or mixed with frame pictures or MBAFF frames, also in 4:2:2
   and 4:0:0, bit depths 9, 12 and 14, I_PCM (heavy noise, QP 14 to 15), cabac_init_idc 1 and 2
-  (`ContextInitMethod=0 FixedModelNumber=N`) and Cb and Cr QP offsets of their own (`CbQPOffset`, `CrQPOffset`); `tools/h264-add-weights.py` weights its field pictures afterwards (`tools/make-jm-samples.sh <JM tree> <names>` makes only those samples). Cover
+  (`ContextInitMethod=0 FixedModelNumber=N`), Cb and Cr QP offsets of their own (`CbQPOffset`, `CrQPOffset`), B
+  partitions below 8x8 (by default) and scaling lists in the SPS, PPS or both (`QmatrixFile`,
+  `ScalingMatrixPresentFlag`, `ScalingListPresentFlagN`); `tools/h264-add-weights.py` weights its field pictures afterwards (`tools/make-jm-samples.sh <JM tree> <names>` makes only those samples). Cover
   the rest with unit tests and say so in the docs.
   `tests/ManagedCodecs.Tests/H264/ParameterSetRewriter.cs` rewrites a sample's SPS and PPS for such tests.
   `tests/ManagedCodecs.Tests/H264/CabacEncoder.cs` (a CABAC encoder and bit writer) builds such H.264 streams.
@@ -122,5 +124,7 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
 - Deeper than 10 bits: JM codes macroblocks as I_PCM below about QP -6 at 14 bits (so its streams never reach CAVLC's
   level_prefix 16), segfaults with `EnableIPCM=0`, and writes 4:0:0 with 8-bit chroma, which FFmpeg refuses ("Different
   chroma and luma bit depth"). 16-bit SIMD lanes hold sums of eight 12-bit samples, not 14-bit ones.
+- Counting macroblock kinds (I_PCM, sub-8x8 partitions) per picture: FFmpeg's `-debug mb_type` grids come out after
+  later frames' headers, so they can't be matched to picture types; count in the decoder with a temporary counter.
 - In fragmented MP4, FFmpeg's packet durations are not the file's: its demuxer leaves them unset and libavformat
   fills in the codec frame size (1024 for AAC). Compare with FFmpeg's next dts instead (Mp4ConformanceTests does).

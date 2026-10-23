@@ -1,5 +1,5 @@
 using ManagedCodecs.Aac;
-using ManagedCodecs.Containers.Mp4;
+using ManagedCodecs.Containers;
 
 namespace ManagedCodecs.Tests.Aac;
 
@@ -30,7 +30,7 @@ public class AacConformanceTests
     public void MatchesFfmpegTrimmed(string sampleName)
     {
         var reference = File.ReadAllBytes(TestSamples.ReferenceOf(sampleName, ".trim.f32"));
-        using var demuxer = Mp4Demuxer.Open(TestSamples.PathOf(sampleName));
+        using var demuxer = Demuxer.Open(TestSamples.PathOf(sampleName));
         var audio = demuxer.Audio!;
         var decoder = new AacDecoder(audio);
         int channels = decoder.Channels;
@@ -62,7 +62,7 @@ public class AacConformanceTests
     public void MatchesFfmpeg(string sampleName)
     {
         var reference = File.ReadAllBytes(TestSamples.ReferenceOf(sampleName, ".f32"));
-        using var demuxer = Mp4Demuxer.Open(TestSamples.PathOf(sampleName));
+        using var demuxer = Demuxer.Open(TestSamples.PathOf(sampleName));
         var audio = demuxer.Audio!;
         var decoder = new AacDecoder(audio);
         int channels = decoder.Channels;

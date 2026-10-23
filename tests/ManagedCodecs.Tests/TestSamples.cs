@@ -9,7 +9,7 @@ public static class TestSamples
 
     public static string PathOf(string name) => Path.Combine(Directory!, name);
 
-    /// <summary>Container files (AVI and MP4) that have a reference file with the given suffix.</summary>
+    /// <summary>Container files (AVI, MP4 and raw AAC) that have a reference file with the given suffix.</summary>
     public static IEnumerable<string> WithReference(string suffix)
     {
         if (Directory is null)
@@ -19,7 +19,7 @@ public static class TestSamples
 
         foreach (var file in System.IO.Directory.EnumerateFiles(Directory).Order())
         {
-            if (Path.GetExtension(file) is ".avi" or ".mp4" && File.Exists(ReferenceOf(file, suffix)))
+            if (Path.GetExtension(file) is ".avi" or ".mp4" or ".aac" && File.Exists(ReferenceOf(file, suffix)))
             {
                 yield return Path.GetFileName(file);
             }

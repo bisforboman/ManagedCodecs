@@ -173,9 +173,7 @@ what the two commands above include and are not comparable with FFmpeg's `bench:
    and field marking, mixed with frame pictures from one frame to the next, and direct prediction
    from a co-located field, from the frame macroblocks over a field's rows, or for a frame from
    the nearer field of a frame coded as fields.
-   Not checked against FFmpeg there: explicit weighted prediction (libx264 writes none for
-   interlaced video, and JM's encoder crashes when asked for it, or for implicit weights, in
-   field pictures), field pictures next to MBAFF frames (JM refuses to mix them), and
+   Not checked against FFmpeg there:
    constrained intra prediction next to a left pair of the other kind with
    one intra and one inter macroblock (libx264's output for it is not conforming: FFmpeg and JM
    both reject the prediction modes it uses), and a frame macroblock over a co-located field pair
@@ -183,7 +181,14 @@ what the two commands above include and are not comparable with FFmpeg's `bench:
    Field pictures come from JM, the ITU reference encoder: field pairs with CABAC and CAVLC, slices,
    POC types 0, 1 and 2, constrained intra prediction and the 8x8 transform, B field pairs with
    spatial and temporal direct prediction, and frames switching between frame and field coding
-   (B fields over frames and B frames over fields). Not reached by JM's streams: a B frame after
+   (B fields over frames and B frames over fields), MBAFF frames (all field pairs) next to field
+   pictures, and field pictures in 4:0:0. Weighted prediction in them is added to JM's streams
+   afterwards (its encoder crashes when asked to weight field pictures): `tools/h264-add-weights.py`
+   sets weighted_bipred_idc 2 for implicit weights, or puts a pred_weight_table with weights and
+   offsets of their own for each reference index in every P and B slice header; JM's decoder
+   decodes each rewritten stream exactly as FFmpeg does. So explicit weights in P and B fields
+   (CAVLC and CABAC, B over frames and fields), next to MBAFF frames, and implicit weights from
+   field order counts are checked too. Not reached by JM's streams: a B frame after
    its co-located field pair in display order (so the bottom field is the nearer one), and a B
    frame over a field pair partitioned below 16x16. Field marking that JM's streams never reach
    (the second field of a frame not sliding the window, memory management operation 1 by field
@@ -217,7 +222,7 @@ what the two commands above include and are not comparable with FFmpeg's `bench:
    ones for deblocking), each checked against its reference on random 10-bit input.
    9, 12 and 14 bits (High 10 and High 4:4:4 Predictive) are checked on JM's output (libx264 writes
    only 8 and 10): P and B frames with the 8x8 transform, explicit weights in P and B at 12 bits
-   (bi-predicted blocks too, though JM's B offsets are all 0), CAVLC at 12 and 14 bits, 4:2:2 at
+   (bi-predicted blocks too), CAVLC at 12 and 14 bits, 4:2:2 at
    12 and 4:4:4 at 14, at QPs down to -6 (CAVLC's level_prefix up to 15); I_PCM from hand-built streams, and CAVLC's level_prefix of 16 and more (which only levels
    past about 2048 need, and which JM never writes: it codes such macroblocks as I_PCM) from unit
    tests. Frames come out as `Yuv420P9`, `Yuv422P12`, `Gray14` and the like (FFmpeg's yuv420p9le
@@ -249,14 +254,13 @@ what the two commands above include and are not comparable with FFmpeg's `bench:
    Monochrome (chroma_format_idc 0) comes out as `Gray8` or `Gray10`, one plane; it is checked on
    libx264's gray output (High and High 10): no intra_chroma_pred_mode, the coded_block_pattern
    without a chroma part, no chroma weights in pred_weight_table, with CABAC and CAVLC, P and B
-   frames, explicit weights, cropping, MBAFF, 10 bits and lossless; I_PCM from hand-built streams.
-   FFmpeg's decoder outputs such streams as 4:2:0 with flat chroma, so the references are taken
-   with `-pix_fmt gray` and `gray10le`, which keep its luma as is. Field pictures (PAFF) in 4:0:0 are
-   not checked (libx264 does not write them; the field code is the one 4:2:0 uses, with no chroma).
+   frames, explicit weights, cropping, MBAFF, 10 bits and lossless; and on JM's field pictures
+   (PAFF) in 4:0:0, alone and mixed with frame pictures, with B pictures and CAVLC; I_PCM from
+   hand-built streams. FFmpeg's decoder outputs such streams as 4:2:0 with flat chroma, so the
+   references take its Y plane alone (`-vf extractplanes=y`, which leaves the samples as they are).
    Produced by neither, so not checked against FFmpeg: I_PCM (decoded from hand-built streams,
    CAVLC and CABAC), memory management operations 2, 3 and 5 (unit tests),
-   B sub-macroblock partitions smaller than 8x8, explicit offsets for bi-predicted blocks (libx264 weights B frames
-   implicitly; JM's 12-bit sample weights them explicitly, with offsets 0), cabac_init_idc 1 and 2 (only their tables are checked, against libavc), a Cr QP
+   B sub-macroblock partitions smaller than 8x8, cabac_init_idc 1 and 2 (only their tables are checked, against libavc), a Cr QP
    offset other than Cb's (second_chroma_qp_index_offset), and of scaling matrices: lists in the
    SPS, fall-back rule B, useDefaultScalingMatrixFlag and a Cr list of its own (unit tests decode
    samples with rewritten parameter sets). Still open: separate colour planes, luma and chroma bit depths that differ,

@@ -182,6 +182,27 @@ noise=60 deep pcm 8 1 -p QPISlice=15 -p QPPSlice=15 -p QPBSlice=17
 # cabac_init_idc 1 and 2 throughout (JM's adaptive choice, in the samples above, takes 1 and 2 in some slices).
 deep cabac-init1 8 1 -p ContextInitMethod=0 -p FixedModelNumber=1
 deep cabac-init2 8 1 -p ContextInitMethod=0 -p FixedModelNumber=2
+# Scaling matrices (JM writes them where libx264 never does): every list different, Cb's and Cr's too, from a matrix
+# file made here (qm.cfg; qm-default.cfg sends some lists as useDefaultScalingMatrixFlag, a first value of 0), each list
+# in the SPS, the PPS, both or neither by ScalingListPresentFlagN (1, 2, 3, 0). In the SPS only, falling back by rule A;
+# in both, where an absent picture list falls back by rule B (lists 0, 3, 6, 7 to the sequence's, the others to the
+# list before); CAVLC; and 4:4:4 with Cb's and Cr's 8x8 lists (8 to 11).
+python3 - "$work" <<'PY'
+import sys
+names = ['INTRA4X4_LUMA', 'INTRA4X4_CHROMAU', 'INTRA4X4_CHROMAV', 'INTER4X4_LUMA', 'INTER4X4_CHROMAU', 'INTER4X4_CHROMAV',
+         'INTRA8X8_LUMA', 'INTER8X8_LUMA', 'INTRA8X8_CHROMAU', 'INTER8X8_CHROMAU', 'INTRA8X8_CHROMAV', 'INTER8X8_CHROMAV']
+for file, defaults in (('qm.cfg', ()), ('qm-default.cfg', (1, 5, 7, 10))):
+    with open(f'{sys.argv[1]}/{file}', 'w') as f:
+        for k, name in enumerate(names):
+            n = 4 if k < 6 else 8
+            values = [0] * (n * n) if k in defaults else [6 + (k * 29 + i * 7 + (i // n) * 13) % 70 for i in range(n * n)]
+            f.write(f'{name} =\n' + ',\n'.join(','.join(map(str, values[r * n:(r + 1) * n])) for r in range(n)) + '\n\n')
+PY
+qm() { local n; for n in "$@"; do echo -n " -p ScalingListPresentFlag$((k++))=$n"; done; }
+deep qm-sps 8 1 -p QmatrixFile=qm.cfg -p ScalingMatrixPresentFlag=1 $(k=0 qm 1 1 1 1 1 1 1 1)
+deep qm-rule-b 8 1 -p QmatrixFile=qm.cfg -p ScalingMatrixPresentFlag=3 $(k=0 qm 1 3 2 3 1 0 1 2)
+deep qm-default-cavlc 8 1 -p QmatrixFile=qm-default.cfg -p ScalingMatrixPresentFlag=3 -p SymbolMode=0 $(k=0 qm 3 3 1 2 3 3 3 1)
+deep qm-444 8 3 -p QmatrixFile=qm.cfg -p ScalingMatrixPresentFlag=3 $(k=0 qm 3 1 2 3 3 1 3 3 1 2 3 0)
 # Cb and Cr QP offsets of their own (chroma_qp_index_offset -3, second_chroma_qp_index_offset 4): dequantization
 # and deblocking, in 4:2:0, 4:2:2 and 4:4:4 (where chroma takes the luma filter at QP_C).
 deep chroma-qp 8 1 -p CbQPOffset=-3 -p CrQPOffset=4

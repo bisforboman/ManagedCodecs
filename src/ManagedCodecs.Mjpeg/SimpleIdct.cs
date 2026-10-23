@@ -586,23 +586,23 @@ internal static class SimpleIdct
         ref Vector128<short> r6,
         ref Vector128<short> r7)
     {
-        var a0 = ZipLow16(r0, r1).AsInt32();
-        var a1 = ZipHigh16(r0, r1).AsInt32();
-        var a2 = ZipLow16(r2, r3).AsInt32();
-        var a3 = ZipHigh16(r2, r3).AsInt32();
-        var a4 = ZipLow16(r4, r5).AsInt32();
-        var a5 = ZipHigh16(r4, r5).AsInt32();
-        var a6 = ZipLow16(r6, r7).AsInt32();
-        var a7 = ZipHigh16(r6, r7).AsInt32();
+        var a0 = VectorZip.Low(r0.AsUInt16(), r1.AsUInt16()).AsInt32();
+        var a1 = VectorZip.High(r0.AsUInt16(), r1.AsUInt16()).AsInt32();
+        var a2 = VectorZip.Low(r2.AsUInt16(), r3.AsUInt16()).AsInt32();
+        var a3 = VectorZip.High(r2.AsUInt16(), r3.AsUInt16()).AsInt32();
+        var a4 = VectorZip.Low(r4.AsUInt16(), r5.AsUInt16()).AsInt32();
+        var a5 = VectorZip.High(r4.AsUInt16(), r5.AsUInt16()).AsInt32();
+        var a6 = VectorZip.Low(r6.AsUInt16(), r7.AsUInt16()).AsInt32();
+        var a7 = VectorZip.High(r6.AsUInt16(), r7.AsUInt16()).AsInt32();
 
-        var b0 = ZipLow32(a0, a2).AsInt64();
-        var b1 = ZipHigh32(a0, a2).AsInt64();
-        var b2 = ZipLow32(a1, a3).AsInt64();
-        var b3 = ZipHigh32(a1, a3).AsInt64();
-        var b4 = ZipLow32(a4, a6).AsInt64();
-        var b5 = ZipHigh32(a4, a6).AsInt64();
-        var b6 = ZipLow32(a5, a7).AsInt64();
-        var b7 = ZipHigh32(a5, a7).AsInt64();
+        var b0 = VectorZip.Low(a0.AsUInt32(), a2.AsUInt32()).AsInt64();
+        var b1 = VectorZip.High(a0.AsUInt32(), a2.AsUInt32()).AsInt64();
+        var b2 = VectorZip.Low(a1.AsUInt32(), a3.AsUInt32()).AsInt64();
+        var b3 = VectorZip.High(a1.AsUInt32(), a3.AsUInt32()).AsInt64();
+        var b4 = VectorZip.Low(a4.AsUInt32(), a6.AsUInt32()).AsInt64();
+        var b5 = VectorZip.High(a4.AsUInt32(), a6.AsUInt32()).AsInt64();
+        var b6 = VectorZip.Low(a5.AsUInt32(), a7.AsUInt32()).AsInt64();
+        var b7 = VectorZip.High(a5.AsUInt32(), a7.AsUInt32()).AsInt64();
 
         r0 = Vector128.Create(b0.GetLower(), b4.GetLower()).AsInt16();
         r1 = Vector128.Create(b0.GetUpper(), b4.GetUpper()).AsInt16();
@@ -613,34 +613,6 @@ internal static class SimpleIdct
         r6 = Vector128.Create(b3.GetLower(), b7.GetLower()).AsInt16();
         r7 = Vector128.Create(b3.GetUpper(), b7.GetUpper()).AsInt16();
     }
-
-    /// <summary>a0 b0 a1 b1 a2 b2 a3 b3, as SSE2's punpcklwd.</summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static Vector128<short> ZipLow16(Vector128<short> a, Vector128<short> b) => Vector128.ConditionalSelect(
-        Vector128.Create(-1, 0, -1, 0, -1, 0, -1, 0),
-        Vector128.Shuffle(a, Vector128.Create(0, 0, 1, 1, 2, 2, 3, 3)),
-        Vector128.Shuffle(b, Vector128.Create(0, 0, 1, 1, 2, 2, 3, 3)));
-
-    /// <summary>a4 b4 a5 b5 a6 b6 a7 b7, as SSE2's punpckhwd.</summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static Vector128<short> ZipHigh16(Vector128<short> a, Vector128<short> b) => Vector128.ConditionalSelect(
-        Vector128.Create(-1, 0, -1, 0, -1, 0, -1, 0),
-        Vector128.Shuffle(a, Vector128.Create(4, 4, 5, 5, 6, 6, 7, 7)),
-        Vector128.Shuffle(b, Vector128.Create(4, 4, 5, 5, 6, 6, 7, 7)));
-
-    /// <summary>a0 b0 a1 b1, as SSE2's punpckldq.</summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static Vector128<int> ZipLow32(Vector128<int> a, Vector128<int> b) => Vector128.ConditionalSelect(
-        Vector128.Create(-1, 0, -1, 0),
-        Vector128.Shuffle(a, Vector128.Create(0, 0, 1, 1)),
-        Vector128.Shuffle(b, Vector128.Create(0, 0, 1, 1)));
-
-    /// <summary>a2 b2 a3 b3, as SSE2's punpckhdq.</summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static Vector128<int> ZipHigh32(Vector128<int> a, Vector128<int> b) => Vector128.ConditionalSelect(
-        Vector128.Create(-1, 0, -1, 0),
-        Vector128.Shuffle(a, Vector128.Create(2, 2, 3, 3)),
-        Vector128.Shuffle(b, Vector128.Create(2, 2, 3, 3)));
 
     private static void CheckDestination(Span<byte> dest, int stride)
     {

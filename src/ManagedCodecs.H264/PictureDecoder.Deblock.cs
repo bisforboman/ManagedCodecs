@@ -779,13 +779,22 @@ internal sealed partial class PictureDecoder<TPixel>
 
     private static void Gather(byte[] plane, int q0, int across, int along, int length, Span<byte> taps, int firstTap, int lastTap)
     {
-        if (across == 1 && Sse2.IsSupported)
+        if (across == 1 && Vector128.IsHardwareAccelerated)
         {
             // Vertical edges: p3 .. q3 of each row are 8 contiguous bytes. Chroma needs only
             // p1 .. q1 but takes all eight; they lie inside this macroblock and its left neighbour.
             // With 8 rows the lanes 8-15 repeat rows 0-7 and are not used.
             int start = q0 - 4;
-            TransposeIn(plane, start, plane, length == 16 ? start + (8 * along) : start, along, taps);
+            int bottom = length == 16 ? start + (8 * along) : start;
+            if (Sse2.IsSupported)
+            {
+                TransposeIn(plane, start, plane, bottom, along, taps);
+            }
+            else
+            {
+                TransposeInVector128(plane, start, plane, bottom, along, taps);
+            }
+
             return;
         }
 
@@ -816,9 +825,17 @@ internal sealed partial class PictureDecoder<TPixel>
 
     private static void Scatter(byte[] plane, int q0, int across, int along, int length, ReadOnlySpan<byte> taps, int firstTap, int lastTap)
     {
-        if (across == 1 && length == 16 && firstTap == 1 && Sse2.IsSupported)
+        if (across == 1 && length == 16 && firstTap == 1 && Vector128.IsHardwareAccelerated)
         {
-            TransposeOut(taps, plane, q0 - 4, plane, q0 - 4 + (8 * along), along);
+            if (Sse2.IsSupported)
+            {
+                TransposeOut(taps, plane, q0 - 4, plane, q0 - 4 + (8 * along), along);
+            }
+            else
+            {
+                TransposeOutVector128(taps, plane, q0 - 4, plane, q0 - 4 + (8 * along), along);
+            }
+
             return;
         }
 
@@ -922,6 +939,77 @@ internal sealed partial class PictureDecoder<TPixel>
             WriteRows(plane, start + (2 * stride), stride, Sse2.UnpackHigh(left, right).AsUInt64());
             WriteRows(plane, start + (4 * stride), stride, Sse2.UnpackLow(leftHigh, rightHigh).AsUInt64());
             WriteRows(plane, start + (6 * stride), stride, Sse2.UnpackHigh(leftHigh, rightHigh).AsUInt64());
+        }
+    }
+
+    /// <summary>
+    /// <see cref="TransposeIn"/> with <see cref="VectorZip"/> for SSE2's unpacks: what machines without SSE2 (ARM64)
+    /// run, and tested against the scalar gather on x64.
+    /// </summary>
+    [SkipLocalsInit]
+    internal static void TransposeInVector128(byte[] top, int topStart, byte[] bottom, int bottomStart, int stride, Span<byte> taps)
+    {
+        Span<Vector128<byte>> pairs = stackalloc Vector128<byte>[8];
+        for (int k = 0; k < 4; k++)
+        {
+            int even = topStart + (2 * k * stride);
+            pairs[k] = VectorZip.Low(Row8(top, even), Row8(top, even + stride));
+            even = bottomStart + (2 * k * stride);
+            pairs[k + 4] = VectorZip.Low(Row8(bottom, even), Row8(bottom, even + stride));
+        }
+
+        Span<Vector128<uint>> quads = stackalloc Vector128<uint>[4];
+        Span<Vector128<uint>> quadsHigh = stackalloc Vector128<uint>[4];
+        for (int m = 0; m < 4; m++)
+        {
+            quads[m] = VectorZip.Low(pairs[2 * m].AsUInt16(), pairs[(2 * m) + 1].AsUInt16()).AsUInt32();
+            quadsHigh[m] = VectorZip.High(pairs[2 * m].AsUInt16(), pairs[(2 * m) + 1].AsUInt16()).AsUInt32();
+        }
+
+        for (int half = 0; half < 2; half++)
+        {
+            var source = half == 0 ? quads : quadsHigh;
+            var upper = VectorZip.Low(source[0], source[1]).AsUInt64();
+            var upperHigh = VectorZip.High(source[0], source[1]).AsUInt64();
+            var lower = VectorZip.Low(source[2], source[3]).AsUInt64();
+            var lowerHigh = VectorZip.High(source[2], source[3]).AsUInt64();
+
+            int tap = half * 4;
+            VectorZip.Low(upper, lower).AsByte().CopyTo(taps[(tap * 16)..]);
+            VectorZip.High(upper, lower).AsByte().CopyTo(taps[((tap + 1) * 16)..]);
+            VectorZip.Low(upperHigh, lowerHigh).AsByte().CopyTo(taps[((tap + 2) * 16)..]);
+            VectorZip.High(upperHigh, lowerHigh).AsByte().CopyTo(taps[((tap + 3) * 16)..]);
+        }
+    }
+
+    /// <summary><see cref="TransposeOut"/> with <see cref="VectorZip"/>, as <see cref="TransposeInVector128"/>.</summary>
+    [SkipLocalsInit]
+    internal static void TransposeOutVector128(ReadOnlySpan<byte> taps, byte[] top, int topStart, byte[] bottom, int bottomStart, int stride)
+    {
+        Span<Vector128<ushort>> low = stackalloc Vector128<ushort>[4];
+        Span<Vector128<ushort>> high = stackalloc Vector128<ushort>[4];
+        for (int k = 0; k < 4; k++)
+        {
+            var a = Vector128.Create(taps.Slice(2 * k * 16, 16));
+            var b = Vector128.Create(taps.Slice(((2 * k) + 1) * 16, 16));
+            low[k] = VectorZip.Low(a, b).AsUInt16();
+            high[k] = VectorZip.High(a, b).AsUInt16();
+        }
+
+        for (int half = 0; half < 2; half++)
+        {
+            var source = half == 0 ? low : high;
+            var left = VectorZip.Low(source[0], source[1]).AsUInt32();
+            var leftHigh = VectorZip.High(source[0], source[1]).AsUInt32();
+            var right = VectorZip.Low(source[2], source[3]).AsUInt32();
+            var rightHigh = VectorZip.High(source[2], source[3]).AsUInt32();
+
+            byte[] plane = half == 0 ? top : bottom;
+            int start = half == 0 ? topStart : bottomStart;
+            WriteRows(plane, start, stride, VectorZip.Low(left, right).AsUInt64());
+            WriteRows(plane, start + (2 * stride), stride, VectorZip.High(left, right).AsUInt64());
+            WriteRows(plane, start + (4 * stride), stride, VectorZip.Low(leftHigh, rightHigh).AsUInt64());
+            WriteRows(plane, start + (6 * stride), stride, VectorZip.High(leftHigh, rightHigh).AsUInt64());
         }
     }
 

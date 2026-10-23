@@ -33,9 +33,9 @@ internal sealed partial class PictureDecoder<TPixel>
         9, 12, 18, 10, 13, 20, 11, 15, 23, 13, 17, 25,
     ];
 
-    // A frame's macroblocks decoded in raster order from the first (every one before this address), and its rows
-    // deblocked so far. Frames are deblocked a row behind decoding; pair-slot pictures (MBAFF frames, field pictures)
-    // all at once in Deblock.
+    // The picture's macroblocks decoded in address order from its first (every one of its slots before this address),
+    // and its rows deblocked so far: macroblock rows of a frame, pair rows of a pair-slot picture (an MBAFF frame's
+    // macroblock pairs, a field picture's macroblock rows). Rows are deblocked a row behind decoding.
     private int _decodedPrefix;
     private int _deblockedRows;
 
@@ -43,26 +43,22 @@ internal sealed partial class PictureDecoder<TPixel>
     private int _reportedRows;
 
     /// <summary>
-    /// Deblocks the frame's rows that decoding no longer needs unfiltered: a row once the row below it is decoded, as
-    /// intra prediction reads the row above as it was before filtering, and filtering a row changes all of it (its
-    /// vertical edges) but nothing below it. Macroblocks are still filtered in raster order (8.7), so the result is the
-    /// same as filtering the whole picture at the end.
+    /// Deblocks the rows that decoding no longer needs unfiltered: a row once the row below it is decoded, as intra
+    /// prediction reads the row above as it was before filtering, and filtering a row changes all of it (its vertical
+    /// edges) and the bottom of the row above (its top edges) but nothing below it. That holds for pair rows too, where
+    /// frame and field pairs meet. Macroblocks are still filtered in address order (8.7), so the result is the same as
+    /// filtering the whole picture at the end.
     /// </summary>
     private void MacroblockDone(int mbAddr)
     {
-        if (_pairSlots || mbAddr != _decodedPrefix)
+        // Every macroblock marked as in a slice is decoded by now (they are marked as they start): some may be past this
+        // one (slices out of order). A field picture's macroblocks are every other slot.
+        while (_decodedPrefix < _mbCount && _sliceOfMb[_decodedPrefix] >= 0)
         {
-            return;
+            _decodedPrefix += MbStep;
         }
 
-        // Macroblocks of other slices may already be decoded past this one (slices out of order).
-        do
-        {
-            _decodedPrefix++;
-        }
-        while (_decodedPrefix < _mbCount && _sliceOfMb[_decodedPrefix] >= 0);
-
-        int decodedRows = _decodedPrefix / _widthInMbs;
+        int decodedRows = (_decodedPrefix - Math.Max(_fieldParity, 0)) / RowSlots;
         int rows = Math.Max(_deblockedRows, decodedRows - 1);
         DeblockRows(_deblockedRows, rows);
         _deblockedRows = rows;
@@ -71,7 +67,7 @@ internal sealed partial class PictureDecoder<TPixel>
         if (decodedRows != _reportedRows)
         {
             _reportedRows = decodedRows;
-            Picture.ReportProgress(decodedRows, 16 * Math.Max(0, _deblockedRows - 1));
+            ReportProgress(decodedRows, Math.Max(0, _deblockedRows - 1));
             if (RowDelay > 0)
             {
                 Thread.Sleep(Random.Shared.Next(RowDelay + 1));
@@ -79,29 +75,53 @@ internal sealed partial class PictureDecoder<TPixel>
         }
     }
 
+    // The slots of a row: a frame's macroblock row, or a pair row (two macroblock slots a pair; a field picture has one
+    // of them).
+    private int RowSlots => _pairSlots ? 2 * _widthInMbs : _widthInMbs;
+
+    /// <summary>
+    /// Reports decoded and final rows to the picture (frame threading), in the units of what it is: a frame's macroblock
+    /// and luma rows (an MBAFF frame's pair row is two macroblock rows, 32 luma rows), a field picture's own.
+    /// </summary>
+    private void ReportProgress(int decodedRows, int finalRows)
+    {
+        if (_fieldParity >= 0)
+        {
+            Picture.Field(_fieldParity).ReportProgress(decodedRows, 16 * finalRows);
+        }
+        else if (_pairSlots)
+        {
+            Picture.ReportProgress(2 * decodedRows, 32 * finalRows);
+        }
+        else
+        {
+            Picture.ReportProgress(decodedRows, 16 * finalRows);
+        }
+    }
+
     /// <summary>The macroblock row of the frame that holds (the bottom of) macroblock <paramref name="mbAddr"/>.</summary>
     private int FrameMbRow(int mbAddr) => !_pairSlots ? mbAddr / _widthInMbs : (2 * ((mbAddr >> 1) / _widthInMbs)) + 1;
 
-    /// <summary>Filters what is left of the picture, macroblock by macroblock in raster order (8.7).</summary>
+    /// <summary>Filters what is left of the picture, macroblock by macroblock in address order (8.7).</summary>
     public void Deblock()
     {
-        if (_pairSlots)
-        {
-            DeblockMbaff();
-            return;
-        }
-
-        int height = _mbCount / _widthInMbs;
+        int height = _mbCount / RowSlots;
         DeblockRows(_deblockedRows, height);
         _deblockedRows = height;
     }
 
-    /// <summary>Filters the macroblock rows from <paramref name="firstRow"/> up to <paramref name="endRow"/> of a frame.</summary>
+    /// <summary>Filters the rows from <paramref name="firstRow"/> up to <paramref name="endRow"/>: macroblock rows of a frame, pair rows of a pair-slot picture.</summary>
     [SkipLocalsInit]
     private void DeblockRows(int firstRow, int endRow)
     {
         if (firstRow >= endRow)
         {
+            return;
+        }
+
+        if (_pairSlots)
+        {
+            DeblockMbaff(firstRow, endRow);
             return;
         }
 

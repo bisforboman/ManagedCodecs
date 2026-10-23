@@ -143,7 +143,8 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
   `bin/Release/net10.0/browser-wasm/AppBundle`, whatever `-o` says.
 - Frame threading (`H264Decoder.Threads`): a picture's worker may read only what an earlier picture has reported
   done (`Picture.WaitForRow`, `WaitForMotion`), and never marking state (the front end marks later pictures
-  meanwhile; read `MarkSnapshot`). Rows are final one row after they are deblocked (the next row's top edge filters
+  meanwhile; read `MarkSnapshot`). Rows (pair rows of MBAFF frames and field pictures, a field picture's per field)
+  are final one row after they are deblocked (the next row's top edge filters
   their bottom). A race passes the threaded conformance tests by luck unless the random per-row delays
   (`MatchesFfmpegWithDelayedThreads`) make pictures overtake: check a new wait by breaking it and seeing that test fail
   (the co-located motion wait is the exception, covered in practice by the motion compensation waits before it).

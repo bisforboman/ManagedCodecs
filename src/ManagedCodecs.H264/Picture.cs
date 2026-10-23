@@ -220,35 +220,51 @@ internal sealed class Picture
 
     // ---- Decoding progress, for frame threading (H264Decoder.Threads) ----
     // Kept on the frame: how many of its macroblock rows are decoded (their motion final, which direct prediction of a
-    // later picture reads), how many luma rows are final (decoded and deblocked, which motion compensation reads),
-    // which fields are done when it is coded as two field pictures, and whether decoding it failed. Progress is
-    // written by the thread decoding the picture after the data it covers, and read by the threads of later pictures.
+    // later picture reads) and how many luma rows are final (decoded and deblocked, which motion compensation reads);
+    // per field the same in field rows when it is coded as two field pictures; and whether decoding it failed.
+    // Progress is written by the thread decoding the picture after the data it covers, and read by the threads of
+    // later pictures.
     private readonly object _progressLock = new();
+    private readonly int[] _fieldDecodedMbRows = new int[2];
+    private readonly int[] _fieldFinalRows = new int[2];
     private volatile int _decodedMbRows;
     private volatile int _finalLumaRows;
-    private volatile bool _topDone;
-    private volatile bool _bottomDone;
     private volatile bool _failed;
 
     /// <summary>Before decoding into the picture again: nothing of it is decoded.</summary>
     public void ResetProgress()
     {
         var frame = Frame;
-        frame._decodedMbRows = 0;
-        frame._finalLumaRows = 0;
-        frame._topDone = false;
-        frame._bottomDone = false;
-        frame._failed = false;
+        lock (frame._progressLock)
+        {
+            frame._decodedMbRows = 0;
+            frame._finalLumaRows = 0;
+            Array.Clear(frame._fieldDecodedMbRows);
+            Array.Clear(frame._fieldFinalRows);
+            frame._failed = false;
+        }
     }
 
-    /// <summary>The first <paramref name="decodedMbRows"/> macroblock rows are decoded and the first <paramref name="finalLumaRows"/> luma rows final.</summary>
+    /// <summary>
+    /// The first <paramref name="decodedMbRows"/> macroblock rows are decoded and the first
+    /// <paramref name="finalLumaRows"/> luma rows final: of the frame, or of this field when it is a field picture.
+    /// </summary>
     public void ReportProgress(int decodedMbRows, int finalLumaRows)
     {
         var frame = Frame;
         lock (frame._progressLock)
         {
-            frame._decodedMbRows = decodedMbRows;
-            frame._finalLumaRows = finalLumaRows;
+            if (Parity < 0)
+            {
+                frame._decodedMbRows = decodedMbRows;
+                frame._finalLumaRows = finalLumaRows;
+            }
+            else
+            {
+                Volatile.Write(ref frame._fieldDecodedMbRows[Parity], decodedMbRows);
+                Volatile.Write(ref frame._fieldFinalRows[Parity], finalLumaRows);
+            }
+
             Monitor.PulseAll(frame._progressLock);
         }
     }
@@ -257,25 +273,16 @@ internal sealed class Picture
     public void ReportDone()
     {
         var frame = Frame;
-        lock (frame._progressLock)
+        if (Parity >= 0)
         {
-            if (Parity == 0)
+            ReportProgress(HeightInMbs / 2, HeightInMbs * 8);
+            if (Volatile.Read(ref frame._fieldFinalRows[1 - Parity]) < HeightInMbs * 8)
             {
-                frame._topDone = true;
+                return;
             }
-            else if (Parity == 1)
-            {
-                frame._bottomDone = true;
-            }
-
-            if (Parity < 0 || (frame._topDone && frame._bottomDone))
-            {
-                frame._decodedMbRows = HeightInMbs;
-                frame._finalLumaRows = HeightInMbs * 16;
-            }
-
-            Monitor.PulseAll(frame._progressLock);
         }
+
+        frame.ReportProgress(HeightInMbs, HeightInMbs * 16);
     }
 
     /// <summary>Decoding the picture failed: whatever waits on it fails too, rather than waiting forever.</summary>
@@ -293,28 +300,40 @@ internal sealed class Picture
     public void WaitForRow(int row)
     {
         int height = Parity < 0 ? HeightInMbs * 16 : HeightInMbs * 8;
-        int frameRow = Math.Clamp(row, 0, height - 1);
-        frameRow = Parity < 0 ? frameRow : (2 * frameRow) + Parity;
-        var frame = Frame;
-        if (frame._finalLumaRows <= frameRow && !FieldDone())
+        int clamped = Math.Clamp(row, 0, height - 1);
+        if (!RowReady(clamped))
         {
-            Wait(() => frame._finalLumaRows > frameRow || FieldDone());
+            Wait(() => RowReady(clamped));
         }
+    }
+
+    // A field's row y is the frame's row 2y + parity; a frame's row y, of a frame coded as fields, row y / 2 of both.
+    private bool RowReady(int row)
+    {
+        var frame = Frame;
+        return Parity < 0
+            ? frame._finalLumaRows > row || (Volatile.Read(ref frame._fieldFinalRows[0]) > row / 2 && Volatile.Read(ref frame._fieldFinalRows[1]) > row / 2)
+            : frame._finalLumaRows > (2 * row) + Parity || Volatile.Read(ref frame._fieldFinalRows[Parity]) > row;
     }
 
     /// <summary>Waits until the motion of macroblock row <paramref name="frameMbRow"/> of the frame (and every row above it) is decoded.</summary>
     public void WaitForMotion(int frameMbRow)
     {
         int row = Math.Min(frameMbRow, HeightInMbs - 1);
-        var frame = Frame;
-        if (frame._decodedMbRows <= row && !FieldDone())
+        if (!MotionReady(row))
         {
-            Wait(() => frame._decodedMbRows > row || FieldDone());
+            Wait(() => MotionReady(row));
         }
     }
 
-    // Whether this is a field view and its field picture is done.
-    private bool FieldDone() => Parity == 0 ? Frame._topDone : Parity == 1 && Frame._bottomDone;
+    // A frame macroblock row r is field macroblock row r / 2 (the pair row) of each field.
+    private bool MotionReady(int frameMbRow)
+    {
+        var frame = Frame;
+        return frame._decodedMbRows > frameMbRow || (Parity < 0
+            ? Volatile.Read(ref frame._fieldDecodedMbRows[0]) > frameMbRow / 2 && Volatile.Read(ref frame._fieldDecodedMbRows[1]) > frameMbRow / 2
+            : Volatile.Read(ref frame._fieldDecodedMbRows[Parity]) > frameMbRow / 2);
+    }
 
     private void Wait(Func<bool> ready)
     {

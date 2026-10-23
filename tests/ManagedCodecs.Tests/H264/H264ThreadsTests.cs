@@ -114,16 +114,40 @@ public class H264ThreadsTests
         using var demuxer = Mp4Demuxer.Open(TestSamples.PathOf("h264-high-b.mp4"));
         var video = demuxer.Video!;
         var packets = demuxer.ReadPackets().Where(p => p.StreamIndex == video.StreamIndex).ToList();
-        var decoder = new H264Decoder(video) { Threads = 2, RowDelay = 30 };
+        var decoder = new H264Decoder(video) { Threads = 2, RowDelay = 50 };
         var frames = new List<VideoFrame>();
-        frames.AddRange(await decoder.DecodeAsync(packets[0]));
-        frames.AddRange(await decoder.DecodeAsync(packets[1]));
 
-        // Both decoders are busy for a while (30 ms a row at most): the third packet waits for the first picture.
-        using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(5));
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await decoder.DecodeAsync(packets[2], cancellation.Token));
+        // With both decoders busy for a while (up to 50 ms a row), a packet waits for the oldest picture: DecodeAsync
+        // returns still waiting (a blocking one never would). That one is cancelled (directly, not on a timer, which a
+        // busy thread pool can fire late); should its picture have finished first after all, it gives its frames.
+        using var cancellation = new CancellationTokenSource();
+        int next = 0;
+        ValueTask<IReadOnlyList<VideoFrame>>? waiting = null;
+        while (next < packets.Count && waiting is null)
+        {
+            var decoding = decoder.DecodeAsync(packets[next++], cancellation.Token);
+            if (decoding.IsCompleted)
+            {
+                frames.AddRange(await decoding);
+            }
+            else
+            {
+                waiting = decoding;
+            }
+        }
 
-        foreach (var packet in packets.Skip(2))
+        Assert.True(waiting is not null, "DecodeAsync never waited for the busy decoders.");
+        cancellation.Cancel();
+        try
+        {
+            frames.AddRange(await waiting.Value);
+        }
+        catch (OperationCanceledException)
+        {
+            next--; // not decoded: decode it again
+        }
+
+        foreach (var packet in packets.Skip(next))
         {
             frames.AddRange(await decoder.DecodeAsync(packet));
         }

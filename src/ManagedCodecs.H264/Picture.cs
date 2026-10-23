@@ -4,8 +4,8 @@ using System.Runtime.CompilerServices;
 namespace ManagedCodecs.H264;
 
 /// <summary>
-/// A decoded picture in macroblock-aligned planes (4:2:0 or 4:2:2), with its motion field (which direct
-/// prediction of later B pictures reads) and its reference marking state.
+/// A decoded picture in macroblock-aligned planes (4:2:0, 4:2:2, 4:4:4, or luma alone in monochrome), with its motion
+/// field (which direct prediction of later B pictures reads) and its reference marking state.
 /// </summary>
 internal sealed class Picture
 {

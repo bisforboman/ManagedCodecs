@@ -199,8 +199,13 @@ pool, FFmpeg 6.1.1, single-threaded on a 4-core AVX2 (and AVX-512) Xeon cloud VM
 | `h264-10bit-b.mp4` (the same at 10 bits, High 10) | 40 | 1947 | 628 |
 | `h264-high-motion.mp4` (320x240 H.264 High, fast motion and noise, QP 22) | 20 | 5906 | 3199 |
 | `h264-10bit-motion.mp4` (the same at 10 bits, QP 34, which is QP 22's step size) | 20 | 6299 | 3285 |
-| `aac-stereo-48k.mp4` (AAC, stereo) | 100 | 56 | 65 |
-| `aac-5.1.mp4` (AAC, 5.1) | 100 | 169 | 88 |
+| `aac-stereo-48k.mp4` (AAC, stereo)¹ | 100 | 54 | 100 |
+| `aac-5.1.mp4` (AAC, 5.1)¹ | 100 | 151 | 129 |
+
+¹ Remeasured on 2026-10-23's VM, after the AAC filterbank's FFT and windowing went to vectors (median of five runs
+interleaved with FFmpeg's and with the build before the change, which took 72 and 177 µs). Without startup (mcdec's
+`last loop` line, 500 loops, six interleaved runs) 5.1 takes 93 µs a frame against 128 before (medians; best 86 against
+121); callgrind counts 23% fewer instructions for its decode.
 
 The short MJPEG and AAC runs are dominated by .NET's startup and JIT and move the most from run to run
 (testsrc-420.avi took between 263 and 604 µs in the previous snapshot, 274 to 319 in this one). At 10 bits the ratio

@@ -477,6 +477,9 @@ cp samples/jm/*.mp4 samples/
 # by its data (ADTS), mono to 5.1, coupled pairs, and parametric stereo. tools/make-heaac-samples.sh says how each was
 # made.
 cp samples/heaac/* samples/
+# HE-AAC remuxed by FFmpeg, whose muxer writes the encoder delay as an edit list in the SBR rate's timescale (the FDK
+# front end writes an iTunSMPB tag instead): the edit's samples are the decoder's output samples, not the core's.
+ff -i samples/heaac-stereo-44k.mp4 -c copy samples/heaac-edit.mp4
 
 # ---- FFmpeg's references ----
 # name.framemd5: decoded frames. name.packets.csv: demuxed packets as ffprobe lists them (the demuxer's own timestamps,

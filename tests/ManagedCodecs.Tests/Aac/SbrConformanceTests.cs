@@ -42,6 +42,12 @@ public class SbrConformanceTests
         var audio = demuxer.Audio!;
         var decoder = new AacDecoder(audio);
         int channels = decoder.Channels;
+        if (sampleName.EndsWith(".mp4", StringComparison.Ordinal))
+        {
+            // The config signals SBR, so the track reports the output's rate, as FFmpeg does.
+            Assert.Equal(decoder.SampleRate, audio.SampleRate);
+        }
+
         int referenceChannels = channels == 1 ? 2 : channels; // FFmpeg's mono HE-AAC is stereo
         bool parametricStereo = sampleName.StartsWith("heaacv2", StringComparison.Ordinal);
 

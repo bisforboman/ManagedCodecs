@@ -1148,7 +1148,9 @@ public sealed class Mp4Demuxer : IDemuxer
 
         /// <summary>
         /// The start of an AudioSpecificConfig (14496-3 1.6.2.1): audioObjectType, then the sampling
-        /// frequency index (or an explicit 24-bit rate) and channelConfiguration.
+        /// frequency index (or an explicit 24-bit rate) and channelConfiguration. With spectral band replication the rate
+        /// is the SBR rate, as FFmpeg reports it (edit list times convert to the decoder's output at it): after object type
+        /// 5 or 29 (hierarchical signalling), or in the sync extension after an AAC LC core's GASpecificConfig.
         /// </summary>
         private static bool TryReadAudioSpecificConfig(ReadOnlySpan<byte> config, out int sampleRate, out int channels)
         {
@@ -1172,27 +1174,42 @@ public sealed class Mp4Demuxer : IDemuxer
                 return value;
             }
 
-            if (Read(5, config) == 31)
+            int ObjectType(ReadOnlySpan<byte> data)
             {
-                Read(6, config); // audioObjectTypeExt
+                int type = Read(5, data);
+                return type == 31 ? 32 + Read(6, data) : type; // audioObjectTypeExt
             }
 
-            int index = Read(4, config);
-            ReadOnlySpan<int> rates = [96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000, 7350];
-            if (index == 15)
+            int Rate(ReadOnlySpan<byte> data)
             {
-                sampleRate = Read(24, config);
-            }
-            else if (index < rates.Length)
-            {
-                sampleRate = rates[index];
-            }
-            else
-            {
-                return false;
+                int index = Read(4, data);
+                ReadOnlySpan<int> rates = [96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000, 7350];
+                return index == 15 ? Read(24, data) : index < rates.Length ? rates[index] : 0;
             }
 
+            int objectType = ObjectType(config);
+            sampleRate = Rate(config);
             int configuration = Read(4, config);
+            if (objectType is 5 or 29)
+            {
+                sampleRate = Rate(config); // then the core's object type
+            }
+            else if (objectType == 2 && configuration != 0 && config.Length * 8 >= bit + 3 + 16)
+            {
+                // GASpecificConfig: frameLengthFlag, dependsOnCoreCoder (and a 14-bit delay), extensionFlag.
+                Read(1, config);
+                if (Read(1, config) == 1)
+                {
+                    Read(14, config);
+                }
+
+                Read(1, config);
+                if (config.Length * 8 >= bit + 16 && Read(11, config) == 0x2B7 && ObjectType(config) == 5 && Read(1, config) == 1)
+                {
+                    sampleRate = Rate(config);
+                }
+            }
+
             channels = configuration switch
             {
                 >= 1 and <= 6 => configuration,

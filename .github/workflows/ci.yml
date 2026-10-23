@@ -94,6 +94,7 @@ jobs:
           path: |
             samples/*.avi
             samples/*.mp4
+            samples/*.aac
             samples/jm/*.mp4
             samples/openh264/*.mp4
           retention-days: 1

@@ -3,7 +3,8 @@
 # what libx264 and OpenH264 never do: field pictures (PAFF), each field of a frame its own picture, in pairs whose
 # second field predicts from the first, pictures that switch between frame and field coding, and B field pictures
 # whose direct prediction looks into fields and frames, in 4:2:0, 4:2:2 and 4:0:0, also next to MBAFF frames, and
-# weighted afterwards by tools/h264-add-weights.py; and bit depths 9, 12 and 14. These files
+# weighted afterwards by tools/h264-add-weights.py; bit depths 9, 12 and 14; and I_PCM, cabac_init_idc 1 and 2, and
+# Cb and Cr QP offsets of their own. These files
 # are committed: CI has no JM (and it takes a minute a sample), so tools/make-samples.sh only copies them into samples/
 # and writes their FFmpeg references like any other sample's.
 #

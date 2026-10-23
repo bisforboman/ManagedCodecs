@@ -40,7 +40,8 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
   streams committed in `samples/openh264/`) writes long-term references, MMCO 4 and 6, POC type 2, SVC, and
   frame_num gaps once temporal layers are dropped. A third, JM (`tools/make-jm-samples.sh`, committed in
   `samples/jm/`), writes field pictures (PAFF), alone or mixed with frame pictures or MBAFF frames, also in 4:2:2
-  and 4:0:0, and bit depths 9, 12 and 14; `tools/h264-add-weights.py` weights its field pictures afterwards (`tools/make-jm-samples.sh <JM tree> <names>` makes only those samples). Cover
+  and 4:0:0, bit depths 9, 12 and 14, I_PCM (heavy noise, QP 14 to 15), cabac_init_idc 1 and 2
+  (`ContextInitMethod=0 FixedModelNumber=N`) and Cb and Cr QP offsets of their own (`CbQPOffset`, `CrQPOffset`); `tools/h264-add-weights.py` weights its field pictures afterwards (`tools/make-jm-samples.sh <JM tree> <names>` makes only those samples). Cover
   the rest with unit tests and say so in the docs.
   `tests/ManagedCodecs.Tests/H264/ParameterSetRewriter.cs` rewrites a sample's SPS and PPS for such tests.
   `tests/ManagedCodecs.Tests/H264/CabacEncoder.cs` (a CABAC encoder and bit writer) builds such H.264 streams.

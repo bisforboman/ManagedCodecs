@@ -234,6 +234,19 @@ Implemented but never produced by FFmpeg's encoder, so untested against it: puls
 correlated noise. Priming before the edit list's start is trimmed (`Packet.SkipSamples`); like FFmpeg, the
 padding in the last packet is not.
 
+## HE-AAC (spectral band replication)
+
+Read so far, not yet decoded (the decoder refuses SBR output). Samples from the Fraunhofer FDK encoder, committed in
+`samples/heaac/` (`tools/make-heaac-samples.sh`): stereo at 44.1 kHz, mono at 48 kHz, a coupled low-bitrate pair at
+32 kHz, 5.1, ADTS (SBR signalled only by its data), and HE-AAC v2 (parametric stereo). The config's signalling, both
+backward-compatible (a sync extension after the core's config) and hierarchical (object type 5 first, a unit test),
+and SBR data in the fill element after each SCE and CPE (none after the LFE). Every frame of every sample is read to
+its last bit (an SBR payload leaves only its padding to a whole byte; changing how one field is read breaks that on
+5 of the 6 samples), with every frame class, coupling, added sinusoids and parametric stereo data occurring. The
+frequency tables follow the spec's formulas; its start and stop bands match the PacketVideo decoder's precomputed
+tables, and the tables derived from every header a 44.1 kHz stream can send hold together (a unit test). The FDK
+encoder's headers use bs_freq_scale 2 and 3 (3 in the low-bitrate pair): scale 1, and the linear master table of 0, are
+checked only for consistency.
 ## ADTS (raw AAC)
 
 Raw AAC files (ADTS, `AdtsDemuxer`) demux packet by packet as FFmpeg's

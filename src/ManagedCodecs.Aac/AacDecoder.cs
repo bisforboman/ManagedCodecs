@@ -1,3 +1,5 @@
+using ManagedCodecs.Aac.Sbr;
+
 namespace ManagedCodecs.Aac;
 
 /// <summary>
@@ -8,8 +10,9 @@ namespace ManagedCodecs.Aac;
 /// Supports single and channel pair elements, LFE, M/S and intensity stereo, perceptual noise
 /// substitution, TNS, pulse data, long and short windows with sine and KBD shapes, and channel
 /// configurations 0 (program config element, channels in bitstream order) to 7. Output is in the
-/// WAVE / FFmpeg channel order (5.1: FL FR FC LFE BL BR; configuration 7: FL FR FC LFE BL BR SL SR). Not supported: other object types (Main, SSR, LTP, HE-AAC),
-/// coupling channel elements, 960-sample frames. Every packet yields 1024 samples, encoder
+/// WAVE / FFmpeg channel order (5.1: FL FR FC LFE BL BR; configuration 7: FL FR FC LFE BL BR SL SR). Not supported: other object types (Main, SSR, LTP),
+/// coupling channel elements, 960-sample frames, and spectral band replication (HE-AAC): its signalling (in the config,
+/// or only by its data) and data are read, but <see cref="Decode(ReadOnlySpan{byte})"/> refuses to output it yet. Every packet yields 1024 samples, encoder
 /// priming included; the container's timestamps (negative for priming) and the last packet's
 /// duration say what to trim.
 /// </remarks>
@@ -32,6 +35,9 @@ public sealed class AacDecoder : IAudioDecoder
     // Seed of the noise generator for PNS.
     private uint _noiseState = 0x1F2E3D4C;
 
+    // SBR state of each SCE and CPE (by their order in the access unit), once SBR data comes.
+    private readonly List<SbrElement> _sbr = [];
+
     public AacDecoder(ReadOnlySpan<byte> audioSpecificConfig)
     {
         _config = AudioSpecificConfig.Parse(audioSpecificConfig);
@@ -52,6 +58,15 @@ public sealed class AacDecoder : IAudioDecoder
 
     /// <summary>How often each coding tool was used, so tests can check samples exercise them.</summary>
     internal AacStatistics Statistics { get; } = new();
+
+    /// <summary>
+    /// Whether the stream has spectral band replication (HE-AAC): its config says so, or SBR data came in a fill
+    /// element (implicit signalling).
+    /// </summary>
+    public bool HasSbr => _config.SbrPresent || _sbr.Count > 0;
+
+    /// <summary>For tests: read SBR data and output the core's samples without it, rather than refusing SBR.</summary>
+    internal bool SbrParseOnly { get; init; }
 
     /// <inheritdoc/>
     public AudioFrame Decode(Packet packet)
@@ -84,21 +99,30 @@ public sealed class AacDecoder : IAudioDecoder
 
         var r = new AacBitReader(packet);
         int channel = 0;
+        int element = -1; // the SCE or CPE an SBR payload belongs to: the one before it
+        int elementChannels = 0;
+        int elements = 0;
         while (true)
         {
-            int element = r.Read(3);
-            if (element == EndElement)
+            int elementType = r.Read(3);
+            if (elementType == EndElement)
             {
                 break;
             }
 
-            switch (element)
+            if (elementType != FilElement)
+            {
+                element = elementType is SceElement or CpeElement ? elements++ : -1;
+            }
+
+            switch (elementType)
             {
                 case SceElement or LfeElement:
                     r.Read(4); // element_instance_tag
                     CheckChannels(channel + 1);
                     DecodeIndividualStream(r, _streams[channel], commonWindow: false);
                     channel++;
+                    elementChannels = 1;
                     break;
 
                 case CpeElement:
@@ -106,6 +130,7 @@ public sealed class AacDecoder : IAudioDecoder
                     CheckChannels(channel + 2);
                     DecodeChannelPair(r, _streams[channel], _streams[channel + 1]);
                     channel += 2;
+                    elementChannels = 2;
                     break;
 
                 case CceElement:
@@ -136,17 +161,30 @@ public sealed class AacDecoder : IAudioDecoder
 
                 case FilElement:
                     {
-                        // Extension payloads (SBR, dynamic range, fill) are skipped.
+                        // Extension payloads: SBR data (for the SCE or CPE before it) is read, the others (dynamic
+                        // range, fill) skipped.
                         int count = r.Read(4);
                         if (count == 15)
                         {
                             count += r.Read(8) - 1;
                         }
 
-                        r.Skip(count * 8);
+                        int end = r.Position + (count * 8);
+                        if (count > 0 && r.Peek(4) is SbrElement.ExtensionSbr or SbrElement.ExtensionSbrCrc && element >= 0)
+                        {
+                            int type = r.Read(4);
+                            SbrFor(element, elementChannels).Read(r, end - r.Position, type == SbrElement.ExtensionSbrCrc, Statistics);
+                        }
+
+                        r.Skip(end - r.Position);
                         break;
                     }
             }
+        }
+
+        if (HasSbr && !SbrParseOnly)
+        {
+            throw new NotSupportedException("HE-AAC (spectral band replication) is not supported yet.");
         }
 
         if (channel != _config.Channels)
@@ -164,6 +202,23 @@ public sealed class AacDecoder : IAudioDecoder
         }
 
         return frame;
+    }
+
+    // The SBR state of SCE or CPE number index, made when its first SBR data comes; at the rate the config gives SBR,
+    // else twice the core's.
+    private SbrElement SbrFor(int index, int channels)
+    {
+        while (_sbr.Count <= index)
+        {
+            _sbr.Add(null!);
+        }
+
+        if (_sbr[index] is not { } sbr || sbr.Channels.Length != channels)
+        {
+            _sbr[index] = sbr = new SbrElement(channels, _config.SbrRate);
+        }
+
+        return sbr;
     }
 
     private void CheckChannels(int needed)
@@ -911,4 +966,28 @@ internal sealed class AacStatistics
     public int TnsFilters { get; set; }
 
     public int PulseFrames { get; set; }
+
+    /// <summary>SBR: frames read, headers, resets (frequency tables made), frames of each class, coupled pairs.</summary>
+    public int SbrFrames { get; set; }
+
+    public int SbrHeaders { get; set; }
+
+    public int SbrResets { get; set; }
+
+    public int[] SbrFrameClasses { get; } = new int[4];
+
+    public int SbrCoupledFrames { get; set; }
+
+    /// <summary>Envelopes coded at 1.5 dB, bands with a sinusoid added, frames with parametric stereo data.</summary>
+    public int SbrFineAmpEnvelopes { get; set; }
+
+    public int SbrHarmonics { get; set; }
+
+    public int SbrParametricStereoFrames { get; set; }
+
+    /// <summary>The most bits of an SBR payload left after its data: the fill to a whole byte, so under 8.</summary>
+    public int SbrMostUnreadBits { get; set; }
+
+    /// <summary>The bs_freq_scale values seen, as bits.</summary>
+    public int SbrFrequencyScales { get; set; }
 }

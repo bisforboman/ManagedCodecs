@@ -108,8 +108,16 @@ for (int loop = 0; loop < loops; loop++)
         }
         else if (packet.StreamIndex == audio?.StreamIndex && audioDecoder is not null)
         {
-            audioDecoder.Decode(packet);
-            audioFrames++;
+            try
+            {
+                audioDecoder.Decode(packet);
+                audioFrames++;
+            }
+            catch (NotSupportedException e)
+            {
+                Console.Error.WriteLine($"audio skipped: {e.Message}"); // such as HE-AAC, not decoded yet
+                audioDecoder = null;
+            }
         }
     }
 

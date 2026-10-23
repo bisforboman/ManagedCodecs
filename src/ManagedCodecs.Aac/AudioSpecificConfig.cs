@@ -1,9 +1,32 @@
 namespace ManagedCodecs.Aac;
 
-/// <summary>AudioSpecificConfig (ISO/IEC 14496-3 1.6.2.1) with the GASpecificConfig of AAC LC.</summary>
-internal sealed record AudioSpecificConfig(int ObjectType, int SampleRateIndex, int SampleRate, int ChannelConfiguration, int Channels)
+/// <summary>
+/// AudioSpecificConfig (ISO/IEC 14496-3 1.6.2.1) with the GASpecificConfig of AAC LC, and what it says of spectral band
+/// replication (HE-AAC): signalled hierarchically (object type 5 or 29 first, then the core's), or backward-compatibly
+/// (a sync extension after the core's config). <see cref="SampleRate"/> is the core's; SBR doubles it.
+/// </summary>
+/// <param name="SbrPresent">The config says SBR is present (it can also be present unsaid: <see cref="SbrRate"/>).</param>
+/// <param name="SbrSampleRate">The output rate the config gives for SBR, 0 when it gives none (twice the core's).</param>
+/// <param name="PsPresent">The config says parametric stereo (HE-AAC v2, object type 29) is present.</param>
+internal sealed record AudioSpecificConfig(
+    int ObjectType,
+    int SampleRateIndex,
+    int SampleRate,
+    int ChannelConfiguration,
+    int Channels,
+    bool SbrPresent = false,
+    int SbrSampleRate = 0,
+    bool PsPresent = false)
 {
     public const int AacLc = 2;
+
+    /// <summary>Object types of SBR (HE-AAC) and of SBR with parametric stereo (HE-AAC v2).</summary>
+    public const int Sbr = 5;
+
+    public const int Ps = 29;
+
+    /// <summary>The rate SBR outputs at: the config's, else twice the core's.</summary>
+    public int SbrRate => SbrSampleRate > 0 ? SbrSampleRate : 2 * SampleRate;
 
     public static AudioSpecificConfig Parse(ReadOnlySpan<byte> data)
     {
@@ -17,9 +40,16 @@ internal sealed record AudioSpecificConfig(int ObjectType, int SampleRateIndex, 
         var (index, rate) = ReadSampleRate(r);
         int channelConfiguration = r.Read(4);
 
-        if (objectType is 5 or 29)
+        // Hierarchical signalling: the extension's rate, then the core's object type.
+        bool sbrPresent = false;
+        bool psPresent = false;
+        int sbrRate = 0;
+        if (objectType is Sbr or Ps)
         {
-            throw new NotSupportedException("HE-AAC (SBR / PS) is not supported.");
+            sbrPresent = true;
+            psPresent = objectType == Ps;
+            sbrRate = ReadSampleRate(r).Rate;
+            objectType = ReadObjectType(r);
         }
 
         if (objectType != AacLc)
@@ -60,7 +90,21 @@ internal sealed record AudioSpecificConfig(int ObjectType, int SampleRateIndex, 
             throw new NotSupportedException($"channelConfiguration {channelConfiguration} is not supported.");
         }
 
-        return new AudioSpecificConfig(objectType, index, rate, channelConfiguration, channels);
+        // Backward-compatible signalling (1.6.5.2): a sync extension after the core's config.
+        if (!sbrPresent && r.BitsLeft >= 16 && r.Read(11) == 0x2B7 && ReadObjectType(r) == Sbr)
+        {
+            sbrPresent = r.ReadFlag();
+            if (sbrPresent)
+            {
+                sbrRate = ReadSampleRate(r).Rate;
+                if (r.BitsLeft >= 12 && r.Read(11) == 0x548)
+                {
+                    psPresent = r.ReadFlag();
+                }
+            }
+        }
+
+        return new AudioSpecificConfig(objectType, index, rate, channelConfiguration, channels, sbrPresent, sbrRate, psPresent);
     }
 
     private static int ReadObjectType(AacBitReader r)

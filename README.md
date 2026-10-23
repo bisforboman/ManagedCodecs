@@ -45,7 +45,8 @@ says feature by feature which encoder made the samples (libx264, OpenH264, JM) a
 
 ### Open
 
-- AAC: HE-AAC (SBR, PS). In ADTS: frames of several raw data blocks, and channel configuration 0.
+- AAC: HE-AAC (SBR, PS): its signalling and SBR data are read, its output not decoded yet (`NotSupportedException`).
+  In ADTS: frames of several raw data blocks, and channel configuration 0.
 - MJPEG: files from real cameras (the samples are all FFmpeg's), and packets holding one field (FFmpeg decodes none).
 - H.264: separate colour planes, luma and chroma bit depths that differ, monochrome above 10 bits (FFmpeg decodes
   none of these, so checking them needs another reference); error concealment (a damaged picture fails its
@@ -273,7 +274,11 @@ to 1023 (4:4:4's Cb and Cr residual blocks and the coded_block_flag of 8x8 block
 block category; all of them were compared, with the residual contexts below 460, against the tables of JM, the ITU's
 reference software (3740 values, all four initialization tables).
 The AAC Huffman codebooks were cross-checked the same way against the PacketVideo AAC decoder
-from Android (Apache-2.0). AAC's noise substitution uses the Numerical Recipes random generator
+from Android (Apache-2.0). For spectral band replication (HE-AAC), whose specification text (ISO/IEC 14496-3 4.6.18,
+and 3GPP TS 26.404) is out of the sandbox's reach, the same decoder's SBR sources stand in for it as JM did for MBAFF:
+read for the syntax and the clauses its comments cite, its Huffman codebooks enumerated from its decoding trees, its
+precomputed band tables used to check the spec's formulas; the arithmetic is written from the formulas, in double
+precision, and no code was copied. AAC's noise substitution uses the Numerical Recipes random generator
 with the seed FFmpeg uses (the spec leaves the generator open), so noise bands match FFmpeg too.
 For MBAFF (the neighbour table 6-4, the field scans, the field CABAC context maps, the order of the
 deblocking filter's field edges and the co-located field or frame of direct prediction) the ITU's reference decoder, JM (royalty-free, from the ITU), stood

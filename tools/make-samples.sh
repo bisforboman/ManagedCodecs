@@ -472,6 +472,12 @@ cp samples/openh264/*.mp4 samples/
 # tools/make-jm-samples.sh says how each was made.
 cp samples/jm/*.mp4 samples/
 
+# ---- HE-AAC from the FDK AAC encoder ----
+# Committed in samples/heaac/ (CI has no fdk-aac with SBR): spectral band replication, signalled in the config and only
+# by its data (ADTS), mono to 5.1, coupled pairs, and parametric stereo. tools/make-heaac-samples.sh says how each was
+# made.
+cp samples/heaac/* samples/
+
 # ---- FFmpeg's references ----
 # name.framemd5: decoded frames. name.packets.csv: demuxed packets as ffprobe lists them (the demuxer's own timestamps,
 # flags with discard, MD5 of the data); name.packets.framemd5 for the codec private data (and the ADTS packets).
@@ -491,7 +497,7 @@ done
 # Raw AAC: packets as FFmpeg's demuxer gives them (whole ADTS frames), and every decoded sample (no edit list).
 for f in samples/*.aac; do
   ff -copyts -i "$f" -c copy -f framemd5 "${f%.aac}.packets.framemd5"
-  ff -i "$f" -f f32le "${f%.aac}.f32"
+  [[ $f == samples/heaac-* ]] || ff -i "$f" -f f32le "${f%.aac}.f32"  # HE-AAC: SBR output is not decoded yet
 done
 for f in samples/aac-*.mp4 samples/h264-with-audio.mp4 samples/h264-audio-edits.mp4 samples/fmp4-*.mp4; do
   [[ $f == samples/aac-edit-trim.mp4 || $f == *edits* ]] || ff -ignore_editlist 1 -i "$f" -map 0:a:0 -f f32le "${f%.mp4}.f32"

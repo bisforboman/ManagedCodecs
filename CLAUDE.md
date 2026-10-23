@@ -3,7 +3,8 @@
 Pure managed C# media decoders: no native binaries, Native AOT friendly. MJPEG (bit-exact with FFmpeg), H.264
 Constrained Baseline, Main and High (CAVLC and CABAC, I/P/B, weighted prediction, 8x8 transform, scaling matrices,
 MBAFF, field pictures, monochrome, 4:2:2, 4:4:4, 9 to 14 bits, lossless, bit-exact), AAC LC (within 2^-17 of FFmpeg's float output, measured 3e-7), AVI, MP4
-and ADTS demuxing. README.md has the layout, the roadmap and what is not supported yet.
+and ADTS demuxing. README.md has the layout, the status and what is still open;
+docs/conformance.md what each feature is checked against.
 
 ## Core idea
 

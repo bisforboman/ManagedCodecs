@@ -136,7 +136,7 @@ fixed.
 
 The libraries run unchanged on `browser-wasm`. `tools/wasm-check.sh [aot]` decodes every sample there, under
 Node, and natively (`mcdec --hash`, a SHA-256 of each file's decoded frames and audio samples), and fails unless the
-output is the same. All 272 sample files agree, interpreted or compiled ahead of time, and CI's `wasm` job runs the
+output is the same. All 274 sample files agree, interpreted or compiled ahead of time, and CI's `wasm` job runs the
 AOT build on every pull request. The native build is the one checked against FFmpeg, so the wasm output matches
 FFmpeg as well. `tools/ManagedCodecs.Wasm` needs the `wasm-tools` workload (`dotnet workload install wasm-tools`),
 so it is not part of `ManagedCodecs.slnx`.
@@ -228,9 +228,37 @@ into memory, from `samples/testsrc-420.avi`, `samples/h264-bench-720p.mp4` and `
 in `MANAGEDCODECS_SAMPLE`, `MANAGEDCODECS_H264_SAMPLE` and `MANAGEDCODECS_AAC_SAMPLE`), so its numbers leave out
 what the two commands above include and are not comparable with FFmpeg's `bench:` line.
 
-## Roadmap
+## Status
 
-See [docs/conformance.md](docs/conformance.md).
+Every decoder is checked against FFmpeg, on samples generated to isolate one feature each; where an encoder never
+writes a feature, unit tests and hand-built or rewritten streams cover it. [docs/conformance.md](docs/conformance.md)
+says feature by feature which encoder made the samples (libx264, OpenH264, JM) and what is not checked.
+
+- **MJPEG**: baseline and extended Huffman JPEG in 4:2:0, 4:2:2, 4:4:4 and gray, restart markers, missing Huffman
+  tables, interlaced AVI1 frames; bit-exact. A vector IDCT (AVX2, and `Vector128` for ARM64 and WebAssembly), and
+  output straight into the frame's planes (`ZeroCopy`).
+- **H.264**: Constrained Baseline to High 4:4:4 Predictive. CAVLC and CABAC; I, P and B pictures; weighted
+  prediction, the 8x8 transform, scaling matrices; MBAFF frames and field pictures; monochrome, 4:2:0, 4:2:2 and
+  4:4:4; 8, 9, 10, 12 and 14 bits; lossless. Bit-exact on streams from libx264, OpenH264 and JM. Frame threading
+  (`Threads`).
+- **AAC LC**: mono to 7.1 and program config elements, every window sequence and shape, M/S and intensity stereo,
+  PNS, TNS; within 2^-17 of FFmpeg's float output (measured: 3e-7). Encoder priming is trimmed by the MP4 edit list.
+- **Containers**: AVI (video), MP4 (video and audio tracks, fragmented files too) and raw AAC (ADTS), with packets and
+  timestamps as FFmpeg's demuxers give them.
+- **Throughout**: an async API, malformed input that ends in `InvalidDataException` or `NotSupportedException`
+  (fuzzed), and the same output on x64, ARM64 and WebAssembly (CI checks all three).
+
+### Open
+
+- MP4: edit lists of more than one edit, and video trimmed at the edit's end.
+- AAC: HE-AAC (SBR, PS). In ADTS: frames of several raw data blocks, and channel configuration 0.
+- MJPEG: files from real cameras (the samples are all FFmpeg's), and packets holding one field (FFmpeg decodes none).
+- H.264: separate colour planes, luma and chroma bit depths that differ, monochrome above 10 bits (FFmpeg decodes
+  none of these, so checking them needs another reference); error concealment (a damaged picture fails its
+  `Decode` call).
+- H.264 speed: SPEED_PLACEHOLDER. With threads, a second field waits for its first (they share a decoder), and
+  P pictures in a chain keep 4 threads busy 2.4 cores' worth.
+- `ReadPacketsAsync` reads each packet synchronously (it yields the thread between packets).
 
 ## License note
 

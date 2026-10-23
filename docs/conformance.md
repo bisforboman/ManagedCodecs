@@ -1,20 +1,19 @@
 # Conformance notes
 
 What each decoder and demuxer is checked against, which encoder produced the samples for each feature, and what
-is not checked. Moved here from the README's roadmap, as it stood; the README has the summary.
+is not checked, feature by feature. The README's Status section has the summary and the list of what is still open.
 
 ## MJPEG
 
-~~MJPEG baseline decoder, bit-exact against FFmpeg (4:2:0, 4:2:2, 4:4:4, gray, restart markers, missing DHT)~~ done;
-interlaced AVI1 frames too (two JPEG fields per packet, recognized as FFmpeg does by being less than 3/4 of the
+Baseline (and extended Huffman) JPEG, bit-exact against FFmpeg: 4:2:0, 4:2:2, 4:4:4, gray, restart markers, missing
+DHT. Interlaced AVI1 frames too (two JPEG fields per packet, recognized as FFmpeg does by being less than 3/4 of the
 stream's height, so the decoder needs `new MjpegDecoder(video)`), woven with the first field on the odd rows, the
 order FFmpeg takes for AVI, which does not tell it (`FirstFieldOnTop` gives the other; the AVI1 segment's field
-byte is ignored, as by FFmpeg). Still open: real camera files, and packets of one field (FFmpeg decodes none)
+byte is ignored, as by FFmpeg). Packets of one field are not decoded (FFmpeg decodes none either).
 
-## SIMD and fast paths
+## SIMD and ARM64
 
-SIMD: `Span`, `Vector128`/`Vector256` IDCT and colour paths; measure the ratio to FFmpeg.
-Done so far: AVX2 IDCT, DC-only blocks, single-lookup coefficient decoding, buffer reuse, and for machines
+MJPEG: AVX2 IDCT, DC-only blocks, single-lookup coefficient decoding, buffer reuse, and for machines
 without AVX2 (ARM64 among them) an IDCT in cross-platform `Vector128` operations, so the code ARM64 runs is
 tested on x64 too (against the scalar IDCT on random blocks, and against FFmpeg with `DOTNET_EnableAVX2=0`, a CI
 step): with AVX2 off, 43 and 47% fewer instructions than the scalar IDCT on `testsrc-420.avi` and `noise-q1.avi`
@@ -22,18 +21,20 @@ step): with AVX2 off, 43 and 47% fewer instructions than the scalar IDCT on `tes
 runner), against references made there; the H.264 deblocking filter's transposes have a `Vector128` version
 for it as well (x64 keeps SSE2's), and that job found 8-bit H.264 throwing PlatformNotSupportedException on
 ARM64 before (the chroma filter called SSE2's transposes unchecked).
-Decoding straight into the output frame: opt-in, `MjpegDecoder.ZeroCopy` (6% fewer instructions)
+Decoding straight into the output frame: opt-in, `MjpegDecoder.ZeroCopy` (6% fewer instructions).
 
 ## MP4 demuxing
 
-~~MP4 demuxer (ISO BMFF: `moov`, `trak`, `stbl` sample tables)~~ done: packets, timestamps and
+ISO BMFF (`moov`, `trak`, `stbl` sample tables): packets, timestamps and
 codec private data match FFmpeg, for video and audio tracks, fragmented files (moof) included. Audio is trimmed by the edit list as FFmpeg trims it: priming
-skipped sample by sample, packets after the edit's end left out. Still open: multi-edit edit lists, trimming
-video at the edit's end
+skipped sample by sample, packets after the edit's end left out. Edit lists of more than one edit are not
+supported yet, nor is video trimmed at the edit's end.
 
 ## H.264
 
-~~H.264 decoder, starting with Constrained Baseline (CAVLC, I/P frames)~~ done: bit-exact with
+### Profiles and tools
+
+Bit-exact with
 FFmpeg on libx264 samples covering intra and inter prediction, all partitions, multiple
 references and slices, cropping and constrained intra, with CAVLC and with CABAC (Main profile),
 and B frames: every B macroblock type, spatial and temporal direct prediction, bi-prediction, B
@@ -41,7 +42,10 @@ pictures as references (with memory management operation 1); explicit and implic
 prediction, so libx264's default Main profile output decodes; and High profile's 8x8 transform
 with Intra 8x8 prediction, so libx264's default output decodes too, and scaling matrices (the
 default ones and custom lists). Frames come out in display order.
-Interlaced video: MBAFF frames of I, P and B slices (macroblock pairs coded as frame or field
+
+### Interlaced video
+
+MBAFF frames of I, P and B slices (macroblock pairs coded as frame or field
 pairs, mixed in any way; skipped pairs whose kind is inferred; field macroblocks predicting
 from either field of a reference frame; spatial and temporal direct prediction from
 co-located pairs of either kind, and implicit weights, with field order counts), with CAVLC
@@ -73,6 +77,9 @@ frame over a field pair partitioned below 16x16. Field marking that JM's streams
 (the second field of a frame not sliding the window, memory management operation 1 by field
 PicNum) and the field B lists' list 1 swap have unit tests; other memory management operations
 in field pictures and a field without its pair throw NotSupportedException.
+
+### OpenH264 and rewritten libx264 streams
+
 Streams from a second encoder, OpenH264, are checked against FFmpeg too: long-term references
 with reference list modification and memory management operations 1, 4 and 6, POC type 2,
 non-reference P frames, slices by size, deblocking that stops at slice edges, changing and
@@ -83,6 +90,9 @@ no encoder names a reference by such a position, so hand-built streams test that
 Direct prediction without direct_8x8_inference_flag, which libx264 never writes, is checked
 on two libx264 B streams with the flag cleared in their SPS (Main profile, where it changes
 only how direct motion is derived, and FFmpeg decodes the same rewritten stream).
+
+### 4:2:2
+
 High 4:2:2 (8-bit) is checked on libx264's 4:2:2 output: 8x16 chroma blocks
 with the 2x4 chroma DC transform (at QP_C + 3), CAVLC's and CABAC's chroma DC coding of 8
 levels, chroma intra prediction over 16 rows, chroma motion with quarter-sample vertical
@@ -92,6 +102,9 @@ intra prediction and cropping; I_PCM in 4:2:2 from hand-built streams. Interlace
 libx264's MBAFF frames (intra prediction from 16 chroma rows of neighbours, and chroma lines
 across mixed pair edges taking their own luma line's bS) and JM's field pairs, also mixed with
 frame pictures and B pictures.
+
+### 10 bits
+
 10-bit video (High 10 and High 4:2:2 at 10 bits) is checked on libx264's output too: QP_Y from
 -12 (QpBdOffset) with dequantization at QP'Y and chroma QPs below 0, Clip1 to 1023, deblocking
 thresholds and weighted-prediction offsets scaled by 4, CAVLC level prefixes of 16 and more,
@@ -99,6 +112,9 @@ at QP_Y -12 on noise, P and B frames, weights, constrained intra prediction, cro
 and MBAFF; I_PCM at 10 bits from hand-built streams. Motion compensation and the deblocking
 filter have vector paths for 10-bit samples too (32-bit lanes for the 6-tap filter, 16-bit
 ones for deblocking), each checked against its reference on random 10-bit input.
+
+### 9, 12 and 14 bits
+
 9, 12 and 14 bits (High 10 and High 4:4:4 Predictive) are checked on JM's output (libx264 writes
 only 8 and 10): P and B frames with the 8x8 transform, explicit weights in P and B at 12 bits
 (bi-predicted blocks too), CAVLC at 12 and 14 bits, 4:2:2 at
@@ -110,6 +126,9 @@ samples, 8 x 4095 + 4 at most) and the scalar filter at 14. 11 and 13 bits are r
 has no pixel format for them, so nothing to check them against. Monochrome at 9 to 14 bits is
 not checked (JM writes it with 8-bit chroma, which FFmpeg refuses), nor are luma and chroma
 bit depths that differ (FFmpeg does not decode them; this decoder rejects them).
+
+### 4:4:4
+
 4:4:4 (High 4:4:4 Predictive, 8 and 10 bits) is checked on libx264's 4:4:4 output: Cb and Cr
 coded as luma (Intra16x16 DC and AC, 4x4 and 8x8 blocks, CABAC contexts 460 to 1023 and the
 coded_block_flag that 8x8 blocks have only in 4:4:4, Table 9-4's 4:4:4 coded_block_pattern),
@@ -120,6 +139,9 @@ and 10 bits; I_PCM in 4:4:4 from hand-built streams. Separate colour planes are 
 build 151 derived the context of an 8x8 block's coded_block_flag in 4:4:4 against the spec (a
 neighbour without 8x8 transforms counted as missing); FFmpeg decodes such streams by the encoder's
 version, this decoder by the spec, so they come out differently.
+
+### Lossless
+
 Lossless coding (qpprime_y_zero_transform_bypass_flag with QP'Y 0) is checked on libx264's
 `-qp 0` output: the levels added as the residual with no scaling or transform, Intra_16x16 and
 chroma DC levels put in place, and the residual of intra blocks predicted vertically or
@@ -130,6 +152,9 @@ lossless macroblocks by their QP_Y, as JM and FFmpeg do (libx264's `-qp 0` puts 
 macroblock at QP 0, so lossless next to lossy macroblocks is not checked). x264 before build 151
 also predicted lossless Intra_8x8 blocks from unfiltered neighbours; FFmpeg follows it there
 too, this decoder the spec.
+
+### Monochrome
+
 Monochrome (chroma_format_idc 0) comes out as `Gray8` or `Gray10`, one plane; it is checked on
 libx264's gray output (High and High 10): no intra_chroma_pred_mode, the coded_block_pattern
 without a chroma part, no chroma weights in pred_weight_table, with CABAC and CAVLC, P and B
@@ -137,6 +162,9 @@ frames, explicit weights, cropping, MBAFF, 10 bits and lossless; and on JM's fie
 (PAFF) in 4:0:0, alone and mixed with frame pictures, with B pictures and CAVLC; I_PCM from
 hand-built streams. FFmpeg's decoder outputs such streams as 4:2:0 with flat chroma, so the
 references take its Y plane alone (`-vf extractplanes=y`, which leaves the samples as they are).
+
+### What only JM writes, and what no encoder writes
+
 Produced by neither libx264 nor OpenH264, but by JM, so checked against FFmpeg on its streams:
 I_PCM next to coded macroblocks in I and P pictures, with CAVLC and CABAC (also decoded from
 hand-built streams), cabac_init_idc 1 and 2 (JM's adaptive choice takes them in most of its
@@ -150,10 +178,11 @@ is not reached: an edge next to it averages 0 with the neighbour's QP, below ind
 for any neighbour under QP 32, and JM writes I_PCM only below about QP 16.
 Produced by none of them, so not checked against FFmpeg: memory management operations 2, 3
 and 5 (unit tests; JM writes 1 and OpenH264 1, 4 and 6). The scaling matrix unit tests (samples
-with rewritten parameter sets) stay as a second check. Still open: separate colour planes, luma and chroma bit depths that differ,
-error concealment, more speed (about 3.2x FFmpeg's time on `h264-bench-720p.mp4`, 2.5 to 3.3x on libx264's
-default High output at 720p, less the noisier the source, and about the same ratio at 10 bits as at 8; 2x on
-high-bitrate intra content). A profile of a
+with rewritten parameter sets) stay as a second check.
+
+### Performance notes
+
+A profile of a
 720p libx264 default stream (2026-10-22) is flat: CABAC residual decoding takes 14%, deblocking 21%
 in pieces of at most 2.5% (bS, transposes, the filter), nothing else over 5%. Output planes are allocated
 without zeroing (callgrind: 0.4% fewer instructions on `h264-high-b.mp4`, 2.6% on `testsrc-420.avi`). Looked
@@ -165,24 +194,27 @@ decoding (no measurable change in time, so cache locality matters little with a 
 upper rows become final while the rest is still being decoded: frame threading (`Threads`, under Decoding a file)
 builds on it. MBAFF frames and field pictures are deblocked and report their progress by pair rows (32 frame rows)
 the same way, a field picture's per field: with 4 threads, libx264's MBAFF samples decode 1.8 to 2.2 times as fast
-as with one (1.3 to 1.4 before). Still open there: a second field waits for its first to finish (they share a
+as with one (1.3 to 1.4 before). Not yet: a second field waits for its first to finish (they share a
 decoder), so field-picture streams gain little (JM's 10-frame samples lose), and P pictures in a chain keep 4
 threads busy 2.4 cores' worth. Output frames given back with `Dispose` are pooled
 (gen2 collections over 5 loops of `h264-bench-720p.mp4`: 33 down to 3). Vector 4x4 and 8x8 inverse transforms
 (#42) were reverted: callgrind counted 1.4% more instructions per loop of `h264-bench-720p.mp4` with them and 0.9%
 more on `h264-high-b.mp4`, and 24 interleaved runs of the builds before and after showed no difference; the 9 and
 10% first reported were the VM's noise, more than the two functions' 2% (CAVLC) and 7% (CABAC) of the profile
-could have given
+could have given.
 
 ## AAC
 
-~~AAC-LC decoder~~ done: channel configurations 1 to 7 and program config elements (1 to 8
+AAC LC: channel configurations 1 to 7 and program config elements (1 to 8
 channels), all window sequences and shapes, M/S, intensity, PNS, TNS. Both decoders are floating
 point, so the tests compare values: they require 2^-17 (about 7.6e-6) and measure at most 3e-7.
 Implemented but never produced by FFmpeg's encoder, so untested against it: pulse data and
 correlated noise. Priming before the edit list's start is trimmed (`Packet.SkipSamples`); like FFmpeg, the
-padding in the last packet is not. Raw AAC files (ADTS, `AdtsDemuxer`) demux packet by packet as FFmpeg's
+padding in the last packet is not.
+
+## ADTS (raw AAC)
+
+Raw AAC files (ADTS, `AdtsDemuxer`) demux packet by packet as FFmpeg's
 demuxer does (whole frames, header included; ID3v2 tags skipped, junk between frames skipped as FFmpeg
 resynchronizes) and decode as FFmpeg decodes them; frames with a CRC (which FFmpeg's muxer never writes) from
-rewritten samples. Not supported there: several raw data blocks in a frame, channel configuration 0. Still open:
-HE-AAC (SBR, PS)
+rewritten samples. Not supported there: several raw data blocks in a frame, channel configuration 0.

@@ -28,8 +28,13 @@ public sealed class H264Decoder : IVideoDecoder
 
     // The planes of copied frames, back from frames the caller disposed.
     private readonly VideoFramePool _framePool = new();
-    private IPictureDecoder? _decoder;
     private long _pictureCount;
+
+    // One picture decoder per picture decoded at once (Threads), all for the current stream size and format; and
+    // with threads, the pictures being decoded (or decoded and not yet output), in decoding order.
+    private readonly List<IPictureDecoder> _decoders = [];
+    private readonly Queue<PictureJob> _inFlight = new();
+    private readonly int _threads = 1;
 
     // frame_num of the last reference picture (PrevRefFrameNum, 7.4.3); -1 before the first.
     private int _prevRefFrameNum = -1;
@@ -71,6 +76,23 @@ public sealed class H264Decoder : IVideoDecoder
     public bool BorrowFrames { get; init; }
 
     /// <summary>
+    /// How many pictures to decode at once, each on a thread of its own (frame threading): a picture is decoded while
+    /// the ones before it are still being decoded, waiting only for the rows of theirs its motion vectors reach, so
+    /// more threads decode faster on more cores, and give the same frames. 1, the default, decodes on the calling
+    /// thread, as WebAssembly in a browser needs (it has no threads there). With more, <see cref="Decode"/> returns
+    /// frames up to that many packets later (<see cref="Flush"/> returns the rest), and <see cref="BorrowFrames"/> is
+    /// not supported.
+    /// </summary>
+    public int Threads
+    {
+        get => _threads;
+        init => _threads = value >= 1 ? value : throw new ArgumentOutOfRangeException(nameof(value), value, "At least one thread is needed.");
+    }
+
+    /// <summary>For tests of frame threading: sleep up to this many milliseconds after each macroblock row, at random.</summary>
+    internal int RowDelay { get; init; }
+
+    /// <summary>
     /// Decodes one packet, which holds one picture (MP4 sample), and returns the frames ready for
     /// display. A field picture is half a frame: the first of a pair gives no frame, the second
     /// the whole frame, with the first one's timestamp.
@@ -82,22 +104,58 @@ public sealed class H264Decoder : IVideoDecoder
     /// </remarks>
     public IReadOnlyList<VideoFrame> Decode(Packet packet)
     {
+        if (BorrowFrames && Threads > 1)
+        {
+            throw new NotSupportedException("Borrowed frames with more than one thread are not supported.");
+        }
+
         var frames = new List<VideoFrame>();
-        var job = ParsePicture(packet.Data.Span, packet.Pts);
-        Run(job);
+        var job = ParsePicture(packet.Data.Span, packet.Pts, frames);
+        if (Threads == 1)
+        {
+            Run(job);
+            Finish(job);
+            Output(job, frames);
+            return frames;
+        }
+
+        // A thread of its own, so that a picture always runs while the later ones that wait for it do: pictures
+        // start in decoding order, and wait only for earlier ones. The front end goes on from the headers alone.
+        job.Task = Task.Factory.StartNew(() => Run(job), CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+        _inFlight.Enqueue(job);
         Finish(job);
-        Output(job, frames);
+        Drain(frames, all: false);
         return frames;
     }
 
     public IReadOnlyList<VideoFrame> Flush()
     {
+        var frames = new List<VideoFrame>();
+        Drain(frames, all: true);
         if (_firstField is not null)
         {
             throw new NotSupportedException("A field without its second field (an unpaired field) is not supported.");
         }
 
-        return _output.Flush();
+        frames.AddRange(_output.Flush());
+        return frames;
+    }
+
+    /// <summary>Outputs the decoded pictures at the front of the queue, in decoding order: those done, or all of them (waiting).</summary>
+    private void Drain(List<VideoFrame> frames, bool all)
+    {
+        while (_inFlight.TryPeek(out var job) && (all || job.Task!.IsCompleted))
+        {
+            DrainOldest(frames);
+        }
+    }
+
+    /// <summary>Waits for the oldest picture being decoded and outputs it; rethrows what decoding it threw.</summary>
+    private void DrainOldest(List<VideoFrame> frames)
+    {
+        var job = _inFlight.Dequeue();
+        job.Task!.GetAwaiter().GetResult();
+        Output(job, frames);
     }
 
     /// <summary>Decodes the job's slices into its picture and deblocks it, then reports it done (or failed) to pictures that predict from it.</summary>
@@ -217,7 +275,7 @@ public sealed class H264Decoder : IVideoDecoder
     }
 
     /// <summary>Parses a packet's NAL units: parameter sets, and the slices of its picture with their reference lists.</summary>
-    private PictureJob ParsePicture(ReadOnlySpan<byte> packet, long pts)
+    private PictureJob ParsePicture(ReadOnlySpan<byte> packet, long pts, List<VideoFrame> frames)
     {
         PictureJob? current = null;
         int pos = 0;
@@ -240,14 +298,15 @@ public sealed class H264Decoder : IVideoDecoder
                 throw new InvalidDataException($"NAL unit length {length} overruns the packet.");
             }
 
-            current = HandleNal(NalUnit.Parse(packet.Slice(pos, length)), current, pts);
+            current = HandleNal(NalUnit.Parse(packet.Slice(pos, length)), current, pts, frames);
             pos += length;
         }
 
         return current ?? throw new InvalidDataException("The packet contains no picture.");
     }
 
-    private PictureJob? HandleNal(NalUnit nal, PictureJob? current, long pts = 0)
+    // frames: where pictures output while waiting for a free decoder go.
+    private PictureJob? HandleNal(NalUnit nal, PictureJob? current, long pts = 0, List<VideoFrame>? frames = null)
     {
         switch (nal.Type)
         {
@@ -273,7 +332,7 @@ public sealed class H264Decoder : IVideoDecoder
 
                     if (current is null)
                     {
-                        current = StartPicture(header, sps, pts);
+                        current = StartPicture(header, sps, pts, frames!);
                     }
                     else if (header.FrameNum != current.State.Header.FrameNum || current.State.Sps != sps)
                     {
@@ -308,7 +367,7 @@ public sealed class H264Decoder : IVideoDecoder
     /// <summary>How often MBAFF frames used field and frame pairs and mixed them, so tests can check samples exercise them.</summary>
     internal MbaffStatistics MbaffStatistics { get; } = new();
 
-    private PictureJob StartPicture(SliceHeader header, SequenceParameterSet sps, long pts)
+    private PictureJob StartPicture(SliceHeader header, SequenceParameterSet sps, long pts, List<VideoFrame> frames)
     {
         // The second field of a frame (7.4.1.2.4): the other parity right after the first, with its
         // frame_num, not IDR, and a reference if and only if the first one is.
@@ -329,8 +388,10 @@ public sealed class H264Decoder : IVideoDecoder
             InferGapFrames(header, sps);
         }
 
-        // The second field goes on in the first one's decoder, which holds the first one's macroblocks.
-        var decoder = secondField ? _firstField!.State.Decoder : TakeDecoder(sps);
+        // The second field goes on in the first one's decoder, which holds the first one's macroblocks, once the
+        // first one is done.
+        _firstField?.Task?.GetAwaiter().GetResult();
+        var decoder = secondField ? _firstField!.State.Decoder : TakeDecoder(sps, frames);
 
         int poc = _order.Next(header, sps);
         Picture picture;
@@ -364,19 +425,44 @@ public sealed class H264Decoder : IVideoDecoder
             : new PictureJob(state, pts, header.IsIdr || header.MemoryManagement.Any(op => op.Op == 5));
     }
 
-    /// <summary>A decoder for pictures of the stream's size and format: the one of the previous picture, or a new one.</summary>
-    private IPictureDecoder TakeDecoder(SequenceParameterSet sps)
+    /// <summary>
+    /// A decoder for pictures of the stream's size and format that no picture being decoded uses: a free one, a new one
+    /// while there are fewer than <see cref="Threads"/>, or the oldest one's once it is done (its picture output into
+    /// <paramref name="frames"/>). A new size or format waits for every picture being decoded first.
+    /// </summary>
+    private IPictureDecoder TakeDecoder(SequenceParameterSet sps, List<VideoFrame> frames)
     {
-        if (_decoder is null || _decoder.Sps.WidthInMbs != sps.WidthInMbs || _decoder.Sps.HeightInMbs != sps.HeightInMbs
-            || _decoder.Sps.ChromaFormatIdc != sps.ChromaFormatIdc || _decoder.Sps.BitDepthLuma != sps.BitDepthLuma)
+        if (_decoders.Count > 0 && (_decoders[0].Sps.WidthInMbs != sps.WidthInMbs || _decoders[0].Sps.HeightInMbs != sps.HeightInMbs
+            || _decoders[0].Sps.ChromaFormatIdc != sps.ChromaFormatIdc || _decoders[0].Sps.BitDepthLuma != sps.BitDepthLuma))
         {
-            _decoder = sps.BitDepthLuma > 8
-                ? new PictureDecoder<ushort>(sps) { Statistics = MbaffStatistics, FieldStatistics = FieldStatistics }
-                : new PictureDecoder<byte>(sps) { Statistics = MbaffStatistics, FieldStatistics = FieldStatistics };
+            Drain(frames, all: true);
+            _decoders.Clear();
         }
 
-        return _decoder;
+        while (true)
+        {
+            var free = _decoders.Find(d => !_inFlight.Any(job => job.State.Decoder == d));
+            if (free is not null)
+            {
+                return free;
+            }
+
+            if (_decoders.Count < Threads)
+            {
+                // The statistics are shared, counted without locks: exact with one thread (which tests use).
+                IPictureDecoder decoder = sps.BitDepthLuma > 8
+                    ? new PictureDecoder<ushort>(sps) { Statistics = MbaffStatistics, FieldStatistics = FieldStatistics, RowDelay = RowDelay }
+                    : new PictureDecoder<byte>(sps) { Statistics = MbaffStatistics, FieldStatistics = FieldStatistics, RowDelay = RowDelay };
+                _decoders.Add(decoder);
+                return decoder;
+            }
+
+            DrainOldest(frames);
+        }
     }
+
+    /// <summary>Whether a picture being decoded (or decoded and not yet output) is <paramref name="picture"/> or predicts from it.</summary>
+    private bool InUse(Picture picture) => _inFlight.Any(job => job.State.Picture == picture || job.Uses.Contains(picture));
 
     // The first field of a frame being decoded as two field pictures.
     private PictureJob? _firstField;
@@ -417,8 +503,8 @@ public sealed class H264Decoder : IVideoDecoder
         // are valid until the next call. One waiting in the output queue may not.
         bool Fits(Picture p) => p.WidthInMbs == sps.WidthInMbs && p.HeightInMbs == sps.HeightInMbs && p.MbHeightC == sps.MbHeightC
             && p.MbWidthC == sps.MbWidthC && p.BitDepth == sps.BitDepthLuma;
-        _pictures.RemoveAll(p => !Fits(p) && !_references.Contains(p) && !_output.Holds(p));
-        var picture = _pictures.Find(p => Fits(p) && !_references.Contains(p) && !_output.Holds(p));
+        _pictures.RemoveAll(p => !Fits(p) && !_references.Contains(p) && !_output.Holds(p) && !InUse(p));
+        var picture = _pictures.Find(p => Fits(p) && !_references.Contains(p) && !_output.Holds(p) && !InUse(p));
         if (picture is null)
         {
             picture = new Picture(sps.WidthInMbs, sps.HeightInMbs, sps.MbHeightC, sps.BitDepthLuma, sps.MbWidthC);
@@ -517,6 +603,9 @@ public sealed class H264Decoder : IVideoDecoder
         public List<SliceWork> Slices { get; } = [];
 
         public HashSet<Picture> Uses { get; } = [];
+
+        /// <summary>With threads, the thread decoding it.</summary>
+        public Task? Task { get; set; }
     }
 
     private static void CheckSupported(SequenceParameterSet sps)

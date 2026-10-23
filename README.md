@@ -14,7 +14,7 @@ then the same approach for H.264 + AAC in MP4.
 | `src/ManagedCodecs.H264` | `H264Decoder`: Constrained Baseline, Main, High, High 10, High 4:2:2 and High 4:4:4 Predictive profile H.264 (CAVLC, CABAC, I/P/B, weighted prediction, 8x8 transform, scaling matrices, deblocking, monochrome, 4:2:0, 4:2:2 and 4:4:4, 8 to 14 bits, lossless, progressive and interlaced), bit-exact |
 | `src/ManagedCodecs.Aac` | `AacDecoder`: AAC LC (mono to 7.1, M/S, intensity, PNS, TNS), within 3e-7 of FFmpeg's float output |
 | `src/Shared` | Source files linked into several codec projects (the VLC decoder) |
-| `tools/ManagedCodecs.Cli` | `mcdec`: decodes a file and times it, to compare with `ffmpeg -benchmark` |
+| `tools/ManagedCodecs.Cli` | `mcdec`: decodes a file and times it, to compare with `ffmpeg -benchmark` (`--threads N` for H.264 frame threading) |
 | `tools/make-samples.sh` | Generates the test samples and FFmpeg's references |
 | `tools/compare.sh` | Times mcdec and FFmpeg on the same file |
 | `tools/ManagedCodecs.Fuzz`, `tools/fuzz.sh` | Fuzzing targets for SharpFuzz and AFL++ (see Malformed input) |
@@ -71,6 +71,14 @@ read them through `GetRow`, or with the frame's `Offsets` and `Strides`. `mcdec 
 video comes out as `PixelFormat.Yuv420P10`, `Yuv422P10` or `Yuv444P10`, a little-endian 16-bit word a sample (strides and offsets
 count bytes), and always as copies: the decoder keeps those samples as `ushort`, which a frame's byte planes cannot
 borrow.
+
+`new H264Decoder(video) { Threads = 4 }` decodes up to four pictures at once, each on a thread of its own (frame
+threading): a picture starts while the ones before it are still being decoded, and its motion compensation and direct
+prediction wait only for the rows of theirs they read. The frames are the same as with one thread, but `Decode` returns
+them up to that many packets later (`Flush` returns the rest), and borrowed frames are not supported with threads. On
+`h264-bench-720p.mp4` (one I and 49 P pictures, each predicting from the one before) on a 4-core cloud VM, 2 threads
+take 0.63 of one thread's time and 4 threads 0.47 (`mcdec --threads N`). The default, 1, decodes on the calling thread,
+which WebAssembly in a browser needs; it costs 0.3% more instructions than before frame threading existed (callgrind).
 
 `AacDecoder.Decode(packet)` returns one `AudioFrame`: the packet's 1024 samples per channel, less the
 `packet.SkipSamples` at its start. The MP4 demuxer sets those from the edit list, so encoder priming is dropped and the
@@ -333,8 +341,10 @@ what the two commands above include and are not comparable with FFmpeg's `bench:
    zeros in `_absMvd` and the motion arrays, so each path would clear its own macroblock instead, about as many
    bytes), one transpose for all four vertical luma edges (`FilterEdge` already skips the transposes of edges whose
    bS are all 0, which a whole-macroblock transpose would not). Frames are now deblocked a macroblock row behind
-   decoding (no measurable change in time, so cache locality matters little with a large L2), the first step towards
-   frame threading: a reference's upper rows become final while the rest is still being decoded. Output frames given back with `Dispose` are pooled
+   decoding (no measurable change in time, so cache locality matters little with a large L2), so that a reference's
+   upper rows become final while the rest is still being decoded: frame threading (`Threads`, under Decoding a file)
+   builds on it. Still open there: MBAFF frames and field pictures report their progress only when done (a picture
+   predicting from one waits for all of it), and P pictures in a chain keep 4 threads busy 2.4 cores' worth. Output frames given back with `Dispose` are pooled
    (gen2 collections over 5 loops of `h264-bench-720p.mp4`: 33 down to 3). Vector 4x4 and 8x8 inverse transforms
    (#42) were reverted: callgrind counted 1.4% more instructions per loop of `h264-bench-720p.mp4` with them and 0.9%
    more on `h264-high-b.mp4`, and 24 interleaved runs of the builds before and after showed no difference; the 9 and

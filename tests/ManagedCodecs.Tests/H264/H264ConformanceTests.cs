@@ -36,7 +36,26 @@ public class H264ConformanceTests
     [MemberData(nameof(Samples))]
     public void MatchesFfmpegWithBorrowedFrames(string sampleName) => CompareWithFfmpeg(sampleName, borrowFrames: true, dispose: true);
 
-    private static void CompareWithFfmpeg(string sampleName, bool borrowFrames, bool dispose)
+    /// <summary>
+    /// The same with frame threading (<see cref="H264Decoder.Threads"/>), more threads than cores so that they contend,
+    /// and the frames disposed: the waits for references must give the frames of one thread.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(Samples))]
+    public void MatchesFfmpegWithThreads(string sampleName) =>
+        CompareWithFfmpeg(sampleName, borrowFrames: false, dispose: true, threads: Environment.ProcessorCount + 1);
+
+    /// <summary>
+    /// The same with four threads that sleep up to a millisecond, at random, after each macroblock row: pictures then
+    /// overtake each other where they may, and a wait that is too short (a row read before it is final) shows as a
+    /// wrong frame where, without the delays, the threads would most often have been in time by luck.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(Samples))]
+    public void MatchesFfmpegWithDelayedThreads(string sampleName) =>
+        CompareWithFfmpeg(sampleName, borrowFrames: false, dispose: true, threads: 4, rowDelay: 1);
+
+    private static void CompareWithFfmpeg(string sampleName, bool borrowFrames, bool dispose, int threads = 1, int rowDelay = 0)
     {
         var lines = File.ReadAllLines(TestSamples.ReferenceOf(sampleName, ".framemd5"));
         var expected = FrameMd5.Parse(lines).Where(e => e.StreamIndex == 0).ToList(); // FFmpeg lists video first
@@ -44,7 +63,7 @@ public class H264ConformanceTests
 
         using var demuxer = Mp4Demuxer.Open(TestSamples.PathOf(sampleName));
         var video = demuxer.Video!;
-        var decoder = new H264Decoder(video) { BorrowFrames = borrowFrames };
+        var decoder = new H264Decoder(video) { BorrowFrames = borrowFrames, Threads = threads, RowDelay = rowDelay };
 
         int index = 0;
         long firstPts = 0;
@@ -81,6 +100,12 @@ public class H264ConformanceTests
         }
 
         Assert.Equal(expected.Count, index);
+
+        // The statistics below are counted without locks, exact with one thread only.
+        if (threads > 1)
+        {
+            return;
+        }
 
         // Field picture samples (from JM) must pair fields, and predict second fields from their first.
         if (sampleName.Contains("paff", StringComparison.Ordinal))

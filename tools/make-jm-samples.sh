@@ -2,9 +2,9 @@
 # Encodes the H.264 samples in samples/jm/ with JM's encoder (lencod, the ITU-T reference software), which writes
 # what libx264 and OpenH264 never do: field pictures (PAFF), each field of a frame its own picture, in pairs whose
 # second field predicts from the first, pictures that switch between frame and field coding, and B field pictures
-# whose direct prediction looks into fields and frames, in 4:2:0 and 4:2:2. These files are committed: CI has no JM
-# (and it takes a minute a sample), so tools/make-samples.sh only copies them into samples/ and writes their FFmpeg
-# references like any other sample's.
+# whose direct prediction looks into fields and frames, in 4:2:0 and 4:2:2; and bit depths 9, 12 and 14. These files
+# are committed: CI has no JM (and it takes a minute a sample), so tools/make-samples.sh only copies them into samples/
+# and writes their FFmpeg references like any other sample's.
 #
 # Usage: tools/make-jm-samples.sh <JM source tree with lencod built> [sample names, to make only those]
 #   (git clone https://github.com/shihuade/JM && make -C lencod CFLAGS="-fcommon -O2"; made with JM 19.0)
@@ -84,7 +84,7 @@ encode-b paff-422-b-adaptive -p InputFile=noisy422.yuv -p YUVFormat=2 -p Profile
 
 # ---- Bit depths 9, 12 and 14 (libx264 writes only 8 and 10) ----
 # Progressive frames (176x144, 10 of them) of a moving noisy test pattern, at each depth and chroma format the
-# sample needs. deep name bits yuvformat [lencod options]: High 10 for 9 bits, High 4:4:4 Predictive above 10 (no
+# sample needs (noise=N sets the noise). deep name bits yuvformat [lencod options]: High 10 for 9 bits, High 4:4:4 Predictive above 10 (no
 # other profile allows them), 8x8 transforms, B pictures, CABAC, QP 16 so the levels get large.
 deep() {
   local name=$1 bits=$2 yuv=$3; shift 3
@@ -92,7 +92,7 @@ deep() {
   local pix=(gray yuv420p yuv422p yuv444p)
   local fmt=${pix[yuv]}
   [[ $fmt == gray ]] && fmt=gray${bits}le || fmt=${fmt}${bits}le
-  ffmpeg -hide_banner -loglevel error -y -f lavfi -i "testsrc2=size=176x144:rate=25,scroll=h=0.01:v=0.005,noise=alls=8:allf=t" \
+  ffmpeg -hide_banner -loglevel error -y -f lavfi -i "testsrc2=size=176x144:rate=25,scroll=h=0.01:v=0.005,noise=alls=${noise:-8}:allf=t" \
     -frames:v 10 -pix_fmt "$fmt" -f rawvideo "$work/deep-$name.yuv"
   local profile=244
   ((bits <= 10 && yuv <= 1)) && profile=110
@@ -104,7 +104,8 @@ deep 9bit 9 1                                     # 9 bits: High 10
 deep 12bit 12 1 -p WeightedPrediction=1 -p WeightedBiprediction=1  # 12 bits, explicit weights in P and B
 deep 12bit-cavlc 12 1 -p SymbolMode=0 -p IntraPeriod=3  # CAVLC
 deep 14bit 14 1 -p QPISlice=-6 -p QPPSlice=-6 -p QPBSlice=-4  # 14 bits at low QP: levels past 2^15
-deep 14bit-cavlc 14 1 -p SymbolMode=0 -p QPISlice=-6 -p QPPSlice=-6 -p QPBSlice=-4  # level_prefix 16 and more
+noise=40 deep 14bit-cavlc 14 1 -p SymbolMode=0 -p QPISlice=-6 -p QPPSlice=-6 -p QPBSlice=-4  # CAVLC, level_prefix 15
+          # (16 and more is in CavlcLevelTests: below QP -6 JM codes this source as I_PCM, and crashes with EnableIPCM=0)
 deep 12bit-422 12 2                               # 4:2:2
 deep 14bit-444 14 3                               # 4:4:4
 # No 4:0:0: JM writes bit_depth_chroma 8 there, and FFmpeg refuses luma and chroma depths that differ.

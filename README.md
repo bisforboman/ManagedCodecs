@@ -11,7 +11,7 @@ then the same approach for H.264 + AAC in MP4.
 | `src/ManagedCodecs.Core` | `VideoFrame`, `PixelFormat`, `Packet`, `Rational`, `IDemuxer`, `IVideoDecoder` |
 | `src/ManagedCodecs.Containers` | `AviDemuxer`, `Mp4Demuxer`, and `Demuxer.Open` to pick one by content |
 | `src/ManagedCodecs.Mjpeg` | `MjpegDecoder`: baseline/extended Huffman JPEG, interlaced AVI1, bit-exact with FFmpeg |
-| `src/ManagedCodecs.H264` | `H264Decoder`: Constrained Baseline, Main, High, High 10, High 4:2:2 and High 4:4:4 Predictive profile H.264 (CAVLC, CABAC, I/P/B, weighted prediction, 8x8 transform, scaling matrices, deblocking, monochrome, 4:2:0, 4:2:2 and 4:4:4, 8 and 10 bits, lossless, progressive and interlaced), bit-exact |
+| `src/ManagedCodecs.H264` | `H264Decoder`: Constrained Baseline, Main, High, High 10, High 4:2:2 and High 4:4:4 Predictive profile H.264 (CAVLC, CABAC, I/P/B, weighted prediction, 8x8 transform, scaling matrices, deblocking, monochrome, 4:2:0, 4:2:2 and 4:4:4, 8 to 14 bits, lossless, progressive and interlaced), bit-exact |
 | `src/ManagedCodecs.Aac` | `AacDecoder`: AAC LC (mono to 7.1, M/S, intensity, PNS, TNS), within 3e-7 of FFmpeg's float output |
 | `src/Shared` | Source files linked into several codec projects (the VLC decoder) |
 | `tools/ManagedCodecs.Cli` | `mcdec`: decodes a file and times it, to compare with `ffmpeg -benchmark` |
@@ -215,6 +215,17 @@ what the two commands above include and are not comparable with FFmpeg's `bench:
    and MBAFF; I_PCM at 10 bits from hand-built streams. Motion compensation and the deblocking
    filter have vector paths for 10-bit samples too (32-bit lanes for the 6-tap filter, 16-bit
    ones for deblocking), each checked against its reference on random 10-bit input.
+   9, 12 and 14 bits (High 10 and High 4:4:4 Predictive) are checked on JM's output (libx264 writes
+   only 8 and 10): P and B frames with the 8x8 transform, explicit weights in P and B at 12 bits,
+   CAVLC at 12 and 14 bits, 4:2:2 at 12 and 4:4:4 at 14, at QPs down to -6 (14-bit levels past
+   2^15); I_PCM from hand-built streams, and CAVLC's level_prefix of 16 and more (which only levels
+   past about 2048 need, and which JM never writes: it codes such macroblocks as I_PCM) from unit
+   tests. Frames come out as `Yuv420P9`, `Yuv422P12`, `Gray14` and the like (FFmpeg's yuv420p9le
+   and so on). Deblocking takes its 16-bit lanes up to 12 bits (the strong filter sums eight
+   samples, 8 x 4095 + 4 at most) and the scalar filter at 14. 11 and 13 bits are rejected: FFmpeg
+   has no pixel format for them, so nothing to check them against. Monochrome at 9 to 14 bits is
+   not checked (JM writes it with 8-bit chroma, which FFmpeg refuses), nor are luma and chroma
+   bit depths that differ (FFmpeg does not decode them; this decoder rejects them).
    4:4:4 (High 4:4:4 Predictive, 8 and 10 bits) is checked on libx264's 4:4:4 output: Cb and Cr
    coded as luma (Intra16x16 DC and AC, 4x4 and 8x8 blocks, CABAC contexts 460 to 1023 and the
    coded_block_flag that 8x8 blocks have only in 4:4:4, Table 9-4's 4:4:4 coded_block_pattern),
@@ -248,7 +259,7 @@ what the two commands above include and are not comparable with FFmpeg's `bench:
    implicitly), cabac_init_idc 1 and 2 (only their tables are checked, against libavc), a Cr QP
    offset other than Cb's (second_chroma_qp_index_offset), and of scaling matrices: lists in the
    SPS, fall-back rule B, useDefaultScalingMatrixFlag and a Cr list of its own (unit tests decode
-   samples with rewritten parameter sets). Still open: separate colour planes, bit depths other than 8 and 10,
+   samples with rewritten parameter sets). Still open: separate colour planes, luma and chroma bit depths that differ,
    error concealment, more speed (about 3.2x FFmpeg's time on `h264-bench-720p.mp4`, 2.5 to 3.3x on libx264's
    default High output at 720p, less the noisier the source, and about the same ratio at 10 bits as at 8; 2x on
    high-bitrate intra content). A profile of a

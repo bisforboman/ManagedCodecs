@@ -30,9 +30,14 @@ public class H264PcmTests
     [InlineData(false, 3, 8)]
     [InlineData(true, 3, 8)]
     [InlineData(true, 3, 10)]
+    [InlineData(true, 1, 9)]
+    [InlineData(false, 1, 12)]
+    [InlineData(true, 2, 12)]
+    [InlineData(true, 1, 14)]
+    [InlineData(false, 3, 14)]
     public void PcmMacroblock_GivesItsSamplesAndDecodingResumes(bool cabac, int chromaFormat, int bitDepth)
     {
-        int[] values = bitDepth == 8 ? [100, 50, 200] : [700, 300, 900];
+        int[] values = bitDepth == 8 ? [100, 50, 200] : [(700 << bitDepth) >> 10, (300 << bitDepth) >> 10, (1 << bitDepth) - 100];
         var decoder = new H264Decoder(AvcC(Sps(chromaFormat, bitDepth), Pps(cabac)));
         var slice = cabac ? CabacSlice(chromaFormat, bitDepth, values) : CavlcSlice(chromaFormat, bitDepth, values);
         var nal = slice.ToNal(3, 5);
@@ -47,11 +52,16 @@ public class H264PcmTests
             (0, 8) => PixelFormat.Gray8,
             (0, _) => PixelFormat.Gray10,
             (3, 8) => PixelFormat.Yuv444P,
-            (3, _) => PixelFormat.Yuv444P10,
+            (3, 10) => PixelFormat.Yuv444P10,
+            (3, _) => PixelFormat.Yuv444P14,
             (2, 8) => PixelFormat.Yuv422P,
-            (2, _) => PixelFormat.Yuv422P10,
+            (2, 10) => PixelFormat.Yuv422P10,
+            (2, _) => PixelFormat.Yuv422P12,
             (_, 8) => PixelFormat.Yuv420P,
-            _ => PixelFormat.Yuv420P10,
+            (_, 9) => PixelFormat.Yuv420P9,
+            (_, 10) => PixelFormat.Yuv420P10,
+            (_, 12) => PixelFormat.Yuv420P12,
+            _ => PixelFormat.Yuv420P14,
         };
         Assert.Equal(expectedFormat, frame.Format);
         Assert.Equal(chromaFormat == 0 ? 1 : 3, frame.Planes.Length);
@@ -67,7 +77,7 @@ public class H264PcmTests
     private static BitWriter Sps(int chromaFormat, int bitDepth)
     {
         var w = new BitWriter();
-        w.Bits(chromaFormat switch { 3 => 244, 2 => 122, 0 when bitDepth == 8 => 100, _ => bitDepth > 8 ? 110 : 77 }, 8); // profile_idc: High 4:4:4 Predictive, High 4:2:2, High, High 10 or Main
+        w.Bits(chromaFormat switch { _ when bitDepth > 10 => 244, 3 => 244, 2 => 122, 0 when bitDepth == 8 => 100, _ => bitDepth > 8 ? 110 : 77 }, 8); // profile_idc: High 4:4:4 Predictive, High 4:2:2, High, High 10 or Main
         w.Bits(0, 8);  // constraint flags
         w.Bits(30, 8); // level_idc
         w.Ue(0);       // seq_parameter_set_id

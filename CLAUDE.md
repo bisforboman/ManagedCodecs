@@ -2,7 +2,7 @@
 
 Pure managed C# media decoders: no native binaries, Native AOT friendly. MJPEG (bit-exact with FFmpeg), H.264
 Constrained Baseline, Main and High (CAVLC and CABAC, I/P/B, weighted prediction, 8x8 transform, scaling matrices,
-MBAFF, field pictures, monochrome, 4:2:2, 4:4:4, 10-bit, lossless, bit-exact), AAC LC (within 2^-17 of FFmpeg's float output, measured 3e-7), AVI and MP4
+MBAFF, field pictures, monochrome, 4:2:2, 4:4:4, 9 to 14 bits, lossless, bit-exact), AAC LC (within 2^-17 of FFmpeg's float output, measured 3e-7), AVI and MP4
 demuxing. README.md has the layout, the roadmap and what is not supported yet.
 
 ## Core idea
@@ -39,7 +39,8 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
   FFmpeg's AAC: no pulse data). A second encoder covers some: OpenH264 (`tools/make-openh264-samples.sh`, its
   streams committed in `samples/openh264/`) writes long-term references, MMCO 4 and 6, POC type 2, SVC, and
   frame_num gaps once temporal layers are dropped. A third, JM (`tools/make-jm-samples.sh`, committed in
-  `samples/jm/`), writes field pictures (PAFF), alone or mixed with frame pictures, also in 4:2:2. Cover
+  `samples/jm/`), writes field pictures (PAFF), alone or mixed with frame pictures, also in 4:2:2, and bit depths
+  9, 12 and 14 (`tools/make-jm-samples.sh <JM tree> <names>` makes only those samples). Cover
   the rest with unit tests and say so in the docs.
   `tests/ManagedCodecs.Tests/H264/ParameterSetRewriter.cs` rewrites a sample's SPS and PPS for such tests.
   `tests/ManagedCodecs.Tests/H264/CabacEncoder.cs` (a CABAC encoder and bit writer) builds such H.264 streams.
@@ -113,5 +114,8 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
 - FFmpeg decodes monochrome H.264 to 4:2:0 with flat chroma (128, or 512 at 10 bits): references for gray samples
   come from `-pix_fmt gray`/`gray10le` (make-samples.sh, by the h264-gray- prefix), the decoder's output is one plane.
   xunit theory rows filter by `DisplayName~<sample>`, not `FullyQualifiedName`.
+- Deeper than 10 bits: JM codes macroblocks as I_PCM below about QP -6 at 14 bits (so its streams never reach CAVLC's
+  level_prefix 16), segfaults with `EnableIPCM=0`, and writes 4:0:0 with 8-bit chroma, which FFmpeg refuses ("Different
+  chroma and luma bit depth"). 16-bit SIMD lanes hold sums of eight 12-bit samples, not 14-bit ones.
 - In fragmented MP4, FFmpeg's packet durations are not the file's: its demuxer leaves them unset and libavformat
   fills in the codec frame size (1024 for AAC). Compare with FFmpeg's next dts instead (Mp4ConformanceTests does).

@@ -4,7 +4,7 @@ Test media is generated locally with FFmpeg and is not committed (see `.gitignor
 `openh264/`: OpenH264's encoder writes what libx264 never does (long-term references, POC type 2, SVC), and CI has
 no OpenH264, so those few small files are committed and `tools/make-samples.sh` copies them here and writes their
 references like any other sample's. `tools/make-openh264-samples.sh <openh264 tree>` makes them again. The same
-goes for `jm/`: field pictures (PAFF) from JM's encoder, made again by `tools/make-jm-samples.sh <JM tree>`. From the
+goes for `jm/`: field pictures (PAFF) and 9-, 12- and 14-bit video from JM's encoder, made again by `tools/make-jm-samples.sh <JM tree>`. From the
 repository root:
 
 ```

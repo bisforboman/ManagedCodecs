@@ -51,8 +51,8 @@ says feature by feature which encoder made the samples (libx264, OpenH264, JM) a
 
 ### Open
 
-- AAC: parametric stereo (HE-AAC v2), downsampled SBR, and SBR's speed (the QMF banks are the spec's sums: 5.1 runs at
-  about 5 times real time, 30 times slower than FFmpeg). In ADTS: frames of several raw data blocks, and channel
+- AAC: parametric stereo (HE-AAC v2) and downsampled SBR; SBR's speed (FFT-based QMF banks: 5.1 HE-AAC at about 1 ms a
+  frame, 40 times real time, 4 times FFmpeg's time). In ADTS: frames of several raw data blocks, and channel
   configuration 0.
 - MJPEG: files from real cameras (the samples are all FFmpeg's), and packets holding one field (FFmpeg decodes none).
 - H.264: separate colour planes, luma and chroma bit depths that differ, monochrome above 10 bits (FFmpeg decodes

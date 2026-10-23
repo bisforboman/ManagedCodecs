@@ -126,7 +126,7 @@ public interface IVideoDecoder
     /// <summary>
     /// Decodes one packet and returns the frames that are now ready to be shown, in display
     /// order. Each frame's <see cref="VideoFrame.Pts"/> is the <see cref="Packet.Pts"/> of the
-    /// packet it was coded in.
+    /// packet it was coded in; a <see cref="Packet.Discard"/> packet's frame is decoded but never returned.
     /// </summary>
     IReadOnlyList<VideoFrame> Decode(Packet packet);
 

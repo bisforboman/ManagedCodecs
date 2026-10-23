@@ -38,7 +38,7 @@ says feature by feature which encoder made the samples (libx264, OpenH264, JM) a
   (`Threads`).
 - **AAC LC**: mono to 7.1 and program config elements, every window sequence and shape, M/S and intensity stereo,
   PNS, TNS; within 2^-17 of FFmpeg's float output (measured: 3e-7). Encoder priming is trimmed by the MP4 edit list.
-- **Containers**: AVI (video), MP4 (video and audio tracks, fragmented files too, edit lists of any number of edits)
+- **Containers**: AVI (video), MP4 (video and audio tracks, fragmented files too, edit lists of several edits)
   and raw AAC (ADTS), with packets and timestamps as FFmpeg's demuxers give them.
 - **Throughout**: an async API, malformed input that ends in `InvalidDataException` or `NotSupportedException`
   (fuzzed), and the same output on x64, ARM64 and WebAssembly (CI checks all three).

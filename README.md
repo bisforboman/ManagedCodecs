@@ -148,7 +148,10 @@ what the two commands above include and are not comparable with FFmpeg's `bench:
    without AVX2 (ARM64 among them) an IDCT in cross-platform `Vector128` operations, so the code ARM64 runs is
    tested on x64 too (against the scalar IDCT on random blocks, and against FFmpeg with `DOTNET_EnableAVX2=0`, a CI
    step): with AVX2 off, 43 and 47% fewer instructions than the scalar IDCT on `testsrc-420.avi` and `noise-q1.avi`
-   (callgrind), 16 and 18% less time. It has not run on ARM64 itself, which neither this VM nor CI has.
+   (callgrind), 16 and 18% less time. CI runs every test on ARM64 too (`build-arm64`, GitHub's ubuntu-24.04-arm
+   runner), against references made there; the H.264 deblocking filter's transposes have a `Vector128` version
+   for it as well (x64 keeps SSE2's), and that job found 8-bit H.264 throwing PlatformNotSupportedException on
+   ARM64 before (the chroma filter called SSE2's transposes unchecked).
    Still open: decoding straight into the output frame
 3. ~~MP4 demuxer (ISO BMFF: `moov`, `trak`, `stbl` sample tables)~~ done: packets, timestamps and
    codec private data match FFmpeg, for video and audio tracks, fragmented files (moof) included. Audio is trimmed by the edit list as FFmpeg trims it: priming

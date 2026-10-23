@@ -1,7 +1,7 @@
 # ManagedCodecs
 
 Pure managed C# media codecs: no native binaries, Native AOT friendly, and running on WebAssembly too. Decoders for
-MJPEG, H.264 (Constrained Baseline up to High 4:4:4 Predictive) and AAC LC, with AVI and MP4 demuxing, every one
+MJPEG, H.264 (Constrained Baseline up to High 4:4:4 Predictive) and AAC LC, with AVI, MP4 and raw AAC (ADTS) demuxing, every one
 checked against FFmpeg sample by sample: video **bit-exact**, AAC within 2^-17 of FFmpeg's float output. H.264 decodes
 on several threads if asked, and every decoder has an async API.
 
@@ -10,7 +10,7 @@ on several threads if asked, and every decoder has an async API.
 | Project | What it holds |
 | --- | --- |
 | `src/ManagedCodecs.Core` | `VideoFrame`, `PixelFormat`, `Packet`, `Rational`, `IDemuxer`, `IVideoDecoder` |
-| `src/ManagedCodecs.Containers` | `AviDemuxer`, `Mp4Demuxer`, and `Demuxer.Open` to pick one by content |
+| `src/ManagedCodecs.Containers` | `AviDemuxer`, `Mp4Demuxer`, `AdtsDemuxer` (raw .aac), and `Demuxer.Open` to pick one by content |
 | `src/ManagedCodecs.Mjpeg` | `MjpegDecoder`: baseline/extended Huffman JPEG, interlaced AVI1, bit-exact with FFmpeg |
 | `src/ManagedCodecs.H264` | `H264Decoder`: Constrained Baseline, Main, High, High 10, High 4:2:2 and High 4:4:4 Predictive profile H.264 (CAVLC, CABAC, I/P/B, weighted prediction, 8x8 transform, scaling matrices, deblocking, monochrome, 4:2:0, 4:2:2 and 4:4:4, 8 to 14 bits, lossless, progressive and interlaced), bit-exact |
 | `src/ManagedCodecs.Aac` | `AacDecoder`: AAC LC (mono to 7.1, M/S, intensity, PNS, TNS), within 3e-7 of FFmpeg's float output |
@@ -394,7 +394,11 @@ what the two commands above include and are not comparable with FFmpeg's `bench:
    point, so the tests compare values: they require 2^-17 (about 7.6e-6) and measure at most 3e-7.
    Implemented but never produced by FFmpeg's encoder, so untested against it: pulse data and
    correlated noise. Priming before the edit list's start is trimmed (`Packet.SkipSamples`); like FFmpeg, the
-   padding in the last packet is not. Still open: HE-AAC (SBR, PS), ADTS input
+   padding in the last packet is not. Raw AAC files (ADTS, `AdtsDemuxer`) demux packet by packet as FFmpeg's
+   demuxer does (whole frames, header included; ID3v2 tags skipped, junk between frames skipped as FFmpeg
+   resynchronizes) and decode as FFmpeg decodes them; frames with a CRC (which FFmpeg's muxer never writes) from
+   rewritten samples. Not supported there: several raw data blocks in a frame, channel configuration 0. Still open:
+   HE-AAC (SBR, PS)
 
 ## License note
 

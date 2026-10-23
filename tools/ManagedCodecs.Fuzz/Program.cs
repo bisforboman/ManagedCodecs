@@ -47,7 +47,7 @@ static void WriteSeeds(string samples, string output)
         Directory.CreateDirectory(Path.Combine(output, name));
     }
 
-    foreach (var path in Directory.GetFiles(samples).Where(f => f.EndsWith(".avi") || f.EndsWith(".mp4")).Order())
+    foreach (var path in Directory.GetFiles(samples).Where(f => f.EndsWith(".avi") || f.EndsWith(".mp4") || f.EndsWith(".aac")).Order())
     {
         string stem = Path.GetFileNameWithoutExtension(path);
         if (new FileInfo(path).Length <= 64 * 1024)

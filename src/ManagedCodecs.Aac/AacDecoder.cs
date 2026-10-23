@@ -1,7 +1,7 @@
 namespace ManagedCodecs.Aac;
 
 /// <summary>
-/// AAC LC decoder (ISO/IEC 14496-3 subpart 4) for raw access units as stored in MP4: one
+/// AAC LC decoder (ISO/IEC 14496-3 subpart 4) for raw access units as stored in MP4, or ADTS frames: one
 /// packet in, 1024 samples per channel out.
 /// </summary>
 /// <remarks>
@@ -56,8 +56,28 @@ public sealed class AacDecoder : IAudioDecoder
     /// <inheritdoc/>
     public AudioFrame Decode(Packet packet) => Decode(packet.Data.Span).DropStart(packet.SkipSamples);
 
+    /// <summary>
+    /// Decodes one access unit: a raw one as stored in MP4, or an ADTS frame (header included, as the ADTS demuxer gives
+    /// them) of one raw data block, whose header must match the decoder's configuration.
+    /// </summary>
     public AudioFrame Decode(ReadOnlySpan<byte> packet)
     {
+        // A raw access unit can't pass for an ADTS frame: one starting with 0xFF starts with an END element.
+        if (AdtsHeader.TryParse(packet, out var adts) && adts.FrameLength == packet.Length)
+        {
+            if (adts.RawDataBlocks != 1)
+            {
+                throw new NotSupportedException("ADTS frames of more than one raw data block are not supported.");
+            }
+
+            if (adts.Profile + 1 != _config.ObjectType || adts.SampleRateIndex != _config.SampleRateIndex || adts.ChannelConfiguration != _config.ChannelConfiguration)
+            {
+                throw new NotSupportedException("An ADTS header that changes the stream's configuration is not supported.");
+            }
+
+            packet = packet[adts.HeaderLength..];
+        }
+
         var r = new AacBitReader(packet);
         int channel = 0;
         while (true)

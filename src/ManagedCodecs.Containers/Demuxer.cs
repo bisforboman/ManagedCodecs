@@ -1,3 +1,4 @@
+using ManagedCodecs.Containers.Adts;
 using ManagedCodecs.Containers.Avi;
 using ManagedCodecs.Containers.Mp4;
 
@@ -27,6 +28,12 @@ public static class Demuxer
             if (read >= 8 && IsTopLevelBox(head[4..8]))
             {
                 return new Mp4Demuxer(stream, leaveOpen);
+            }
+
+            // Raw AAC: an ADTS frame (after any ID3v2 tags) followed by another one.
+            if (AdtsDemuxer.Probe(stream))
+            {
+                return new AdtsDemuxer(stream, leaveOpen);
             }
         }
         catch when (!leaveOpen)

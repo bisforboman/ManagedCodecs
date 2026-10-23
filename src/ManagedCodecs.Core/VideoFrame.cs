@@ -49,7 +49,7 @@ public sealed class VideoFrame : IDisposable
         Offsets = new int[count];
     }
 
-    /// <summary>A tight frame on planes of <paramref name="pool"/>, which takes them back on <see cref="Dispose"/>.</summary>
+    /// <summary>A frame on planes of <paramref name="pool"/> (tight, or rows <paramref name="strides"/> apart), which takes them back on <see cref="Dispose"/>.</summary>
     internal VideoFrame(int width, int height, PixelFormat format, byte[][] planes, int[] strides, VideoFramePool pool)
         : this(width, height, format, planes, strides, new int[planes.Length])
     {

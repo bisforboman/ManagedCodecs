@@ -63,8 +63,14 @@ foreach (var frame in decoder.Flush())
 ```
 
 Each frame owns its samples. Frames are `IDisposable`: disposing one when done with it is optional, and gives an
-H.264 frame's planes back to the decoder for a later frame (a `VideoFramePool`), which saves allocating and
-collecting about 1.4 MB a frame at 720p; a disposed frame's samples must not be used again. `new H264Decoder(video) { BorrowFrames = true }` saves the copy that takes (with the copied
+H.264 or MJPEG frame's planes back to the decoder for a later frame (a `VideoFramePool`), which saves allocating and
+collecting about 1.4 MB a frame at 720p (MJPEG, `testsrc-420.avi`: 7.7 MB allocated a pass down to 2.0); a disposed
+frame's samples must not be used again. `new MjpegDecoder(video) { ZeroCopy = true }` decodes each image straight into
+its frame's planes, which are then whole MCUs wide and high (read rows through `GetRow`, or with `Strides`): 6% fewer
+instructions than decoding into the decoder's buffers and copying out (callgrind, `testsrc-420.avi`), and the frame
+owns its planes like any other (interlaced packets are woven into a frame all the same; `mcdec --zero-copy`).
+`H264Decoder.Decode(ReadOnlySpan<byte> data, long pts)` takes a picture's NAL units from any memory, which need not
+outlive the call, as `MjpegDecoder.Decode(ReadOnlySpan<byte>)` and `AacDecoder.Decode(ReadOnlySpan<byte>)` do. `new H264Decoder(video) { BorrowFrames = true }` saves the copy that takes (with the copied
 frames disposed, about 5% of the decoding time at 720p and 1% at 320x240): its frames point into the decoder's own pictures, valid until the
 next `Decode` or `Flush` call and not to be written. Their planes are the decoder's macroblock-aligned buffers, so
 read them through `GetRow`, or with the frame's `Offsets` and `Strides`. `mcdec --borrow-frames` times it. 10-bit
@@ -208,7 +214,7 @@ what the two commands above include and are not comparable with FFmpeg's `bench:
    runner), against references made there; the H.264 deblocking filter's transposes have a `Vector128` version
    for it as well (x64 keeps SSE2's), and that job found 8-bit H.264 throwing PlatformNotSupportedException on
    ARM64 before (the chroma filter called SSE2's transposes unchecked).
-   Still open: decoding straight into the output frame
+   Decoding straight into the output frame: opt-in, `MjpegDecoder.ZeroCopy` (6% fewer instructions)
 3. ~~MP4 demuxer (ISO BMFF: `moov`, `trak`, `stbl` sample tables)~~ done: packets, timestamps and
    codec private data match FFmpeg, for video and audio tracks, fragmented files (moof) included. Audio is trimmed by the edit list as FFmpeg trims it: priming
    skipped sample by sample, packets after the edit's end left out. Still open: multi-edit edit lists, trimming

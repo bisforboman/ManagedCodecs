@@ -71,23 +71,28 @@ public class DeblockingTests
 
     /// <summary>
     /// The 16-bit vector filter (10-bit samples) against the sample-by-sample one, on the same
-    /// kind of edges as <see cref="VectorFilter_MatchesScalar"/> scaled to 10 bits, where alpha,
-    /// beta and tC0 are four times as large.
+    /// kind of edges as <see cref="VectorFilter_MatchesScalar"/> scaled to 9, 10 and 12 bits, where alpha,
+    /// beta and tC0 are 2, 4 and 16 times as large.
     /// </summary>
-    [Fact]
-    public void VectorFilter16_MatchesScalar()
+    [Theory]
+    [InlineData(9)]
+    [InlineData(10)]
+    [InlineData(12)] // the deepest the 16-bit lanes take: the strong filter's sums reach 8 * 4095 + 4
+    public void VectorFilter16_MatchesScalar(int bitDepth)
     {
         const int Stride = 32;
         var random = new Random(17);
+        int scale = 1 << (bitDepth - 8);
+        int max = (1 << bitDepth) - 1;
         var strengths = new byte[4];
         int filtered = 0;
 
         for (int n = 0; n < 20_000; n++)
         {
             var plane = new ushort[Stride * Stride];
-            int baseValue = random.Next(4) switch { 0 => 12, 1 => 1010, _ => random.Next(1024) };
-            int step = random.Next(-48, 49);
-            int noise = random.Next(1, 21);
+            int baseValue = random.Next(4) switch { 0 => 3 * scale, 1 => max - (3 * scale), _ => random.Next(max + 1) };
+            int step = random.Next(-12 * scale, (12 * scale) + 1);
+            int noise = random.Next(1, (5 * scale) + 1);
             bool vertical = random.Next(2) == 0;
             for (int y = 0; y < Stride; y++)
             {
@@ -95,7 +100,7 @@ public class DeblockingTests
                 {
                     int across = vertical ? x : y;
                     int value = baseValue + (across >= 16 ? step : 0) + random.Next(-noise, noise + 1);
-                    plane[(y * Stride) + x] = (ushort)Math.Clamp(value, 0, 1023);
+                    plane[(y * Stride) + x] = (ushort)Math.Clamp(value, 0, max);
                 }
             }
 
@@ -108,8 +113,8 @@ public class DeblockingTests
                 strengths[i] = (byte)random.Next(0, 5);
             }
 
-            int qpP = random.Next(-12, 52);
-            int qpQ = random.Next(-12, 52);
+            int qpP = random.Next(-6 * (bitDepth - 8), 52);
+            int qpQ = random.Next(-6 * (bitDepth - 8), 52);
             int alphaOffset = random.Next(-6, 7) * 2;
             int betaOffset = random.Next(-6, 7) * 2;
             int q0 = vertical ? (8 * Stride) + 16 : (16 * Stride) + 8;
@@ -118,8 +123,8 @@ public class DeblockingTests
 
             var expected = (ushort[])plane.Clone();
             var actual = (ushort[])plane.Clone();
-            PictureDecoder<ushort>.FilterEdge(expected, q0, acrossStep, alongStep, length, strengths, qpP, qpQ, alphaOffset, betaOffset, chroma, vectorized: false, segmentShift, bitDepth: 10);
-            PictureDecoder<ushort>.FilterEdge(actual, q0, acrossStep, alongStep, length, strengths, qpP, qpQ, alphaOffset, betaOffset, chroma, vectorized: true, segmentShift, bitDepth: 10);
+            PictureDecoder<ushort>.FilterEdge(expected, q0, acrossStep, alongStep, length, strengths, qpP, qpQ, alphaOffset, betaOffset, chroma, vectorized: false, segmentShift, bitDepth);
+            PictureDecoder<ushort>.FilterEdge(actual, q0, acrossStep, alongStep, length, strengths, qpP, qpQ, alphaOffset, betaOffset, chroma, vectorized: true, segmentShift, bitDepth);
 
             if (!expected.AsSpan().SequenceEqual(plane))
             {

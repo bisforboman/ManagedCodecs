@@ -445,17 +445,8 @@ public sealed class H264Decoder : IVideoDecoder
             [lumaOffset, chromaOffset, chromaOffset]);
     }
 
-    private static PixelFormat FormatOf(Picture picture) => (picture.MbWidthC == 16 ? 3 : picture.MbHeightC, picture.BitDepth) switch
-    {
-        (0, 8) => PixelFormat.Gray8,
-        (0, _) => PixelFormat.Gray10,
-        (3, 8) => PixelFormat.Yuv444P,
-        (3, _) => PixelFormat.Yuv444P10,
-        (16, 8) => PixelFormat.Yuv422P,
-        (16, _) => PixelFormat.Yuv422P10,
-        (_, 8) => PixelFormat.Yuv420P,
-        _ => PixelFormat.Yuv420P10,
-    };
+    private static PixelFormat FormatOf(Picture picture) =>
+        PixelFormatExtensions.Of(picture.MbWidthC == 16 ? 3 : picture.MbHeightC switch { 0 => 0, 16 => 2, _ => 1 }, picture.BitDepth);
 
     /// <summary>The picture being decoded: its first slice header, its SPS, its decoder and its order count.</summary>
     private sealed record PictureState(SliceHeader Header, SequenceParameterSet Sps, IPictureDecoder Decoder, int Poc, bool SecondField = false);
@@ -467,9 +458,10 @@ public sealed class H264Decoder : IVideoDecoder
             throw new NotSupportedException("Separate colour planes (separate_colour_plane_flag) are not supported.");
         }
 
-        if (sps.BitDepthLuma is not (8 or 10) || (sps.ChromaFormatIdc != 0 && sps.BitDepthChroma != sps.BitDepthLuma))
+        // 11 and 13 bits are left out: FFmpeg has no pixel format for them, so nothing to check them against.
+        if (sps.BitDepthLuma is not (8 or 9 or 10 or 12 or 14) || (sps.ChromaFormatIdc != 0 && sps.BitDepthChroma != sps.BitDepthLuma))
         {
-            throw new NotSupportedException($"Bit depths {sps.BitDepthLuma} (luma) and {sps.BitDepthChroma} (chroma) are not supported (8 or 10, the same for both unless monochrome).");
+            throw new NotSupportedException($"Bit depths {sps.BitDepthLuma} (luma) and {sps.BitDepthChroma} (chroma) are not supported (8, 9, 10, 12 or 14, the same for both unless monochrome).");
         }
     }
 }

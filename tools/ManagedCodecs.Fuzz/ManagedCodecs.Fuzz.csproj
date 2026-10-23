@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>ManagedCodecs.Fuzz</RootNamespace>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="SharpFuzz" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\ManagedCodecs.Containers\ManagedCodecs.Containers.csproj" />
+    <ProjectReference Include="..\..\src\ManagedCodecs.Mjpeg\ManagedCodecs.Mjpeg.csproj" />
+    <ProjectReference Include="..\..\src\ManagedCodecs.H264\ManagedCodecs.H264.csproj" />
+    <ProjectReference Include="..\..\src\ManagedCodecs.Aac\ManagedCodecs.Aac.csproj" />
+  </ItemGroup>
+
+</Project>

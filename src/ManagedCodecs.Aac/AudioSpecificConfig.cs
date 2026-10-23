@@ -50,6 +50,10 @@ internal sealed record AudioSpecificConfig(int ObjectType, int SampleRateIndex, 
         if (channelConfiguration == 0)
         {
             channels = ProgramConfigElement.Parse(r).Channels;
+            if (channels == 0)
+            {
+                throw new InvalidDataException("The program config element has no channels.");
+            }
         }
         else if (channels == 0)
         {

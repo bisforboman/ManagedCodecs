@@ -15,3 +15,4 @@ samples/*.framemd5
 samples/*.flags
 samples/*.f32
 .claude/worktrees/
+fuzz-work/

@@ -415,13 +415,14 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
     private void DecodeMacroblock(SliceState slice, BitReader r, int mbAddr)
     {
         var type = slice.Header.Type;
-        int mbType = slice.Cabac is not { } c ? (int)r.ReadUe()
+
+        // Inter types come first in P (5, Table 7-13) and B slices (23, Table 7-14), then the 26 intra ones.
+        int interTypes = type switch { SliceType.P => 5, SliceType.B => 23, _ => 0 };
+        int mbType = slice.Cabac is not { } c ? r.ReadUe(interTypes + 25, "mb_type")
             : type == SliceType.P ? CabacPMbType(c, mbAddr)
             : type == SliceType.B ? CabacBMbType(c, mbAddr)
             : CabacIntraMbType(c, mbAddr);
 
-        // Inter types come first in P (5, Table 7-13) and B slices (23, Table 7-14), then the intra ones.
-        int interTypes = type switch { SliceType.P => 5, SliceType.B => 23, _ => 0 };
         if (mbType < interTypes)
         {
             DecodeInterMacroblock(slice, r, mbAddr, mbType);

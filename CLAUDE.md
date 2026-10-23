@@ -129,5 +129,11 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
   `Vector128.IsHardwareAccelerated` throws PlatformNotSupportedException on ARM64: dispatch inside the function.
 - Counting macroblock kinds (I_PCM, sub-8x8 partitions) per picture: FFmpeg's `-debug mb_type` grids come out after
   later frames' headers, so they can't be matched to picture types; count in the decoder with a temporary counter.
+- Fuzzing (`tools/fuzz.sh`): SharpFuzz-instrumented assemblies crash (access violation) without afl-fuzz around
+  them, so seeds and reproductions run from an uninstrumented build (fuzz.sh writes the seeds before instrumenting;
+  reproduce with `dotnet tools/ManagedCodecs.Fuzz/bin/Debug/net10.0/ManagedCodecs.Fuzz.dll <target> <files>`). The
+  sandbox needs `AFL_SKIP_BIN_CHECK=1 AFL_SKIP_CPUFREQ=1 AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES=1` (fuzz.sh sets them),
+  and the `sharpfuzz` global tool lives in `~/.dotnet/tools`, which is not on PATH by default. Many crash files are
+  one bug: group them by the top frame of the stack before fixing.
 - In fragmented MP4, FFmpeg's packet durations are not the file's: its demuxer leaves them unset and libavformat
   fills in the codec frame size (1024 for AAC). Compare with FFmpeg's next dts instead (Mp4ConformanceTests does).

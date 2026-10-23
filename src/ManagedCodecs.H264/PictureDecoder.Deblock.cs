@@ -33,8 +33,38 @@ internal sealed partial class PictureDecoder<TPixel>
         9, 12, 18, 10, 13, 20, 11, 15, 23, 13, 17, 25,
     ];
 
-    /// <summary>Filters the whole picture, macroblock by macroblock in raster order (8.7).</summary>
-    [SkipLocalsInit]
+    // A frame's macroblocks decoded in raster order from the first (every one before this address), and its rows
+    // deblocked so far. Frames are deblocked a row behind decoding; pair-slot pictures (MBAFF frames, field pictures)
+    // all at once in Deblock.
+    private int _decodedPrefix;
+    private int _deblockedRows;
+
+    /// <summary>
+    /// Deblocks the frame's rows that decoding no longer needs unfiltered: a row once the row below it is decoded, as
+    /// intra prediction reads the row above as it was before filtering, and filtering a row changes all of it (its
+    /// vertical edges) but nothing below it. Macroblocks are still filtered in raster order (8.7), so the result is the
+    /// same as filtering the whole picture at the end.
+    /// </summary>
+    private void MacroblockDone(int mbAddr)
+    {
+        if (_pairSlots || mbAddr != _decodedPrefix)
+        {
+            return;
+        }
+
+        // Macroblocks of other slices may already be decoded past this one (slices out of order).
+        do
+        {
+            _decodedPrefix++;
+        }
+        while (_decodedPrefix < _mbCount && _sliceOfMb[_decodedPrefix] >= 0);
+
+        int rows = Math.Max(_deblockedRows, (_decodedPrefix / _widthInMbs) - 1);
+        DeblockRows(_deblockedRows, rows);
+        _deblockedRows = rows;
+    }
+
+    /// <summary>Filters what is left of the picture, macroblock by macroblock in raster order (8.7).</summary>
     public void Deblock()
     {
         if (_pairSlots)
@@ -43,11 +73,25 @@ internal sealed partial class PictureDecoder<TPixel>
             return;
         }
 
+        int height = _mbCount / _widthInMbs;
+        DeblockRows(_deblockedRows, height);
+        _deblockedRows = height;
+    }
+
+    /// <summary>Filters the macroblock rows from <paramref name="firstRow"/> up to <paramref name="endRow"/> of a frame.</summary>
+    [SkipLocalsInit]
+    private void DeblockRows(int firstRow, int endRow)
+    {
+        if (firstRow >= endRow)
+        {
+            return;
+        }
+
         // bS per edge (0..3) and per 4-sample segment along it, for vertical and horizontal edges.
         Span<byte> vertical = stackalloc byte[16];
         Span<byte> horizontal = stackalloc byte[16];
 
-        for (int mbAddr = 0; mbAddr < _mbCount; mbAddr++)
+        for (int mbAddr = firstRow * _widthInMbs; mbAddr < endRow * _widthInMbs; mbAddr++)
         {
             var slice = _slices[_sliceOfMb[mbAddr]];
             if (slice.DisableDeblockingFilterIdc == 1)

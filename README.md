@@ -332,8 +332,9 @@ what the two commands above include and are not comparable with FFmpeg's `bench:
    at and left: dropping the whole-picture clears in `Begin` (skipped, direct and intra macroblocks rely on the
    zeros in `_absMvd` and the motion arrays, so each path would clear its own macroblock instead, about as many
    bytes), one transpose for all four vertical luma edges (`FilterEdge` already skips the transposes of edges whose
-   bS are all 0, which a whole-macroblock transpose would not), and deblocking a macroblock row behind decoding
-   (for cache locality, which matters little with a large L2). Output frames given back with `Dispose` are pooled
+   bS are all 0, which a whole-macroblock transpose would not). Frames are now deblocked a macroblock row behind
+   decoding (no measurable change in time, so cache locality matters little with a large L2), the first step towards
+   frame threading: a reference's upper rows become final while the rest is still being decoded. Output frames given back with `Dispose` are pooled
    (gen2 collections over 5 loops of `h264-bench-720p.mp4`: 33 down to 3). Vector 4x4 and 8x8 inverse transforms
    (#42) were reverted: callgrind counted 1.4% more instructions per loop of `h264-bench-720p.mp4` with them and 0.9%
    more on `h264-high-b.mp4`, and 24 interleaved runs of the builds before and after showed no difference; the 9 and

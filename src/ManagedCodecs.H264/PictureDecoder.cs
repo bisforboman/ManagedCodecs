@@ -145,6 +145,8 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
         Sps = sps;
         Picture = picture;
         DecodedMbCount = 0;
+        _decodedPrefix = 0;
+        _deblockedRows = 0;
         _slices.Clear();
         _fieldParity = fieldParity;
         _pairSlots = fieldParity >= 0;
@@ -265,6 +267,7 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
 
                     DecodeSkip(slice, mbAddr);
                     PairDone(mbAddr);
+                    MacroblockDone(mbAddr);
                     mbAddr += MbStep;
                 }
             }
@@ -279,6 +282,7 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
 
                 DecodeMacroblock(slice, r, mbAddr);
                 PairDone(mbAddr);
+                MacroblockDone(mbAddr);
                 mbAddr += MbStep;
                 moreData = r.MoreRbspData();
             }

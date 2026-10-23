@@ -112,7 +112,8 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
   instantiation, and clip bounds come from `Samples.Max<TPixel>` (a constant for byte; a runtime `(1 << bitDepth) - 1`
   cost intra-heavy streams about 5%).
 - FFmpeg decodes monochrome H.264 to 4:2:0 with flat chroma (128, or 512 at 10 bits): references for gray samples
-  come from `-pix_fmt gray`/`gray10le` (make-samples.sh, by the h264-gray- prefix), the decoder's output is one plane.
+  come from `-vf extractplanes=y` (make-samples.sh, by `gray` in the name), the decoder's output is one plane. Not
+  `-pix_fmt gray`: it rescales a limited-range stream (JM's, no VUI) to full range; libx264's gray is full range.
   xunit theory rows filter by `DisplayName~<sample>`, not `FullyQualifiedName`.
 - Deeper than 10 bits: JM codes macroblocks as I_PCM below about QP -6 at 14 bits (so its streams never reach CAVLC's
   level_prefix 16), segfaults with `EnableIPCM=0`, and writes 4:0:0 with 8-bit chroma, which FFmpeg refuses ("Different

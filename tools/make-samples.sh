@@ -371,7 +371,7 @@ ff -f lavfi -i "testsrc2=size=320x240:rate=50,noise=alls=10:allf=t" -t 0.4 "${X[
 # coded_block_pattern without a chroma part (Table 9-4's 4:0:0 column, CABAC's chroma bins absent), no chroma weights
 # in pred_weight_table. Intra with CABAC and CAVLC; B frames, CAVLC too; motion; fades with explicit weights in P
 # (weightp=2); odd size; 10 bits intra and with B frames; MBAFF; lossless. FFmpeg's decoder outputs gray as 4:2:0 with
-# flat chroma, so their references are taken with -pix_fmt gray or gray10le below (the same luma, checked).
+# flat chroma, so their references take its Y plane alone (below).
 G=(-c:v libx264 -profile:v high -pix_fmt gray)
 ff -f lavfi -i testsrc2=size=320x240:rate=25 -t 0.2 "${G[@]}" -g 1 samples/h264-gray-intra.mp4
 ff -f lavfi -i testsrc2=size=320x240:rate=25 -t 0.2 "${G[@]}" -g 1 -x264-params cabac=0 samples/h264-gray-intra-cavlc.mp4
@@ -457,10 +457,9 @@ cp samples/jm/*.mp4 samples/
 # packet, whole; not for aac-edit-trim, whose packets after the edit are not demuxed). name.trim.f32: decoded audio as
 # FFmpeg gives it by default, trimmed by the edit list.
 for f in samples/*.avi samples/*.mp4; do ff -i "$f" -f framemd5 "${f%.*}.framemd5"; done
-for f in samples/h264-gray-*.mp4; do
-  [[ $f == *10bit* ]] && pix=gray10le || pix=gray
-  ff -i "$f" -pix_fmt $pix -f framemd5 "${f%.*}.framemd5"
-done
+# Monochrome H.264 (by the name): FFmpeg decodes it to 4:2:0 with flat chroma, so the references take its Y plane
+# alone, as it is (extractplanes; -pix_fmt gray would rescale a limited-range stream's samples to full range).
+for f in samples/*gray*.mp4; do ff -i "$f" -vf extractplanes=y -f framemd5 "${f%.*}.framemd5"; done
 for f in samples/*.mp4; do
   ff -copyts -i "$f" -c copy -f framemd5 "${f%.mp4}.packets.framemd5"
   ffprobe -v error -select_streams v:0 -show_packets -show_entries packet=flags -of csv=p=0 "$f" > "${f%.mp4}.packets.flags"

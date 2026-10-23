@@ -249,10 +249,10 @@ what the two commands above include and are not comparable with FFmpeg's `bench:
    Monochrome (chroma_format_idc 0) comes out as `Gray8` or `Gray10`, one plane; it is checked on
    libx264's gray output (High and High 10): no intra_chroma_pred_mode, the coded_block_pattern
    without a chroma part, no chroma weights in pred_weight_table, with CABAC and CAVLC, P and B
-   frames, explicit weights, cropping, MBAFF, 10 bits and lossless; I_PCM from hand-built streams.
-   FFmpeg's decoder outputs such streams as 4:2:0 with flat chroma, so the references are taken
-   with `-pix_fmt gray` and `gray10le`, which keep its luma as is. Field pictures (PAFF) in 4:0:0 are
-   not checked (libx264 does not write them; the field code is the one 4:2:0 uses, with no chroma).
+   frames, explicit weights, cropping, MBAFF, 10 bits and lossless; and on JM's field pictures
+   (PAFF) in 4:0:0, alone and mixed with frame pictures, with B pictures and CAVLC; I_PCM from
+   hand-built streams. FFmpeg's decoder outputs such streams as 4:2:0 with flat chroma, so the
+   references take its Y plane alone (`-vf extractplanes=y`, which leaves the samples as they are).
    Produced by neither, so not checked against FFmpeg: I_PCM (decoded from hand-built streams,
    CAVLC and CABAC), memory management operations 2, 3 and 5 (unit tests),
    B sub-macroblock partitions smaller than 8x8, explicit offsets for bi-predicted blocks (libx264 weights B frames

@@ -2,7 +2,7 @@
 
 Pure managed C# media decoders: no native binaries, Native AOT friendly. MJPEG (bit-exact with FFmpeg), H.264
 Constrained Baseline, Main and High (CAVLC and CABAC, I/P/B, weighted prediction, 8x8 transform, scaling matrices,
-MBAFF, field pictures, 4:2:2, 4:4:4, 10-bit, lossless, bit-exact), AAC LC (within 2^-17 of FFmpeg's float output, measured 3e-7), AVI and MP4
+MBAFF, field pictures, monochrome, 4:2:2, 4:4:4, 10-bit, lossless, bit-exact), AAC LC (within 2^-17 of FFmpeg's float output, measured 3e-7), AVI and MP4
 demuxing. README.md has the layout, the roadmap and what is not supported yet.
 
 ## Core idea
@@ -110,5 +110,8 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
   byte SIMD paths are reached through `typeof(TPixel) == typeof(byte)` branches, which the JIT folds per
   instantiation, and clip bounds come from `Samples.Max<TPixel>` (a constant for byte; a runtime `(1 << bitDepth) - 1`
   cost intra-heavy streams about 5%).
+- FFmpeg decodes monochrome H.264 to 4:2:0 with flat chroma (128, or 512 at 10 bits): references for gray samples
+  come from `-pix_fmt gray`/`gray10le` (make-samples.sh, by the h264-gray- prefix), the decoder's output is one plane.
+  xunit theory rows filter by `DisplayName~<sample>`, not `FullyQualifiedName`.
 - In fragmented MP4, FFmpeg's packet durations are not the file's: its demuxer leaves them unset and libavformat
   fills in the codec frame size (1024 for AAC). Compare with FFmpeg's next dts instead (Mp4ConformanceTests does).

@@ -11,7 +11,7 @@ then the same approach for H.264 + AAC in MP4.
 | `src/ManagedCodecs.Core` | `VideoFrame`, `PixelFormat`, `Packet`, `Rational`, `IDemuxer`, `IVideoDecoder` |
 | `src/ManagedCodecs.Containers` | `AviDemuxer`, `Mp4Demuxer`, and `Demuxer.Open` to pick one by content |
 | `src/ManagedCodecs.Mjpeg` | `MjpegDecoder`: baseline/extended Huffman JPEG, interlaced AVI1, bit-exact with FFmpeg |
-| `src/ManagedCodecs.H264` | `H264Decoder`: Constrained Baseline, Main, High, High 10, High 4:2:2 and High 4:4:4 Predictive profile H.264 (CAVLC, CABAC, I/P/B, weighted prediction, 8x8 transform, scaling matrices, deblocking, 4:2:0, 4:2:2 and 4:4:4, 8 and 10 bits, lossless, progressive and interlaced), bit-exact |
+| `src/ManagedCodecs.H264` | `H264Decoder`: Constrained Baseline, Main, High, High 10, High 4:2:2 and High 4:4:4 Predictive profile H.264 (CAVLC, CABAC, I/P/B, weighted prediction, 8x8 transform, scaling matrices, deblocking, monochrome, 4:2:0, 4:2:2 and 4:4:4, 8 and 10 bits, lossless, progressive and interlaced), bit-exact |
 | `src/ManagedCodecs.Aac` | `AacDecoder`: AAC LC (mono to 7.1, M/S, intensity, PNS, TNS), within 3e-7 of FFmpeg's float output |
 | `src/Shared` | Source files linked into several codec projects (the VLC decoder) |
 | `tools/ManagedCodecs.Cli` | `mcdec`: decodes a file and times it, to compare with `ffmpeg -benchmark` |
@@ -235,6 +235,12 @@ what the two commands above include and are not comparable with FFmpeg's `bench:
    macroblock at QP 0, so lossless next to lossy macroblocks is not checked). x264 before build 151
    also predicted lossless Intra_8x8 blocks from unfiltered neighbours; FFmpeg follows it there
    too, this decoder the spec.
+   Monochrome (chroma_format_idc 0) comes out as `Gray8` or `Gray10`, one plane; it is checked on
+   libx264's gray output (High and High 10): no intra_chroma_pred_mode, the coded_block_pattern
+   without a chroma part, no chroma weights in pred_weight_table, with CABAC and CAVLC, P and B
+   frames, explicit weights, cropping, MBAFF, 10 bits and lossless; I_PCM from hand-built streams.
+   FFmpeg's decoder outputs such streams as 4:2:0 with flat chroma, so the references are taken
+   with `-pix_fmt gray` and `gray10le`, which keep its luma as is.
    Produced by neither, so not checked against FFmpeg: I_PCM (decoded from hand-built streams,
    CAVLC and CABAC), memory management operations 2, 3 and 5 (unit tests),
    B sub-macroblock partitions smaller than 8x8, explicit weights for bi-predicted blocks (libx264 weights B frames

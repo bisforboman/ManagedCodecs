@@ -58,6 +58,9 @@ internal sealed class SbrFrequencies
             index += (numLow - index) / (numNoise + 1 - k);
             Noise[k] = Low[index];
         }
+
+        (PatchStart, PatchBands) = BuildPatches(sampleRate);
+        LimiterTables = [.. Enumerable.Range(0, 4).Select(BuildLimiterTable)];
     }
 
     /// <summary>The first and the (exclusive) last subband of the master table.</summary>
@@ -79,6 +82,17 @@ internal sealed class SbrFrequencies
     public int Kx { get; }
 
     public int M { get; }
+
+    /// <summary>
+    /// The patches of the HF generator (4.6.18.6.3): patch p copies the subbands from PatchStart[p] up, PatchBands[p] of
+    /// them, to the next PatchBands[p] subbands from kx up.
+    /// </summary>
+    public int[] PatchStart { get; }
+
+    public int[] PatchBands { get; }
+
+    /// <summary>The limiter band borders (4.6.18.3.2.4) for each bs_limiter_bands, 0 to 3.</summary>
+    public int[][] LimiterTables { get; }
 
     /// <summary>Bands at frequency resolution 0 (low) or 1 (high).</summary>
     public int Bands(int resolution) => resolution == 0 ? Low.Length - 1 : High.Length - 1;
@@ -127,6 +141,135 @@ internal sealed class SbrFrequencies
         }
 
         return Math.Min(64, k2);
+    }
+
+    // The patch construction of 4.6.18.6.3 (its flowchart): from kx up, each patch copies the highest subbands below k0
+    // it can (from an even subband distance, so the copy keeps the subbands' phase), ending on a master band border, up
+    // to the goal subband of about 16 kHz and then to kx + M; a last patch of fewer than 3 subbands goes.
+    private (int[] Start, int[] Bands) BuildPatches(int sampleRate)
+    {
+        var start = new List<int>();
+        var bands = new List<int>();
+        int numMaster = Master.Length - 1;
+        int msb = K0;
+        int usb = Kx;
+        int goal = Nint(2.048e6 / sampleRate);
+        int k = numMaster;
+        if (goal < Kx + M)
+        {
+            k = 0;
+            while (Master[k] < goal)
+            {
+                k++;
+            }
+        }
+
+        int sb;
+        int rounds = 0;
+        do
+        {
+            if (++rounds > 64)
+            {
+                throw new InvalidDataException("The SBR patches do not reach the top band.");
+            }
+
+            int j = k + 1;
+            int odd;
+            do
+            {
+                if (--j < 0)
+                {
+                    throw new InvalidDataException("No SBR patch fits.");
+                }
+
+                sb = Master[j];
+                odd = (sb - 2 + K0) % 2;
+            }
+            while (sb > K0 - 1 + msb - odd);
+
+            int count = Math.Max(sb - usb, 0);
+            if (count > 0)
+            {
+                if (start.Count == 5)
+                {
+                    throw new InvalidDataException("More than 5 SBR patches.");
+                }
+
+                start.Add(K0 - odd - count);
+                bands.Add(count);
+                usb = sb;
+                msb = sb;
+            }
+            else
+            {
+                msb = Kx;
+            }
+
+            if (Master[k] - sb < 3)
+            {
+                k = numMaster;
+            }
+        }
+        while (sb != Kx + M);
+
+        if (bands.Count > 1 && bands[^1] < 3)
+        {
+            start.RemoveAt(start.Count - 1);
+            bands.RemoveAt(bands.Count - 1);
+        }
+
+        if (start.Count == 0 || start[0] < 1)
+        {
+            throw new InvalidDataException("The SBR patches start below subband 1.");
+        }
+
+        return ([.. start], [.. bands]);
+    }
+
+    // 4.6.18.3.2.4: bs_limiter_bands 0 is one band over the whole range; 1 to 3 (1.2, 2 or 3 bands an octave) start
+    // from the low-resolution table and the patch borders, and drop a border closer than 0.49 bands to the one below
+    // it: the upper one unless it is a patch border, else the lower one unless that is one too.
+    private int[] BuildLimiterTable(int limiterBands)
+    {
+        if (limiterBands == 0)
+        {
+            return [Low[0], Low[^1]];
+        }
+
+        double bandsPerOctave = limiterBands switch { 1 => 1.2, 2 => 2.0, _ => 3.0 };
+        var patchBorders = new int[PatchBands.Length + 1];
+        patchBorders[0] = Kx;
+        for (int p = 0; p < PatchBands.Length; p++)
+        {
+            patchBorders[p + 1] = patchBorders[p] + PatchBands[p];
+        }
+
+        var table = new List<int>(Low);
+        table.AddRange(patchBorders[1..^1]);
+        table.Sort();
+        int k = 1;
+        while (k < table.Count)
+        {
+            double octaves = Math.Log2((double)table[k] / table[k - 1]);
+            if (octaves * bandsPerOctave >= 0.49)
+            {
+                k++;
+            }
+            else if (table[k] == table[k - 1] || Array.IndexOf(patchBorders, table[k]) < 0)
+            {
+                table.RemoveAt(k);
+            }
+            else if (Array.IndexOf(patchBorders, table[k - 1]) < 0)
+            {
+                table.RemoveAt(k - 1);
+            }
+            else
+            {
+                k++;
+            }
+        }
+
+        return [.. table];
     }
 
     // startMin and stopMin before rounding: a frequency of 3 or 6 kHz below 32 kHz, 4/3 and 5/3 of it from 32 and from

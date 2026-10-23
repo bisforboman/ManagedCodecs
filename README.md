@@ -1,8 +1,9 @@
 # ManagedCodecs
 
 Pure managed C# media codecs: no native binaries, Native AOT friendly, and running on WebAssembly too. Decoders for
-MJPEG, H.264 (Constrained Baseline up to High 4:4:4 Predictive) and AAC LC, with AVI, MP4 and raw AAC (ADTS) demuxing, every one
-checked against FFmpeg sample by sample: video **bit-exact**, AAC within 2^-17 of FFmpeg's float output. H.264 decodes
+MJPEG, H.264 (Constrained Baseline up to High 4:4:4 Predictive), AAC LC and HE-AAC, with AVI, MP4 and raw AAC (ADTS)
+demuxing, every one checked against FFmpeg sample by sample: video **bit-exact**, AAC LC within 2^-17 of FFmpeg's float
+output. H.264 decodes
 on several threads if asked, and every decoder has an async API.
 
 ## Layout
@@ -13,7 +14,7 @@ on several threads if asked, and every decoder has an async API.
 | `src/ManagedCodecs.Containers` | `AviDemuxer`, `Mp4Demuxer`, `AdtsDemuxer` (raw .aac), and `Demuxer.Open` to pick one by content |
 | `src/ManagedCodecs.Mjpeg` | `MjpegDecoder`: baseline/extended Huffman JPEG, interlaced AVI1, bit-exact with FFmpeg |
 | `src/ManagedCodecs.H264` | `H264Decoder`: Constrained Baseline, Main, High, High 10, High 4:2:2 and High 4:4:4 Predictive profile H.264 (CAVLC, CABAC, I/P/B, weighted prediction, 8x8 transform, scaling matrices, deblocking, monochrome, 4:2:0, 4:2:2 and 4:4:4, 8 to 14 bits, lossless, progressive and interlaced), bit-exact |
-| `src/ManagedCodecs.Aac` | `AacDecoder`: AAC LC (mono to 7.1, M/S, intensity, PNS, TNS), within 3e-7 of FFmpeg's float output |
+| `src/ManagedCodecs.Aac` | `AacDecoder`: AAC LC (mono to 7.1, M/S, intensity, PNS, TNS), within 3e-7 of FFmpeg's float output; HE-AAC (spectral band replication) |
 | `src/Shared` | Source files linked into several codec projects (the VLC decoder) |
 | `tools/ManagedCodecs.Cli` | `mcdec`: decodes a file and times it, to compare with `ffmpeg -benchmark` (`--threads N` for H.264 frame threading) |
 | `tools/make-samples.sh` | Generates the test samples and FFmpeg's references |
@@ -37,7 +38,12 @@ says feature by feature which encoder made the samples (libx264, OpenH264, JM) a
   4:4:4; 8, 9, 10, 12 and 14 bits; lossless. Bit-exact on streams from libx264, OpenH264 and JM. Frame threading
   (`Threads`).
 - **AAC LC**: mono to 7.1 and program config elements, every window sequence and shape, M/S and intensity stereo,
-  PNS, TNS; within 2^-17 of FFmpeg's float output (measured: 3e-7). Encoder priming is trimmed by the MP4 edit list.
+  PNS, TNS; within 2^-17 of FFmpeg's float output (measured: 3e-7). Encoder priming is trimmed by the MP4 edit list,
+  or by an iTunSMPB tag without one.
+- **HE-AAC** (spectral band replication, at twice the core's rate): signalled in the config or only by its data, mono
+  to 5.1, coupled pairs; within 1e-6 of FFmpeg's float output where its single precision is not the limit (see
+  docs/conformance.md). Parametric stereo (HE-AAC v2) is read but not decoded: such streams come out as their mono
+  core with SBR.
 - **Containers**: AVI (video), MP4 (video and audio tracks, fragmented files too, edit lists of several edits)
   and raw AAC (ADTS), with packets and timestamps as FFmpeg's demuxers give them.
 - **Throughout**: an async API, malformed input that ends in `InvalidDataException` or `NotSupportedException`
@@ -45,8 +51,9 @@ says feature by feature which encoder made the samples (libx264, OpenH264, JM) a
 
 ### Open
 
-- AAC: HE-AAC (SBR, PS): its signalling and SBR data are read, its output not decoded yet (`NotSupportedException`).
-  In ADTS: frames of several raw data blocks, and channel configuration 0.
+- AAC: parametric stereo (HE-AAC v2), downsampled SBR, and SBR's speed (the QMF banks are the spec's sums: 5.1 runs at
+  about 5 times real time, 30 times slower than FFmpeg). In ADTS: frames of several raw data blocks, and channel
+  configuration 0.
 - MJPEG: files from real cameras (the samples are all FFmpeg's), and packets holding one field (FFmpeg decodes none).
 - H.264: separate colour planes, luma and chroma bit depths that differ, monochrome above 10 bits (FFmpeg decodes
   none of these, so checking them needs another reference); error concealment (a damaged picture fails its
@@ -278,8 +285,10 @@ from Android (Apache-2.0). For spectral band replication (HE-AAC), whose specifi
 and 3GPP TS 26.404) is out of the sandbox's reach, the same decoder's SBR sources stand in for it as JM did for MBAFF:
 read for the syntax and the clauses its comments cite, its Huffman codebooks enumerated from its decoding trees, its
 precomputed band tables used to check the spec's formulas; the arithmetic is written from the formulas, in double
-precision, and no code was copied. The QMF banks' 640-tap window is libxaac's (Apache-2.0, in the spec's order),
-whose even taps equal the PacketVideo decoder's own analysis table to the digits it gives. AAC's noise substitution uses the Numerical Recipes random generator
+precision, and no code was copied; where libxaac (Apache-2.0) has the same processes in floating point, it was read
+too. The QMF banks' 640-tap window is libxaac's (in the spec's order), whose even taps equal the PacketVideo decoder's
+own analysis table to the digits it gives; so is the HF adjustment's noise table, whose real parts equal PacketVideo's
+digit for digit. AAC's noise substitution uses the Numerical Recipes random generator
 with the seed FFmpeg uses (the spec leaves the generator open), so noise bands match FFmpeg too.
 For MBAFF (the neighbour table 6-4, the field scans, the field CABAC context maps, the order of the
 deblocking filter's field edges and the co-located field or frame of direct prediction) the ITU's reference decoder, JM (royalty-free, from the ITU), stood

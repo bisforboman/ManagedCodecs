@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Globalization;
 using System.Text;
 
 namespace ManagedCodecs.Containers.Mp4;
@@ -20,6 +21,11 @@ namespace ManagedCodecs.Containers.Mp4;
 /// <see cref="Packet.SkipSamples"/> cuts (encoder priming), a later one at the next whole sample (as in FFmpeg, up to a
 /// sample late). Audio durations run up to the next packet's dts, and the last packet's to the end of the edits. An
 /// empty edit after a real one plays the media from its start, as FFmpeg reads its media time, -1.
+/// </para>
+/// <para>
+/// Without an edit list, the encoder delay of an iTunes-style 'iTunSMPB' tag (the FDK encoder's fdkaac writes one) is
+/// cut from the start of the audio, as FFmpeg cuts it: its first packet's <see cref="Packet.SkipSamples"/>, which can
+/// run on into the next packets.
 /// </para>
 /// <para>
 /// A fragment's samples start at its 'tfdt' decode time, or right after the track's previous sample without one.
@@ -60,6 +66,7 @@ public sealed class Mp4Demuxer : IDemuxer
             Track? video = null;
             Track? audio = null;
             int trackIndex = 0;
+            int priming = 0;
             ReadOnlySpan<byte> mvex = default;
 
             ReadOnlySpan<byte> boxes = moov;
@@ -86,6 +93,10 @@ public sealed class Mp4Demuxer : IDemuxer
                 else if (type == Box.Mvex)
                 {
                     mvex = payload;
+                }
+                else if (type == Box.Udta)
+                {
+                    priming = ITunesPriming(payload);
                 }
             }
 
@@ -131,6 +142,11 @@ public sealed class Mp4Demuxer : IDemuxer
             if (audio is not null)
             {
                 var samples = audio.BuildSamples(movieTimescale);
+                if (priming > 0 && !audio.HasEditList && samples.Length > 0)
+                {
+                    samples[0] = samples[0] with { SkipSamples = priming };
+                }
+
                 audioSamples = samples;
                 Audio = new AudioStreamInfo(
                     audio.Codec,
@@ -151,6 +167,41 @@ public sealed class Mp4Demuxer : IDemuxer
     }
 
     public VideoStreamInfo? Video { get; }
+
+    /// <summary>
+    /// The encoder delay an iTunes-style tag gives, in decoded samples (moov/udta/meta/ilst, a '----' item named
+    /// iTunSMPB whose text is " 00000000 delay padding length ..." in hexadecimal), or 0 without one; FFmpeg takes delays
+    /// from 1 to 16383.
+    /// </summary>
+    private static int ITunesPriming(ReadOnlySpan<byte> udta)
+    {
+        // 'meta' is a full box: version and flags before its children.
+        if (!FindChild(udta, Box.Meta, out var meta) || meta.Length < 4 || !FindChild(meta[4..], Box.Ilst, out var ilst))
+        {
+            return 0;
+        }
+
+        while (NextBox(ref ilst, out uint type, out var item))
+        {
+            if (type != Box.Freeform || !FindChild(item, Box.ItemName, out var name) || name.Length < 4 || !name[4..].SequenceEqual("iTunSMPB"u8))
+            {
+                continue;
+            }
+
+            // 'data': type and locale (8 bytes), then the text.
+            if (!FindChild(item, Box.Data, out var data) || data.Length < 8)
+            {
+                return 0;
+            }
+
+            string[] fields = Encoding.Latin1.GetString(data[8..]).Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            return fields.Length >= 4 && int.TryParse(fields[1], NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture, out int delay) && delay is > 0 and < 16384
+                ? delay
+                : 0;
+        }
+
+        return 0;
+    }
 
     public AudioStreamInfo? Audio { get; }
 
@@ -636,6 +687,8 @@ public sealed class Mp4Demuxer : IDemuxer
             return value;
         }
 
+        public bool HasEditList => _elst is not null;
+
         public Sample[] BuildSamples(uint movieTimescale)
         {
             if (SampleCount > MaxSamples)
@@ -1095,7 +1148,9 @@ public sealed class Mp4Demuxer : IDemuxer
 
         /// <summary>
         /// The start of an AudioSpecificConfig (14496-3 1.6.2.1): audioObjectType, then the sampling
-        /// frequency index (or an explicit 24-bit rate) and channelConfiguration.
+        /// frequency index (or an explicit 24-bit rate) and channelConfiguration. With spectral band replication the rate
+        /// is the SBR rate, as FFmpeg reports it (edit list times convert to the decoder's output at it): after object type
+        /// 5 or 29 (hierarchical signalling), or in the sync extension after an AAC LC core's GASpecificConfig.
         /// </summary>
         private static bool TryReadAudioSpecificConfig(ReadOnlySpan<byte> config, out int sampleRate, out int channels)
         {
@@ -1119,27 +1174,42 @@ public sealed class Mp4Demuxer : IDemuxer
                 return value;
             }
 
-            if (Read(5, config) == 31)
+            int ObjectType(ReadOnlySpan<byte> data)
             {
-                Read(6, config); // audioObjectTypeExt
+                int type = Read(5, data);
+                return type == 31 ? 32 + Read(6, data) : type; // audioObjectTypeExt
             }
 
-            int index = Read(4, config);
-            ReadOnlySpan<int> rates = [96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000, 7350];
-            if (index == 15)
+            int Rate(ReadOnlySpan<byte> data)
             {
-                sampleRate = Read(24, config);
-            }
-            else if (index < rates.Length)
-            {
-                sampleRate = rates[index];
-            }
-            else
-            {
-                return false;
+                int index = Read(4, data);
+                ReadOnlySpan<int> rates = [96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000, 7350];
+                return index == 15 ? Read(24, data) : index < rates.Length ? rates[index] : 0;
             }
 
+            int objectType = ObjectType(config);
+            sampleRate = Rate(config);
             int configuration = Read(4, config);
+            if (objectType is 5 or 29)
+            {
+                sampleRate = Rate(config); // then the core's object type
+            }
+            else if (objectType == 2 && configuration != 0 && config.Length * 8 >= bit + 3 + 16)
+            {
+                // GASpecificConfig: frameLengthFlag, dependsOnCoreCoder (and a 14-bit delay), extensionFlag.
+                Read(1, config);
+                if (Read(1, config) == 1)
+                {
+                    Read(14, config);
+                }
+
+                Read(1, config);
+                if (config.Length * 8 >= bit + 16 && Read(11, config) == 0x2B7 && ObjectType(config) == 5 && Read(1, config) == 1)
+                {
+                    sampleRate = Rate(config);
+                }
+            }
+
             channels = configuration switch
             {
                 >= 1 and <= 6 => configuration,
@@ -1309,6 +1379,12 @@ public sealed class Mp4Demuxer : IDemuxer
         public const uint Esds = 0x65736473;
         public const uint Jpeg = 0x6A706567;
         public const uint Mjpa = 0x6D6A7061;
+        public const uint Udta = 0x75647461;
+        public const uint Meta = 0x6D657461;
+        public const uint Ilst = 0x696C7374;
+        public const uint Freeform = 0x2D2D2D2D; // '----'
+        public const uint ItemName = 0x6E616D65; // 'name'
+        public const uint Data = 0x64617461;
 
         public static string Name(uint type)
         {

@@ -236,9 +236,11 @@ padding in the last packet is not.
 
 ## HE-AAC (spectral band replication)
 
-Read so far, not yet decoded (the decoder refuses SBR output). Samples from the Fraunhofer FDK encoder, committed in
-`samples/heaac/` (`tools/make-heaac-samples.sh`): stereo at 44.1 kHz, mono at 48 kHz, a coupled low-bitrate pair at
-32 kHz, 5.1, ADTS (SBR signalled only by its data), and HE-AAC v2 (parametric stereo). The config's signalling, both
+Samples from the Fraunhofer FDK encoder, committed in `samples/heaac/` (`tools/make-heaac-samples.sh`): stereo at
+44.1 kHz, mono at 48 kHz, a coupled low-bitrate pair at 32 kHz, 5.1, ADTS (SBR signalled only by its data), HE-AAC v2
+(parametric stereo), and a stream with the header's second part (the encoder writes it only with settings other than
+its defaults, so a patched copy makes it: 3 limiter bands an octave, -3 dB limiter gains, no frequency interpolation,
+gains smoothed over time; without it, the other samples use 2 bands, 0 dB, interpolation and no smoothing). The config's signalling, both
 backward-compatible (a sync extension after the core's config) and hierarchical (object type 5 first, a unit test),
 and SBR data in the fill element after each SCE and CPE (none after the LFE). Every frame of every sample is read to
 its last bit (an SBR payload leaves only its padding to a whole byte; changing how one field is read breaks that on
@@ -251,7 +253,31 @@ The QMF banks (32-band analysis, 64-band synthesis) are written as the spec's su
 the upper 32 bands empty, SBR's output where it adds nothing, gives the core's signal at twice the rate: unit gain
 across the core's band to the window's ripple (about 1e-3; the bank is nearly, not perfectly, reconstructing), a delay
 of 578 output samples, and no fractional delay (unit tests; reading samples in the wrong order, the window's odd taps
-or a kernel offset by one breaks them). Their delay against FFmpeg's output waits for the decoded SBR.
+or a kernel offset by one breaks them). The kernels' cos and sin are computed without Math.Cos and Math.Sin, whose
+last bits differ between .NET and WebAssembly's runtime, which the HF generator's prediction can magnify.
+
+Decoded output (`SbrConformanceTests`) against FFmpeg's (name.sbr.f32: at the SBR rate; MP4 without the 2048 samples of
+encoder delay its iTunSMPB tag gives, which the demuxer reads as FFmpeg's does when there is no edit list; mono in
+stereo, as FFmpeg's decoder makes it, with both channels equal). heaac-edit.mp4 is the 44.1 kHz sample remuxed by
+FFmpeg, whose muxer writes that delay as an edit list instead, in the SBR rate's timescale: an MP4 track whose config
+signals SBR reports the SBR rate, as FFmpeg's does, so the edit's samples count the decoder's output (at the core's rate
+half of them would be skipped). The 5.1 sample's LFE, which has no SBR data and so
+goes through the QMF banks alone, agrees to 2e-7: the banks, the 578-sample delay and the 6 time slots the high band
+lags the analysis by are right. The SBR channels agree to about 1e-6 in most frames but differ by up to about 5e-3 of
+the signal's peak in some: FFmpeg's single precision, not a different formula. The HF generator's prediction solves a
+2x2 system per subband that is nearly singular where the subband holds one sinusoid, as the samples' test tones make
+it; computing the coefficients in single precision moves this decoder's output by as much, in the same frames (the
+two differences' logarithms correlate 0.86 to 0.93 over the frames), and adding a little noise to the samples' tones
+shrinks both. So the test bounds the largest difference at 1e-2 of the channel's peak and the mean one at 1e-4 (the
+samples measure 1e-6 to 2e-5). Mutations show what that catches: 16 of 19 (smoothing weights reversed, noise added
+under a sinusoid, the previous frame's transient ignored, unsmoothed chirp factors, sinusoids' alternating sign,
+the noise table's step, no limiter, no boost, frequency interpolation inverted, the sinusoid band flag, sinusoids
+starting an envelope late, balances not doubled, noise floor time deltas, the limiter's band merging, the second noise
+floor) fail it; not caught: epsilon 1 in the gains (it matters only in near-silent bands), the prediction's 1e-6
+relaxation, and dropping a last patch of fewer than 3 subbands (no sample's band layout leaves one). The samples are
+checked to use what they are named for: filtering by the HF generator, cut gains, transient envelopes, sinusoids, and
+in the header sample smoothing, no interpolation and its limiter settings. Parametric stereo is not decoded: HE-AAC v2
+comes out as its mono core with SBR, of which only the sample count is checked.
 ## ADTS (raw AAC)
 
 Raw AAC files (ADTS, `AdtsDemuxer`) demux packet by packet as FFmpeg's

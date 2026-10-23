@@ -41,7 +41,8 @@ public static class CodecIds
 /// <param name="Duration">Duration in the stream's time base.</param>
 /// <param name="SkipSamples">
 /// Audio: how many decoded samples (per channel) at the start of this packet come before the
-/// presentation starts, such as encoder priming that an edit list cuts off; the decoder drops them.
+/// presentation starts, such as encoder priming that an edit list cuts off; the decoder drops them. More than the packet
+/// decodes to (a delay given for the whole stream) runs on into the next packets.
 /// </param>
 /// <param name="Discard">
 /// To be decoded but not shown: a packet an edit list leaves out that later ones need, such as the frames from the
@@ -159,8 +160,8 @@ public interface IAudioDecoder
     AudioFrame Decode(ReadOnlySpan<byte> packet);
 
     /// <summary>
-    /// Decodes one packet and drops its first <see cref="Packet.SkipSamples"/> samples, so the
-    /// output starts where the container says presentation starts, or all of them for a
+    /// Decodes one packet and drops its first <see cref="Packet.SkipSamples"/> samples (those past its own from the next
+    /// packets'), so the output starts where the container says presentation starts, or all of them for a
     /// <see cref="Packet.Discard"/> packet. A packet can come out empty.
     /// </summary>
     AudioFrame Decode(Packet packet);

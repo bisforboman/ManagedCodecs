@@ -49,6 +49,26 @@ internal sealed class SbrChannelData
     public bool[] AddHarmonic { get; } = new bool[64];
 
     /// <summary>
+    /// The envelopes' energies (E_Orig) per envelope and band, and the noise floors' noise-to-signal ratios (Q_Orig) per
+    /// noise floor and band, in the 16-bit sample range's energy: set by <see cref="SbrElement"/> once both channels of a
+    /// pair are decoded.
+    /// </summary>
+    public double[][] EnvelopeEnergy { get; } = [.. Enumerable.Range(0, 5).Select(_ => new double[64])];
+
+    public double[][] NoiseRatio { get; } = [new double[5], new double[5]];
+
+    /// <summary>The envelope and noise floor values with their deltas summed (4.6.18.3.3), balances in steps of 2.</summary>
+    public int[][] EnvelopeValue { get; } = [.. Enumerable.Range(0, 5).Select(_ => new int[64])];
+
+    public int[][] NoiseValue { get; } = [new int[5], new int[5]];
+
+    // The last envelope (with its resolution) and noise floor of the previous frame: what its first ones' time deltas
+    // add to.
+    private readonly int[] _lastEnvelope = new int[64];
+    private readonly int[] _lastNoise = new int[5];
+    private int _lastResolution;
+
+    /// <summary>
     /// sbr_grid (Table 4.65): the frame class, envelope borders and resolutions, and the noise floor borders (4.6.18.3.3),
     /// for frames of 16 time slots (1024-sample cores).
     /// </summary>
@@ -294,6 +314,75 @@ internal sealed class SbrChannelData
         {
             AddHarmonic[k] = present && r.ReadFlag();
         }
+    }
+
+    /// <summary>
+    /// Sums the deltas (4.6.18.3.3): in frequency from the first value, or in time from the envelope before (the previous
+    /// frame's last for the first), mapped across a change of frequency resolution. A coupled pair's balances count
+    /// double (the right channel's values are coded in half the level's steps).
+    /// </summary>
+    public void DecodeValues(SbrFrequencies frequencies, bool balance)
+    {
+        int factor = balance ? 2 : 1;
+        int[] previous = _lastEnvelope;
+        int previousResolution = _lastResolution;
+        for (int l = 0; l < NumEnvelopes; l++)
+        {
+            int resolution = FrequencyResolution[l];
+            int bands = frequencies.Bands(resolution);
+            int[] values = EnvelopeValue[l];
+            int[] coded = Envelope[l];
+            for (int k = 0; k < bands; k++)
+            {
+                int start = DeltaTimeEnvelope[l] ? previous[MapBand(frequencies, k, resolution, previousResolution)] : k == 0 ? 0 : values[k - 1];
+                values[k] = start + (factor * coded[k]);
+            }
+
+            previous = values;
+            previousResolution = resolution;
+        }
+
+        previous.AsSpan(0, frequencies.Bands(previousResolution)).CopyTo(_lastEnvelope);
+        _lastResolution = previousResolution;
+
+        int[] previousNoise = _lastNoise;
+        for (int l = 0; l < NumNoiseFloors; l++)
+        {
+            int[] values = NoiseValue[l];
+            for (int k = 0; k < frequencies.NoiseBands; k++)
+            {
+                int start = DeltaTimeNoise[l] ? previousNoise[k] : k == 0 ? 0 : values[k - 1];
+                values[k] = start + (factor * NoiseFloor[l][k]);
+            }
+
+            previousNoise = values;
+        }
+
+        previousNoise.AsSpan(0, frequencies.NoiseBands).CopyTo(_lastNoise);
+    }
+
+    // The band at the previous envelope's resolution that band k at this resolution takes its time delta from: the same
+    // band, the low-resolution band a high one lies in, or the high-resolution band a low one starts with.
+    private static int MapBand(SbrFrequencies frequencies, int k, int resolution, int previousResolution)
+    {
+        if (resolution == previousResolution)
+        {
+            return k;
+        }
+
+        if (resolution == 1)
+        {
+            int i = 0;
+            while (i + 1 < frequencies.Low.Length - 1 && frequencies.Low[i + 1] <= frequencies.High[k])
+            {
+                i++;
+            }
+
+            return i;
+        }
+
+        int index = Array.IndexOf(frequencies.High, frequencies.Low[k]);
+        return index >= 0 ? index : throw new InvalidDataException("An SBR low-resolution band border is not a high-resolution one.");
     }
 
     private static int PointerBits(int numEnvelopes) => numEnvelopes switch { 1 => 1, 2 or 3 => 2, _ => 3 };

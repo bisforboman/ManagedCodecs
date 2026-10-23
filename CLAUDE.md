@@ -2,7 +2,7 @@
 
 Pure managed C# media decoders: no native binaries, Native AOT friendly. MJPEG (bit-exact with FFmpeg), H.264
 Constrained Baseline, Main and High (CAVLC and CABAC, I/P/B, weighted prediction, 8x8 transform, scaling matrices,
-MBAFF, field pictures, monochrome, 4:2:2, 4:4:4, 9 to 14 bits, lossless, bit-exact), AAC LC (within 2^-17 of FFmpeg's float output, measured 3e-7), AVI, MP4
+MBAFF, field pictures, monochrome, 4:2:2, 4:4:4, 9 to 14 bits, lossless, bit-exact), AAC LC (within 2^-17 of FFmpeg's float output, measured 3e-7), HE-AAC (SBR; FFmpeg's single precision limits the match, docs/conformance.md), AVI, MP4
 and ADTS demuxing. README.md has the layout, the status and what is still open;
 docs/conformance.md what each feature is checked against.
 
@@ -158,3 +158,9 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
   the first's `Begin` (which resets both fields' slots), and its frame is copied out only once the first is done.
 - In fragmented MP4, FFmpeg's packet durations are not the file's: its demuxer leaves them unset and libavformat
   fills in the codec frame size (1024 for AAC). Compare with FFmpeg's next dts instead (Mp4ConformanceTests does).
+- HE-AAC: FFmpeg's SBR is single precision, and the HF generator's prediction is nearly singular for a subband holding
+  one sinusoid, so its output moves by up to about 5e-3 of the peak there (this decoder's does too in float): compare
+  with a loose largest and a tight mean difference, and check a suspected bug by whether it moves the mean. Math.Cos and
+  Math.Sin differ in their last bit between .NET and the WebAssembly runtime, which that prediction can magnify into the
+  output (wasm-check.sh fails): tables that feed SBR are computed in arithmetic alone (`QmfTrig`). The FDK encoder
+  writes the SBR header's second part only with non-default settings (a patched copy, `make-heaac-samples.sh`).

@@ -477,6 +477,9 @@ cp samples/jm/*.mp4 samples/
 # by its data (ADTS), mono to 5.1, coupled pairs, and parametric stereo. tools/make-heaac-samples.sh says how each was
 # made.
 cp samples/heaac/* samples/
+# HE-AAC remuxed by FFmpeg, whose muxer writes the encoder delay as an edit list in the SBR rate's timescale (the FDK
+# front end writes an iTunSMPB tag instead): the edit's samples are the decoder's output samples, not the core's.
+ff -i samples/heaac-stereo-44k.mp4 -c copy samples/heaac-edit.mp4
 
 # ---- FFmpeg's references ----
 # name.framemd5: decoded frames. name.packets.csv: demuxed packets as ffprobe lists them (the demuxer's own timestamps,
@@ -497,11 +500,15 @@ done
 # Raw AAC: packets as FFmpeg's demuxer gives them (whole ADTS frames), and every decoded sample (no edit list).
 for f in samples/*.aac; do
   ff -copyts -i "$f" -c copy -f framemd5 "${f%.aac}.packets.framemd5"
-  [[ $f == samples/heaac-* ]] || ff -i "$f" -f f32le "${f%.aac}.f32"  # HE-AAC: SBR output is not decoded yet
+  [[ $f == samples/heaac-* ]] || ff -i "$f" -f f32le "${f%.aac}.f32"  # HE-AAC: below
 done
 for f in samples/aac-*.mp4 samples/h264-with-audio.mp4 samples/h264-audio-edits.mp4 samples/fmp4-*.mp4; do
   [[ $f == samples/aac-edit-trim.mp4 || $f == *edits* ]] || ff -ignore_editlist 1 -i "$f" -map 0:a:0 -f f32le "${f%.mp4}.f32"
   ff -i "$f" -map 0:a:0 -f f32le "${f%.mp4}.trim.f32"
 done
+# HE-AAC: name.sbr.f32, decoded audio as FFmpeg gives it by default: at the SBR rate, without the encoder delay an MP4
+# file's iTunSMPB tag gives (ADTS has none), and in stereo for a mono stream (FFmpeg's decoder assumes parametric
+# stereo could come).
+for f in samples/heaac-*.mp4 samples/heaacv2-*.mp4 samples/heaac-*.aac; do ff -i "$f" -f f32le "${f%.*}.sbr.f32"; done
 
 echo "Samples and references written to samples/."

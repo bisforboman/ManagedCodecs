@@ -60,6 +60,21 @@ if wanted heaac-adts; then
   "$fdk/aac-enc" -t 5 -r 48000 "$work/in.wav" "$out/heaac-adts.aac" > /dev/null
 fi
 
+# The SBR header's second part (bs_header_extra_2): the FDK encoder writes it only with settings other than its
+# defaults, which it never chooses, so decoders take the spec's (2 limiter bands an octave, limiter gains of 0 dB,
+# frequency interpolation, no smoothing over time). A copy of the tree with three of them changed (3 bands, -3 dB, no
+# interpolation; its smoothing setting, on, then goes out with them) makes a stream that uses the other paths.
+if wanted heaac-header2; then
+  git -C "$fdk/.." archive HEAD | (mkdir "$work/fdk2" && tar -x -C "$work/fdk2")
+  sed -i 's/config->sbr_limiter_bands = SBR_LIMITER_BANDS_DEFAULT;/config->sbr_limiter_bands = 3;/
+    s/config->sbr_limiter_gains = SBR_LIMITER_GAINS_DEFAULT;/config->sbr_limiter_gains = 0;/
+    s/config->sbr_interpol_freq = SBR_INTERPOL_FREQ_DEFAULT;/config->sbr_interpol_freq = 0;/' \
+    "$(find "$work/fdk2" -path '*libSBRenc/src/sbr_encoder.cpp')"
+  cmake -S "$work/fdk2" -B "$work/fdk2/build" > /dev/null && cmake --build "$work/fdk2/build" -j4 > /dev/null
+  ff -f lavfi -i "aevalsrc=$music|$music2:s=44100:d=3" -c:a pcm_s16le "$work/in.wav"
+  LD_LIBRARY_PATH=$work/fdk2/build fdkaac --silent -p 5 -b 48000 -o "$out/heaac-header2.mp4" "$work/in.wav"
+fi
+
 # HE-AAC v2: a mono core with SBR and parametric stereo data in the SBR extension.
 if wanted heaacv2-stereo; then
   ff -f lavfi -i "aevalsrc=$music|$music2:s=44100:d=3" -c:a pcm_s16le "$work/in.wav"

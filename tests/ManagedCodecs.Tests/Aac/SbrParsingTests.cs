@@ -12,7 +12,7 @@ namespace ManagedCodecs.Tests.Aac;
 public class SbrParsingTests
 {
     public static TheoryData<string> Samples() =>
-        new(new[] { "heaac-stereo-44k.mp4", "heaac-mono-48k.mp4", "heaac-stereo-low.mp4", "heaac-5.1.mp4", "heaac-adts.aac", "heaacv2-stereo.mp4" }
+        new(new[] { "heaac-stereo-44k.mp4", "heaac-mono-48k.mp4", "heaac-stereo-low.mp4", "heaac-5.1.mp4", "heaac-adts.aac", "heaacv2-stereo.mp4", "heaac-header2.mp4" }
             .Where(name => TestSamples.Directory is not null && File.Exists(TestSamples.PathOf(name))));
 
     [Fact]
@@ -183,17 +183,5 @@ public class SbrParsingTests
         }
 
         Assert.Equal(sampleName.StartsWith("heaacv2", StringComparison.Ordinal), stats.SbrParametricStereoFrames > 0);
-    }
-
-    /// <summary>Until its output is decoded, SBR is refused rather than its core's half band given.</summary>
-    [Theory]
-    [MemberData(nameof(Samples))]
-    public void SbrOutput_NotSupportedYet(string sampleName)
-    {
-        using var demuxer = Demuxer.Open(TestSamples.PathOf(sampleName));
-        var audio = demuxer.Audio!;
-        var decoder = new AacDecoder(audio);
-        var packet = demuxer.ReadPackets().First(p => p.StreamIndex == audio.StreamIndex);
-        Assert.Throws<NotSupportedException>(() => decoder.Decode(packet));
     }
 }

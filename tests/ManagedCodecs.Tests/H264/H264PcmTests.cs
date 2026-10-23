@@ -80,7 +80,7 @@ public class H264PcmTests
             }
 
             w.Ue((uint)bitDepth - 8); // bit_depth_luma_minus8
-            w.Ue((uint)bitDepth - 8); // bit_depth_chroma_minus8
+            w.Ue(chromaFormat == 0 ? 10u - (uint)bitDepth : (uint)bitDepth - 8); // bit_depth_chroma_minus8: unused in 4:0:0, so set apart
             w.Bit(0); // qpprime_y_zero_transform_bypass_flag
             w.Bit(0); // seq_scaling_matrix_present_flag
         }

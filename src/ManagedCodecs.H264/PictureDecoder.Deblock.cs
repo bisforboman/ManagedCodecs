@@ -575,24 +575,25 @@ internal sealed partial class PictureDecoder<TPixel>
     }
 
     /// <summary>
-    /// The same filter on up to 16 positions at once. The samples across the edge (p3 .. q3) are
-    /// gathered into rows, filtered in 16-bit lanes with per-lane bS, and written back.
+    /// The same filter on up to 16 positions at once, in registers: the samples across the edge
+    /// (p3 .. q3) loaded as rows (horizontal edges) or transposed from them (vertical ones),
+    /// filtered in 16-bit lanes with per-lane bS, and written back.
     /// </summary>
-    [SkipLocalsInit]
     private static void FilterEdgeVector(byte[] plane, int q0, int across, int along, int length, ReadOnlySpan<byte> strengths, int segmentShift, int indexA, int alpha, int beta, bool chroma)
     {
-        // taps[k * 16 + i]: sample k (0 = p3, 3 = p0, 4 = q0, 7 = q3) at position i along the edge.
-        Span<byte> taps = stackalloc byte[(8 * 16) + 16];
-        int firstTap = chroma ? 2 : 0;
-        int lastTap = chroma ? 5 : 7;
-        Gather(plane, q0, across, along, length, taps, firstTap, lastTap);
+        var parameters = new EdgeParameters(indexA, alpha, beta);
 
-        Span<short> lanes = stackalloc short[4 * 16];
-        SetLanes(lanes, 0, length, strengths, segmentShift, indexA, alpha, beta, tcShift: 0);
-        FilterTaps(taps, length, lanes, chroma, 255);
-
-        // Only p2 .. q2 (luma) or p0, q0 (chroma) can change.
-        Scatter(plane, q0, across, along, length, taps, chroma ? 3 : 1, chroma ? 4 : 6);
+        // Four lanes to a segment, or two (8-sample chroma edges, whose lanes 8-15 repeat 0-7).
+        var bs = SegmentLanes(strengths, segmentShift == 2 ? LumaSegments : ChromaSegments);
+        if (across == 1)
+        {
+            // An edge of 8 rows takes them twice: lanes 8-15 are filtered and written back alike.
+            FilterColumns(plane, plane, q0 - 4, length == 16 ? q0 - 4 + (8 * along) : q0 - 4, along, bs, parameters, parameters, chroma);
+        }
+        else
+        {
+            FilterRows(plane, q0, across, length, bs, parameters, chroma);
+        }
     }
 
     /// <summary>
@@ -667,56 +668,36 @@ internal sealed partial class PictureDecoder<TPixel>
 
         byte[] cb = Unsafe.As<byte[]>(cbPlane);
         byte[] cr = Unsafe.As<byte[]>(crPlane);
-
-        Span<short> lanes = stackalloc short[4 * 16];
-        bool any = false;
-        for (int c = 0; c < 2; c++)
-        {
-            int qpAv = c == 0 ? (qpPCb + qpQCb + 1) >> 1 : (qpPCr + qpQCr + 1) >> 1;
-            int indexA = Math.Clamp(qpAv + alphaOffset, 0, 51);
-            int alpha = Alpha[indexA];
-            int beta = Beta[Math.Clamp(qpAv + betaOffset, 0, 51)];
-            any |= alpha != 0 && beta != 0;
-
-            // alpha 0 (or beta 0) lets no sample of the component pass the filter's test.
-            SetLanes(lanes, c * 8, 8, strengths, 1, indexA, beta == 0 ? 0 : alpha, beta, tcShift: 0);
-        }
-
-        if (!any)
+        var cbParameters = ChromaParameters(qpPCb, qpQCb, alphaOffset, betaOffset, out bool cbFiltered);
+        var crParameters = ChromaParameters(qpPCr, qpQCr, alphaOffset, betaOffset, out bool crFiltered);
+        if (!cbFiltered && !crFiltered)
         {
             return;
         }
 
-        Span<byte> taps = stackalloc byte[(8 * 16) + 16];
+        var bs = SegmentLanes(strengths, ChromaSegments);
         if (across == 1)
         {
-            TransposeIn(cb, q0 - 4, cr, q0 - 4, along, taps);
+            FilterColumns(cb, cr, q0 - 4, q0 - 4, along, bs, cbParameters, crParameters, chroma: true);
         }
         else
         {
-            for (int k = 2; k <= 5; k++)
-            {
-                int start = q0 + ((k - 4) * across);
-                MemoryMarshal.Write(taps[(k * 16)..], MemoryMarshal.Read<ulong>(cb.AsSpan(start, 8)));
-                MemoryMarshal.Write(taps[((k * 16) + 8)..], MemoryMarshal.Read<ulong>(cr.AsSpan(start, 8)));
-            }
+            FilterChromaRows(cb, cr, q0, across, bs, cbParameters, crParameters);
         }
+    }
 
-        FilterTaps(taps, 16, lanes, chroma: true, 255);
-
-        if (across == 1)
-        {
-            TransposeOut(taps, cb, q0 - 4, cr, q0 - 4, along);
-        }
-        else
-        {
-            for (int k = 3; k <= 4; k++)
-            {
-                int start = q0 + ((k - 4) * across);
-                MemoryMarshal.Write(cb.AsSpan(start, 8), MemoryMarshal.Read<ulong>(taps[(k * 16)..]));
-                MemoryMarshal.Write(cr.AsSpan(start, 8), MemoryMarshal.Read<ulong>(taps[((k * 16) + 8)..]));
-            }
-        }
+    /// <summary>
+    /// A chroma component's parameters for <see cref="FilterChromaEdge"/>; <paramref name="filtered"/>
+    /// false when alpha or beta is 0, which lets no sample pass (alpha is then 0 in the parameters).
+    /// </summary>
+    private static EdgeParameters ChromaParameters(int qpP, int qpQ, int alphaOffset, int betaOffset, out bool filtered)
+    {
+        int qpAv = (qpP + qpQ + 1) >> 1;
+        int indexA = Math.Clamp(qpAv + alphaOffset, 0, 51);
+        int alpha = Alpha[indexA];
+        int beta = Beta[Math.Clamp(qpAv + betaOffset, 0, 51)];
+        filtered = alpha != 0 && beta != 0;
+        return new EdgeParameters(indexA, filtered ? alpha : 0, beta);
     }
 
     /// <summary>
@@ -766,379 +747,556 @@ internal sealed partial class PictureDecoder<TPixel>
     private static short Tc0Of(int bS, int indexA) => bS is > 0 and < 4 ? Tc0[(indexA * 3) + bS - 1] : (short)0;
 
     /// <summary>
-    /// The filter (8.7.2.3, 8.7.2.4) on <paramref name="length"/> positions of gathered taps, eight
-    /// 16-bit lanes at a time, with the lane parameters of <see cref="SetLanes"/>. The taps are
-    /// bytes (8-bit samples, widened as they are loaded) or 16-bit samples up to <paramref name="maxSample"/>.
+    /// The filter (8.7.2.3, 8.7.2.4) on <paramref name="length"/> positions of gathered 16-bit
+    /// taps (taps[k * 16 + i]: sample k, 0 = p3 .. 7 = q3, at position i), eight lanes at a time,
+    /// with the lane parameters of <see cref="SetLanes"/>; results clipped to 0 .. <paramref name="maxSample"/>.
     /// </summary>
-    private static void FilterTaps<TTap>(Span<TTap> taps, int length, ReadOnlySpan<short> lanes, bool chroma, short maxSample)
-        where TTap : unmanaged
+    private static void FilterTaps(Span<short> taps, int length, ReadOnlySpan<short> lanes, bool chroma, short maxSample)
     {
-        var maxV = Vector128.Create(typeof(TTap) == typeof(byte) ? (short)255 : maxSample);
+        var maxV = Vector128.Create(maxSample);
         for (int h = 0; h < length; h += 8)
         {
             var bs = Vector128.Create(lanes.Slice(h, 8));
             var tc0 = Vector128.Create(lanes.Slice(16 + h, 8));
             var alphaV = Vector128.Create(lanes.Slice(32 + h, 8));
             var betaV = Vector128.Create(lanes.Slice(48 + h, 8));
-            var p1 = LoadTap(taps, 2, h);
-            var p0 = LoadTap(taps, 3, h);
-            var q0v = LoadTap(taps, 4, h);
-            var q1 = LoadTap(taps, 5, h);
-
-            var filter = Vector128.GreaterThan(bs, Vector128<short>.Zero)
-                & Vector128.LessThan(Vector128.Abs(p0 - q0v), alphaV)
-                & Vector128.LessThan(Vector128.Abs(p1 - p0), betaV)
-                & Vector128.LessThan(Vector128.Abs(q1 - q0v), betaV);
-            if (filter == Vector128<short>.Zero)
-            {
-                continue;
-            }
-
-            var strong = Vector128.Equals(bs, Vector128.Create((short)4));
-            var one = Vector128.Create((short)1);
-            var two = Vector128.Create((short)2);
-            var four = Vector128.Create((short)4);
-
+            EdgeLanes t;
+            t.P1 = LoadTap(taps, 2, h);
+            t.P0 = LoadTap(taps, 3, h);
+            t.Q0 = LoadTap(taps, 4, h);
+            t.Q1 = LoadTap(taps, 5, h);
             if (chroma)
             {
-                var tc = tc0 + one;
-                var delta = Vector128.Clamp((((q0v - p0) << 2) + (p1 - q1) + four) >> 3, -tc, tc);
-                var p0n = Vector128.Clamp(p0 + delta, Vector128<short>.Zero, maxV);
-                var q0n = Vector128.Clamp(q0v - delta, Vector128<short>.Zero, maxV);
-                var p0s = ((p1 << 1) + p0 + q1 + two) >> 2;
-                var q0s = ((q1 << 1) + q0v + p1 + two) >> 2;
-                StoreTap(taps, 3, h, maxV, Vector128.ConditionalSelect(filter, Vector128.ConditionalSelect(strong, p0s, p0n), p0));
-                StoreTap(taps, 4, h, maxV, Vector128.ConditionalSelect(filter, Vector128.ConditionalSelect(strong, q0s, q0n), q0v));
-                continue;
+                t.P3 = t.P2 = t.Q2 = t.Q3 = default;
             }
-
-            var p3 = LoadTap(taps, 0, h);
-            var p2 = LoadTap(taps, 1, h);
-            var q2 = LoadTap(taps, 6, h);
-            var q3 = LoadTap(taps, 7, h);
-            var ap = Vector128.LessThan(Vector128.Abs(p2 - p0), betaV);
-            var aq = Vector128.LessThan(Vector128.Abs(q2 - q0v), betaV);
-
-            // bS < 4 (8.7.2.3); the masks are -1 where true, so subtracting them adds one.
-            var tcL = tc0 - ap - aq;
-            var deltaL = Vector128.Clamp((((q0v - p0) << 2) + (p1 - q1) + four) >> 3, -tcL, tcL);
-            var p0Normal = Vector128.Clamp(p0 + deltaL, Vector128<short>.Zero, maxV);
-            var q0Normal = Vector128.Clamp(q0v - deltaL, Vector128<short>.Zero, maxV);
-            var average = (p0 + q0v + one) >> 1;
-            var p1Normal = Vector128.ConditionalSelect(ap, p1 + Vector128.Clamp((p2 + average - (p1 << 1)) >> 1, -tc0, tc0), p1);
-            var q1Normal = Vector128.ConditionalSelect(aq, q1 + Vector128.Clamp((q2 + average - (q1 << 1)) >> 1, -tc0, tc0), q1);
-
-            var strongFilter = filter & strong;
-            if (strongFilter == Vector128<short>.Zero)
+            else
             {
-                // Only bS < 4 here, which is every internal edge.
-                StoreTap(taps, 2, h, maxV, Vector128.ConditionalSelect(filter, p1Normal, p1));
-                StoreTap(taps, 3, h, maxV, Vector128.ConditionalSelect(filter, p0Normal, p0));
-                StoreTap(taps, 4, h, maxV, Vector128.ConditionalSelect(filter, q0Normal, q0v));
-                StoreTap(taps, 5, h, maxV, Vector128.ConditionalSelect(filter, q1Normal, q1));
+                t.P3 = LoadTap(taps, 0, h);
+                t.P2 = LoadTap(taps, 1, h);
+                t.Q2 = LoadTap(taps, 6, h);
+                t.Q3 = LoadTap(taps, 7, h);
+            }
+
+            if (!FilterLanes(ref t, bs, tc0, alphaV, betaV, chroma, maxV))
+            {
                 continue;
             }
 
-            // bS == 4 (8.7.2.4).
-            var small = Vector128.LessThan(Vector128.Abs(p0 - q0v), (alphaV >> 2) + Vector128.Create((short)2));
-            var sp = ap & small;
-            var sq = aq & small;
-            var p0Strong = Vector128.ConditionalSelect(sp, (p2 + (p1 << 1) + (p0 << 1) + (q0v << 1) + q1 + four) >> 3, ((p1 << 1) + p0 + q1 + two) >> 2);
-            var p1Strong = Vector128.ConditionalSelect(sp, (p2 + p1 + p0 + q0v + two) >> 2, p1);
-            var p2Strong = Vector128.ConditionalSelect(sp, ((p3 << 1) + (p2 * 3) + p1 + p0 + q0v + four) >> 3, p2);
-            var q0Strong = Vector128.ConditionalSelect(sq, (p1 + (p0 << 1) + (q0v << 1) + (q1 << 1) + q2 + four) >> 3, ((q1 << 1) + q0v + p1 + two) >> 2);
-            var q1Strong = Vector128.ConditionalSelect(sq, (p0 + q0v + q1 + q2 + two) >> 2, q1);
-            var q2Strong = Vector128.ConditionalSelect(sq, ((q3 << 1) + (q2 * 3) + q1 + q0v + p0 + four) >> 3, q2);
+            if (!chroma)
+            {
+                StoreTap(taps, 1, h, maxV, t.P2);
+                StoreTap(taps, 2, h, maxV, t.P1);
+                StoreTap(taps, 5, h, maxV, t.Q1);
+                StoreTap(taps, 6, h, maxV, t.Q2);
+            }
 
-            StoreTap(taps, 1, h, maxV, Vector128.ConditionalSelect(strongFilter, p2Strong, p2));
-            StoreTap(taps, 2, h, maxV, Vector128.ConditionalSelect(filter, Vector128.ConditionalSelect(strong, p1Strong, p1Normal), p1));
-            StoreTap(taps, 3, h, maxV, Vector128.ConditionalSelect(filter, Vector128.ConditionalSelect(strong, p0Strong, p0Normal), p0));
-            StoreTap(taps, 4, h, maxV, Vector128.ConditionalSelect(filter, Vector128.ConditionalSelect(strong, q0Strong, q0Normal), q0v));
-            StoreTap(taps, 5, h, maxV, Vector128.ConditionalSelect(filter, Vector128.ConditionalSelect(strong, q1Strong, q1Normal), q1));
-            StoreTap(taps, 6, h, maxV, Vector128.ConditionalSelect(strongFilter, q2Strong, q2));
+            StoreTap(taps, 3, h, maxV, t.P0);
+            StoreTap(taps, 4, h, maxV, t.Q0);
         }
     }
 
-    private static void Gather(byte[] plane, int q0, int across, int along, int length, Span<byte> taps, int firstTap, int lastTap)
+    /// <summary>p3 .. q3 at eight positions along an edge, in 16-bit lanes.</summary>
+    private struct EdgeLanes
     {
-        if (across == 1 && Vector128.IsHardwareAccelerated)
-        {
-            // Vertical edges: p3 .. q3 of each row are 8 contiguous bytes. Chroma needs only
-            // p1 .. q1 but takes all eight; they lie inside this macroblock and its left neighbour.
-            // With 8 rows the lanes 8-15 repeat rows 0-7 and are not used.
-            int start = q0 - 4;
-            TransposeIn(plane, start, plane, length == 16 ? start + (8 * along) : start, along, taps);
-            return;
-        }
-
-        for (int k = firstTap; k <= lastTap; k++)
-        {
-            int start = q0 + ((k - 4) * across);
-            var row = taps.Slice(k * 16, length);
-            if (along == 1)
-            {
-                if (length == 16)
-                {
-                    Vector128.Create(plane.AsSpan(start, 16)).CopyTo(row);
-                }
-                else
-                {
-                    MemoryMarshal.Write(row, MemoryMarshal.Read<ulong>(plane.AsSpan(start, 8)));
-                }
-
-                continue;
-            }
-
-            for (int i = 0; i < length; i++)
-            {
-                row[i] = plane[start + (i * along)];
-            }
-        }
-    }
-
-    private static void Scatter(byte[] plane, int q0, int across, int along, int length, ReadOnlySpan<byte> taps, int firstTap, int lastTap)
-    {
-        if (across == 1 && length == 16 && firstTap == 1 && Vector128.IsHardwareAccelerated)
-        {
-            TransposeOut(taps, plane, q0 - 4, plane, q0 - 4 + (8 * along), along);
-            return;
-        }
-
-        for (int k = firstTap; k <= lastTap; k++)
-        {
-            int start = q0 + ((k - 4) * across);
-            var row = taps.Slice(k * 16, length);
-            if (along == 1)
-            {
-                if (length == 16)
-                {
-                    Vector128.Create(row).CopyTo(plane.AsSpan(start, 16));
-                }
-                else
-                {
-                    MemoryMarshal.Write(plane.AsSpan(start, 8), MemoryMarshal.Read<ulong>(row));
-                }
-
-                continue;
-            }
-
-            for (int i = 0; i < length; i++)
-            {
-                plane[start + (i * along)] = row[i];
-            }
-        }
+        public Vector128<short> P3;
+        public Vector128<short> P2;
+        public Vector128<short> P1;
+        public Vector128<short> P0;
+        public Vector128<short> Q0;
+        public Vector128<short> Q1;
+        public Vector128<short> Q2;
+        public Vector128<short> Q3;
     }
 
     /// <summary>
-    /// Vertical edge: 16 rows of p3 .. q3 (8 bytes each), rows 0-7 from <paramref name="top"/> at
-    /// <paramref name="topStart"/> and rows 8-15 from <paramref name="bottom"/> at
-    /// <paramref name="bottomStart"/>, become the 8 tap rows of 16 lanes, by interleaving at 8, 16,
-    /// 32 and 64 bits.
+    /// The filter (8.7.2.3, 8.7.2.4) on eight positions with per-lane bS, tC0, alpha and beta:
+    /// replaces p2 .. q2 (luma) or p0, q0 (chroma, which reads only p1 .. q1) with their
+    /// filtered values, which the caller clamps to 0 .. <paramref name="maxV"/> as it stores them.
+    /// False, and nothing changed, when no lane passes the filter's tests.
     /// </summary>
-    private static void TransposeIn(byte[] top, int topStart, byte[] bottom, int bottomStart, int stride, Span<byte> taps)
+    /// <remarks>
+    /// In parts small enough for the JIT to inline (it does not inline a method with as many
+    /// locals as the whole filter has), so the lanes stay in registers.
+    /// </remarks>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool FilterLanes(ref EdgeLanes t, Vector128<short> bs, Vector128<short> tc0, Vector128<short> alphaV, Vector128<short> betaV, bool chroma, Vector128<short> maxV)
     {
-        if (Sse2.IsSupported)
+        var filter = Vector128.GreaterThan(bs, Vector128<short>.Zero)
+            & Vector128.LessThan(Vector128.Abs(t.P0 - t.Q0), alphaV)
+            & Vector128.LessThan(Vector128.Abs(t.P1 - t.P0), betaV)
+            & Vector128.LessThan(Vector128.Abs(t.Q1 - t.Q0), betaV);
+        if (filter == Vector128<short>.Zero)
         {
-            TransposeInSse2(top, topStart, bottom, bottomStart, stride, taps);
+            return false;
+        }
+
+        var strong = filter & Vector128.Equals(bs, Vector128.Create((short)4));
+        if (chroma)
+        {
+            FilterChromaLanes(ref t, filter, strong, tc0, maxV);
+        }
+        else if (strong == Vector128<short>.Zero)
+        {
+            // Only bS < 4 here, which is every internal edge.
+            FilterNormalLanes(ref t, filter, tc0, betaV, maxV);
         }
         else
         {
-            TransposeInVector128(top, topStart, bottom, bottomStart, stride, taps);
+            var original = t;
+            FilterNormalLanes(ref t, filter & ~strong, tc0, betaV, maxV);
+            FilterStrongLanes(ref t, in original, strong, alphaV, betaV);
+        }
+
+        return true;
+    }
+
+    /// <summary>Chroma: p0 and q0 by bS &lt; 4 (8-470) or bS 4 (8-480), where <paramref name="filter"/> is set.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void FilterChromaLanes(ref EdgeLanes t, Vector128<short> filter, Vector128<short> strong, Vector128<short> tc0, Vector128<short> maxV)
+    {
+        var (p1, p0, q0, q1) = (t.P1, t.P0, t.Q0, t.Q1);
+        var two = Vector128.Create((short)2);
+        var tc = tc0 + Vector128<short>.One;
+        var delta = Vector128.Clamp((((q0 - p0) << 2) + (p1 - q1) + Vector128.Create((short)4)) >> 3, -tc, tc);
+        var p0n = Vector128.ConditionalSelect(strong, ((p1 << 1) + p0 + q1 + two) >> 2, Vector128.Clamp(p0 + delta, Vector128<short>.Zero, maxV));
+        var q0n = Vector128.ConditionalSelect(strong, ((q1 << 1) + q0 + p1 + two) >> 2, Vector128.Clamp(q0 - delta, Vector128<short>.Zero, maxV));
+        t.P0 = Vector128.ConditionalSelect(filter, p0n, p0);
+        t.Q0 = Vector128.ConditionalSelect(filter, q0n, q0);
+    }
+
+    /// <summary>Luma with bS &lt; 4 (8.7.2.3): p1 .. q1, where <paramref name="filter"/> is set.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void FilterNormalLanes(ref EdgeLanes t, Vector128<short> filter, Vector128<short> tc0, Vector128<short> betaV, Vector128<short> maxV)
+    {
+        var (p2, p1, p0, q0, q1, q2) = (t.P2, t.P1, t.P0, t.Q0, t.Q1, t.Q2);
+        var ap = Vector128.LessThan(Vector128.Abs(p2 - p0), betaV);
+        var aq = Vector128.LessThan(Vector128.Abs(q2 - q0), betaV);
+
+        // The masks are -1 where true, so subtracting them adds one.
+        var tc = tc0 - ap - aq;
+        var delta = Vector128.Clamp((((q0 - p0) << 2) + (p1 - q1) + Vector128.Create((short)4)) >> 3, -tc, tc);
+        var average = (p0 + q0 + Vector128<short>.One) >> 1;
+        t.P1 = Vector128.ConditionalSelect(filter & ap, p1 + Vector128.Clamp((p2 + average - (p1 << 1)) >> 1, -tc0, tc0), p1);
+        t.Q1 = Vector128.ConditionalSelect(filter & aq, q1 + Vector128.Clamp((q2 + average - (q1 << 1)) >> 1, -tc0, tc0), q1);
+        t.P0 = Vector128.ConditionalSelect(filter, Vector128.Clamp(p0 + delta, Vector128<short>.Zero, maxV), p0);
+        t.Q0 = Vector128.ConditionalSelect(filter, Vector128.Clamp(q0 - delta, Vector128<short>.Zero, maxV), q0);
+    }
+
+    /// <summary>Luma with bS 4 (8.7.2.4): p2 .. q2 from the <paramref name="original"/> samples, where <paramref name="strong"/> is set.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void FilterStrongLanes(ref EdgeLanes t, in EdgeLanes original, Vector128<short> strong, Vector128<short> alphaV, Vector128<short> betaV)
+    {
+        var (p3, p2, p1, p0, q0, q1, q2, q3) = (original.P3, original.P2, original.P1, original.P0, original.Q0, original.Q1, original.Q2, original.Q3);
+        var two = Vector128.Create((short)2);
+        var four = Vector128.Create((short)4);
+        var small = Vector128.LessThan(Vector128.Abs(p0 - q0), (alphaV >> 2) + two);
+        var sp = strong & small & Vector128.LessThan(Vector128.Abs(p2 - p0), betaV);
+        var sq = strong & small & Vector128.LessThan(Vector128.Abs(q2 - q0), betaV);
+        t.P0 = Vector128.ConditionalSelect(strong, Vector128.ConditionalSelect(sp, (p2 + (p1 << 1) + (p0 << 1) + (q0 << 1) + q1 + four) >> 3, ((p1 << 1) + p0 + q1 + two) >> 2), t.P0);
+        t.P1 = Vector128.ConditionalSelect(sp, (p2 + p1 + p0 + q0 + two) >> 2, t.P1);
+        t.P2 = Vector128.ConditionalSelect(sp, ((p3 << 1) + (p2 * 3) + p1 + p0 + q0 + four) >> 3, p2);
+        t.Q0 = Vector128.ConditionalSelect(strong, Vector128.ConditionalSelect(sq, (p1 + (p0 << 1) + (q0 << 1) + (q1 << 1) + q2 + four) >> 3, ((q1 << 1) + q0 + p1 + two) >> 2), t.Q0);
+        t.Q1 = Vector128.ConditionalSelect(sq, (p0 + q0 + q1 + q2 + two) >> 2, t.Q1);
+        t.Q2 = Vector128.ConditionalSelect(sq, ((q3 << 1) + (q2 * 3) + q1 + q0 + p0 + four) >> 3, q2);
+    }
+
+    /// <summary>
+    /// A horizontal edge of 16 or 8 8-bit samples, filtered in place: the rows p3 .. q3 (luma) or
+    /// p1 .. q1 (chroma) loaded whole from the plane.
+    /// </summary>
+    private static void FilterRows(byte[] plane, int q0, int stride, int length, Vector128<byte> bs, in EdgeParameters parameters, bool chroma)
+    {
+        // Rows q0 - reach * stride .. q0 + (reach - 1) * stride, length bytes each.
+        int reach = chroma ? 2 : 4;
+        if (q0 - (reach * stride) < 0 || q0 + ((reach - 1) * stride) + length > plane.Length)
+        {
+            throw new ArgumentOutOfRangeException(nameof(q0));
+        }
+
+        // With 8 samples the upper lanes hold zeros: filtered (or not) for nothing, and never stored.
+        ref byte origin = ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(plane), q0);
+        EdgeBytes taps = default;
+        if (!chroma)
+        {
+            taps.P3 = LoadRow(ref origin, -4 * stride, length);
+            taps.P2 = LoadRow(ref origin, -3 * stride, length);
+            taps.Q2 = LoadRow(ref origin, 2 * stride, length);
+            taps.Q3 = LoadRow(ref origin, 3 * stride, length);
+        }
+
+        taps.P1 = LoadRow(ref origin, -2 * stride, length);
+        taps.P0 = LoadRow(ref origin, -stride, length);
+        taps.Q0 = LoadRow(ref origin, 0, length);
+        taps.Q1 = LoadRow(ref origin, stride, length);
+        if (!FilterBytes(ref taps, bs, parameters, parameters, chroma))
+        {
+            return;
+        }
+
+        if (!chroma)
+        {
+            StoreRow(taps.P2, ref origin, -3 * stride, length);
+            StoreRow(taps.P1, ref origin, -2 * stride, length);
+            StoreRow(taps.Q1, ref origin, stride, length);
+            StoreRow(taps.Q2, ref origin, 2 * stride, length);
+        }
+
+        StoreRow(taps.P0, ref origin, -stride, length);
+        StoreRow(taps.Q0, ref origin, 0, length);
+
+        static Vector128<byte> LoadRow(ref byte origin, int offset, int length) =>
+            length == 16 ? Vector128.LoadUnsafe(ref Unsafe.Add(ref origin, offset)) : Row8(ref origin, offset);
+
+        static void StoreRow(Vector128<byte> value, ref byte origin, int offset, int length)
+        {
+            if (length == 16)
+            {
+                value.StoreUnsafe(ref Unsafe.Add(ref origin, offset));
+            }
+            else
+            {
+                Unsafe.WriteUnaligned(ref Unsafe.Add(ref origin, offset), value.AsUInt64().ToScalar());
+            }
         }
     }
 
-    /// <summary><see cref="TransposeIn"/> with SSE2's unpacks.</summary>
-    [SkipLocalsInit]
-    private static void TransposeInSse2(byte[] top, int topStart, byte[] bottom, int bottomStart, int stride, Span<byte> taps)
+    /// <summary>The segment (0 .. 3) of each of 16 lanes: four lanes to a luma segment.</summary>
+    private static Vector128<byte> LumaSegments => Vector128.Create((byte)0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3);
+
+    /// <summary>Two lanes to a chroma segment, in each half (4:2:0's Cb and Cr).</summary>
+    private static Vector128<byte> ChromaSegments => Vector128.Create((byte)0, 0, 1, 1, 2, 2, 3, 3, 0, 0, 1, 1, 2, 2, 3, 3);
+
+    /// <summary>bS of each lane: the four <paramref name="strengths"/> spread by <paramref name="segments"/>.</summary>
+    private static Vector128<byte> SegmentLanes(ReadOnlySpan<byte> strengths, Vector128<byte> segments) =>
+        Vector128.Shuffle(Vector128.CreateScalarUnsafe(MemoryMarshal.Read<uint>(strengths)).AsByte(), segments);
+
+    /// <summary>
+    /// A vertical edge of 16 8-bit rows, filtered in place: rows 0-7 from <paramref name="top"/> and
+    /// 8-15 from <paramref name="bottom"/> at <paramref name="start"/> (p3 of the first row), each
+    /// row's eight bytes p3 .. q3 transposed in registers into eight tap vectors of 16 lanes. Luma
+    /// (one plane, the bottom half 8 rows down, bS four rows to a segment) or chroma: 4:2:2's tall
+    /// edges the same way, 4:2:0's Cb in the top half and Cr in the bottom, two rows to a segment,
+    /// each with its own parameters (<paramref name="low"/> for lanes 0-7, <paramref name="high"/> for 8-15).
+    /// </summary>
+    private static void FilterColumns(byte[] top, byte[] bottom, int start, int bottomStart, int stride, Vector128<byte> bs, in EdgeParameters low, in EdgeParameters high, bool chroma)
     {
-        Span<Vector128<byte>> pairs = stackalloc Vector128<byte>[8];
-        for (int k = 0; k < 4; k++)
+        // Eight rows of eight bytes from each start.
+        if (start < 0 || bottomStart < 0 || start + (7 * stride) + 8 > top.Length || bottomStart + (7 * stride) + 8 > bottom.Length)
         {
-            int even = topStart + (2 * k * stride);
-            pairs[k] = Sse2.UnpackLow(Row8(top, even), Row8(top, even + stride));
-            even = bottomStart + (2 * k * stride);
-            pairs[k + 4] = Sse2.UnpackLow(Row8(bottom, even), Row8(bottom, even + stride));
+            throw new ArgumentOutOfRangeException(nameof(start));
         }
 
-        // quads[m] / quadsHigh[m]: bytes 0-3 / 4-7 of rows 4m .. 4m + 3, one 32-bit group per byte.
-        Span<Vector128<uint>> quads = stackalloc Vector128<uint>[4];
-        Span<Vector128<uint>> quadsHigh = stackalloc Vector128<uint>[4];
-        for (int m = 0; m < 4; m++)
+        ref byte upper = ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(top), start);
+        ref byte lower = ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(bottom), bottomStart);
+        var taps = Sse2.IsSupported ? Columns<Sse2Zip>(ref upper, ref lower, stride) : Columns<PortableZip>(ref upper, ref lower, stride);
+        if (!FilterBytes(ref taps, bs, low, high, chroma))
         {
-            quads[m] = Sse2.UnpackLow(pairs[2 * m].AsUInt16(), pairs[(2 * m) + 1].AsUInt16()).AsUInt32();
-            quadsHigh[m] = Sse2.UnpackHigh(pairs[2 * m].AsUInt16(), pairs[(2 * m) + 1].AsUInt16()).AsUInt32();
+            return;
         }
 
-        for (int half = 0; half < 2; half++)
-        {
-            var source = half == 0 ? quads : quadsHigh;
-
-            // Each 64-bit group: one byte position for 8 rows.
-            var upper = Sse2.UnpackLow(source[0], source[1]).AsUInt64();
-            var upperHigh = Sse2.UnpackHigh(source[0], source[1]).AsUInt64();
-            var lower = Sse2.UnpackLow(source[2], source[3]).AsUInt64();
-            var lowerHigh = Sse2.UnpackHigh(source[2], source[3]).AsUInt64();
-
-            int tap = half * 4;
-            Sse2.UnpackLow(upper, lower).AsByte().CopyTo(taps[(tap * 16)..]);
-            Sse2.UnpackHigh(upper, lower).AsByte().CopyTo(taps[((tap + 1) * 16)..]);
-            Sse2.UnpackLow(upperHigh, lowerHigh).AsByte().CopyTo(taps[((tap + 2) * 16)..]);
-            Sse2.UnpackHigh(upperHigh, lowerHigh).AsByte().CopyTo(taps[((tap + 3) * 16)..]);
-        }
-    }
-
-    /// <summary>The inverse of <see cref="TransposeIn"/>: writes all 8 bytes of each of the 16 rows.</summary>
-    private static void TransposeOut(ReadOnlySpan<byte> taps, byte[] top, int topStart, byte[] bottom, int bottomStart, int stride)
-    {
         if (Sse2.IsSupported)
         {
-            TransposeOutSse2(taps, top, topStart, bottom, bottomStart, stride);
+            WriteColumns<Sse2Zip>(in taps, ref upper, ref lower, stride);
         }
         else
         {
-            TransposeOutVector128(taps, top, topStart, bottom, bottomStart, stride);
+            WriteColumns<PortableZip>(in taps, ref upper, ref lower, stride);
         }
     }
 
-    /// <summary><see cref="TransposeOut"/> with SSE2's unpacks.</summary>
-    [SkipLocalsInit]
-    private static void TransposeOutSse2(ReadOnlySpan<byte> taps, byte[] top, int topStart, byte[] bottom, int bottomStart, int stride)
+    /// <summary>The 4:2:0 chroma edge of 8 rows or columns of Cb (lanes 0-7) and Cr (lanes 8-15), filtered in place.</summary>
+    private static void FilterChromaRows(byte[] cb, byte[] cr, int q0, int stride, Vector128<byte> bs, in EdgeParameters low, in EdgeParameters high)
     {
-        Span<Vector128<ushort>> low = stackalloc Vector128<ushort>[4];
-        Span<Vector128<ushort>> high = stackalloc Vector128<ushort>[4];
-        for (int k = 0; k < 4; k++)
+        // Rows p1 .. q1, eight bytes each.
+        if (q0 - (2 * stride) < 0 || q0 + stride + 8 > cb.Length || q0 + stride + 8 > cr.Length)
         {
-            var a = Vector128.Create(taps.Slice(2 * k * 16, 16));
-            var b = Vector128.Create(taps.Slice(((2 * k) + 1) * 16, 16));
-            low[k] = Sse2.UnpackLow(a, b).AsUInt16();   // rows 0-7: bytes 2k, 2k + 1
-            high[k] = Sse2.UnpackHigh(a, b).AsUInt16(); // rows 8-15
+            throw new ArgumentOutOfRangeException(nameof(q0));
         }
 
-        for (int half = 0; half < 2; half++)
+        ref byte b = ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(cb), q0);
+        ref byte r = ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(cr), q0);
+        EdgeBytes taps = default;
+        taps.P1 = Pair(ref Unsafe.Subtract(ref b, 2 * stride), ref Unsafe.Subtract(ref r, 2 * stride));
+        taps.P0 = Pair(ref Unsafe.Subtract(ref b, stride), ref Unsafe.Subtract(ref r, stride));
+        taps.Q0 = Pair(ref b, ref r);
+        taps.Q1 = Pair(ref Unsafe.Add(ref b, stride), ref Unsafe.Add(ref r, stride));
+        if (FilterBytes(ref taps, bs, low, high, chroma: true))
         {
-            var source = half == 0 ? low : high;
+            WriteHalves(taps.P0, ref Unsafe.Subtract(ref b, stride), ref Unsafe.Subtract(ref r, stride));
+            WriteHalves(taps.Q0, ref b, ref r);
+        }
 
+        static Vector128<byte> Pair(ref byte first, ref byte second) =>
+            Vector128.Create(Unsafe.ReadUnaligned<ulong>(ref first), Unsafe.ReadUnaligned<ulong>(ref second)).AsByte();
+
+        static void WriteHalves(Vector128<byte> value, ref byte first, ref byte second)
+        {
+            Unsafe.WriteUnaligned(ref first, value.AsUInt64().GetElement(0));
+            Unsafe.WriteUnaligned(ref second, value.AsUInt64().GetElement(1));
+        }
+    }
+
+    /// <summary>bS, tC0, alpha and beta for eight lanes, from one indexA's row of the tables.</summary>
+    private readonly struct EdgeParameters(int indexA, int alpha, int beta)
+    {
+        /// <summary>tC0 by bS (0 for bS 0 and 4), lanes 0 .. 4.</summary>
+        public readonly Vector128<byte> Tc0Row = Vector128.Create(0, Tc0[indexA * 3], Tc0[(indexA * 3) + 1], Tc0[(indexA * 3) + 2], 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+        public readonly Vector128<short> Alpha = Vector128.Create((short)alpha);
+        public readonly Vector128<short> Beta = Vector128.Create((short)beta);
+    }
+
+    /// <summary>p3 .. q3 at 16 positions along an edge, 8-bit samples.</summary>
+    private struct EdgeBytes
+    {
+        public Vector128<byte> P3;
+        public Vector128<byte> P2;
+        public Vector128<byte> P1;
+        public Vector128<byte> P0;
+        public Vector128<byte> Q0;
+        public Vector128<byte> Q1;
+        public Vector128<byte> Q2;
+        public Vector128<byte> Q3;
+    }
+
+    /// <summary>
+    /// <see cref="FilterLanes"/> on 16 8-bit lanes, widened in two halves of eight with their own
+    /// parameters; <paramref name="bs"/> per lane. False, and nothing changed, when no lane is filtered.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool FilterBytes(ref EdgeBytes taps, Vector128<byte> bs, in EdgeParameters low, in EdgeParameters high, bool chroma)
+    {
+        var maxV = Vector128.Create((short)255);
+        var tcLow = Vector128.Shuffle(low.Tc0Row, bs);
+        var tcHigh = Vector128.Shuffle(high.Tc0Row, bs);
+
+        EdgeLanes lo;
+        lo.P3 = Lower(taps.P3);
+        lo.P2 = Lower(taps.P2);
+        lo.P1 = Lower(taps.P1);
+        lo.P0 = Lower(taps.P0);
+        lo.Q0 = Lower(taps.Q0);
+        lo.Q1 = Lower(taps.Q1);
+        lo.Q2 = Lower(taps.Q2);
+        lo.Q3 = Lower(taps.Q3);
+        bool lowChanged = FilterLanes(ref lo, Lower(bs), Lower(tcLow), low.Alpha, low.Beta, chroma, maxV);
+
+        EdgeLanes hi;
+        hi.P3 = Upper(taps.P3);
+        hi.P2 = Upper(taps.P2);
+        hi.P1 = Upper(taps.P1);
+        hi.P0 = Upper(taps.P0);
+        hi.Q0 = Upper(taps.Q0);
+        hi.Q1 = Upper(taps.Q1);
+        hi.Q2 = Upper(taps.Q2);
+        hi.Q3 = Upper(taps.Q3);
+        bool highChanged = FilterLanes(ref hi, Upper(bs), Upper(tcHigh), high.Alpha, high.Beta, chroma, maxV);
+        if (!lowChanged && !highChanged)
+        {
+            return false;
+        }
+
+        // Lanes that did not change keep their values, which are in range.
+        taps.P0 = Pack(lo.P0, hi.P0);
+        taps.Q0 = Pack(lo.Q0, hi.Q0);
+        if (!chroma)
+        {
+            taps.P2 = Pack(lo.P2, hi.P2);
+            taps.P1 = Pack(lo.P1, hi.P1);
+            taps.Q1 = Pack(lo.Q1, hi.Q1);
+            taps.Q2 = Pack(lo.Q2, hi.Q2);
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Rows 0-7 from <paramref name="top"/> and 8-15 from <paramref name="bottom"/>, eight bytes
+    /// each, transposed: byte k of every row in tap k (8-bit, 16-bit, 32-bit then 64-bit interleaves).
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static EdgeBytes Columns<TZip>(ref byte top, ref byte bottom, int stride)
+        where TZip : struct, IZip
+    {
+        // pairs: bytes of rows 2k and 2k + 1 interleaved.
+        var a0 = TZip.Low(Row8(ref top, 0), Row8(ref top, stride));
+        var a1 = TZip.Low(Row8(ref top, 2 * stride), Row8(ref top, 3 * stride));
+        var a2 = TZip.Low(Row8(ref top, 4 * stride), Row8(ref top, 5 * stride));
+        var a3 = TZip.Low(Row8(ref top, 6 * stride), Row8(ref top, 7 * stride));
+        var a4 = TZip.Low(Row8(ref bottom, 0), Row8(ref bottom, stride));
+        var a5 = TZip.Low(Row8(ref bottom, 2 * stride), Row8(ref bottom, 3 * stride));
+        var a6 = TZip.Low(Row8(ref bottom, 4 * stride), Row8(ref bottom, 5 * stride));
+        var a7 = TZip.Low(Row8(ref bottom, 6 * stride), Row8(ref bottom, 7 * stride));
+
+        // quads: bytes 0-3 (Low) or 4-7 (High) of four rows, one 32-bit group per byte.
+        var b0 = TZip.Low(a0.AsUInt16(), a1.AsUInt16()).AsUInt32();
+        var b1 = TZip.Low(a2.AsUInt16(), a3.AsUInt16()).AsUInt32();
+        var b2 = TZip.Low(a4.AsUInt16(), a5.AsUInt16()).AsUInt32();
+        var b3 = TZip.Low(a6.AsUInt16(), a7.AsUInt16()).AsUInt32();
+        var c0 = TZip.High(a0.AsUInt16(), a1.AsUInt16()).AsUInt32();
+        var c1 = TZip.High(a2.AsUInt16(), a3.AsUInt16()).AsUInt32();
+        var c2 = TZip.High(a4.AsUInt16(), a5.AsUInt16()).AsUInt32();
+        var c3 = TZip.High(a6.AsUInt16(), a7.AsUInt16()).AsUInt32();
+
+        // One byte position of eight rows in each 64-bit group.
+        EdgeBytes taps;
+        var upper = TZip.Low(b0, b1).AsUInt64();
+        var upperHigh = TZip.High(b0, b1).AsUInt64();
+        var lowerRows = TZip.Low(b2, b3).AsUInt64();
+        var lowerHigh = TZip.High(b2, b3).AsUInt64();
+        taps.P3 = TZip.Low(upper, lowerRows).AsByte();
+        taps.P2 = TZip.High(upper, lowerRows).AsByte();
+        taps.P1 = TZip.Low(upperHigh, lowerHigh).AsByte();
+        taps.P0 = TZip.High(upperHigh, lowerHigh).AsByte();
+        upper = TZip.Low(c0, c1).AsUInt64();
+        upperHigh = TZip.High(c0, c1).AsUInt64();
+        lowerRows = TZip.Low(c2, c3).AsUInt64();
+        lowerHigh = TZip.High(c2, c3).AsUInt64();
+        taps.Q0 = TZip.Low(upper, lowerRows).AsByte();
+        taps.Q1 = TZip.High(upper, lowerRows).AsByte();
+        taps.Q2 = TZip.Low(upperHigh, lowerHigh).AsByte();
+        taps.Q3 = TZip.High(upperHigh, lowerHigh).AsByte();
+        return taps;
+    }
+
+    /// <summary>The inverse of <see cref="Columns"/>: writes all eight bytes of each of the 16 rows.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void WriteColumns<TZip>(in EdgeBytes taps, ref byte top, ref byte bottom, int stride)
+        where TZip : struct, IZip
+    {
+        // Bytes 2k and 2k + 1 of rows 0-7 (Low) and 8-15 (High).
+        var l0 = TZip.Low(taps.P3, taps.P2).AsUInt16();
+        var l1 = TZip.Low(taps.P1, taps.P0).AsUInt16();
+        var l2 = TZip.Low(taps.Q0, taps.Q1).AsUInt16();
+        var l3 = TZip.Low(taps.Q2, taps.Q3).AsUInt16();
+        var h0 = TZip.High(taps.P3, taps.P2).AsUInt16();
+        var h1 = TZip.High(taps.P1, taps.P0).AsUInt16();
+        var h2 = TZip.High(taps.Q0, taps.Q1).AsUInt16();
+        var h3 = TZip.High(taps.Q2, taps.Q3).AsUInt16();
+        WriteHalf(ref top, stride, l0, l1, l2, l3);
+        WriteHalf(ref bottom, stride, h0, h1, h2, h3);
+
+        static void WriteHalf(ref byte rows, int stride, Vector128<ushort> s0, Vector128<ushort> s1, Vector128<ushort> s2, Vector128<ushort> s3)
+        {
             // 32-bit groups: bytes 0-3 / 4-7 of one row.
-            var left = Sse2.UnpackLow(source[0], source[1]).AsUInt32();      // rows 0-3, bytes 0-3
-            var leftHigh = Sse2.UnpackHigh(source[0], source[1]).AsUInt32(); // rows 4-7, bytes 0-3
-            var right = Sse2.UnpackLow(source[2], source[3]).AsUInt32();
-            var rightHigh = Sse2.UnpackHigh(source[2], source[3]).AsUInt32();
-
-            byte[] plane = half == 0 ? top : bottom;
-            int start = half == 0 ? topStart : bottomStart;
-            WriteRows(plane, start, stride, Sse2.UnpackLow(left, right).AsUInt64());
-            WriteRows(plane, start + (2 * stride), stride, Sse2.UnpackHigh(left, right).AsUInt64());
-            WriteRows(plane, start + (4 * stride), stride, Sse2.UnpackLow(leftHigh, rightHigh).AsUInt64());
-            WriteRows(plane, start + (6 * stride), stride, Sse2.UnpackHigh(leftHigh, rightHigh).AsUInt64());
+            var left = TZip.Low(s0, s1).AsUInt32();
+            var leftHigh = TZip.High(s0, s1).AsUInt32();
+            var right = TZip.Low(s2, s3).AsUInt32();
+            var rightHigh = TZip.High(s2, s3).AsUInt32();
+            WriteRowPair(ref rows, 0, stride, TZip.Low(left, right).AsUInt64());
+            WriteRowPair(ref rows, 2 * stride, stride, TZip.High(left, right).AsUInt64());
+            WriteRowPair(ref rows, 4 * stride, stride, TZip.Low(leftHigh, rightHigh).AsUInt64());
+            WriteRowPair(ref rows, 6 * stride, stride, TZip.High(leftHigh, rightHigh).AsUInt64());
         }
     }
 
+    private static Vector128<byte> Row8(ref byte rows, int offset) =>
+        Vector128.CreateScalarUnsafe(Unsafe.ReadUnaligned<ulong>(ref Unsafe.Add(ref rows, offset))).AsByte();
+
+    private static void WriteRowPair(ref byte rows, int offset, int stride, Vector128<ulong> pair)
+    {
+        Unsafe.WriteUnaligned(ref Unsafe.Add(ref rows, offset), pair.GetElement(0));
+        Unsafe.WriteUnaligned(ref Unsafe.Add(ref rows, offset + stride), pair.GetElement(1));
+    }
+
     /// <summary>
-    /// <see cref="TransposeInSse2"/> with <see cref="VectorZip"/> for SSE2's unpacks: what machines without SSE2 (ARM64)
-    /// run, and tested against the transpose's definition on x64.
+    /// The interleaves of the transposes, as SSE2's unpacks: SSE2 itself (<see cref="Sse2Zip"/>) or
+    /// <see cref="VectorZip"/>'s portable operations (<see cref="PortableZip"/>, what ARM64 runs).
     /// </summary>
-    [SkipLocalsInit]
+    internal interface IZip
+    {
+        static abstract Vector128<byte> Low(Vector128<byte> a, Vector128<byte> b);
+
+        static abstract Vector128<byte> High(Vector128<byte> a, Vector128<byte> b);
+
+        static abstract Vector128<ushort> Low(Vector128<ushort> a, Vector128<ushort> b);
+
+        static abstract Vector128<ushort> High(Vector128<ushort> a, Vector128<ushort> b);
+
+        static abstract Vector128<uint> Low(Vector128<uint> a, Vector128<uint> b);
+
+        static abstract Vector128<uint> High(Vector128<uint> a, Vector128<uint> b);
+
+        static abstract Vector128<ulong> Low(Vector128<ulong> a, Vector128<ulong> b);
+
+        static abstract Vector128<ulong> High(Vector128<ulong> a, Vector128<ulong> b);
+    }
+
+    internal readonly struct Sse2Zip : IZip
+    {
+        public static Vector128<byte> Low(Vector128<byte> a, Vector128<byte> b) => Sse2.UnpackLow(a, b);
+
+        public static Vector128<byte> High(Vector128<byte> a, Vector128<byte> b) => Sse2.UnpackHigh(a, b);
+
+        public static Vector128<ushort> Low(Vector128<ushort> a, Vector128<ushort> b) => Sse2.UnpackLow(a, b);
+
+        public static Vector128<ushort> High(Vector128<ushort> a, Vector128<ushort> b) => Sse2.UnpackHigh(a, b);
+
+        public static Vector128<uint> Low(Vector128<uint> a, Vector128<uint> b) => Sse2.UnpackLow(a, b);
+
+        public static Vector128<uint> High(Vector128<uint> a, Vector128<uint> b) => Sse2.UnpackHigh(a, b);
+
+        public static Vector128<ulong> Low(Vector128<ulong> a, Vector128<ulong> b) => Sse2.UnpackLow(a, b);
+
+        public static Vector128<ulong> High(Vector128<ulong> a, Vector128<ulong> b) => Sse2.UnpackHigh(a, b);
+    }
+
+    internal readonly struct PortableZip : IZip
+    {
+        public static Vector128<byte> Low(Vector128<byte> a, Vector128<byte> b) => VectorZip.Low(a, b);
+
+        public static Vector128<byte> High(Vector128<byte> a, Vector128<byte> b) => VectorZip.High(a, b);
+
+        public static Vector128<ushort> Low(Vector128<ushort> a, Vector128<ushort> b) => VectorZip.Low(a, b);
+
+        public static Vector128<ushort> High(Vector128<ushort> a, Vector128<ushort> b) => VectorZip.High(a, b);
+
+        public static Vector128<uint> Low(Vector128<uint> a, Vector128<uint> b) => VectorZip.Low(a, b);
+
+        public static Vector128<uint> High(Vector128<uint> a, Vector128<uint> b) => VectorZip.High(a, b);
+
+        public static Vector128<ulong> Low(Vector128<ulong> a, Vector128<ulong> b) => VectorZip.Low(a, b);
+
+        public static Vector128<ulong> High(Vector128<ulong> a, Vector128<ulong> b) => VectorZip.High(a, b);
+    }
+
+    /// <summary>
+    /// <see cref="Columns"/> with <see cref="PortableZip"/>, into <paramref name="taps"/> (tap k at
+    /// k * 16): the transpose ARM64 runs, tested against its definition on x64 too.
+    /// </summary>
     internal static void TransposeInVector128(byte[] top, int topStart, byte[] bottom, int bottomStart, int stride, Span<byte> taps)
     {
-        Span<Vector128<byte>> pairs = stackalloc Vector128<byte>[8];
-        for (int k = 0; k < 4; k++)
-        {
-            int even = topStart + (2 * k * stride);
-            pairs[k] = VectorZip.Low(Row8(top, even), Row8(top, even + stride));
-            even = bottomStart + (2 * k * stride);
-            pairs[k + 4] = VectorZip.Low(Row8(bottom, even), Row8(bottom, even + stride));
-        }
-
-        Span<Vector128<uint>> quads = stackalloc Vector128<uint>[4];
-        Span<Vector128<uint>> quadsHigh = stackalloc Vector128<uint>[4];
-        for (int m = 0; m < 4; m++)
-        {
-            quads[m] = VectorZip.Low(pairs[2 * m].AsUInt16(), pairs[(2 * m) + 1].AsUInt16()).AsUInt32();
-            quadsHigh[m] = VectorZip.High(pairs[2 * m].AsUInt16(), pairs[(2 * m) + 1].AsUInt16()).AsUInt32();
-        }
-
-        for (int half = 0; half < 2; half++)
-        {
-            var source = half == 0 ? quads : quadsHigh;
-            var upper = VectorZip.Low(source[0], source[1]).AsUInt64();
-            var upperHigh = VectorZip.High(source[0], source[1]).AsUInt64();
-            var lower = VectorZip.Low(source[2], source[3]).AsUInt64();
-            var lowerHigh = VectorZip.High(source[2], source[3]).AsUInt64();
-
-            int tap = half * 4;
-            VectorZip.Low(upper, lower).AsByte().CopyTo(taps[(tap * 16)..]);
-            VectorZip.High(upper, lower).AsByte().CopyTo(taps[((tap + 1) * 16)..]);
-            VectorZip.Low(upperHigh, lowerHigh).AsByte().CopyTo(taps[((tap + 2) * 16)..]);
-            VectorZip.High(upperHigh, lowerHigh).AsByte().CopyTo(taps[((tap + 3) * 16)..]);
-        }
+        var columns = Columns<PortableZip>(ref top[topStart], ref bottom[bottomStart], stride);
+        ReadOnlySpan<Vector128<byte>> rows = [columns.P3, columns.P2, columns.P1, columns.P0, columns.Q0, columns.Q1, columns.Q2, columns.Q3];
+        MemoryMarshal.AsBytes(rows).CopyTo(taps);
     }
 
-    /// <summary><see cref="TransposeOutSse2"/> with <see cref="VectorZip"/>, as <see cref="TransposeInVector128"/>.</summary>
-    [SkipLocalsInit]
+    /// <summary><see cref="WriteColumns"/> with <see cref="PortableZip"/>, from taps as <see cref="TransposeInVector128"/> writes them.</summary>
     internal static void TransposeOutVector128(ReadOnlySpan<byte> taps, byte[] top, int topStart, byte[] bottom, int bottomStart, int stride)
     {
-        Span<Vector128<ushort>> low = stackalloc Vector128<ushort>[4];
-        Span<Vector128<ushort>> high = stackalloc Vector128<ushort>[4];
-        for (int k = 0; k < 4; k++)
-        {
-            var a = Vector128.Create(taps.Slice(2 * k * 16, 16));
-            var b = Vector128.Create(taps.Slice(((2 * k) + 1) * 16, 16));
-            low[k] = VectorZip.Low(a, b).AsUInt16();
-            high[k] = VectorZip.High(a, b).AsUInt16();
-        }
-
-        for (int half = 0; half < 2; half++)
-        {
-            var source = half == 0 ? low : high;
-            var left = VectorZip.Low(source[0], source[1]).AsUInt32();
-            var leftHigh = VectorZip.High(source[0], source[1]).AsUInt32();
-            var right = VectorZip.Low(source[2], source[3]).AsUInt32();
-            var rightHigh = VectorZip.High(source[2], source[3]).AsUInt32();
-
-            byte[] plane = half == 0 ? top : bottom;
-            int start = half == 0 ? topStart : bottomStart;
-            WriteRows(plane, start, stride, VectorZip.Low(left, right).AsUInt64());
-            WriteRows(plane, start + (2 * stride), stride, VectorZip.High(left, right).AsUInt64());
-            WriteRows(plane, start + (4 * stride), stride, VectorZip.Low(leftHigh, rightHigh).AsUInt64());
-            WriteRows(plane, start + (6 * stride), stride, VectorZip.High(leftHigh, rightHigh).AsUInt64());
-        }
+        EdgeBytes columns;
+        columns.P3 = Vector128.Create(taps[..16]);
+        columns.P2 = Vector128.Create(taps.Slice(16, 16));
+        columns.P1 = Vector128.Create(taps.Slice(32, 16));
+        columns.P0 = Vector128.Create(taps.Slice(48, 16));
+        columns.Q0 = Vector128.Create(taps.Slice(64, 16));
+        columns.Q1 = Vector128.Create(taps.Slice(80, 16));
+        columns.Q2 = Vector128.Create(taps.Slice(96, 16));
+        columns.Q3 = Vector128.Create(taps.Slice(112, 16));
+        WriteColumns<PortableZip>(in columns, ref top[topStart], ref bottom[bottomStart], stride);
     }
 
-    private static Vector128<byte> Row8(byte[] plane, int offset) =>
-        Vector128.CreateScalarUnsafe(MemoryMarshal.Read<ulong>(plane.AsSpan(offset, 8))).AsByte();
+    private static Vector128<short> Lower(Vector128<byte> value) => Vector128.WidenLower(value).AsInt16();
 
-    private static void WriteRows(byte[] plane, int offset, int stride, Vector128<ulong> rows)
-    {
-        MemoryMarshal.Write(plane.AsSpan(offset, 8), rows.GetElement(0));
-        MemoryMarshal.Write(plane.AsSpan(offset + stride, 8), rows.GetElement(1));
-    }
+    private static Vector128<short> Upper(Vector128<byte> value) => Vector128.WidenUpper(value).AsInt16();
 
-    private static Vector128<short> LoadTap<TTap>(Span<TTap> taps, int tap, int offset)
-        where TTap : unmanaged =>
-        typeof(TTap) == typeof(byte)
-            ? Load(MemoryMarshal.Cast<TTap, byte>(taps), tap, offset)
-            : Vector128.Create(MemoryMarshal.Cast<TTap, short>(taps).Slice((tap * 16) + offset, 8));
+    /// <summary>Two vectors of eight 16-bit samples, clipped to 0 .. 255, as sixteen bytes.</summary>
+    private static Vector128<byte> Pack(Vector128<short> low, Vector128<short> high) =>
+        Vector128.Narrow(Clip(low).AsUInt16(), Clip(high).AsUInt16());
 
-    private static void StoreTap<TTap>(Span<TTap> taps, int tap, int offset, Vector128<short> max, Vector128<short> value)
-        where TTap : unmanaged
-    {
-        if (typeof(TTap) == typeof(byte))
-        {
-            Store(MemoryMarshal.Cast<TTap, byte>(taps), tap, offset, value);
-            return;
-        }
+    private static Vector128<short> LoadTap(Span<short> taps, int tap, int offset) => Vector128.Create(taps.Slice((tap * 16) + offset, 8));
 
-        Vector128.Clamp(value, Vector128<short>.Zero, max).CopyTo(MemoryMarshal.Cast<TTap, short>(taps)[((tap * 16) + offset)..]);
-    }
-
-    private static Vector128<short> Load(ReadOnlySpan<byte> taps, int tap, int offset) =>
-        Vector128.WidenLower(Vector128.Create(taps.Slice((tap * 16) + offset, 16))).AsInt16();
-
-    private static void Store(Span<byte> taps, int tap, int offset, Vector128<short> value)
-    {
-        var bytes = Vector128.Narrow(Clip(value).AsUInt16(), Vector128<ushort>.Zero);
-        MemoryMarshal.Write(taps[((tap * 16) + offset)..], bytes.AsUInt64().ToScalar());
-    }
+    private static void StoreTap(Span<short> taps, int tap, int offset, Vector128<short> max, Vector128<short> value) =>
+        Vector128.Clamp(value, Vector128<short>.Zero, max).CopyTo(taps[((tap * 16) + offset)..]);
 
     private static Vector128<short> Clip(Vector128<short> value) =>
         Vector128.Clamp(value, Vector128<short>.Zero, Vector128.Create((short)255));

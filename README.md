@@ -59,7 +59,7 @@ says feature by feature which encoder made the samples (libx264, OpenH264, JM) a
 - H.264: separate colour planes, luma and chroma bit depths that differ, monochrome above 10 bits (FFmpeg decodes
   none of these, so checking them needs another reference); concealing a lost field of a field pair (an unpaired
   field still throws), and guessing motion for concealed macroblocks (they copy their place in a reference).
-- H.264 speed: 1.9 to 3.6 times FFmpeg's time on one thread (Benchmarking). With 4 threads a 720p P chain takes
+- H.264 speed: 1.95 to 3.6 times FFmpeg's time on one thread (Benchmarking). With 4 threads a 720p P chain takes
   about half of one thread's time: each picture decodes about 28% slower than alone (its references were written on
   other cores) and threads wait for references' rows about a fifth of the time.
 
@@ -240,35 +240,39 @@ ffmpeg -benchmark -threads 1 -stream_loop 9 -i $f -f null -
 
 Both time the whole process, demuxing included; mcdec's also includes .NET's startup and JIT (mcdec's `last loop`
 line shows the steady speed without them). mcdec disposes each frame once it has it, as a consumer done with them
-would, so H.264 frames reuse the planes of earlier ones. A snapshot, made that way (2026-10-24, FFmpeg 6.1.1,
+would, so H.264 frames reuse the planes of earlier ones. A snapshot, made that way (2026-10-24 evening, after the
+day's speed PRs, FFmpeg 6.1.1,
 single-threaded on a 4-core 2.8 GHz Xeon cloud VM with AVX2 and AVX-512; the median of five runs interleaved with
 FFmpeg's, the order alternating; µs per frame, AAC frames are 1024 samples, HE-AAC frames 2048):
 
 | Sample | Loops | ManagedCodecs | FFmpeg | Ratio |
 | --- | ---: | ---: | ---: | ---: |
-| `testsrc-420.avi` (320x240 MJPEG 4:2:0) | 100 | 299 | 418 | 0.72 |
-| `testsrc-444.avi` (MJPEG 4:4:4) | 100 | 509 | 590 | 0.86 |
-| `noise-q1.avi` (MJPEG, noise at the highest quality) | 100 | 1106 | 1306 | 0.85 |
-| `h264-p-refs.mp4` (320x240 H.264, P frames) | 40 | 786 | 282 | 2.79 |
-| `h264-bench-720p.mp4` (1280x720 H.264) | 10 | 10210 | 2992 | 3.41 |
-| `h264-main-p-refs.mp4` (320x240 H.264 Main, CABAC) | 40 | 1026 | 408 | 2.51 |
-| `h264-b-pyramid.mp4` (320x240 H.264 Main, CABAC, B frames) | 20 | 1687 | 561 | 3.01 |
-| `h264-wp-default.mp4` (320x240 H.264, libx264's Main defaults: B frames, weighted prediction) | 20 | 1346 | 432 | 3.12 |
-| `h264-high-default.mp4` (320x240 H.264, libx264's High defaults: also the 8x8 transform) | 20 | 1599 | 441 | 3.63 |
-| `h264-high-b.mp4` (320x240 H.264 High, B frames, all partitions) | 40 | 1779 | 625 | 2.85 |
-| `h264-10bit-b.mp4` (the same at 10 bits, High 10) | 40 | 2188 | 720 | 3.04 |
-| `h264-high-motion.mp4` (320x240 H.264 High, fast motion and noise, QP 22) | 20 | 6322 | 3313 | 1.91 |
-| `h264-10bit-motion.mp4` (the same at 10 bits, QP 34, which is QP 22's step size) | 20 | 6861 | 3205 | 2.14 |
-| `aac-stereo-48k.mp4` (AAC, stereo) | 100 | 56 | 99 | 0.57 |
-| `aac-5.1.mp4` (AAC, 5.1) | 100 | 142 | 138 | 1.03 |
-| `heaac/heaac-5.1.mp4` (HE-AAC, 5.1) | 100 | 699 | 350 | 2.00 |
-| `heaac/heaacv2-stereo.mp4` (HE-AAC v2: parametric stereo) | 100 | 305 | 189 | 1.61 |
+| `testsrc-420.avi` (320x240 MJPEG 4:2:0) | 100 | 299 | 392 | 0.76 |
+| `testsrc-444.avi` (MJPEG 4:4:4) | 100 | 473 | 511 | 0.93 |
+| `noise-q1.avi` (MJPEG, noise at the highest quality) | 100 | 1112 | 1257 | 0.88 |
+| `h264-p-refs.mp4` (320x240 H.264, P frames) | 40 | 658 | 282 | 2.33 |
+| `h264-bench-720p.mp4` (1280x720 H.264) | 10 | 9740 | 3162 | 3.08 |
+| `h264-main-p-refs.mp4` (320x240 H.264 Main, CABAC) | 40 | 900 | 394 | 2.29 |
+| `h264-b-pyramid.mp4` (320x240 H.264 Main, CABAC, B frames) | 20 | 1471 | 564 | 2.61 |
+| `h264-wp-default.mp4` (320x240 H.264, libx264's Main defaults: B frames, weighted prediction) | 20 | 1322 | 393 | 3.36 |
+| `h264-high-default.mp4` (320x240 H.264, libx264's High defaults: also the 8x8 transform) | 20 | 1468 | 407 | 3.61 |
+| `h264-high-b.mp4` (320x240 H.264 High, B frames, all partitions) | 40 | 1684 | 678 | 2.48 |
+| `h264-10bit-b.mp4` (the same at 10 bits, High 10) | 40 | 2240 | 690 | 3.25 |
+| `h264-high-motion.mp4` (320x240 H.264 High, fast motion and noise, QP 22) | 20 | 6161 | 3166 | 1.95 |
+| `h264-10bit-motion.mp4` (the same at 10 bits, QP 34, which is QP 22's step size) | 20 | 6903 | 3248 | 2.13 |
+| `aac-stereo-48k.mp4` (AAC, stereo) | 100 | 47 | 96 | 0.48 |
+| `aac-5.1.mp4` (AAC, 5.1) | 100 | 134 | 119 | 1.12 |
+| `heaac/heaac-5.1.mp4` (HE-AAC, 5.1) | 100 | 683 | 312 | 2.19 |
+| `heaac/heaacv2-stereo.mp4` (HE-AAC v2: parametric stereo) | 100 | 294 | 162 | 1.82 |
 
 The short MJPEG and AAC runs are mostly .NET's startup and JIT: without them (`last loop`), `aac-5.1.mp4` takes about
-93 µs a frame, `heaac-5.1.mp4` about 590. H.264 takes 1.9 to 3.6 times FFmpeg's time, less on noisier content,
+93 µs a frame, `heaac-5.1.mp4` about 590. H.264 takes 1.95 to 3.6 times FFmpeg's time, less on noisier content,
 whose residual decoding weighs more; at 10 bits the ratio is close to the 8-bit one. A VM's speed moves from day to
-day, and FFmpeg's and ours do not move together: the previous snapshot (2026-10-23, in the history of this file) had
-H.264 up to 9% faster against about the same FFmpeg times, yet that commit's build and main's just before the faster
+day, and FFmpeg's and ours do not move together: this snapshot has 8-bit H.264 2 to 16% faster than the morning's
+(the deblocking and motion compensation PRs between them; 10-bit, which they do not touch, within 3%) against FFmpeg
+times that moved by up to 9% too,
+while the previous one (2026-10-23, in the history of this file) had H.264 up to 9% faster against about the same
+FFmpeg times, yet that commit's build and main's just before the faster
 6-tap luma filters, run in interleaved pairs on this VM, differ by less than the noise (`h264-p-refs.mp4` +0.6%,
 `h264-high-b.mp4` -2.5%, `h264-bench-720p.mp4` +1.6%). Only comparisons made on one machine at one time count.
 

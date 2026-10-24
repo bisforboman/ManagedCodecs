@@ -233,6 +233,17 @@ CABAC slice ends inside its data (9.3.4.5 writes the stop bit last), so consumin
 
 ### Performance notes
 
+Where the time goes after the day's speed PRs (stage timers in a scratch copy, 2026-10-24 evening, one thread,
+`DOTNET_TieredCompilation=0`; shares of each picture's decoding, the timers nested so they overlap): on
+`h264-bench-720p.mp4` motion compensation 29%, deblocking 22% (30% before #81 and #84), inter residuals 22% (16 of it
+parsing), intra macroblocks 8%, the rest (macroblock headers, motion vector prediction and storage) about 18%; on
+`h264-high-b.mp4` residual parsing 24%, deblocking 18%, intra macroblocks 18%, motion compensation 15%; on the noisy
+`h264-high-motion.mp4` residual parsing 61%. Copying frames out is 1 to 4%. So the next gains are in
+CABAC residual parsing for detailed content and motion compensation's memory reads at 720p (the chroma half of it
+waits on its reference reads, #85), nothing above about a quarter on its own. `ConcealErrors` costs nothing measurable
+on clean input: `mcdec --conceal` against without, 6 interleaved pairs each, +0.8% on one thread and +1.1% on four
+on the 720p stream, -3.7% on `h264-high-b.mp4` with four, all within the pairs' spread.
+
 A profile of a
 720p libx264 default stream (2026-10-22) is flat: CABAC residual decoding takes 14%, deblocking 21%
 in pieces of at most 2.5% (bS, transposes, the filter), nothing else over 5%. (That profile counted the JIT's

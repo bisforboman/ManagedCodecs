@@ -205,9 +205,10 @@ in pieces of at most 2.5% (bS, transposes, the filter), nothing else over 5%. (T
 unoptimized fallback under valgrind, CLAUDE.md, Timing.) Stage timers (2026-10-24, wall clock) put deblocking at
 30% of `h264-bench-720p.mp4` and 22% of `h264-high-b.mp4`, three quarters of it the edge filters; 8-bit edges are now
 filtered in registers (rows loaded whole or transposed in registers, bS and tC0 spread to the lanes by shuffles, no
-gather buffer), about twice as fast an edge. The 16-bit path still gathers into a buffer. The bS derivation is most
-of the rest (about 290 ns a macroblock on the 720p stream, 84% of whose macroblocks have uniform motion and no
-coefficients). Output planes are allocated
+gather buffer), about twice as fast an edge. The 16-bit path still gathers into a buffer. The bS derivation was most
+of the rest (about 250 ns a macroblock on the 720p stream, 84% of whose macroblocks have uniform motion and no
+coefficients); an edge between two such macroblocks now takes one motion comparison for its four segments, which
+halves that (about 140 ns). Output planes are allocated
 without zeroing (callgrind: 0.4% fewer instructions on `h264-high-b.mp4`, 2.6% on `testsrc-420.avi`). Looked
 at and left: dropping the whole-picture clears in `Begin` (skipped, direct and intra macroblocks rely on the
 zeros in `_absMvd` and the motion arrays, so each path would clear its own macroblock instead, about as many

@@ -222,8 +222,11 @@ time, and are idle (no picture to decode) about as long. More threads than cores
 (gen2 collections over 5 loops of `h264-bench-720p.mp4`: 33 down to 3). Vector 4x4 and 8x8 inverse transforms
 (#42) were reverted: callgrind counted 1.4% more instructions per loop of `h264-bench-720p.mp4` with them and 0.9%
 more on `h264-high-b.mp4`, and 24 interleaved runs of the builds before and after showed no difference; the 9 and
-10% first reported were the VM's noise, more than the two functions' 2% (CAVLC) and 7% (CABAC) of the profile
-could have given.
+10% first reported were the VM's noise. Those instruction counts and profile shares were of the JIT's unoptimized
+fallback under valgrind (CLAUDE.md, Timing); by wall clock the conclusion holds: the vector transforms are 2.5 to
+2.8 times faster per block (about 20 against 50 ns for a 4x4, 100 against 280 for an 8x8), but at 503 4x4 and 22
+8x8 blocks a frame of `h264-high-b.mp4`, and 4625 and 11 of `h264-bench-720p.mp4`, that is about 1.5% of a frame,
+below what interleaved runs resolve.
 
 ## AAC
 

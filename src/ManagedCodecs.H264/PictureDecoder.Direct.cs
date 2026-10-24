@@ -7,7 +7,8 @@ internal sealed partial class PictureDecoder<TPixel>
     /// Derives and stores the motion of 8x8 blocks <paramref name="first"/> .. first + count - 1
     /// of a macroblock in direct mode, spatial or temporal as the slice says.
     /// </summary>
-    private void DirectMotion(SliceState slice, int mbAddr, int first, int count)
+    /// <returns>Whether the macroblock came out with one motion in each list (spatial direct's usual case); false when not known.</returns>
+    private bool DirectMotion(SliceState slice, int mbAddr, int first, int count)
     {
         if (slice.RefList1[0].IsNonExisting)
         {
@@ -28,19 +29,18 @@ internal sealed partial class PictureDecoder<TPixel>
 
         if (slice.Header.DirectSpatialMvPred)
         {
-            SpatialDirect(slice, mbAddr, first, count);
+            return SpatialDirect(slice, mbAddr, first, count);
         }
-        else
-        {
-            TemporalDirect(slice, mbAddr, first, count);
-        }
+
+        TemporalDirect(slice, mbAddr, first, count);
+        return false;
     }
 
     /// <summary>
     /// 8.4.1.2.2: reference indices and motion vectors predicted from the neighbouring macroblocks
     /// (as for a 16x16 partition), set to zero motion in blocks whose co-located block is still.
     /// </summary>
-    private void SpatialDirect(SliceState slice, int mbAddr, int first, int count)
+    private bool SpatialDirect(SliceState slice, int mbAddr, int first, int count)
     {
         int ref0 = SpatialDirectRefIdx(0, mbAddr);
         int ref1 = SpatialDirectRefIdx(1, mbAddr);
@@ -69,7 +69,7 @@ internal sealed partial class PictureDecoder<TPixel>
         // from its own reference 0 (its motion as stored, not rescaled between frame and field).
         var colPic = slice.RefList1[0];
         int size = Sps.Direct8x8Inference ? 8 : 4;
-        bool checkStill = !zero && slice.Marks.IsShortTerm(colPic) && (ref0 == 0 || ref1 == 0);
+        bool checkStill = !zero && slice.ColPicShortTerm && (ref0 == 0 || ref1 == 0);
         uint colZero = 0;
         int blocks = 0;
         foreach (var (x, y) in DirectBlocks(first, count, size))
@@ -87,7 +87,7 @@ internal sealed partial class PictureDecoder<TPixel>
         if (count == 4 && (colZero == 0 || colZero == (1u << blocks) - 1))
         {
             StoreSpatialMotion(slice, mbAddr, 0, 0, 16, ref0, ref1, mv0, mv1, colZero != 0);
-            return;
+            return true;
         }
 
         int block = 0;
@@ -95,6 +95,8 @@ internal sealed partial class PictureDecoder<TPixel>
         {
             StoreSpatialMotion(slice, mbAddr, x, y, size, ref0, ref1, mv0, mv1, ((colZero >> block++) & 1) != 0);
         }
+
+        return false;
     }
 
     /// <summary>Spatial direct motion of a size x size area: zero in a list whose reference is 0 where the co-located block is still.</summary>
@@ -156,7 +158,7 @@ internal sealed partial class PictureDecoder<TPixel>
                 {
                     int refParity = col.Scale == VerticalScale.FrameToField ? parity : col.RefParity;
                     frameIdx = -1;
-                    for (int i = 0; i < refList0.Count && frameIdx < 0; i++)
+                    for (int i = 0; i < refList0.Length && frameIdx < 0; i++)
                     {
                         frameIdx = refList0[i].Id == col.RefId && refList0[i].Parity == refParity ? i : -1;
                     }
@@ -171,7 +173,7 @@ internal sealed partial class PictureDecoder<TPixel>
             {
                 // The lowest index in list 0 of the picture the co-located block referred to.
                 frameIdx = -1;
-                for (int i = 0; i < refList0.Count && frameIdx < 0; i++)
+                for (int i = 0; i < refList0.Length && frameIdx < 0; i++)
                 {
                     if (refList0[i].Id == col.RefId)
                     {
@@ -355,11 +357,12 @@ internal sealed partial class PictureDecoder<TPixel>
     }
 
     /// <summary>Motion compensation of direct predicted 8x8 blocks, in the units their motion was derived in.</summary>
-    private void PredictDirect(SliceState slice, int mbAddr, int first, int count)
+    /// <param name="uniform">Whether the direct motion is known to be one motion a list (else it is checked).</param>
+    private void PredictDirect(SliceState slice, int mbAddr, int first, int count, bool uniform = false)
     {
         // A whole macroblock whose blocks came out with one motion (as spatial direct's usually
         // do) predicts as one 16x16 partition: the same samples, for a quarter of the calls.
-        if (count == 4 && HasUniformMotion(mbAddr))
+        if (count == 4 && (uniform || HasUniformMotion(mbAddr)))
         {
             PredictPartition(slice, mbAddr, 0, 0, 16, 16);
             return;

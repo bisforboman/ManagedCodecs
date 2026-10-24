@@ -61,7 +61,7 @@ says feature by feature which encoder made the samples (libx264, OpenH264, JM) a
   encoder or decoder, FFmpeg included, handles them, and they would need a bit depth for each plane in the frame
   API); concealing a lost field of a field pair (an unpaired
   field still throws), and guessing motion for concealed macroblocks (they copy their place in a reference).
-- H.264 speed: 1.95 to 3.6 times FFmpeg's time on one thread (Benchmarking). With 4 threads a 720p P chain takes
+- H.264 speed: 1.87 to 3.2 times FFmpeg's time on one thread (Benchmarking). With 4 threads a 720p P chain takes
   about half of one thread's time: each picture decodes about 28% slower than alone (its references were written on
   other cores) and threads wait for references' rows about a fifth of the time.
 
@@ -242,41 +242,39 @@ ffmpeg -benchmark -threads 1 -stream_loop 9 -i $f -f null -
 
 Both time the whole process, demuxing included; mcdec's also includes .NET's startup and JIT (mcdec's `last loop`
 line shows the steady speed without them). mcdec disposes each frame once it has it, as a consumer done with them
-would, so H.264 frames reuse the planes of earlier ones. A snapshot, made that way (2026-10-24 evening, after the
-day's speed PRs, FFmpeg 6.1.1,
+would, so H.264 frames reuse the planes of earlier ones. A snapshot, made that way (2026-10-24 late evening, after the
+speed PRs on libx264's default streams, FFmpeg 6.1.1,
 single-threaded on a 4-core 2.8 GHz Xeon cloud VM with AVX2 and AVX-512; the median of five runs interleaved with
 FFmpeg's, the order alternating; µs per frame, AAC frames are 1024 samples, HE-AAC frames 2048):
 
 | Sample | Loops | ManagedCodecs | FFmpeg | Ratio |
 | --- | ---: | ---: | ---: | ---: |
-| `testsrc-420.avi` (320x240 MJPEG 4:2:0) | 100 | 299 | 392 | 0.76 |
-| `testsrc-444.avi` (MJPEG 4:4:4) | 100 | 473 | 511 | 0.93 |
-| `noise-q1.avi` (MJPEG, noise at the highest quality) | 100 | 1112 | 1257 | 0.88 |
-| `h264-p-refs.mp4` (320x240 H.264, P frames) | 40 | 658 | 282 | 2.33 |
-| `h264-bench-720p.mp4` (1280x720 H.264) | 10 | 9740 | 3162 | 3.08 |
-| `h264-main-p-refs.mp4` (320x240 H.264 Main, CABAC) | 40 | 900 | 394 | 2.29 |
-| `h264-b-pyramid.mp4` (320x240 H.264 Main, CABAC, B frames) | 20 | 1471 | 564 | 2.61 |
-| `h264-wp-default.mp4` (320x240 H.264, libx264's Main defaults: B frames, weighted prediction) | 20 | 1322 | 393 | 3.36 |
-| `h264-high-default.mp4` (320x240 H.264, libx264's High defaults: also the 8x8 transform) | 20 | 1468 | 407 | 3.61 |
-| `h264-high-b.mp4` (320x240 H.264 High, B frames, all partitions) | 40 | 1684 | 678 | 2.48 |
-| `h264-10bit-b.mp4` (the same at 10 bits, High 10) | 40 | 2240 | 690 | 3.25 |
-| `h264-high-motion.mp4` (320x240 H.264 High, fast motion and noise, QP 22) | 20 | 6161 | 3166 | 1.95 |
-| `h264-10bit-motion.mp4` (the same at 10 bits, QP 34, which is QP 22's step size) | 20 | 6903 | 3248 | 2.13 |
-| `aac-stereo-48k.mp4` (AAC, stereo) | 100 | 47 | 96 | 0.48 |
-| `aac-5.1.mp4` (AAC, 5.1) | 100 | 134 | 119 | 1.12 |
-| `heaac/heaac-5.1.mp4` (HE-AAC, 5.1) | 100 | 683 | 312 | 2.19 |
-| `heaac/heaacv2-stereo.mp4` (HE-AAC v2: parametric stereo) | 100 | 294 | 162 | 1.82 |
+| `testsrc-420.avi` (320x240 MJPEG 4:2:0) | 100 | 277 | 388 | 0.71 |
+| `testsrc-444.avi` (MJPEG 4:4:4) | 100 | 503 | 531 | 0.95 |
+| `noise-q1.avi` (MJPEG, noise at the highest quality) | 100 | 1012 | 1193 | 0.85 |
+| `h264-p-refs.mp4` (320x240 H.264, P frames) | 40 | 616 | 262 | 2.35 |
+| `h264-bench-720p.mp4` (1280x720 H.264) | 10 | 7776 | 2570 | 3.03 |
+| `h264-main-p-refs.mp4` (320x240 H.264 Main, CABAC) | 40 | 840 | 372 | 2.26 |
+| `h264-b-pyramid.mp4` (320x240 H.264 Main, CABAC, B frames) | 20 | 1420 | 549 | 2.59 |
+| `h264-wp-default.mp4` (320x240 H.264, libx264's Main defaults: B frames, weighted prediction) | 20 | 1199 | 390 | 3.07 |
+| `h264-high-default.mp4` (320x240 H.264, libx264's High defaults: also the 8x8 transform) | 20 | 1248 | 397 | 3.14 |
+| `h264-high-b.mp4` (320x240 H.264 High, B frames, all partitions) | 40 | 1536 | 605 | 2.54 |
+| `h264-10bit-b.mp4` (the same at 10 bits, High 10) | 40 | 1966 | 619 | 3.18 |
+| `h264-high-motion.mp4` (320x240 H.264 High, fast motion and noise, QP 22) | 20 | 5784 | 3089 | 1.87 |
+| `h264-10bit-motion.mp4` (the same at 10 bits, QP 34, which is QP 22's step size) | 20 | 6530 | 3101 | 2.11 |
+| `aac-stereo-48k.mp4` (AAC, stereo) | 100 | 45 | 90 | 0.50 |
+| `aac-5.1.mp4` (AAC, 5.1) | 100 | 132 | 113 | 1.17 |
+| `heaac/heaac-5.1.mp4` (HE-AAC, 5.1) | 100 | 641 | 282 | 2.28 |
+| `heaac/heaacv2-stereo.mp4` (HE-AAC v2: parametric stereo) | 100 | 292 | 167 | 1.75 |
 
 The short MJPEG and AAC runs are mostly .NET's startup and JIT: without them (`last loop`), `aac-5.1.mp4` takes about
-93 µs a frame, `heaac-5.1.mp4` about 590. H.264 takes 1.95 to 3.6 times FFmpeg's time, less on noisier content,
+87 µs a frame, `heaac-5.1.mp4` about 550. H.264 takes 1.87 to 3.2 times FFmpeg's time, less on noisier content,
 whose residual decoding weighs more; at 10 bits the ratio is close to the 8-bit one. A VM's speed moves from day to
-day, and FFmpeg's and ours do not move together: this snapshot has 8-bit H.264 2 to 16% faster than the morning's
-(the deblocking and motion compensation PRs between them; 10-bit, which they do not touch, within 3%) against FFmpeg
-times that moved by up to 9% too,
-while the previous one (2026-10-23, in the history of this file) had H.264 up to 9% faster against about the same
-FFmpeg times, yet that commit's build and main's just before the faster
-6-tap luma filters, run in interleaved pairs on this VM, differ by less than the noise (`h264-p-refs.mp4` +0.6%,
-`h264-high-b.mp4` -2.5%, `h264-bench-720p.mp4` +1.6%). Only comparisons made on one machine at one time count.
+day, and FFmpeg's and ours do not move together: between the evening's snapshot (in the history of this file) and this
+one, FFmpeg's own times moved by +4 to -19%, so the ratios are what compare. They fell on libx264's default streams
+(`h264-wp-default.mp4` 3.36 to 3.07, `h264-high-default.mp4` 3.61 to 3.14: the neighbour lookup, motion bookkeeping and
+deblocking PRs between them, which interleaved runs of the builds before and after each put at 1 to 6%) and stayed
+within about 4% elsewhere. Only comparisons made on one machine at one time count.
 
 Cloud VMs are noisy (single runs differed by up to a third), so compare before and after on one machine. For
 statistics on the decoder alone there is BenchmarkDotNet, `dotnet run -c Release --project

@@ -262,7 +262,9 @@ last bits differ between .NET and WebAssembly's runtime, which the HF generator'
 
 Decoded output (`SbrConformanceTests`) against FFmpeg's (name.sbr.f32: at the SBR rate; MP4 without the 2048 samples of
 encoder delay its iTunSMPB tag gives, which the demuxer reads as FFmpeg's does when there is no edit list; mono in
-stereo, as FFmpeg's decoder makes it, with both channels equal). heaac-edit.mp4 is the 44.1 kHz sample remuxed by
+stereo, as FFmpeg's decoder makes it, with both channels equal; this decoder keeps a mono stream without
+parametric stereo mono, one channel and an MP4 track reporting one, by the owner's choice, and the test compares that
+channel with FFmpeg's left one). heaac-edit.mp4 is the 44.1 kHz sample remuxed by
 FFmpeg, whose muxer writes that delay as an edit list instead, in the SBR rate's timescale: an MP4 track whose config
 signals SBR reports the SBR rate, as FFmpeg's does, so the edit's samples count the decoder's output (at the core's rate
 half of them would be skipped). The 5.1 sample's LFE, which has no SBR data and so

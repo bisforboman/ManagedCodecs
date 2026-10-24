@@ -69,7 +69,10 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
   A gain larger than the changed functions' share of the frame is noise, however consistent: check that ceiling
   before believing an A/B (two streams agreeing on -9 and -10% for the vector inverse transforms were noise and the
   change was reverted; timed by wall clock later, the transforms are 2.5 to 2.8 times faster per block but about 2%
-  of a frame, so about 1.5% in all).
+  of a frame, so about 1.5% in all). Nor rank hot spots by `dotnet-trace`'s thread-time sampling: its samples land at
+  safe points, and it put 23 to 48% of H.264 decoding in `Picture.ReportProgress`'s lock, whose removal changed
+  nothing. Stopwatch timers around a decoder's stages (in a scratch copy, never pushed) and microbenchmarks of the hot
+  functions ranked them instead.
 
 ## Gotchas (each cost time once)
 

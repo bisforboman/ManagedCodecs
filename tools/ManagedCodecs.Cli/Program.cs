@@ -12,11 +12,12 @@ using ManagedCodecs.Mjpeg;
 //   ffmpeg -benchmark -threads 1 -stream_loop 9 -i samples/h264-bench-720p.mp4 -f null -
 if (args.Length == 0 || args.Contains("-h") || args.Contains("--help"))
 {
-    Console.WriteLine("usage: mcdec <file> [--loops N] [--threads N] [--borrow-frames] [--zero-copy] | mcdec --hash [--loops N] <file>...");
+    Console.WriteLine("usage: mcdec <file> [--loops N] [--threads N] [--borrow-frames] [--zero-copy] [--conceal] | mcdec --hash [--loops N] <file>...");
     Console.WriteLine("  Demuxes and decodes the file's video and audio N times (default 1), like ffmpeg -stream_loop N-1.");
     Console.WriteLine("  --threads N: decode up to N H.264 pictures at once, each on a thread of its own (default 1).");
     Console.WriteLine("  --borrow-frames: H.264 frames point into the decoder's pictures instead of being copied out.");
     Console.WriteLine("  --zero-copy: MJPEG images are decoded straight into their frames' (MCU-padded) planes.");
+    Console.WriteLine("  --conceal: H.264 conceals damaged and lost pictures (H264Decoder.ConcealErrors) instead of failing on them.");
     Console.WriteLine("  --hash: prints a SHA-256 of each file's decoded output instead (tools/wasm-check.sh compares them).");
     return args.Length == 0 ? 1 : 0;
 }
@@ -68,6 +69,7 @@ if (threadsAt >= 0 && (threadsAt + 1 >= args.Length || !int.TryParse(args[thread
 }
 
 bool borrowFrames = args.Contains("--borrow-frames");
+bool conceal = args.Contains("--conceal");
 bool zeroCopy = args.Contains("--zero-copy");
 var process = Process.GetCurrentProcess();
 var wall = Stopwatch.StartNew();
@@ -86,7 +88,7 @@ for (int loop = 0; loop < loops; loop++)
     IVideoDecoder? videoDecoder = video?.Codec switch
     {
         CodecIds.Mjpeg => new MjpegDecoder(video) { ZeroCopy = zeroCopy },
-        CodecIds.H264 => new H264Decoder(video) { BorrowFrames = borrowFrames, Threads = threads },
+        CodecIds.H264 => new H264Decoder(video) { BorrowFrames = borrowFrames, Threads = threads, ConcealErrors = conceal },
         _ => null,
     };
     IAudioDecoder? audioDecoder = audio?.Codec == CodecIds.Aac ? new AacDecoder(audio) : null;

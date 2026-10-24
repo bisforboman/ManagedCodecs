@@ -65,10 +65,11 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
   measures optimized code: under valgrind (runtime 10.0.13) the JIT's full-optimization compiles fail and fall back to
   MinOpts, where every span index is a call (the QMF FFT's profile, all MinOpts, was 7 times the native instruction
   count); `DOTNET_JitDisasmSummary=1 DOTNET_JitStdOutFile=<file>` under valgrind lists each method's level, and
-  without FullOpts or Tier1 for the hot ones, time the code instead (a Stopwatch microbenchmark, interleaved A/B). A gain larger than the
-  changed functions' share of the profile is noise, however consistent: check that ceiling before believing an
-  A/B (two streams agreeing on -9 and -10% for the vector inverse transforms, about 2% and 7% of their profiles,
-  did not survive callgrind or a longer A/B, and the change was reverted).
+  without FullOpts or Tier1 for the hot ones, time the code instead (a Stopwatch microbenchmark, interleaved A/B).
+  A gain larger than the changed functions' share of the frame is noise, however consistent: check that ceiling
+  before believing an A/B (two streams agreeing on -9 and -10% for the vector inverse transforms were noise and the
+  change was reverted; timed by wall clock later, the transforms are 2.5 to 2.8 times faster per block but about 2%
+  of a frame, so about 1.5% in all).
 
 ## Gotchas (each cost time once)
 

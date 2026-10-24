@@ -257,8 +257,9 @@ FFmpeg's, the order alternating; µs per frame, AAC frames are 1024 samples, HE-
 The short MJPEG and AAC runs are mostly .NET's startup and JIT: without them (`last loop`), `aac-5.1.mp4` takes about
 90 µs a frame, `heaac-5.1.mp4` about 570. H.264 takes 2.3 to 3.6 times FFmpeg's time, less on noisier content,
 whose residual decoding weighs more; at 10 bits the ratio is close to the 8-bit one. A VM's speed moves from day to
-day, and FFmpeg's and ours do not move together: the previous snapshot (2026-10-22, in the history of this file) had `h264-bench-720p.mp4` at
-7656 µs against 2412, while callgrind counts 1.5% more instructions for `h264-p-refs.mp4` since then. Only
+day, and FFmpeg's and ours do not move together: the previous snapshot (2026-10-22, in the history of this file) had
+`h264-bench-720p.mp4` at 7656 µs against 2412, though the code changed little in between (callgrind counted 1.5% more
+instructions for `h264-p-refs.mp4`, but of the JIT's unoptimized fallback under valgrind: CLAUDE.md, Timing). Only
 comparisons made on one machine at one time count.
 
 Cloud VMs are noisy (single runs differed by up to a third), so compare before and after on one machine. For

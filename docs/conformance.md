@@ -204,16 +204,27 @@ ending inside a macroblock) keeps the macroblocks it decoded; the failing one an
 missing at once, so the rows below them are neither deblocked nor reported to other pictures before they are filled.
 The picture's other slices are decoded, then every missing macroblock becomes an inter macroblock with zero motion
 from list 0 entry 0 of the picture's first P or B slice (an intra picture: the latest reference; none, after a damaged
-IDR picture, and for now an intra second field, whose latest reference is its own frame: mid-grey), no coefficients and the slice's QP, in a slice of its own. Deblocking, co-located motion and
-later direct prediction then read it as any other. The frame is flagged `VideoFrame.IsDamaged`, as is every picture
-whose motion names a damaged reference (checked once those references are done), up to the next IDR picture. Nothing
-of FFmpeg's (error_resilience.c guesses motion) is ported.
+IDR picture, and for now an intra second field, whose latest reference is its own frame: mid-grey), no coefficients and
+the slice's QP, in a slice of its own. Deblocking, co-located motion and later direct prediction then read it as any
+other. A lost picture (a frame_num gap; its packet missing, or its slice headers damaged) is the frame inferred for the
+gap (8.2.5.2), which then copies the latest reference once that is done, with no motion; a slice whose reference lists
+cannot be built (no reference at all, or a list modification naming a lost one) is not decoded and its macroblocks are
+concealed. The frame is flagged `VideoFrame.IsDamaged`, as is every picture whose reference lists hold a damaged
+picture (checked once those are done: a lost picture's place shifts the lists even where no motion names it), up to the
+next IDR picture. Nothing of FFmpeg's (error_resilience.c guesses motion) is ported. JM codes an intra frame's second
+field as P, so no sample has an intra second field to test the grey case's alternative (its first field) with.
+
+Without concealment, a gap the SPS does not allow fails every picture up to the next IDR picture: the lost picture's
+memory_management_control_operation went with it (libx264's B pyramid un-marks references that way), and the lists
+after it named the wrong pictures without an error (1 or 2 wrong frames a lost picture in libx264's B samples before).
+Gaps the SPS allows (OpenH264 with temporal layers dropped) decode as before.
 
 Concealed frames match no reference, so `H264ConcealmentTests` checks the rest against the clean decode (bit-exact
 with FFmpeg by the conformance tests): one packet loses the second half of its last NAL unit (CAVLC and CABAC with four
 slices a picture, a B pyramid, MBAFF, 4:4:4, JM's field pictures; an IDR picture and an inter one), every frame comes
 out, the unflagged ones are bit-exact, the flagged ones within a loose PSNR floor, and three threads with random delays
-give the same frames and flags. Without concealment no frame comes out wrong. The malformed-input sweep and the fuzz
+give the same frames and flags; lost packets likewise (an IDR picture, an inter one, a B picture other B pictures
+predict from, OpenH264's long-term references, a JM field pair). Without concealment no frame comes out wrong. The malformed-input sweep and the fuzz
 target run concealing too. Measured against FFmpeg on the same damage (8 bytes flipped in a B picture of
 `h264-high-b.mp4`, 20 frames affected): mean PSNR against the clean decode 23.8 dB, as FFmpeg's (23.8 dB; worst frame
 18.2 dB, FFmpeg's 19.7). Damage that still parses is not detected and spreads unflagged: with 8 bytes flipped in one of 6

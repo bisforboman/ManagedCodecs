@@ -37,6 +37,11 @@ public sealed class H264Decoder : IVideoDecoder
     private readonly Queue<PictureJob> _inFlight = new();
     private readonly int _threads = 1;
 
+    // Without ConcealErrors: a reference picture was lost (a gap in frame_num the SPS does not allow) since the last IDR
+    // picture. Its reference marking (memory_management_control_operation) went with it, so no reference list after it
+    // can be trusted: every picture fails until the next IDR picture, rather than predict from the wrong pictures.
+    private bool _referenceLost;
+
     // Frames a call that threw had already taken out, for the next call to return first (TakeHeld).
     private List<VideoFrame>? _held;
 
@@ -322,7 +327,7 @@ public sealed class H264Decoder : IVideoDecoder
             job.FirstField?.Begun.Task.GetAwaiter().GetResult();
             state.Decoder.Begin(state.Picture, state.Sps, state.Header.Parity, state.SecondField);
             job.Begun.SetResult();
-            foreach (var slice in job.Slices)
+            foreach (var slice in job.Slices.Where(s => !s.Lost))
             {
                 state.Decoder.DecodeSlice(slice.Header, slice.Pps, slice.Reader, slice.List0, slice.List1, slice.Marks);
             }
@@ -338,7 +343,7 @@ public sealed class H264Decoder : IVideoDecoder
             }
 
             state.Decoder.Deblock();
-            if (state.Decoder.ConcealErrors && (state.Decoder.ConcealedMbCount > 0 || state.Decoder.ReadsDamagedReference()))
+            if (state.Decoder.ConcealErrors && (state.Decoder.ConcealedMbCount > 0 || ListsDamaged(job)))
             {
                 state.Picture.Damaged = true;
             }
@@ -351,6 +356,28 @@ public sealed class H264Decoder : IVideoDecoder
             view.ReportFailed();
             throw;
         }
+    }
+
+    /// <summary>
+    /// Whether a picture in the job's reference lists is damaged, once each is done: a damaged picture, or one inferred
+    /// for a gap, shifts the lists' order even where no motion names it. Its own frame (a second field's) is left out:
+    /// a damaged first field marks the frame itself.
+    /// </summary>
+    private static bool ListsDamaged(PictureJob job)
+    {
+        foreach (var picture in job.Uses)
+        {
+            if (picture != job.State.Picture)
+            {
+                picture.WaitForRow(int.MaxValue);
+                if (picture.Damaged)
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -532,18 +559,30 @@ public sealed class H264Decoder : IVideoDecoder
                         throw new NotSupportedException("A packet holding more than one picture is not supported.");
                     }
 
-                    var (list0, list1) = header.Type switch
+                    List<Picture> list0;
+                    List<Picture> list1;
+                    bool lost = false;
+                    try
                     {
-                        SliceType.P => (_references.BuildList(header, sps), []),
-                        SliceType.B => _references.BuildLists(header, sps, current.State.Poc),
-                        _ => (new List<Picture>(), new List<Picture>()),
-                    };
+                        (list0, list1) = header.Type switch
+                        {
+                            SliceType.P => (_references.BuildList(header, sps), []),
+                            SliceType.B => _references.BuildLists(header, sps, current.State.Poc),
+                            _ => (new List<Picture>(), new List<Picture>()),
+                        };
+                    }
+                    catch (InvalidDataException) when (ConcealErrors)
+                    {
+                        // No reference to predict from, or a list modification naming a missing one: a lost reference.
+                        (list0, list1, lost) = ([], [], true);
+                    }
+
                     foreach (var picture in list0.Concat(list1))
                     {
                         current.Uses.Add(picture.Frame);
                     }
 
-                    current.Slices.Add(new SliceWork(header, pps, reader, list0, list1, new MarkSnapshot(list0.Concat(list1))));
+                    current.Slices.Add(new SliceWork(header, pps, reader, list0, list1, new MarkSnapshot(list0.Concat(list1)), lost));
                     break;
                 }
 
@@ -575,10 +614,16 @@ public sealed class H264Decoder : IVideoDecoder
         if (header.IsIdr)
         {
             _references.Clear();
+            _referenceLost = false;
         }
         else if (!secondField)
         {
             InferGapFrames(header, sps);
+        }
+
+        if (_referenceLost)
+        {
+            throw new InvalidDataException("A reference picture was lost (a gap in frame_num the SPS does not allow): pictures fail until an IDR picture.");
         }
 
         // A second field takes a decoder of its own, so it can run while its first is still being decoded: each writes
@@ -686,15 +731,54 @@ public sealed class H264Decoder : IVideoDecoder
             return;
         }
 
+        // Of a long gap, only the last frames stay marked (the sliding window): only those are worth filling in.
+        int gap = (header.FrameNum - _prevRefFrameNum - 1 + maxFrameNum) % maxFrameNum;
+        int inferred = 0;
         for (int frameNum = (_prevRefFrameNum + 1) % maxFrameNum; frameNum != header.FrameNum; frameNum = (frameNum + 1) % maxFrameNum)
         {
             var picture = TakePicture(sps, frameNum, _order.NextInferred(frameNum, sps));
-            picture.IsNonExisting = true;
+            if (ConcealErrors && gap - inferred++ <= Math.Max(sps.MaxNumRefFrames, 1))
+            {
+                // A gap that is a loss, as far as anything predicts from it: the frame copies the latest reference,
+                // so that pictures predicted from it decode (flagged damaged), rather than fail.
+                picture.FillMissing(LatestReferenceDone(picture));
+                _lastReference = picture;
+            }
+            else
+            {
+                picture.IsNonExisting = true;
+                _referenceLost |= !ConcealErrors && !sps.GapsInFrameNumAllowed;
+            }
+
             picture.ReportDone();
             _references.MarkNonExisting(picture, sps);
         }
 
         _prevRefFrameNum = (header.FrameNum + maxFrameNum - 1) % maxFrameNum;
+    }
+
+    /// <summary>
+    /// The latest reference (still marked, not <paramref name="exclude"/>) once it is decoded, for an inferred frame to
+    /// copy; null if there is none, or it failed.
+    /// </summary>
+    private Picture? LatestReferenceDone(Picture exclude)
+    {
+        if (_lastReference is not { IsNonExisting: false } latest || !_references.Contains(latest) || latest == exclude
+            || latest.WidthInMbs != exclude.WidthInMbs || latest.HeightInMbs != exclude.HeightInMbs || latest.BitDepth != exclude.BitDepth
+            || latest.MbWidthC != exclude.MbWidthC || latest.MbHeightC != exclude.MbHeightC)
+        {
+            return null;
+        }
+
+        try
+        {
+            latest.WaitForRow(int.MaxValue);
+            return latest;
+        }
+        catch (InvalidDataException)
+        {
+            return null;
+        }
     }
 
     /// <summary>A picture of the stream's size that is not a reference, reused when one is free.</summary>
@@ -787,7 +871,8 @@ public sealed class H264Decoder : IVideoDecoder
     private sealed record PictureState(SliceHeader Header, SequenceParameterSet Sps, IPictureDecoder Decoder, Picture Picture, int Poc, bool SecondField = false);
 
     /// <summary>A slice to decode, with its reference lists and their marking when they were built.</summary>
-    private sealed record SliceWork(SliceHeader Header, PictureParameterSet Pps, BitReader Reader, List<Picture> List0, List<Picture> List1, MarkSnapshot Marks);
+    // Lost: its reference lists could not be built (ConcealErrors), so it is not decoded and its macroblocks are concealed.
+    private sealed record SliceWork(SliceHeader Header, PictureParameterSet Pps, BitReader Reader, List<Picture> List0, List<Picture> List1, MarkSnapshot Marks, bool Lost = false);
 
     /// <summary>
     /// A picture parsed from a packet, to be decoded: its state and slices, the frames it predicts from, and for its

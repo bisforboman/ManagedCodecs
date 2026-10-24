@@ -109,6 +109,74 @@ public class H264ConcealmentTests
         Assert.Equal(one.Select(f => (f.Pts, FrameMd5.Hash(f.Data))), three.Select(f => (f.Pts, FrameMd5.Hash(f.Data))));
     }
 
+    /// <summary>
+    /// A lost packet: a gap in frame_num where it was a reference picture (and nothing where it was not). The frame
+    /// inferred for the gap copies the latest reference, so the pictures predicted from it decode, flagged; dropping
+    /// the first packet (the IDR picture) leaves the next pictures without any reference, and they conceal in grey.
+    /// A field picture stream loses both fields of a frame.
+    /// </summary>
+    [Theory]
+    [InlineData("h264-main-slices.mp4", 0, 1)]
+    [InlineData("h264-main-slices.mp4", 8, 1)]
+    [InlineData("h264-b-pyramid.mp4", 33, 1)] // a B picture other B pictures predict from, with its MMCO
+    [InlineData("h264-mbaff-b-temporal.mp4", 12, 1)]
+    [InlineData("openh264/oh-cabac.mp4", 10, 1)] // long-term references
+    [InlineData("h264-p-ref1-nodeblock.mp4", 10, 3)] // a gap longer than max_num_ref_frames (1): only its last frame is filled
+    [InlineData("jm/jm-paff-b.mp4", 6, 2)]
+    public void DroppedPackets_ConcealedAndFlagged(string sampleName, int first, int count)
+    {
+        if (!ParameterSetRewriter.Exists(sampleName))
+        {
+            return;
+        }
+
+        var (video, packets) = Read(sampleName);
+        var clean = Decode(video, packets, damaged: -1, conceal: false, threads: 1).ToDictionary(f => f.Pts);
+        var kept = packets.Where((_, i) => i < first || i >= first + count).ToList();
+        var concealed = Decode(video, kept, damaged: -1, conceal: true, threads: 1);
+
+        Assert.Equal(clean.Count - (sampleName.StartsWith("jm/jm-paff", StringComparison.Ordinal) ? count / 2 : count), concealed.Count);
+        Assert.Contains(concealed, f => f.Damaged);
+        foreach (var frame in concealed)
+        {
+            var expected = clean[frame.Pts].Data;
+            if (frame.Damaged)
+            {
+                Assert.True(Psnr(expected, frame.Data) > PsnrFloor, $"frame {frame.Pts}: {Psnr(expected, frame.Data):F1} dB");
+            }
+            else
+            {
+                Assert.True(expected.AsSpan().SequenceEqual(frame.Data), $"frame {frame.Pts} differs and is not flagged");
+            }
+        }
+
+        var threaded = Decode(video, kept, damaged: -1, conceal: true, threads: 3, rowDelay: 2);
+        Assert.Equal(concealed.Select(f => (f.Pts, f.Damaged, FrameMd5.Hash(f.Data))), threaded.Select(f => (f.Pts, f.Damaged, FrameMd5.Hash(f.Data))));
+    }
+
+    /// <summary>
+    /// Without concealment, a lost reference picture (a gap the SPS does not allow) fails every picture up to the next IDR
+    /// picture: its reference marking went with it, so later lists could name the wrong pictures without an error.
+    /// </summary>
+    [Theory]
+    [InlineData("h264-b-pyramid.mp4", 1)]
+    [InlineData("h264-b-pyramid.mp4", 3)]
+    [InlineData("h264-bframes.mp4", 1)]
+    public void DroppedPacket_WithoutConcealment_NoWrongFrame(string sampleName, int threads)
+    {
+        if (!ParameterSetRewriter.Exists(sampleName))
+        {
+            return;
+        }
+
+        var (video, packets) = Read(sampleName);
+        var clean = Decode(video, packets, damaged: -1, conceal: false, threads: 1).ToDictionary(f => f.Pts);
+        int dropped = sampleName == "h264-bframes.mp4" ? 16 : 33;
+        var frames = Decode(video, packets.Where((_, i) => i != dropped).ToList(), damaged: -1, conceal: false, threads);
+        Assert.True(frames.Count < clean.Count - 1);
+        Assert.All(frames, f => Assert.True(clean[f.Pts].Data.AsSpan().SequenceEqual(f.Data), $"frame {f.Pts} is wrong"));
+    }
+
     private static (VideoStreamInfo Video, List<(byte[] Data, long Pts)> Packets) Read(string sampleName)
     {
         using var demuxer = Mp4Demuxer.Open(TestSamples.PathOf(sampleName));

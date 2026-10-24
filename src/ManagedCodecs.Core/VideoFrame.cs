@@ -22,11 +22,6 @@ public sealed class VideoFrame : IDisposable
     private bool _disposed;
 
     public VideoFrame(int width, int height, PixelFormat format)
-        : this(width, height, format, zeroed: true)
-    {
-    }
-
-    private VideoFrame(int width, int height, PixelFormat format, bool zeroed)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(width);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(height);
@@ -43,7 +38,7 @@ public sealed class VideoFrame : IDisposable
             var (planeWidth, planeHeight) = format.PlaneSize(i, width, height);
             planeWidth *= format.BytesPerSample();
             Strides[i] = planeWidth;
-            _planes[i] = zeroed ? new byte[planeWidth * planeHeight] : GC.AllocateUninitializedArray<byte>(planeWidth * planeHeight);
+            _planes[i] = new byte[planeWidth * planeHeight];
         }
 
         Offsets = new int[count];
@@ -55,12 +50,6 @@ public sealed class VideoFrame : IDisposable
     {
         _pool = pool;
     }
-
-    /// <summary>
-    /// A frame with tight planes whose contents are undefined, for a decoder that then writes every
-    /// sample: the planes are not zeroed first.
-    /// </summary>
-    internal static VideoFrame CreateUninitialized(int width, int height, PixelFormat format) => new(width, height, format, zeroed: false);
 
     /// <summary>
     /// Wraps existing planes without copying: plane i's visible rows start at

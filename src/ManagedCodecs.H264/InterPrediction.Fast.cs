@@ -251,71 +251,136 @@ internal static partial class InterPrediction
         }
     }
 
+    // The filters below write whole 16-byte rows to their output (rows 16 apart, so it needs
+    // height * 16 bytes): lanes past the block's width hold anything. They read the window
+    // through one bounds check a block, for the furthest 16-byte load.
+
     /// <summary>b: Clip1((b1 + 16) >> 5) for the half positions right of each G.</summary>
+    /// <remarks>Each row loads 16 bytes from its samples -2 .. 3, the last from origin + (height - 1) * ws + 3.</remarks>
     private static void HalfHorizontal(ReadOnlySpan<byte> window, int ws, int origin, int width, int height, Span<byte> output)
     {
+        CheckBounds(window, origin - 2, origin + ((height - 1) * ws) + 3 + 16, output, height);
+        ref byte source = ref MemoryMarshal.GetReference(window);
+        ref byte dest = ref MemoryMarshal.GetReference(output);
         for (int j = 0; j < height; j++)
         {
-            for (int x = 0; x < width; x += 8)
-            {
-                int p = origin + (j * ws) - 2 + x;
-                var tap = Tap(Widen(window, p), Widen(window, p + 1), Widen(window, p + 2), Widen(window, p + 3), Widen(window, p + 4), Widen(window, p + 5));
-                StorePartial(RoundHalf(tap), output[((j * 16) + x)..], Math.Min(8, width));
-            }
+            int p = origin + (j * ws) - 2;
+            var s0 = Load(ref source, p);
+            var s1 = Load(ref source, p + 1);
+            var s2 = Load(ref source, p + 2);
+            var s3 = Load(ref source, p + 3);
+            var s4 = Load(ref source, p + 4);
+            var s5 = Load(ref source, p + 5);
+            var low = Tap(Lower(s0), Lower(s1), Lower(s2), Lower(s3), Lower(s4), Lower(s5));
+            var high = width > 8 ? Tap(Upper(s0), Upper(s1), Upper(s2), Upper(s3), Upper(s4), Upper(s5)) : low;
+            RoundHalf(low, high).StoreUnsafe(ref dest, (nuint)(j * 16));
         }
     }
 
     /// <summary>h: Clip1((h1 + 16) >> 5) for the half positions below each G.</summary>
+    /// <remarks>
+    /// Rows -2 .. height + 2, 16 bytes each, the last from origin + (height + 2) * ws; the six
+    /// rows of a tap slide down, one new load a row.
+    /// </remarks>
     private static void HalfVertical(ReadOnlySpan<byte> window, int ws, int origin, int width, int height, Span<byte> output)
     {
+        CheckBounds(window, origin - (2 * ws), origin + ((height + 2) * ws) + 16, output, height);
+        ref byte source = ref MemoryMarshal.GetReference(window);
+        ref byte dest = ref MemoryMarshal.GetReference(output);
+        int p = origin - (2 * ws);
+        var r0 = Load(ref source, p);
+        var r1 = Load(ref source, p + ws);
+        var r2 = Load(ref source, p + (2 * ws));
+        var r3 = Load(ref source, p + (3 * ws));
+        var r4 = Load(ref source, p + (4 * ws));
         for (int j = 0; j < height; j++)
         {
-            for (int x = 0; x < width; x += 8)
-            {
-                int p = origin + ((j - 2) * ws) + x;
-                var tap = Tap(Widen(window, p), Widen(window, p + ws), Widen(window, p + (2 * ws)), Widen(window, p + (3 * ws)), Widen(window, p + (4 * ws)), Widen(window, p + (5 * ws)));
-                StorePartial(RoundHalf(tap), output[((j * 16) + x)..], Math.Min(8, width));
-            }
+            var r5 = Load(ref source, p + ((j + 5) * ws));
+            var low = Tap(Lower(r0), Lower(r1), Lower(r2), Lower(r3), Lower(r4), Lower(r5));
+            var high = width > 8 ? Tap(Upper(r0), Upper(r1), Upper(r2), Upper(r3), Upper(r4), Upper(r5)) : low;
+            RoundHalf(low, high).StoreUnsafe(ref dest, (nuint)(j * 16));
+            (r0, r1, r2, r3, r4) = (r1, r2, r3, r4, r5);
         }
     }
 
     /// <summary>j: vertical 6-tap over unrounded horizontal intermediates, Clip1((j1 + 512) >> 10).</summary>
+    /// <remarks>Reads what <see cref="HalfHorizontal"/> does for rows -2 .. height + 2.</remarks>
     [SkipLocalsInit]
     private static void Center(ReadOnlySpan<byte> window, int ws, int origin, int width, int height, Span<byte> output)
     {
-        // b1 for rows -2 .. height + 2; it fits in 16 bits (-2550 .. 10710).
+        CheckBounds(window, origin - (2 * ws) - 2, origin + ((height + 2) * ws) + 3 + 16, output, height);
+        ref byte source = ref MemoryMarshal.GetReference(window);
+        ref byte dest = ref MemoryMarshal.GetReference(output);
+
+        // b1 for rows -2 .. height + 2, 16 a row; it fits in 16 bits (-2550 .. 10710).
         Span<short> b1 = stackalloc short[16 * (16 + 5)];
+        ref short intermediate = ref MemoryMarshal.GetReference(b1);
         for (int j = 0; j < height + 5; j++)
         {
-            for (int x = 0; x < width; x += 8)
+            int p = origin + ((j - 2) * ws) - 2;
+            var s0 = Load(ref source, p);
+            var s1 = Load(ref source, p + 1);
+            var s2 = Load(ref source, p + 2);
+            var s3 = Load(ref source, p + 3);
+            var s4 = Load(ref source, p + 4);
+            var s5 = Load(ref source, p + 5);
+            Tap(Lower(s0), Lower(s1), Lower(s2), Lower(s3), Lower(s4), Lower(s5)).StoreUnsafe(ref intermediate, (nuint)(j * 16));
+            if (width > 8)
             {
-                int p = origin + ((j - 2) * ws) - 2 + x;
-                var tap = Tap(Widen(window, p), Widen(window, p + 1), Widen(window, p + 2), Widen(window, p + 3), Widen(window, p + 4), Widen(window, p + 5));
-                tap.CopyTo(b1[((j * 16) + x)..]);
+                Tap(Upper(s0), Upper(s1), Upper(s2), Upper(s3), Upper(s4), Upper(s5)).StoreUnsafe(ref intermediate, (nuint)((j * 16) + 8));
             }
         }
 
-        // The vertical pass needs 32 bits.
-        for (int j = 0; j < height; j++)
+        // The vertical pass, eight columns at a time down sliding rows. The pair sums still fit
+        // in 16 bits (at most 21420); the weighted sum needs 32.
+        for (int x = 0; x < width; x += 8)
         {
-            for (int x = 0; x < width; x += 8)
+            var r0 = Vector128.LoadUnsafe(ref intermediate, (nuint)x);
+            var r1 = Vector128.LoadUnsafe(ref intermediate, (nuint)(16 + x));
+            var r2 = Vector128.LoadUnsafe(ref intermediate, (nuint)(32 + x));
+            var r3 = Vector128.LoadUnsafe(ref intermediate, (nuint)(48 + x));
+            var r4 = Vector128.LoadUnsafe(ref intermediate, (nuint)(64 + x));
+            for (int j = 0; j < height; j++)
             {
-                int p = (j * 16) + x;
-                var low = Vector128.Create(512);
-                var high = low;
-                for (int k = 0; k < 6; k++)
-                {
-                    var row = Vector128.Create(b1.Slice(p + (k * 16), 8));
-                    int weight = k switch { 0 or 5 => 1, 1 or 4 => -5, _ => 20 };
-                    low += Vector128.WidenLower(row) * weight;
-                    high += Vector128.WidenUpper(row) * weight;
-                }
+                var r5 = Vector128.LoadUnsafe(ref intermediate, (nuint)(((j + 5) * 16) + x));
+                var outer = r0 + r5;
+                var middle = r1 + r4;
+                var inner = r2 + r3;
 
-                var clamped = Vector128.Narrow(Clamp(low >> 10), Clamp(high >> 10));
-                StorePartial(Vector128.Narrow(clamped.AsUInt16(), clamped.AsUInt16()), output[p..], Math.Min(8, width));
+                // outer - 5 middle + 20 inner = outer + 5 (4 inner - middle)
+                var low = WeightedSum(Vector128.WidenLower(outer), Vector128.WidenLower(middle), Vector128.WidenLower(inner));
+                var high = WeightedSum(Vector128.WidenUpper(outer), Vector128.WidenUpper(middle), Vector128.WidenUpper(inner));
+                var clamped = Vector128.Narrow(Clamp(low), Clamp(high)).AsUInt16();
+                Unsafe.WriteUnaligned(ref Unsafe.Add(ref dest, (j * 16) + x), Vector128.Narrow(clamped, clamped).AsUInt64().ToScalar());
+                (r0, r1, r2, r3, r4) = (r1, r2, r3, r4, r5);
             }
         }
     }
+
+    /// <summary>(outer + 5 (4 inner - middle) + 512) >> 10.</summary>
+    private static Vector128<int> WeightedSum(Vector128<int> outer, Vector128<int> middle, Vector128<int> inner)
+    {
+        var d = (inner << 2) - middle;
+        return (outer + (d << 2) + d + Vector128.Create(512)) >> 10;
+    }
+
+    /// <summary>
+    /// Throws unless window[<paramref name="first"/> .. <paramref name="end"/>) and a 16 x
+    /// <paramref name="height"/> output are there, which the unchecked loads and stores rely on.
+    /// </summary>
+    private static void CheckBounds(ReadOnlySpan<byte> window, int first, int end, Span<byte> output, int height)
+    {
+        if (first < 0 || end > window.Length || height * 16 > output.Length)
+        {
+            throw new ArgumentOutOfRangeException(nameof(window));
+        }
+    }
+
+    private static Vector128<byte> Load(ref byte data, int offset) => Vector128.LoadUnsafe(ref data, (nuint)offset);
+
+    private static Vector128<short> Lower(Vector128<byte> value) => Vector128.WidenLower(value).AsInt16();
+
+    private static Vector128<short> Upper(Vector128<byte> value) => Vector128.WidenUpper(value).AsInt16();
 
     private static void Store(ReadOnlySpan<byte> values, int width, int height, Span<byte> output, int stride)
     {
@@ -364,15 +429,19 @@ internal static partial class InterPrediction
     private static Vector128<short> Widen(ReadOnlySpan<byte> data, int offset) =>
         Vector128.WidenLower(Vector128.Create(data.Slice(offset, 16))).AsInt16();
 
-    private static Vector128<short> Tap(Vector128<short> e, Vector128<short> f, Vector128<short> g, Vector128<short> h, Vector128<short> i, Vector128<short> j) =>
-        (e + j) - ((f + i) * 5) + ((g + h) * 20);
-
-    /// <summary>Clip1((v + 16) >> 5) for eight 16-bit values, as bytes in the low half.</summary>
-    private static Vector128<byte> RoundHalf(Vector128<short> tap)
+    /// <summary>E - 5F + 20G + 20H - 5I + J, as (E + J) + 5 (4 (G + H) - (F + I)).</summary>
+    private static Vector128<short> Tap(Vector128<short> e, Vector128<short> f, Vector128<short> g, Vector128<short> h, Vector128<short> i, Vector128<short> j)
     {
-        var rounded = Vector128.Min(Vector128.Max((tap + Vector128.Create((short)16)) >> 5, Vector128<short>.Zero), Vector128.Create((short)255)).AsUInt16();
-        return Vector128.Narrow(rounded, rounded);
+        var d = ((g + h) << 2) - (f + i);
+        return (e + j) + (d << 2) + d;
     }
+
+    /// <summary>Clip1((v + 16) >> 5) for two vectors of eight 16-bit values, as sixteen bytes.</summary>
+    private static Vector128<byte> RoundHalf(Vector128<short> low, Vector128<short> high) =>
+        Vector128.Narrow(RoundHalfWide(low), RoundHalfWide(high));
+
+    private static Vector128<ushort> RoundHalfWide(Vector128<short> tap) =>
+        Vector128.Min(Vector128.Max((tap + Vector128.Create((short)16)) >> 5, Vector128<short>.Zero), Vector128.Create((short)255)).AsUInt16();
 
     private static Vector128<int> Clamp(Vector128<int> value) =>
         Vector128.Min(Vector128.Max(value, Vector128<int>.Zero), Vector128.Create(255));

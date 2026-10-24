@@ -1081,10 +1081,15 @@ internal sealed partial class PictureDecoder<TPixel>
     }
 
     /// <summary>bS, tC0, alpha and beta for eight lanes, from one indexA's row of the tables.</summary>
+    // EdgeParameters.Tc0Row by indexA, made once: building the vector lane by lane for every edge cost about 1% of
+    // decoding.
+    private static readonly Vector128<byte>[] Tc0Rows =
+        [.. Enumerable.Range(0, 52).Select(i => Vector128.Create(0, Tc0[i * 3], Tc0[(i * 3) + 1], Tc0[(i * 3) + 2], 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))];
+
     private readonly struct EdgeParameters(int indexA, int alpha, int beta)
     {
         /// <summary>tC0 by bS (0 for bS 0 and 4), lanes 0 .. 4.</summary>
-        public readonly Vector128<byte> Tc0Row = Vector128.Create(0, Tc0[indexA * 3], Tc0[(indexA * 3) + 1], Tc0[(indexA * 3) + 2], 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+        public readonly Vector128<byte> Tc0Row = Tc0Rows[indexA];
         public readonly Vector128<short> Alpha = Vector128.Create((short)alpha);
         public readonly Vector128<short> Beta = Vector128.Create((short)beta);
     }

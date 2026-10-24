@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.Runtime.InteropServices;
 
 namespace ManagedCodecs.H264;
 
@@ -695,40 +696,32 @@ internal sealed partial class PictureDecoder<TPixel>
     /// <summary>Weighted prediction from one list (8-449, 8-450).</summary>
     private void WeightOne(ReadOnlySpan<TPixel> prediction, int stride, int width, int height, Span<TPixel> output, int outputStride, PartitionWeights weights, int list, int component)
     {
-        int max = Samples.Max<TPixel>(_bitDepth);
         int logWd = weights.LogWd(component);
         int w = weights.Weight(list, component);
         int o = weights.Offset(list, component) << (_bitDepth - 8); // offsets are in 8-bit units (8-449)
-        int round = logWd >= 1 ? 1 << (logWd - 1) : 0;
-        for (int j = 0; j < height; j++)
+        if (typeof(TPixel) == typeof(byte))
         {
-            for (int i = 0; i < width; i++)
-            {
-                int p = int.CreateTruncating(prediction[(j * stride) + i]);
-                int value = logWd >= 1 ? (((p * w) + round) >> logWd) + o : (p * w) + o;
-                output[(j * outputStride) + i] = TPixel.CreateTruncating(Math.Clamp(value, 0, max));
-            }
+            InterPrediction.WeightOne(MemoryMarshal.Cast<TPixel, byte>(prediction), stride, width, height, MemoryMarshal.Cast<TPixel, byte>(output), outputStride, w, o, logWd);
+            return;
         }
+
+        InterPrediction.WeightOneReference(prediction, stride, width, height, output, outputStride, w, o, logWd, Samples.Max<TPixel>(_bitDepth));
     }
 
     /// <summary>Weighted bi-prediction (8-451).</summary>
     private void WeightBoth(ReadOnlySpan<TPixel> prediction0, ReadOnlySpan<TPixel> prediction1, int stride, int width, int height, Span<TPixel> output, int outputStride, PartitionWeights weights, int component)
     {
-        int max = Samples.Max<TPixel>(_bitDepth);
         int logWd = weights.LogWd(component);
         int w0 = weights.Weight(0, component);
         int w1 = weights.Weight(1, component);
         int offset = ((weights.Offset(0, component) << (_bitDepth - 8)) + (weights.Offset(1, component) << (_bitDepth - 8)) + 1) >> 1;
-        for (int j = 0; j < height; j++)
+        if (typeof(TPixel) == typeof(byte))
         {
-            for (int i = 0; i < width; i++)
-            {
-                int p0 = int.CreateTruncating(prediction0[(j * stride) + i]);
-                int p1 = int.CreateTruncating(prediction1[(j * stride) + i]);
-                int value = (((p0 * w0) + (p1 * w1) + (1 << logWd)) >> (logWd + 1)) + offset;
-                output[(j * outputStride) + i] = TPixel.CreateTruncating(Math.Clamp(value, 0, max));
-            }
+            InterPrediction.WeightBoth(MemoryMarshal.Cast<TPixel, byte>(prediction0), MemoryMarshal.Cast<TPixel, byte>(prediction1), stride, width, height, MemoryMarshal.Cast<TPixel, byte>(output), outputStride, w0, w1, offset, logWd);
+            return;
         }
+
+        InterPrediction.WeightBothReference(prediction0, prediction1, stride, width, height, output, outputStride, w0, w1, offset, logWd, Samples.Max<TPixel>(_bitDepth));
     }
 
     private readonly record struct Motion(bool Available, int RefIdx, int MvX, int MvY);

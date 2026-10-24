@@ -171,4 +171,45 @@ public class InterPredictionTests
             Assert.All(output.ToArray(), sample => Assert.Equal(parity == 0 ? 50 : 200, sample));
         }
     }
+
+    /// <summary>
+    /// The 8-bit vector weighted prediction (<see cref="InterPrediction.WeightOne"/>, <see cref="InterPrediction.WeightBoth"/>)
+    /// against the definition, on random samples, weights and offsets over their whole ranges (explicit weights -128 to
+    /// 127, implicit -64 to 128, denominators 0 to 7), every block width, and the extremes.
+    /// </summary>
+    [Fact]
+    public void VectorWeights_MatchReference()
+    {
+        var random = new Random(7);
+        var p0 = new byte[16 * 16];
+        var p1 = new byte[16 * 16];
+        var expected = new byte[16 * 20];
+        var actual = new byte[16 * 20];
+        for (int n = 0; n < 20000; n++)
+        {
+            bool extreme = n % 10 == 0;
+            for (int i = 0; i < p0.Length; i++)
+            {
+                p0[i] = extreme ? (byte)(random.Next(2) * 255) : (byte)random.Next(256);
+                p1[i] = extreme ? (byte)(random.Next(2) * 255) : (byte)random.Next(256);
+            }
+
+            int width = new[] { 2, 4, 8, 16 }[random.Next(4)];
+            int height = new[] { 2, 4, 8, 16 }[random.Next(4)];
+            int logWd = random.Next(8);
+            int w0 = extreme ? (random.Next(2) == 0 ? -128 : 127) : random.Next(-128, 128);
+            int w1 = extreme ? (random.Next(2) == 0 ? -64 : 128) : random.Next(-128, 129);
+            int o = extreme ? (random.Next(2) == 0 ? -128 : 127) : random.Next(-128, 128);
+            Array.Clear(expected);
+            Array.Clear(actual);
+
+            InterPrediction.WeightOneReference<byte>(p0, 16, width, height, expected, 20, w0, o, logWd, 255);
+            InterPrediction.WeightOne(p0, 16, width, height, actual, 20, w0, o, logWd);
+            Assert.Equal(expected, actual);
+
+            InterPrediction.WeightBothReference<byte>(p0, p1, 16, width, height, expected, 20, w0, w1, o, logWd, 255);
+            InterPrediction.WeightBoth(p0, p1, 16, width, height, actual, 20, w0, w1, o, logWd);
+            Assert.Equal(expected, actual);
+        }
+    }
 }

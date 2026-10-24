@@ -242,7 +242,11 @@ parsing), intra macroblocks 8%, the rest (macroblock headers, motion vector pred
 CABAC residual parsing for detailed content and motion compensation's memory reads at 720p (the chroma half of it
 waits on its reference reads, #85), nothing above about a quarter on its own. `ConcealErrors` costs nothing measurable
 on clean input: `mcdec --conceal` against without, 6 interleaved pairs each, +0.8% on one thread and +1.1% on four
-on the 720p stream, -3.7% on `h264-high-b.mp4` with four, all within the pairs' spread.
+on the 720p stream, -3.7% on `h264-high-b.mp4` with four, all within the pairs' spread. The libx264-default streams, furthest
+behind FFmpeg (3.4 and 3.6 times its time), are mostly skipped and direct macroblocks with weighted prediction:
+skipped macroblocks (their motion compensation included) take 20% there, and weighted prediction took 7%. It is now
+in vectors for 8-bit samples (16-bit lanes from one list, 32-bit for two; the by-the-definition loop stays for deeper
+samples and as the reference `VectorWeights_MatchReference` checks), 4% by the same timers.
 
 A profile of a
 720p libx264 default stream (2026-10-22) is flat: CABAC residual decoding takes 14%, deblocking 21%

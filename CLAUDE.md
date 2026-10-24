@@ -68,6 +68,11 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
   MinOpts, where every span index is a call (the QMF FFT's profile, all MinOpts, was 7 times the native instruction
   count); `DOTNET_JitDisasmSummary=1 DOTNET_JitStdOutFile=<file>` under valgrind lists each method's level, and
   without FullOpts or Tier1 for the hot ones, time the code instead (a Stopwatch microbenchmark, interleaved A/B).
+  `perf` (apt's linux-tools-generic; run `/usr/lib/linux-tools-*/perf`) samples optimized code by function:
+  `DOTNET_PerfMapEnabled=1 DOTNET_EnableWriteXorExecute=0 DOTNET_TieredCompilation=0 perf record -e cpu-clock -F 4000
+  dotnet <mcdec.dll> <file> --loops 100`, then `perf report --no-children --sort symbol` (without
+  `EnableWriteXorExecute=0` the JIT's code shows as bare addresses). A function's share falling between builds confirms
+  a gain the wall clock can't separate from noise.
   A gain larger than the changed functions' share of the frame is noise, however consistent: check that ceiling
   before believing an A/B (two streams agreeing on -9 and -10% for the vector inverse transforms were noise and the
   change was reverted; timed by wall clock later, the transforms are 2.5 to 2.8 times faster per block but about 2%

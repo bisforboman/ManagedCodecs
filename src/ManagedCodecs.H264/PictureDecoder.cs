@@ -89,6 +89,10 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
     private readonly int[] _qp;
     private readonly bool[] _transform8x8;
 
+    // Per macroblock the addresses of A, B, C and D (left, above, above right, above left; 6.4.9) inside the picture,
+    // -1 outside it: whether they are in the same slice is checked when they are asked for.
+    private readonly int[] _neighborMbs;
+
     // Per 4x4 block: TotalCoeff of luma (and in 4:4:4 of Cb and Cr, as luma blocks), of 4:2:0 and 4:2:2 chroma.
     private readonly byte[][] _totalCoeff;
     private readonly byte[] _totalCoeffLuma;
@@ -125,6 +129,17 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
 
         _sliceOfMb = new int[_mbCount];
         Array.Fill(_sliceOfMb, -1);
+        _neighborMbs = new int[_mbCount * 4];
+        for (int mb = 0; mb < _mbCount; mb++)
+        {
+            int mbX = mb % _widthInMbs;
+            bool above = mb >= _widthInMbs;
+            _neighborMbs[(mb * 4) + 0] = mbX > 0 ? mb - 1 : -1;
+            _neighborMbs[(mb * 4) + 1] = above ? mb - _widthInMbs : -1;
+            _neighborMbs[(mb * 4) + 2] = above && mbX < _widthInMbs - 1 ? mb - _widthInMbs + 1 : -1;
+            _neighborMbs[(mb * 4) + 3] = above && mbX > 0 ? mb - _widthInMbs - 1 : -1;
+        }
+
         _kind = new MbKind[_mbCount];
         _qp = new int[_mbCount];
         _transform8x8 = new bool[_mbCount];
@@ -387,11 +402,12 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
     /// (outside the picture, in another slice, or not decoded yet). Locations inside the
     /// current macroblock return the current address; callers check decoding order there.
     /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private int NeighborMb(int mbAddr, int x, int y, int maxW = 16, int maxH = 16)
     {
         if (_pairSlots)
         {
-            return AffNeighbor(mbAddr, x, y, maxW, maxH).Mb;
+            return AffNeighborMb(mbAddr, x, y, maxW, maxH);
         }
 
         if (y >= maxH || (x >= maxW && y >= 0))
@@ -399,23 +415,19 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
             return -1;
         }
 
-        int mbX = mbAddr % _widthInMbs;
-        int mbY = mbAddr / _widthInMbs;
-        int nx = mbX + (x < 0 ? -1 : x >= maxW ? 1 : 0);
-        int ny = mbY + (y < 0 ? -1 : 0);
-        if (nx < 0 || nx >= _widthInMbs || ny < 0)
+        // Inside the macroblock, or A, B, C or D (6.4.9) as the picture's edges allow.
+        if (y >= 0 && x >= 0)
         {
-            return -1;
+            return mbAddr;
         }
 
-        int n = (ny * _widthInMbs) + nx;
-        if (n == mbAddr)
-        {
-            return n;
-        }
-
-        return _sliceOfMb[n] == _sliceOfMb[mbAddr] ? n : -1;
+        int n = _neighborMbs[(mbAddr * 4) + (y >= 0 ? 0 : x < 0 ? 3 : x >= maxW ? 2 : 1)];
+        return n >= 0 && _sliceOfMb[n] == _sliceOfMb[mbAddr] ? n : -1;
     }
+
+    // Out of line, so that NeighborMb inlines into its callers.
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private int AffNeighborMb(int mbAddr, int x, int y, int maxW, int maxH) => AffNeighbor(mbAddr, x, y, maxW, maxH).Mb;
 
     /// <summary>Decoding order of the luma 4x4 block at raster position (x, y) inside a macroblock (6.4.3).</summary>
     private static int BlockIndex(int x, int y) => ((y >> 1) * 8) + ((x >> 1) * 4) + ((y & 1) * 2) + (x & 1);

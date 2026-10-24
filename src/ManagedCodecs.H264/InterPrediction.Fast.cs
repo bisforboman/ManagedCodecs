@@ -191,19 +191,60 @@ internal static partial class InterPrediction
             FetchWindow(plane, stride, maxX, maxY, left, top, width + 1, height + 1, copy, windowStride);
         }
 
-        // The four weights add up to 64, so every sum fits in 16 bits.
-        var wA = Vector128.Create((short)((8 - xFrac) * (8 - yFrac)));
-        var wB = Vector128.Create((short)(xFrac * (8 - yFrac)));
-        var wC = Vector128.Create((short)((8 - xFrac) * yFrac));
-        var wD = Vector128.Create((short)(xFrac * yFrac));
+        Bilinear(window, windowStride, origin, width, height, xFrac, yFrac, output, outputStride);
+    }
 
+    /// <summary>
+    /// The chroma filter (8-31) on a window: each row filtered across once, ((8 - xFrac) A + xFrac B), and each
+    /// output row the two rows' sums weighted down, ((8 - yFrac) H0 + yFrac H1 + 32) >> 6. That is the same sum
+    /// as the four corner weights' (they multiply out to it); it never exceeds 64 x 255, so 16 bits hold it.
+    /// </summary>
+    private static void Bilinear(ReadOnlySpan<byte> window, int ws, int origin, int width, int height, int xFrac, int yFrac, Span<byte> output, int outputStride)
+    {
+        // Every row, the last one below the block included, is read as 16 bytes from origin + 1.
+        if (origin < 0 || origin + (height * ws) + 17 > window.Length || ((height - 1) * outputStride) + width > output.Length)
+        {
+            throw new ArgumentOutOfRangeException(nameof(window));
+        }
+
+        ref byte source = ref MemoryMarshal.GetReference(window);
+        ref byte dest = ref MemoryMarshal.GetReference(output);
+        var left = Vector128.Create((short)(8 - xFrac));
+        var right = Vector128.Create((short)xFrac);
+        var upper = Vector128.Create((short)(8 - yFrac));
+        var lower = Vector128.Create((short)yFrac);
+        var above = Across(ref source, origin, left, right);
         for (int j = 0; j < height; j++)
         {
-            int upper = origin + (j * windowStride);
-            int lower = upper + windowStride;
-            var sum = (Widen(window, upper) * wA) + (Widen(window, upper + 1) * wB) + (Widen(window, lower) * wC) + (Widen(window, lower + 1) * wD);
+            var below = Across(ref source, origin + ((j + 1) * ws), left, right);
+            var sum = (above * upper) + (below * lower);
             var rounded = ((sum + Vector128.Create((short)32)) >> 6).AsUInt16();
-            StorePartial(Vector128.Narrow(rounded, rounded), output[(j * outputStride)..], width);
+            StorePartial(Vector128.Narrow(rounded, rounded), ref Unsafe.Add(ref dest, j * outputStride), width);
+            above = below;
+        }
+    }
+
+    /// <summary>A row filtered across, (8 - xFrac) A + xFrac B, for its first eight samples.</summary>
+    private static Vector128<short> Across(ref byte source, int offset, Vector128<short> left, Vector128<short> right) =>
+        (Lower(Load(ref source, offset)) * left) + (Lower(Load(ref source, offset + 1)) * right);
+
+    /// <summary>Writes the first <paramref name="count"/> (2, 4, 8 or 16) bytes of a vector, unchecked.</summary>
+    private static void StorePartial(Vector128<byte> value, ref byte destination, int count)
+    {
+        switch (count)
+        {
+            case 16:
+                value.StoreUnsafe(ref destination);
+                break;
+            case 8:
+                Unsafe.WriteUnaligned(ref destination, value.AsUInt64().ToScalar());
+                break;
+            case 4:
+                Unsafe.WriteUnaligned(ref destination, value.AsUInt32().ToScalar());
+                break;
+            default:
+                Unsafe.WriteUnaligned(ref destination, value.AsUInt16().ToScalar());
+                break;
         }
     }
 
@@ -219,9 +260,16 @@ internal static partial class InterPrediction
             return false;
         }
 
+        if (((height - 1) * outputStride) + width > output.Length)
+        {
+            throw new ArgumentOutOfRangeException(nameof(output));
+        }
+
+        ref byte source = ref MemoryMarshal.GetReference(plane);
+        ref byte dest = ref MemoryMarshal.GetReference(output);
         for (int j = 0; j < height; j++)
         {
-            StorePartial(Vector128.Create(plane.Slice(((y + j) * stride) + x, 16)), output[(j * outputStride)..], width);
+            StorePartial(Load(ref source, ((y + j) * stride) + x), ref Unsafe.Add(ref dest, j * outputStride), width);
         }
 
         return true;
@@ -424,10 +472,6 @@ internal static partial class InterPrediction
 
     /// <summary>(a + b + 1) >> 1 per byte, without widening.</summary>
     private static Vector128<byte> RoundingAverage(Vector128<byte> a, Vector128<byte> b) => (a | b) - ((a ^ b) >> 1);
-
-    /// <summary>Eight samples from <paramref name="offset"/>, widened to 16 bits.</summary>
-    private static Vector128<short> Widen(ReadOnlySpan<byte> data, int offset) =>
-        Vector128.WidenLower(Vector128.Create(data.Slice(offset, 16))).AsInt16();
 
     /// <summary>E - 5F + 20G + 20H - 5I + J, as (E + J) + 5 (4 (G + H) - (F + I)).</summary>
     private static Vector128<short> Tap(Vector128<short> e, Vector128<short> f, Vector128<short> g, Vector128<short> h, Vector128<short> i, Vector128<short> j)

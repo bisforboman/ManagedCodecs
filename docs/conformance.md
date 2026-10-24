@@ -213,8 +213,14 @@ pool and are allocated without zeroing. Two earlier cuts, timed afterwards (2026
 microbenchmark of the old and new code on the decoder's array layout, scaled by calls per frame: `StoreMotion`
 writing a row and an 8x8 partition at a time takes about 45 ns a call instead of 115 (about 5,600 calls a frame on
 the 720p libx264 default stream: about 3.5% of its frame), and skipping the bS of edges 1 and 3 in 8x8-transform
-macroblocks saves about 500 ns where it applies (about 1% there, nothing on `h264-bench-720p.mp4`). Looked
-at and left: dropping the whole-picture clears in `Begin` (skipped, direct and intra macroblocks rely on the
+macroblocks saves about 500 ns where it applies (about 1% there, nothing on `h264-bench-720p.mp4`). Chroma motion
+compensation is about 3% of that stream's time in the filter and about twice that with the reference reads (an
+in-decoder timer; 80% of its blocks are 8x8, 45% whole-sample copies): each row is now filtered across once and
+reused for the row below it, behind one bounds check a block, and the copies are unchecked too, 52 to 65 ns an 8x8
+block down to 35 to 40 and 8x16 (4:2:2) about 1.5 times as fast (microbenchmark), about 0.5% of the stream. Looked
+at and left: prefetching a partition's chroma rows while its luma is predicted (`Sse.Prefetch0`): the chroma
+calls took about 95 ns instead of 116, but a timer around all of motion compensation, the prefetches included,
+showed no gain; dropping the whole-picture clears in `Begin` (skipped, direct and intra macroblocks rely on the
 zeros in `_absMvd` and the motion arrays, so each path would clear its own macroblock instead, about as many
 bytes), one transpose for all four vertical luma edges (`FilterEdge` already skips the transposes of edges whose
 bS are all 0, which a whole-macroblock transpose would not). Frames are now deblocked a macroblock row behind

@@ -9,7 +9,8 @@
 # and writes their FFmpeg references like any other sample's.
 #
 # Usage: tools/make-jm-samples.sh <JM source tree with lencod built> [sample names, to make only those]
-#   (git clone https://github.com/shihuade/JM && make -C lencod CFLAGS="-fcommon -O2"; made with JM 19.0)
+#   (git clone https://github.com/shihuade/JM && make -C lencod CFLAGS="-fcommon -O2"; the separate colour plane
+#   samples also need make -C ldecod; made with JM 19.0)
 set -euo pipefail
 
 jm=$(cd "${1:?usage: tools/make-jm-samples.sh <JM tree> [names]}" && pwd)
@@ -217,3 +218,37 @@ deep qm-444 8 3 -p QmatrixFile=qm.cfg -p ScalingMatrixPresentFlag=3 $(k=0 qm 3 1
 deep chroma-qp 8 1 -p CbQPOffset=-3 -p CrQPOffset=4
 deep chroma-qp-422 8 2 -p CbQPOffset=-3 -p CrQPOffset=4
 deep chroma-qp-444 8 3 -p CbQPOffset=-3 -p CrQPOffset=4
+
+# ---- Separate colour planes (separate_colour_plane_flag 1): references from JM's own decoder ----
+# 4:4:4 coded as three monochrome pictures, one a colour_plane_id. FFmpeg decodes none and cannot even mux them (its
+# parser refuses the SPS): tools/mux-h264.py muxes them, JM's decoder (ldecod, make -C ldecod) gives the frames, and
+# both go to samples/jm-ref/, which make-samples.sh copies after writing FFmpeg's references (it writes none for these).
+# planes name bits [lencod options]: 176x144, 10 frames of the noisy moving pattern in 4:4:4, High 4:4:4 Predictive,
+# 8x8 transforms, QP 22.
+ref=$(pwd)/samples/jm-ref
+planes() {
+  local name=$1 bits=$2; shift 2
+  wanted "$name" || return 0
+  mkdir -p "$ref"
+  local fmt=yuv444p
+  ((bits > 8)) && fmt=yuv444p${bits}le
+  ffmpeg -hide_banner -loglevel error -y -f lavfi -i "testsrc2=size=176x144:rate=25,scroll=h=0.01:v=0.005,noise=alls=8:allf=t" \
+    -frames:v 10 -pix_fmt "$fmt" -f rawvideo "$work/planes-$name.yuv"
+  lencod "$name" -p InputFile="planes-$name.yuv" -p SourceWidth=176 -p SourceHeight=144 -p YUVFormat=3 -p ProfileIDC=244 \
+    -p SeparateColourPlane=1 -p SourceBitDepthLuma="$bits" -p SourceBitDepthChroma="$bits" -p OutputBitDepthLuma="$bits" \
+    -p OutputBitDepthChroma="$bits" -p Transform8x8Mode=1 -p QPISlice=22 -p QPPSlice=22 -p QPBSlice=24 "$@"
+  # Timestamps from pic_order_cnt_lsb, as mux-b's (FFmpeg's trace_headers stops at the SPS here).
+  "$tools/mux-h264.py" "$work/$name.264" "$ref/jm-$name.mp4" 512
+  (cd "$work" && "$jm/bin/ldecod.exe" -p InputFile="$name.264" -p OutputFile="$name.dec.yuv" > "$name.dec.log" 2>&1)
+  ffmpeg -hide_banner -loglevel error -y -f rawvideo -pix_fmt "$fmt" -s 176x144 -r 25 -i "$work/$name.dec.yuv" \
+    -f framemd5 "$ref/jm-$name.framemd5"
+  # The demuxer's references, as make-samples.sh writes them (FFmpeg lists the packets, though it cannot decode them).
+  ffmpeg -hide_banner -loglevel quiet -y -copyts -i "$ref/jm-$name.mp4" -c copy -f framemd5 "$ref/jm-$name.packets.framemd5"
+  ffprobe -v quiet -show_packets -show_data_hash MD5 -show_entries packet=stream_index,pts,dts,duration,size,flags,data_hash \
+    -of csv=p=0 "$ref/jm-$name.mp4" > "$ref/jm-$name.packets.csv"
+}
+planes planes 8 -p NumberBFrames=1                  # CABAC, B pictures
+planes planes-cavlc 8 -p SymbolMode=0 -p NumberBFrames=0 -p IntraPeriod=3  # CAVLC, intra pictures every third
+planes planes-qm 8 -p NumberBFrames=1 -p QmatrixFile=qm.cfg -p ScalingMatrixPresentFlag=3 \
+  $(k=0 qm 3 1 2 3 3 1 3 3 1 2 3 0)                 # scaling lists: each plane takes its colour's (8.5.9)
+planes planes-10bit 10 -p NumberBFrames=1           # 10 bits

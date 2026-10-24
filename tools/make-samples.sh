@@ -502,6 +502,9 @@ for f in samples/*.aac; do
   ff -copyts -i "$f" -c copy -f framemd5 "${f%.aac}.packets.framemd5"
   [[ $f == samples/heaac-* ]] || ff -i "$f" -f f32le "${f%.aac}.f32"  # HE-AAC: below
 done
+# H.264 streams FFmpeg does not decode (separate colour planes), from JM, committed with references from JM's own
+# decoder (tools/make-jm-samples.sh): copied after FFmpeg's references, which would fail on them.
+cp samples/jm-ref/* samples/
 for f in samples/aac-*.mp4 samples/h264-with-audio.mp4 samples/h264-audio-edits.mp4 samples/fmp4-*.mp4; do
   [[ $f == samples/aac-edit-trim.mp4 || $f == *edits* ]] || ff -ignore_editlist 1 -i "$f" -map 0:a:0 -f f32le "${f%.mp4}.f32"
   ff -i "$f" -map 0:a:0 -f f32le "${f%.mp4}.trim.f32"

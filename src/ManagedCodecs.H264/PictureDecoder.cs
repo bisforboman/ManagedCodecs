@@ -372,17 +372,21 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
 
         public int Number { get; } = number;
 
-        public IReadOnlyList<Picture> RefList0 { get; } = refList0;
+        // Arrays, not the interface the lists come as: every stored motion vector reads them.
+        public Picture[] RefList0 { get; } = refList0 as Picture[] ?? [.. refList0];
 
-        public IReadOnlyList<Picture> RefList1 { get; } = refList1;
+        public Picture[] RefList1 { get; } = refList1 as Picture[] ?? [.. refList1];
 
         /// <summary>The marking of the lists' pictures when the lists were built.</summary>
         public MarkSnapshot Marks { get; } = marks;
 
+        /// <summary>Whether the co-located picture (RefList1[0]) is a short-term reference, for spatial direct prediction's colZeroFlag.</summary>
+        public bool ColPicShortTerm { get; } = refList1.Count > 0 && marks.IsShortTerm(refList1[0]);
+
         /// <summary>QP_Y of the previous macroblock in the slice (QP_Y,PRED).</summary>
         public int Qp { get; set; }
 
-        public IReadOnlyList<Picture> RefList(int list) => list == 0 ? RefList0 : RefList1;
+        public Picture[] RefList(int list) => list == 0 ? RefList0 : RefList1;
 
         /// <summary>The scaling matrix of the slice's SPS and PPS.</summary>
         public ScalingMatrix Scaling { get; init; } = ScalingMatrix.Flat;

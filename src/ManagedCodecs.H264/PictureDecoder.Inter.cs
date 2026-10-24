@@ -112,8 +112,8 @@ internal sealed partial class PictureDecoder<TPixel>
 
         if (slice.Header.Type == SliceType.B)
         {
-            DirectMotion(slice, mbAddr, 0, 4);
-            PredictDirect(slice, mbAddr, 0, 4);
+            bool uniform = DirectMotion(slice, mbAddr, 0, 4);
+            PredictDirect(slice, mbAddr, 0, 4, uniform);
             return;
         }
 
@@ -151,8 +151,8 @@ internal sealed partial class PictureDecoder<TPixel>
 
             // B_Direct_16x16.
             _directMb[mbAddr] = true;
-            DirectMotion(slice, mbAddr, 0, 4);
-            PredictDirect(slice, mbAddr, 0, 4);
+            bool uniform = DirectMotion(slice, mbAddr, 0, 4);
+            PredictDirect(slice, mbAddr, 0, 4, uniform);
         }
         else if (isB ? mbType < 22 : mbType < 3)
         {
@@ -434,7 +434,7 @@ internal sealed partial class PictureDecoder<TPixel>
         var refList = slice.RefList(list);
         bool field = IsMbaffFieldMb(mbAddr);
         int frameIdx = field ? refIdx >> 1 : refIdx;
-        if (frameIdx >= refList.Count)
+        if (frameIdx >= refList.Length)
         {
             throw new InvalidDataException($"ref_idx_l{list} {refIdx} names no reference picture.");
         }
@@ -457,16 +457,30 @@ internal sealed partial class PictureDecoder<TPixel>
             Statistics.OppositeParity += refIdx & 1;
         }
 
-        FieldStatistics.FromOwnFirstField += _fieldParity >= 0 && reference.Frame == Picture ? 1 : 0;
+        if (_fieldParity >= 0)
+        {
+            FieldStatistics.FromOwnFirstField += reference.Frame == Picture ? 1 : 0;
+        }
 
         // Motion vectors are stored a 4x4 block, references an 8x8 partition: each row and each
-        // partition is written once.
+        // partition is written once, and the rows of a partition as wide as the macroblock in one go.
         var mvXs = _mvX[list].AsSpan(mbAddr * 16, 16);
         var mvYs = _mvY[list].AsSpan(mbAddr * 16, 16);
-        for (int by = y / 4; by < (y + h) / 4; by++)
+        if (w == 16)
         {
-            mvXs.Slice((by * 4) + (x / 4), w / 4).Fill((short)mvX);
-            mvYs.Slice((by * 4) + (x / 4), w / 4).Fill((short)mvY);
+            mvXs.Slice(y, h).Fill((short)mvX);
+            mvYs.Slice(y, h).Fill((short)mvY);
+        }
+        else
+        {
+            for (int by = y / 4; by < (y + h) / 4; by++)
+            {
+                for (int bx = x / 4; bx < (x + w) / 4; bx++)
+                {
+                    mvXs[(by * 4) + bx] = (short)mvX;
+                    mvYs[(by * 4) + bx] = (short)mvY;
+                }
+            }
         }
 
         var refIdxs = _refIdx[list].AsSpan(mbAddr * 4, 4);

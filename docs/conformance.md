@@ -230,7 +230,13 @@ gap (8.2.5.2), which then copies the latest reference once that is done, with no
 cannot be built (no reference at all, or a list modification naming a lost one) is not decoded and its macroblocks are
 concealed. The frame is flagged `VideoFrame.IsDamaged`, as is every picture whose reference lists hold a damaged
 picture (checked once those are done: a lost picture's place shifts the lists even where no motion names it), up to the
-next IDR picture. Nothing of FFmpeg's (error_resilience.c guesses motion) is ported. JM codes an intra frame's second
+next IDR picture. A field whose second field was lost (an unpaired field; without concealment it throws) gives its frame
+once it is decoded: the missing field's rows are copies of the present field's next to them (line doubling, so spatial,
+unlike the macroblocks' copies from a reference), and the missing field is reported done before the next picture starts,
+so that pictures predicting from the frame do not wait for it; the frame carries its own field's timestamp. A lost
+bottom field followed by the next frame's top field with the same frame_num, both non-reference, would pair them as one
+frame (7.4.1.2.4 says they are a pair): that needs consecutive non-reference frames, which JM's samples do not have.
+Nothing of FFmpeg's (error_resilience.c guesses motion) is ported. JM codes an intra frame's second
 field as P, so no sample has an intra second field to test the grey case's alternative (its first field) with.
 
 Without concealment, a gap the SPS does not allow fails every picture up to the next IDR picture: the lost picture's
@@ -243,7 +249,8 @@ with FFmpeg by the conformance tests): one packet loses the second half of its l
 slices a picture, a B pyramid, MBAFF, 4:4:4, JM's field pictures; an IDR picture and an inter one), every frame comes
 out, the unflagged ones are bit-exact, the flagged ones within a loose PSNR floor, and three threads with random delays
 give the same frames and flags; lost packets likewise (an IDR picture, an inter one, a B picture other B pictures
-predict from, OpenH264's long-term references, a JM field pair). Without concealment no frame comes out wrong. The malformed-input sweep and the fuzz
+predict from, OpenH264's long-term references, a JM field pair, and one field of a pair: reference and non-reference,
+top and bottom, whose frames come out from one field). Without concealment no frame comes out wrong. The malformed-input sweep and the fuzz
 target run concealing too. Measured against FFmpeg on the same damage (8 bytes flipped in a B picture of
 `h264-high-b.mp4`, 20 frames affected): mean PSNR against the clean decode 23.8 dB, as FFmpeg's (23.8 dB; worst frame
 18.2 dB, FFmpeg's 19.7). Damage that still parses is not detected and spreads unflagged: with 8 bytes flipped in one of 6

@@ -57,9 +57,8 @@ says feature by feature which encoder made the samples (libx264, OpenH264, JM) a
   configuration 0.
 - MJPEG: files from real cameras (the samples are all FFmpeg's), and packets holding one field (FFmpeg decodes none).
 - H.264: separate colour planes, luma and chroma bit depths that differ, monochrome above 10 bits (FFmpeg decodes
-  none of these, so checking them needs another reference); concealing a missing picture (a lost packet, a
-  damaged slice header or a frame inferred for a frame_num gap still fails the pictures predicted from it), and
-  guessing motion for concealed macroblocks (they copy their place in a reference).
+  none of these, so checking them needs another reference); concealing a lost field of a field pair (an unpaired
+  field still throws), and guessing motion for concealed macroblocks (they copy their place in a reference).
 - H.264 speed: 1.9 to 3.6 times FFmpeg's time on one thread (Benchmarking). With 4 threads a 720p P chain takes
   about half of one thread's time: each picture decodes about 28% slower than alone (its references were written on
   other cores) and threads wait for references' rows about a fifth of the time.
@@ -173,14 +172,17 @@ neither hang nor allocate without bound: an MJPEG image over 2^26 samples is ref
 the end of the file is an error rather than an allocation. A truncated file throws where the data runs
 out (FFmpeg stops quietly instead); packets already returned stay valid. A damaged H.264 picture fails its `Decode`
 call, and so does every later picture predicted from it (none comes out predicted from other pictures in its place),
-until an IDR picture; frames other pictures finished meanwhile still come out, from the next call. Slice data that
-ends inside a macroblock (cut short) counts as damaged: CABAC would otherwise decode the zeros past its end.
+until an IDR picture; frames other pictures finished meanwhile still come out, from the next call. So does every
+picture after a lost reference picture (a gap in frame_num the SPS does not allow), up to the next IDR picture: the
+lost picture's reference marking went with it. Slice data that ends inside a macroblock (cut short) counts as damaged:
+CABAC would otherwise decode the zeros past its end.
 
 With `H264Decoder.ConcealErrors` the decoder conceals damaged slice data instead: what a slice decoded before the
 damage stays, the picture's other slices are decoded, and each missing macroblock copies its place in a reference,
-with zero motion. Every frame comes out; the damaged ones, and the ones predicted from them until an IDR picture, have
-`VideoFrame.IsDamaged` set (docs/conformance.md, Error concealment). Damage that still parses is not detected, as in
-any decoder; damaged headers and parameter sets still throw.
+with zero motion; a lost picture's frame copies the latest reference. Every frame that arrives comes out; the damaged
+ones, and the ones predicted from them until an IDR picture, have `VideoFrame.IsDamaged` set (docs/conformance.md,
+Error concealment). Damage that still parses is not detected, as in any decoder; damaged slice headers and parameter
+sets still throw (the picture is then lost, which the next one conceals).
 
 `tools/fuzz.sh <file|h264|mjpeg|aac> <minutes>` checks this with AFL++ through SharpFuzz (`file` demuxes a whole file
 and decodes every track; the others feed one decoder its configuration and packets), with seeds taken from

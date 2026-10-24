@@ -209,6 +209,44 @@ internal sealed class Picture
 
     public bool IsReference => IsShortTermReference || IsLongTermReference;
 
+    /// <summary>
+    /// Gives a frame inferred for a gap in frame_num samples to predict from (error concealment): a copy of
+    /// <paramref name="source"/>'s, or mid-grey without one; no motion (as intra), and damaged.
+    /// </summary>
+    public void FillMissing(Picture? source)
+    {
+        for (int c = 0; c < 3; c++)
+        {
+            var plane = (Array)_planes[c];
+            if (source is not null)
+            {
+                Array.Copy((Array)source.Frame._planes[c], plane, plane.Length);
+            }
+            else if (plane is ushort[] wide)
+            {
+                Array.Fill(wide, (ushort)(1 << (BitDepth - 1)));
+            }
+            else
+            {
+                Array.Fill((byte[])plane, (byte)128);
+            }
+        }
+
+        for (int list = 0; list < 2; list++)
+        {
+            Array.Clear(MvX[list]);
+            Array.Clear(MvY[list]);
+            Array.Fill(RefIdx[list], (sbyte)-1);
+            Array.Clear(RefId[list]);
+            Array.Clear(RefParity[list]);
+        }
+
+        Array.Clear(FieldMb);
+        Mbaff = false;
+        CodedAsFields = false;
+        Damaged = true;
+    }
+
     public byte[] Plane(int component) => (byte[])_planes[component];
 
     /// <summary>Plane <paramref name="component"/> (0 Y, 1 Cb, 2 Cr) as samples of <typeparamref name="TPixel"/>, byte or ushort as <see cref="BitDepth"/> says.</summary>

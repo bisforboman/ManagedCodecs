@@ -161,36 +161,4 @@ internal sealed partial class PictureDecoder<TPixel>
             PlaneCr.AsSpan(chromaOut + (y * chromaStride), width).Fill(grey);
         }
     }
-
-    /// <summary>
-    /// Whether the picture predicted from a damaged one (<see cref="Picture.Damaged"/>): any reference its
-    /// macroblocks' motion names, once that reference is done.
-    /// </summary>
-    /// <remarks>
-    /// A reference sets its flag before reporting its last rows final, so a picture that read those rows already waited
-    /// long enough; the wait here is for pictures that read only upper rows (frame threading's tests do not tell).
-    /// </remarks>
-    public bool ReadsDamagedReference()
-    {
-        var seen = new HashSet<Picture>();
-        for (int mb = Math.Max(_fieldParity, 0); mb < _mbCount; mb += MbStep)
-        {
-            for (int list = 0; list < 2; list++)
-            {
-                for (int part = 0; part < 4; part++)
-                {
-                    if (_refPic[list][(mb * 4) + part] is { } reference && seen.Add(reference))
-                    {
-                        reference.WaitForRow(int.MaxValue);
-                        if (reference.Damaged)
-                        {
-                            return true;
-                        }
-                    }
-                }
-            }
-        }
-
-        return false;
-    }
 }

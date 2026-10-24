@@ -42,9 +42,6 @@ internal interface IPictureDecoder
 
     /// <summary>Fills in the macroblocks no slice decoded, from a reference (else <paramref name="fallback"/>, else grey).</summary>
     void Conceal(Picture? fallback);
-
-    /// <summary>Whether a reference the picture's motion names is damaged (waits for each to be done).</summary>
-    bool ReadsDamagedReference();
 }
 
 /// <summary>

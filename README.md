@@ -56,8 +56,10 @@ says feature by feature which encoder made the samples (libx264, OpenH264, JM) a
   time, twice FFmpeg's time; Benchmarking). In ADTS: frames of several raw data blocks, and channel
   configuration 0.
 - MJPEG: files from real cameras (the samples are all FFmpeg's), and packets holding one field (FFmpeg decodes none).
-- H.264: separate colour planes, luma and chroma bit depths that differ (FFmpeg decodes neither; JM's decoder is
-  to be their reference); concealing a lost field of a field pair (an unpaired
+- H.264: separate colour planes (FFmpeg decodes none: `samples/jm-ref/` holds JM's streams with JM's decoder's
+  references, for the decoder to come); luma and chroma bit depths that differ are rejected on purpose (no mainstream
+  encoder or decoder, FFmpeg included, handles them, and they would need a bit depth for each plane in the frame
+  API); concealing a lost field of a field pair (an unpaired
   field still throws), and guessing motion for concealed macroblocks (they copy their place in a reference).
 - H.264 speed: 1.95 to 3.6 times FFmpeg's time on one thread (Benchmarking). With 4 threads a 720p P chain takes
   about half of one thread's time: each picture decodes about 28% slower than alone (its references were written on

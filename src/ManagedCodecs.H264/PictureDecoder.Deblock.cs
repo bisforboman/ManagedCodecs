@@ -39,6 +39,10 @@ internal sealed partial class PictureDecoder<TPixel>
     private int _decodedPrefix;
     private int _deblockedRows;
 
+    // Per macroblock, once its deblocking has looked at it: inter, one block of motion in each list
+    // and no luma coefficients (HasUniformMotionWithoutCoefficients), for its neighbours' edges.
+    private bool[]? _uniformMb;
+
     // Decoded macroblock rows last reported to the picture's progress (frame threading).
     private int _reportedRows;
 
@@ -129,8 +133,14 @@ internal sealed partial class PictureDecoder<TPixel>
         Span<byte> vertical = stackalloc byte[16];
         Span<byte> horizontal = stackalloc byte[16];
 
+        _uniformMb ??= new bool[_mbCount];
         for (int mbAddr = firstRow * _widthInMbs; mbAddr < endRow * _widthInMbs; mbAddr++)
         {
+            // Kept for every macroblock, filtered or not, before its right and lower neighbours read it.
+            bool intra = IsIntra(mbAddr);
+            bool uniform = !intra && HasUniformMotionWithoutCoefficients(mbAddr);
+            _uniformMb[mbAddr] = uniform;
+
             var slice = _slices[_sliceOfMb[mbAddr]];
             if (slice.DisableDeblockingFilterIdc == 1)
             {
@@ -143,21 +153,20 @@ internal sealed partial class PictureDecoder<TPixel>
             bool left = mbX > 0 && (!sameSliceOnly || _sliceOfMb[mbAddr - 1] == _sliceOfMb[mbAddr]);
             bool top = mbY > 0 && (!sameSliceOnly || _sliceOfMb[mbAddr - _widthInMbs] == _sliceOfMb[mbAddr]);
 
-            // Macroblock edges (edge 0) depend on the neighbour.
-            for (int k = 0; k < 4; k++)
-            {
-                vertical[k] = (byte)(left ? BoundaryStrength(mbAddr - 1, (k * 4) + 3, mbAddr, k * 4, mbEdge: true) : 0);
-                horizontal[k] = (byte)(top ? BoundaryStrength(mbAddr - _widthInMbs, 12 + k, mbAddr, k, mbEdge: true) : 0);
-            }
+            // Macroblock edges (edge 0) depend on the neighbour. Between two macroblocks that
+            // move as one block each and have no luma coefficients, all four segments have the
+            // bS of any one of them.
+            MacroblockEdgeStrengths(vertical, left, mbAddr - 1, 3, 4, mbAddr, uniform);
+            MacroblockEdgeStrengths(horizontal, top, mbAddr - _widthInMbs, 12, 1, mbAddr, uniform);
 
             // Internal edges: fixed for intra macroblocks and for macroblocks with uniform motion
             // and no luma coefficients; otherwise block by block.
-            if (IsIntra(mbAddr))
+            if (intra)
             {
                 vertical[4..].Fill(3);
                 horizontal[4..].Fill(3);
             }
-            else if (HasUniformMotionWithoutCoefficients(mbAddr))
+            else if (uniform)
             {
                 vertical[4..].Clear();
                 horizontal[4..].Clear();
@@ -269,6 +278,34 @@ internal sealed partial class PictureDecoder<TPixel>
         {
             int qpP = edge == 0 ? qpAbove : qp;
             FilterChromaEdge(PlaneCb, PlaneCr, origin + (edge * 4 * stride), stride, 1, horizontal.Slice(edge * 4, 4), ChromaQp(qpP, slice.CbQpOffset, _qpBdOffset), qpCb, ChromaQp(qpP, slice.CrQpOffset, _qpBdOffset), qpCr, slice.AlphaOffset, slice.BetaOffset, bitDepth: _bitDepth);
+        }
+    }
+
+    /// <summary>
+    /// bS of the four segments of a macroblock edge, 0 where it is not <paramref name="filtered"/>:
+    /// segment k between block <paramref name="firstP"/> + k * <paramref name="step"/> of
+    /// <paramref name="mbP"/> and block k * step of <paramref name="mbQ"/> (raster indices; a
+    /// vertical edge has firstP 3 and step 4, a horizontal one 12 and 1).
+    /// </summary>
+    private void MacroblockEdgeStrengths(Span<byte> strengths, bool filtered, int mbP, int firstP, int step, int mbQ, bool uniformQ)
+    {
+        if (!filtered)
+        {
+            strengths[..4].Clear();
+            return;
+        }
+
+        // Both macroblocks one block of motion each, without coefficients: neither is intra, so
+        // every segment's bS is the motion's.
+        if (uniformQ && _uniformMb![mbP])
+        {
+            strengths[..4].Fill((byte)MotionStrength((mbP * 16) + firstP, mbQ * 16));
+            return;
+        }
+
+        for (int k = 0; k < 4; k++)
+        {
+            strengths[k] = (byte)BoundaryStrength(mbP, firstP + (k * step), mbQ, k * step, mbEdge: true);
         }
     }
 

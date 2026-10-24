@@ -61,64 +61,92 @@ internal sealed class QmfAnalysis
 }
 
 /// <summary>
-/// The 64-band complex QMF synthesis bank (ISO/IEC 14496-3 4.6.18.4.2): each call takes one time slot of 64 complex
-/// subband samples and gives 64 output samples, at twice the core's rate. The bank keeps 1280 values across calls.
+/// The complex QMF synthesis bank (ISO/IEC 14496-3 4.6.18.4.2): each call takes one time slot of 64 complex subband
+/// samples and gives 64 output samples, at twice the core's rate; the bank keeps 1280 values across calls. Downsampled
+/// (for SBR at the core's own rate), it takes the slot's lower 32 subband samples and gives 32 output samples, keeping
+/// 640 values, with every other window coefficient.
 /// </summary>
 /// <remarks>
-/// The spec's v(n) = the real part of the sum over k of X(k) exp(i pi/128 (k + 0.5)(2n - 255)) / 64 is a 128-point DFT:
-/// the exponent splits into 2 pi k n / 128 + pi (2n - 255) / 256 - 510 pi k / 256, so v(n) is the real part of
-/// exp(i pi (2n - 255) / 256) times the DFT of X(k) exp(-i 510 pi k / 256) (zero for k from 64) at n, over 64. Tests
-/// compare it with the sums on random input.
+/// The spec's v(n) = the real part of the sum over k of X(k) exp(i pi/128 (k + 0.5)(2n - 255)) / 64, n in 0..127; the
+/// downsampled bank's is the same kernel at every other n, exp(i pi/128 (k + 0.5)(4n - 255)), n in 0..63, so that its
+/// output lies on the full bank's even samples (a whole-sample delay; with 2n - 127 instead, it would lag a quarter of
+/// a sample and miss FFmpeg's output by up to 14% at 3 to 6 kHz). With B bands that is a DFT of 2B points: in units of
+/// pi/256 the exponent (2k + 1)((128/B) n - 255) splits into 2 pi k n / 2B, (128/B) n - 255 and -510 k, so v(n) is the
+/// real part of exp(i pi ((128/B) n - 255) / 256) times the DFT of X(k) exp(-i 510 pi k / 256) (zero for k from B) at n,
+/// over 64. Tests compare it with the sums on random input.
 /// </remarks>
 internal sealed class QmfSynthesis
 {
-    public const int Bands = 64;
+    private static readonly Tables Full = new(64);
+    private static readonly Tables Halved = new(32);
 
-    private static readonly QmfFft Fft = new(128);
+    private readonly Tables _tables;
+    private readonly double[] _v;
 
-    // exp(-i 510 pi k / 256) for the input, and exp(i pi (2n - 255) / 256) / 64 for the output.
-    private static readonly double[] InCos = [.. Enumerable.Range(0, Bands).Select(k => QmfTrig.CosPi256(-510 * k))];
-    private static readonly double[] InSin = [.. Enumerable.Range(0, Bands).Select(k => QmfTrig.SinPi256(-510 * k))];
-    private static readonly double[] OutCos = [.. Enumerable.Range(0, 128).Select(n => QmfTrig.CosPi256((2 * n) - 255) / 64)];
-    private static readonly double[] OutSin = [.. Enumerable.Range(0, 128).Select(n => QmfTrig.SinPi256((2 * n) - 255) / 64)];
+    public QmfSynthesis(bool downsampled = false)
+    {
+        _tables = downsampled ? Halved : Full;
+        _v = new double[20 * Bands];
+    }
 
-    private readonly double[] _v = new double[1280];
+    /// <summary>64, or 32 downsampled: the subband samples a slot takes and the output samples it gives.</summary>
+    public int Bands => _tables.Bands;
 
-    /// <summary>One time slot: 64 complex subband samples in, 64 output samples (oldest first) out.</summary>
+    /// <summary>One time slot: <see cref="Bands"/> complex subband samples in, as many output samples (oldest first) out.</summary>
     public void Process(ReadOnlySpan<double> real, ReadOnlySpan<double> imaginary, Span<double> output)
     {
+        var t = _tables;
+        int bands = t.Bands;
         var v = _v.AsSpan();
-        v[..1152].CopyTo(v[128..]);
+        v[..(18 * bands)].CopyTo(v[(2 * bands)..]);
 
-        Span<double> re = stackalloc double[128];
-        Span<double> im = stackalloc double[128];
-        for (int k = 0; k < Bands; k++)
+        Span<double> re = stackalloc double[2 * bands];
+        Span<double> im = stackalloc double[2 * bands];
+        for (int k = 0; k < bands; k++)
         {
-            re[k] = (real[k] * InCos[k]) - (imaginary[k] * InSin[k]);
-            im[k] = (real[k] * InSin[k]) + (imaginary[k] * InCos[k]);
+            re[k] = (real[k] * t.InCos[k]) - (imaginary[k] * t.InSin[k]);
+            im[k] = (real[k] * t.InSin[k]) + (imaginary[k] * t.InCos[k]);
         }
 
-        re[Bands..].Clear();
-        im[Bands..].Clear();
-        Fft.Transform(re, im);
-        for (int n = 0; n < 128; n++)
+        re[bands..].Clear();
+        im[bands..].Clear();
+        t.Fft.Transform(re, im);
+        for (int n = 0; n < 2 * bands; n++)
         {
-            v[n] = (re[n] * OutCos[n]) - (im[n] * OutSin[n]);
+            v[n] = (re[n] * t.OutCos[n]) - (im[n] * t.OutSin[n]);
         }
 
-        // g takes, of each 256 values of v, the first and the last 64; w(n) = g(n) c(n); each output sample sums ten of w.
+        // g takes, of each 4B values of v, the first and the last B; w(n) = g(n) c(n (64 / B)); each output sample sums
+        // ten of w.
         var c = QmfWindow.Coefficients;
-        for (int n = 0; n < 64; n++)
+        int step = 64 / bands;
+        for (int n = 0; n < bands; n++)
         {
             double sum = 0;
             for (int i = 0; i < 5; i++)
             {
-                sum += v[(256 * i) + n] * c[(128 * i) + n];
-                sum += v[(256 * i) + 192 + n] * c[(128 * i) + 64 + n];
+                sum += v[(4 * bands * i) + n] * c[step * ((2 * bands * i) + n)];
+                sum += v[(4 * bands * i) + (3 * bands) + n] * c[step * ((2 * bands * i) + bands + n)];
             }
 
             output[n] = sum;
         }
+    }
+
+    // exp(-i 510 pi k / 256) for the input, and exp(i pi ((128/B) n - 255) / 256) / 64 for the output.
+    private sealed class Tables(int bands)
+    {
+        public int Bands { get; } = bands;
+
+        public QmfFft Fft { get; } = new(2 * bands);
+
+        public double[] InCos { get; } = [.. Enumerable.Range(0, bands).Select(k => QmfTrig.CosPi256(-510 * k))];
+
+        public double[] InSin { get; } = [.. Enumerable.Range(0, bands).Select(k => QmfTrig.SinPi256(-510 * k))];
+
+        public double[] OutCos { get; } = [.. Enumerable.Range(0, 2 * bands).Select(n => QmfTrig.CosPi256(((128 / bands) * n) - 255) / 64)];
+
+        public double[] OutSin { get; } = [.. Enumerable.Range(0, 2 * bands).Select(n => QmfTrig.SinPi256(((128 / bands) * n) - 255) / 64)];
     }
 }
 

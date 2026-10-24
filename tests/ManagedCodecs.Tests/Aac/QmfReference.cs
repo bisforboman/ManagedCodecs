@@ -75,62 +75,74 @@ internal sealed class QmfAnalysisReference
 }
 
 /// <summary>
-/// The 64-band complex QMF synthesis bank (ISO/IEC 14496-3 4.6.18.4.2): each call takes one time slot of 64 complex
-/// subband samples and gives 64 output samples, at twice the core's rate. The bank keeps 1280 values across calls.
+/// The complex QMF synthesis bank (ISO/IEC 14496-3 4.6.18.4.2): each call takes one time slot of 64 complex subband
+/// samples and gives 64 output samples, at twice the core's rate, keeping 1280 values across calls; downsampled (for
+/// SBR at the core's own rate), 32 subband samples in and 32 out, keeping 640, with every other window coefficient.
 /// Written as the spec's sums: the reference the FFT-based <see cref="QmfSynthesis"/> is compared with.
 /// </summary>
 internal sealed class QmfSynthesisReference
 {
-    public const int Bands = 64;
+    private readonly int _bands;
 
-    // cos and sin of pi/128 (k + 0.5)(2n - 255), times the spec's factor 1/64, per band k and n in 0..127: of pi/256
-    // times (2k + 1)(2n - 255).
-    private static readonly double[] Cos = Kernel(QmfTrig.CosPi256);
-    private static readonly double[] Sin = Kernel(QmfTrig.SinPi256);
+    // cos and sin of pi/128 (k + 0.5)((128/B) n - 255), times the spec's factor 1/64, per band k and n in 0..2B-1: of
+    // pi/256 times (2k + 1)((128/B) n - 255) (downsampled, the full bank's kernel at every other n).
+    private readonly double[] _cos;
+    private readonly double[] _sin;
+    private readonly double[] _v;
 
-    private readonly double[] _v = new double[1280];
+    public QmfSynthesisReference(bool downsampled = false)
+    {
+        _bands = downsampled ? 32 : 64;
+        _cos = Kernel(QmfTrig.CosPi256);
+        _sin = Kernel(QmfTrig.SinPi256);
+        _v = new double[20 * _bands];
+    }
 
-    /// <summary>One time slot: 64 complex subband samples in, 64 output samples (oldest first) out.</summary>
+    /// <summary>One time slot: B complex subband samples in, B output samples (oldest first) out.</summary>
     public void Process(ReadOnlySpan<double> real, ReadOnlySpan<double> imaginary, Span<double> output)
     {
+        int bands = _bands;
         var v = _v.AsSpan();
-        v[..1152].CopyTo(v[128..]);
+        v[..(18 * bands)].CopyTo(v[(2 * bands)..]);
 
-        // v(n) = the real part of the sum over k of X(k) exp(i pi/128 (k + 0.5)(2n - 255)) / 64.
-        for (int n = 0; n < 128; n++)
+        // v(n) = the real part of the sum over k of X(k) exp(i pi/128 (k + 0.5)((128/B) n - 255)) / 64.
+        for (int n = 0; n < 2 * bands; n++)
         {
             double sum = 0;
-            for (int k = 0; k < Bands; k++)
+            for (int k = 0; k < bands; k++)
             {
-                sum += (real[k] * Cos[(128 * k) + n]) - (imaginary[k] * Sin[(128 * k) + n]);
+                sum += (real[k] * _cos[(2 * bands * k) + n]) - (imaginary[k] * _sin[(2 * bands * k) + n]);
             }
 
             v[n] = sum;
         }
 
-        // g takes, of each 256 values of v, the first and the last 64; w(n) = g(n) c(n); each output sample sums ten of w.
+        // g takes, of each 4B values of v, the first and the last B; w(n) = g(n) c(n (64 / B)); each output sample sums
+        // ten of w.
         var c = QmfWindow.Coefficients;
-        for (int n = 0; n < 64; n++)
+        int step = 64 / bands;
+        for (int n = 0; n < bands; n++)
         {
             double sum = 0;
             for (int i = 0; i < 5; i++)
             {
-                sum += v[(256 * i) + n] * c[(128 * i) + n];
-                sum += v[(256 * i) + 192 + n] * c[(128 * i) + 64 + n];
+                sum += v[(4 * bands * i) + n] * c[step * ((2 * bands * i) + n)];
+                sum += v[(4 * bands * i) + (3 * bands) + n] * c[step * ((2 * bands * i) + bands + n)];
             }
 
             output[n] = sum;
         }
     }
 
-    private static double[] Kernel(Func<int, double> f)
+    private double[] Kernel(Func<int, double> f)
     {
-        var table = new double[Bands * 128];
-        for (int k = 0; k < Bands; k++)
+        int bands = _bands;
+        var table = new double[bands * 2 * bands];
+        for (int k = 0; k < bands; k++)
         {
-            for (int n = 0; n < 128; n++)
+            for (int n = 0; n < 2 * bands; n++)
             {
-                table[(128 * k) + n] = f(((2 * k) + 1) * ((2 * n) - 255)) / 64;
+                table[(2 * bands * k) + n] = f(((2 * k) + 1) * (((128 / bands) * n) - 255)) / 64;
             }
         }
 

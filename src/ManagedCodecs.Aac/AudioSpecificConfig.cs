@@ -28,6 +28,12 @@ internal sealed record AudioSpecificConfig(
     /// <summary>The rate SBR outputs at: the config's, else twice the core's.</summary>
     public int SbrRate => SbrSampleRate > 0 ? SbrSampleRate : 2 * SampleRate;
 
+    /// <summary>
+    /// Downsampled SBR: the config gives SBR the core's own rate, so it runs as at twice that rate (its frequency tables
+    /// too) but synthesizes only the lower half of the band, at the core's rate.
+    /// </summary>
+    public bool DownsampledSbr => SbrPresent && SbrSampleRate == SampleRate;
+
     public static AudioSpecificConfig Parse(ReadOnlySpan<byte> data)
     {
         if (data.Length < 2)

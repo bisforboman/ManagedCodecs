@@ -40,8 +40,8 @@ says feature by feature which encoder made the samples (libx264, OpenH264, JM) a
 - **AAC LC**: mono to 7.1 and program config elements, every window sequence and shape, M/S and intensity stereo,
   PNS, TNS; within 2^-17 of FFmpeg's float output (measured: 3e-7). Encoder priming is trimmed by the MP4 edit list,
   or by an iTunSMPB tag without one.
-- **HE-AAC** (spectral band replication, at twice the core's rate): signalled in the config or only by its data, mono
-  to 5.1, coupled pairs; within 1e-6 of FFmpeg's float output where its single precision is not the limit (see
+- **HE-AAC** (spectral band replication, at twice the core's rate, or downsampled at the core's own): signalled in the
+  config or only by its data, mono to 5.1, coupled pairs; within 1e-6 of FFmpeg's float output where its single precision is not the limit (see
   docs/conformance.md). Parametric stereo (HE-AAC v2): the baseline decoder (10 and 20 bands, mixing procedure Ra, no
   IPD or OPD), a mono stream decoded to stereo; within 3e-4 of FFmpeg's output, 3e-6 on average.
 - **Containers**: AVI (video), MP4 (video and audio tracks, fragmented files too, edit lists of several edits)
@@ -51,8 +51,8 @@ says feature by feature which encoder made the samples (libx264, OpenH264, JM) a
 
 ### Open
 
-- AAC: parametric stereo with 34 bands or mixing procedure Rb (no encoder at hand sends them), and downsampled SBR;
-  SBR's speed (FFT-based QMF banks: 5.1 HE-AAC at about 1 ms a
+- AAC: parametric stereo with 34 bands or mixing procedure Rb (no encoder at hand sends them, nor downsampled SBR with
+  parametric stereo, which decodes but is untested); SBR's speed (FFT-based QMF banks: 5.1 HE-AAC at about 1 ms a
   frame, 40 times real time, 4 times FFmpeg's time). In ADTS: frames of several raw data blocks, and channel
   configuration 0.
 - MJPEG: files from real cameras (the samples are all FFmpeg's), and packets holding one field (FFmpeg decodes none).

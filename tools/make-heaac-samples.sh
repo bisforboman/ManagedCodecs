@@ -75,6 +75,29 @@ if wanted heaac-header2; then
   LD_LIBRARY_PATH=$work/fdk2/build fdkaac --silent -p 5 -b 48000 -o "$out/heaac-header2.mp4" "$work/in.wav"
 fi
 
+# Downsampled SBR: the config gives SBR the core's own rate (44.1 kHz, sync extension), so the decoder runs SBR as for
+# 88.2 kHz but synthesizes only the lower 32 subbands, at the core's rate. The FDK encoder chooses it only for AAC ELD;
+# a copy of the tree with its HE-AAC default changed (sbrRatio 1 instead of 2) writes it. With parametric stereo the
+# encoder stays dual-rate, so no sample has both.
+if wanted heaac-downsampled; then
+  git -C "$fdk/.." archive HEAD | (mkdir "$work/fdk3" && tar -x -C "$work/fdk3")
+  file=$(find "$work/fdk3" -path '*libAACenc/src/aacenc_lib.cpp')
+  python3 - "$file" <<'PY'
+import sys
+path = sys.argv[1]
+source = open(path).read()
+default = "    } else {\n      hAacConfig->sbrRatio = 2;\n    }"
+assert source.count(default) == 1, "the encoder's SBR ratio default moved"
+open(path, "w").write(source.replace(default, "    } else {\n      hAacConfig->sbrRatio = 1;\n    }"))
+PY
+  cmake -S "$work/fdk3" -B "$work/fdk3/build" > /dev/null && cmake --build "$work/fdk3/build" -j4 > /dev/null
+  # Noise under the tones: a subband holding one pure sinusoid makes the HF generator's prediction nearly singular,
+  # which FFmpeg's single precision magnifies (docs/conformance.md), and this sample's narrower band leaves more of its
+  # high band to the 11 kHz tone. A third as much noise still left 4e-3 on x64 and 1e-2 under FFmpeg's ARM64 build.
+  ff -f lavfi -i "aevalsrc=$music+0.01*(random(2)-0.5)|$music2+0.01*(random(3)-0.5):s=44100:d=3" -c:a pcm_s16le "$work/in.wav"
+  LD_LIBRARY_PATH=$work/fdk3/build fdkaac --silent -p 5 -b 48000 -o "$out/heaac-downsampled.mp4" "$work/in.wav"
+fi
+
 # HE-AAC v2: a mono core with SBR and parametric stereo data in the SBR extension.
 if wanted heaacv2-stereo; then
   ff -f lavfi -i "aevalsrc=$music|$music2:s=44100:d=3" -c:a pcm_s16le "$work/in.wav"

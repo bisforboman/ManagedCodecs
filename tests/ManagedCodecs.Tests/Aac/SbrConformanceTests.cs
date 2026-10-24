@@ -54,6 +54,11 @@ public class SbrConformanceTests
         }
 
         int referenceChannels = channels == 1 ? 2 : channels; // FFmpeg's mono HE-AAC is stereo
+        bool downsampled = sampleName.Contains("downsampled", StringComparison.Ordinal);
+        if (downsampled)
+        {
+            Assert.Equal(44100, decoder.SampleRate); // the core's, which the config also gives SBR
+        }
 
         var worst = new double[channels];
         var sum = new double[channels];
@@ -65,6 +70,12 @@ public class SbrConformanceTests
             var decoded = decoder.Decode(packet);
             packets++;
             Assert.Equal(decoder.SampleRate, decoded.SampleRate);
+            if (downsampled && !packet.Discard)
+            {
+                // At the core's rate: 1024 samples a frame, less what the start trims.
+                Assert.True(decoded.SampleCount <= 1024);
+            }
+
             for (int i = 0; i < decoded.SampleCount; i++)
             {
                 int offset = (position + i) * referenceChannels;

@@ -3,8 +3,9 @@ namespace ManagedCodecs.Aac.Sbr;
 /// <summary>
 /// One output channel through spectral band replication (ISO/IEC 14496-3 4.6.18): QMF analysis of the core decoder's
 /// 1024 samples, HF generation and adjustment from its element's SBR data, and QMF synthesis of 2048 samples at twice
-/// the core's rate. Without SBR data (an LFE, or an element before its first header) the high band stays empty: the
-/// core's signal, upsampled through the same banks and with the same delay.
+/// the core's rate (downsampled, of the lower 32 subbands into 1024 samples at the core's rate). Without SBR data (an
+/// LFE, or an element before its first header) the high band stays empty: the core's signal through the same banks and
+/// with the same delay.
 /// </summary>
 /// <remarks>
 /// Times are in QMF time slots, 32 a frame (two per SBR time slot). The envelopes of a frame cover the slots from twice
@@ -13,7 +14,7 @@ namespace ManagedCodecs.Aac.Sbr;
 /// further back, so 8 slots of the previous frame's analysis are kept (t_HFGen). Samples are processed in the 16-bit
 /// range the spec's constants assume (the core's output times 32768).
 /// </remarks>
-internal sealed class SbrChannel
+internal sealed class SbrChannel(bool downsampled = false)
 {
     private const int Slots = 32;
     private const int Kept = 8;
@@ -45,7 +46,7 @@ internal sealed class SbrChannel
     private static readonly double[] SineImaginary = [0, 1, 0, -1];
 
     private readonly QmfAnalysis _analysis = new();
-    private readonly QmfSynthesis _synthesis = new();
+    private readonly QmfSynthesis _synthesis = new(downsampled);
 
     // Parametric stereo, once it comes: its processor, the right channel's synthesis bank, and the frame's synthesis
     // input for the left (with the look-ahead slots) and the right.
@@ -84,8 +85,8 @@ internal sealed class SbrChannel
 
     /// <summary>
     /// Takes one frame of the core's output for this channel (1024 samples in [-1, 1]) and writes 2048 samples at twice
-    /// the rate: with <paramref name="channel"/> of <paramref name="element"/>'s SBR data when it has this frame's, else
-    /// with no high band.
+    /// the rate (downsampled, 1024 at the core's): with <paramref name="channel"/> of <paramref name="element"/>'s SBR
+    /// data when it has this frame's, else with no high band.
     /// </summary>
     public void Process(SbrElement? element, int channel, ReadOnlySpan<float> core, Span<float> output, AacStatistics statistics) =>
         Process(element, channel, core, output, [], statistics);
@@ -440,7 +441,7 @@ internal sealed class SbrChannel
         {
             SynthesisInput(l, real, imaginary);
             _synthesis.Process(real, imaginary, samples);
-            Output(samples, output[(64 * l)..]);
+            Output(samples, output[(_synthesis.Bands * l)..], _synthesis.Bands);
         }
     }
 
@@ -454,9 +455,9 @@ internal sealed class SbrChannel
         _highImaginary[l].AsSpan(kx).CopyTo(imaginary[kx..]);
     }
 
-    private static void Output(ReadOnlySpan<double> samples, Span<float> output)
+    private static void Output(ReadOnlySpan<double> samples, Span<float> output, int count)
     {
-        for (int n = 0; n < 64; n++)
+        for (int n = 0; n < count; n++)
         {
             output[n] = (float)(samples[n] / 32768);
         }
@@ -467,7 +468,7 @@ internal sealed class SbrChannel
     private void SynthesizeStereo(SbrElement? element, Span<float> left, Span<float> right, AacStatistics statistics)
     {
         _ps ??= new PsProcessor();
-        _rightSynthesis ??= new QmfSynthesis();
+        _rightSynthesis ??= new QmfSynthesis(downsampled);
         _stereoRe ??= Buffers(Slots + PsProcessor.LookAhead, 64);
         _stereoIm ??= Buffers(Slots + PsProcessor.LookAhead, 64);
         _rightRe ??= Buffers(Slots, 64);
@@ -489,10 +490,11 @@ internal sealed class SbrChannel
         Span<double> samples = stackalloc double[64];
         for (int l = 0; l < Slots; l++)
         {
+            int bands = _synthesis.Bands;
             _synthesis.Process(_stereoRe[l], _stereoIm[l], samples);
-            Output(samples, left[(64 * l)..]);
+            Output(samples, left[(bands * l)..], bands);
             _rightSynthesis.Process(_rightRe[l], _rightIm[l], samples);
-            Output(samples, right[(64 * l)..]);
+            Output(samples, right[(bands * l)..], bands);
         }
     }
 

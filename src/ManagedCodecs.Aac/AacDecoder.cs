@@ -4,17 +4,18 @@ namespace ManagedCodecs.Aac;
 
 /// <summary>
 /// AAC LC and HE-AAC decoder (ISO/IEC 14496-3 subpart 4, and spectral band replication of 4.6.18) for raw access units
-/// as stored in MP4, or ADTS frames: one packet in, 1024 samples per channel out, or with SBR 2048 at twice the rate.
+/// as stored in MP4, or ADTS frames: one packet in, 1024 samples per channel out, or with SBR 2048 at twice the rate
+/// (downsampled SBR, which the config signals by giving SBR the core's own rate: 1024 at the core's).
 /// </summary>
 /// <remarks>
 /// Supports single and channel pair elements, LFE, M/S and intensity stereo, perceptual noise
 /// substitution, TNS, pulse data, long and short windows with sine and KBD shapes, and channel
 /// configurations 0 (program config element, channels in bitstream order) to 7. Output is in the
 /// WAVE / FFmpeg channel order (5.1: FL FR FC LFE BL BR; configuration 7: FL FR FC LFE BL BR SL SR). Not supported: other object types (Main, SSR, LTP),
-/// coupling channel elements, 960-sample frames, and downsampled SBR. Spectral band replication is signalled in the
+/// coupling channel elements and 960-sample frames. Spectral band replication is signalled in the
 /// config or only by its data (from the first access unit on, which <see cref="SampleRate"/> then follows); every channel
-/// goes through it, an LFE without a high band. Parametric stereo (HE-AAC v2) is read but not decoded: the mono core comes
-/// out with SBR. Every packet yields its samples whole, encoder priming included; the container's timestamps (negative
+/// goes through it, an LFE without a high band. Parametric stereo (HE-AAC v2) makes a mono stream stereo
+/// (<see cref="Channels"/>). Every packet yields its samples whole, encoder priming included; the container's timestamps (negative
 /// for priming) and the last packet's duration say what to trim, and <see cref="Decode(Packet)"/> drops what
 /// <see cref="Packet.SkipSamples"/> says, running on into the next packets if it is more than one packet's.
 /// </remarks>
@@ -59,10 +60,6 @@ public sealed class AacDecoder : IAudioDecoder
         _outputOrder = OutputOrder(_config.ChannelConfiguration, channels);
         _channelElement = new int[channels];
         _channelInElement = new int[channels];
-        if (_config.SbrPresent && _config.SbrRate == _config.SampleRate)
-        {
-            throw new NotSupportedException("Downsampled SBR (at the core's own rate) is not supported.");
-        }
     }
 
     public AacDecoder(AudioStreamInfo stream)
@@ -251,8 +248,8 @@ public sealed class AacDecoder : IAudioDecoder
     // unit, an LFE's (and any channel's without SBR data) with no high band.
     private AudioFrame DecodeWithSbr()
     {
-        _sbrChannels ??= [.. Enumerable.Range(0, _config.Channels).Select(_ => new SbrChannel())];
-        var frame = new AudioFrame(SampleRate, Channels, 2048);
+        _sbrChannels ??= [.. Enumerable.Range(0, _config.Channels).Select(_ => new SbrChannel(_config.DownsampledSbr))];
+        var frame = new AudioFrame(SampleRate, Channels, _config.DownsampledSbr ? 1024 : 2048);
         if (HasParametricStereo)
         {
             var stream = _streams[0];
@@ -288,7 +285,7 @@ public sealed class AacDecoder : IAudioDecoder
 
         if (_sbr[index] is not { } sbr || sbr.Channels.Length != channels)
         {
-            _sbr[index] = sbr = new SbrElement(channels, _config.SbrRate);
+            _sbr[index] = sbr = new SbrElement(channels, _config.DownsampledSbr ? 2 * _config.SampleRate : _config.SbrRate);
         }
 
         return sbr;

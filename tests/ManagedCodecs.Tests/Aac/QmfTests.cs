@@ -16,6 +16,10 @@ public class QmfTests
     // Slots before the comparison starts: past the banks' start-up (the delay is 9 slots of output).
     private const int StartUp = 40;
 
+    // The banks' delay with downsampled synthesis, at the core's rate, as measured: half the full bank's, its output on
+    // the full bank's even samples.
+    private const double DownsampledDelay = 289;
+
     private const int Slots = 200;
 
     [Fact]
@@ -83,6 +87,46 @@ public class QmfTests
         }
     }
 
+    /// <summary>
+    /// Downsampled synthesis after analysis gives the core's signal back at its own rate, delayed by
+    /// <see cref="DownsampledDelay"/> (the best fit in sixteenths of a sample), to the window's ripple and aliasing (up to about 5e-3), with
+    /// a gain of 1 across the band.
+    /// </summary>
+    [Fact]
+    public void AnalysisThenDownsampledSynthesis_GivesTheSignalBack()
+    {
+        var random = new Random(6);
+        var tones = Enumerable.Range(0, 8).Select(_ => (Frequency: random.NextDouble() * 0.9 * Math.PI, Phase: random.NextDouble() * 2 * Math.PI, Amplitude: 0.1 + random.NextDouble())).ToArray();
+        double Signal(double t) => tones.Sum(tone => tone.Amplitude * Math.Sin((tone.Frequency * t) + tone.Phase));
+
+        var output = RoundTrip(Signal, downsampled: true);
+        double Error(double delay) => Enumerable.Range(StartUp * 32, (Slots - StartUp) * 32).Max(m => Math.Abs(output[m] - Signal(m - delay)));
+        double peak = tones.Sum(tone => tone.Amplitude);
+        Assert.Equal(DownsampledDelay, Enumerable.Range(0, 16 * 600).Select(q => q / 16.0).MinBy(Error));
+        Assert.True(Error(DownsampledDelay) < 5e-3 * peak, $"Error {Error(DownsampledDelay) / peak:e2} of the peak.");
+
+        double worstGain = 0;
+        double worstQuadrature = 0;
+        for (double frequency = 0.05; frequency < 0.98; frequency += 0.0123)
+        {
+            var tone = RoundTrip(t => Math.Cos(frequency * Math.PI * t), downsampled: true);
+            double inPhase = 0;
+            double quadrature = 0;
+            int count = (Slots - StartUp) * 32;
+            for (int m = StartUp * 32; m < Slots * 32; m++)
+            {
+                double phase = frequency * Math.PI * (m - DownsampledDelay);
+                inPhase += tone[m] * Math.Cos(phase);
+                quadrature += tone[m] * Math.Sin(phase);
+            }
+
+            worstGain = Math.Max(worstGain, Math.Abs((2 * inPhase / count) - 1));
+            worstQuadrature = Math.Max(worstQuadrature, Math.Abs(2 * quadrature / count));
+        }
+
+        Assert.True(worstGain < 6e-3 && worstQuadrature < 6e-3, $"Gain off by up to {worstGain:e2}, quadrature up to {worstQuadrature:e2}.");
+    }
+
     /// <summary>The FFT-based banks give the spec's sums (<see cref="QmfAnalysisReference"/>, <see cref="QmfSynthesisReference"/>) on random input, slot after slot.</summary>
     [Fact]
     public void FastBanks_MatchTheSums()
@@ -90,6 +134,7 @@ public class QmfTests
         var random = new Random(11);
         var (analysis, analysisReference) = (new QmfAnalysis(), new QmfAnalysisReference());
         var (synthesis, synthesisReference) = (new QmfSynthesis(), new QmfSynthesisReference());
+        var (downsampled, downsampledReference) = (new QmfSynthesis(downsampled: true), new QmfSynthesisReference(downsampled: true));
         var input = new double[32];
         var (real, imaginary, realReference, imaginaryReference) = (new double[64], new double[64], new double[64], new double[64]);
         var (output, outputReference) = (new double[64], new double[64]);
@@ -120,14 +165,22 @@ public class QmfTests
             {
                 Assert.Equal(outputReference[n], output[n], 1e-6);
             }
+
+            downsampled.Process(real, imaginary, output);
+            downsampledReference.Process(real, imaginary, outputReference);
+            for (int n = 0; n < 32; n++)
+            {
+                Assert.Equal(outputReference[n], output[n], 1e-6);
+            }
         }
     }
 
-    private static double[] RoundTrip(Func<double, double> signal)
+    private static double[] RoundTrip(Func<double, double> signal, bool downsampled = false)
     {
         var analysis = new QmfAnalysis();
-        var synthesis = new QmfSynthesis();
-        var output = new double[Slots * 64];
+        var synthesis = new QmfSynthesis(downsampled);
+        int bands = synthesis.Bands;
+        var output = new double[Slots * bands];
         var input = new double[32];
         var real = new double[64];
         var imaginary = new double[64];
@@ -139,7 +192,7 @@ public class QmfTests
             }
 
             analysis.Process(input, real, imaginary);
-            synthesis.Process(real, imaginary, output.AsSpan(64 * slot, 64));
+            synthesis.Process(real, imaginary, output.AsSpan(bands * slot, bands));
         }
 
         return output;

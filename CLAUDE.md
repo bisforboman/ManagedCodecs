@@ -163,4 +163,7 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
   with a loose largest and a tight mean difference, and check a suspected bug by whether it moves the mean. Math.Cos and
   Math.Sin differ in their last bit between .NET and the WebAssembly runtime, which that prediction can magnify into the
   output (wasm-check.sh fails): tables that feed SBR are computed in arithmetic alone (`QmfTrig`). The FDK encoder
-  writes the SBR header's second part only with non-default settings (a patched copy, `make-heaac-samples.sh`).
+  writes the SBR header's second part only with non-default settings (a patched copy, `make-heaac-samples.sh`), and
+  downsampled SBR only for ELD (another patched copy; with PS it stays dual-rate). The downsampled synthesis kernel is
+  the full one at even n, (4n - 255): read as (2n - 127) it lags a quarter of a sample and misses FFmpeg by 14 to 17% at
+  3 to 6 kHz, which looks like a core bug.

@@ -61,7 +61,11 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
   showed a 10% "regression"), and `DOTNET_TieredCompilation=0` takes JIT tiering out of the noise.
   Changes of 1 to 2% are below the noise: count instructions instead, `DOTNET_TieredCompilation=0 valgrind
   --tool=callgrind --smc-check=all dotnet <mcdec.dll> <file> --loops N` (repeats to 1e-6; take loops 4 minus loops
-  1 for the decode alone; about 40 s for a 320x240 sample). It does not see cache effects. A gain larger than the
+  1 for the decode alone; about 40 s for a 320x240 sample). It does not see cache effects. Check first that it
+  measures optimized code: under valgrind (runtime 10.0.13) the JIT's full-optimization compiles fail and fall back to
+  MinOpts, where every span index is a call (the QMF FFT's profile, all MinOpts, was 7 times the native instruction
+  count); `DOTNET_JitDisasmSummary=1 DOTNET_JitStdOutFile=<file>` under valgrind lists each method's level, and
+  without FullOpts or Tier1 for the hot ones, time the code instead (a Stopwatch microbenchmark, interleaved A/B). A gain larger than the
   changed functions' share of the profile is noise, however consistent: check that ceiling before believing an
   A/B (two streams agreeing on -9 and -10% for the vector inverse transforms, about 2% and 7% of their profiles,
   did not survive callgrind or a longer A/B, and the change was reverted).

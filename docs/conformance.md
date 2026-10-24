@@ -277,8 +277,24 @@ starting an envelope late, balances not doubled, noise floor time deltas, the li
 floor) fail it; not caught: epsilon 1 in the gains (it matters only in near-silent bands), the prediction's 1e-6
 relaxation, and dropping a last patch of fewer than 3 subbands (no sample's band layout leaves one). The samples are
 checked to use what they are named for: filtering by the HF generator, cut gains, transient envelopes, sinusoids, and
-in the header sample smoothing, no interpolation and its limiter settings. Parametric stereo is not decoded yet: HE-AAC
-v2 comes out as its mono core with SBR, of which only the sample count is checked. Its data is read (`PsData`): every
+in the header sample smoothing, no interpolation and its limiter settings.
+
+Parametric stereo (HE-AAC v2, `PsProcessor`) follows the spec's baseline decoder: the hybrid analysis filters on the
+three lowest QMF bands (six slots of look-ahead from the SBR low band), decorrelation by a fractional delay and three
+all-pass links (plain delays above QMF band 23), transient ducking, mixing procedure Ra with the matrices ramped
+linearly over each envelope, and the hybrid synthesis; the right channel gets a QMF synthesis bank of its own. A mono
+stream with it decodes to stereo (`Channels` is 2, from the config's object type 29 or sync extension, or, signalled
+only by its data, once the first access unit is decoded), and an MP4 track signalling it reports two channels, as
+FFmpeg's does (the ADTS demuxer can't tell and reports one; no sample is implicitly signalled v2). The v2 sample agrees
+with FFmpeg's output to 3e-4, 3e-6 on average, with left and right differing by up to 1 (the stereo image is really
+made). FFmpeg's PS runs in single precision too, but nothing here magnifies it as the HF generator does, so the mean is
+held to 2e-5: a decay slope of 0.06 instead of 0.05 gives 1e-4 (within the SBR bound), a link's fraction 0.36 instead
+of 0.347 7e-4, no transient ducking 2e-4 (and 8e-2 at most). The cos and sin of data-dependent angles (`PsMath`, a
+two-part reduction by pi/2 and a series, checked against Math on random input) and the scale factors and ICC angles
+(literals, matching libxaac's float tables to 6e-8) keep the output the same on WebAssembly; the phase factors are
+checked against libxaac's. 10-band parameters map to the 20 bins as band b / 2 (no sample sends 10 bands); 34 bands
+and procedure Rb (icc_mode 3 to 5) throw NotSupportedException, and the phase parameters (IPD, OPD) are ignored, as
+the baseline decoder does. Its data is read (`PsData`): every
 frame of the v2 sample to the end of its extension, less than a byte of padding left (the FDK encoder sends 20 bands,
 fine IID quantization, ICC in 20 bands, no IPD or OPD; reading the envelopes' IID and ICC interleaved instead of IID
 first fails it on the third frame). Its codebooks are enumerated from PacketVideo's decoding trees and checked to be

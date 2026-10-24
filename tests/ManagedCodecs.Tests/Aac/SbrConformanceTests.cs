@@ -18,14 +18,18 @@ namespace ManagedCodecs.Tests.Aac;
 /// the QMF banks alone and agrees to 1e-6.
 /// </para>
 /// <para>
-/// Parametric stereo (HE-AAC v2) is not decoded: such a stream comes out as its SBR-decoded mono core, which only the
-/// sample count is checked for.
+/// Parametric stereo (HE-AAC v2) comes out as stereo, as FFmpeg's does, and is held to the same bounds (it agrees to
+/// about 3e-4 at most, 3e-6 on average); its mean is held tighter, since a decay slope of 0.06 instead of 0.05 stays
+/// within the SBR bound.
 /// </para>
 /// </remarks>
 public class SbrConformanceTests
 {
     private const double MaxTolerance = 1e-2;
     private const double MeanTolerance = 1e-4;
+
+    // Parametric stereo agrees to 3e-6 on average; a decay slope of 0.06 instead of 0.05 gives 1e-4.
+    private const double ParametricStereoMeanTolerance = 2e-5;
     private const double QmfOnlyTolerance = 1e-6;
 
     public static TheoryData<string> Samples() => new(TestSamples.WithReference(".sbr.f32"));
@@ -46,20 +50,22 @@ public class SbrConformanceTests
         {
             // The config signals SBR, so the track reports the output's rate, as FFmpeg does.
             Assert.Equal(decoder.SampleRate, audio.SampleRate);
+            Assert.Equal(decoder.Channels, audio.Channels);
         }
 
         int referenceChannels = channels == 1 ? 2 : channels; // FFmpeg's mono HE-AAC is stereo
-        bool parametricStereo = sampleName.StartsWith("heaacv2", StringComparison.Ordinal);
 
         var worst = new double[channels];
         var sum = new double[channels];
         var peak = new double[channels];
         int position = 0;
+        int packets = 0;
         foreach (var packet in demuxer.ReadPackets().Where(p => p.StreamIndex == audio.StreamIndex))
         {
             var decoded = decoder.Decode(packet);
+            packets++;
             Assert.Equal(decoder.SampleRate, decoded.SampleRate);
-            for (int i = 0; i < decoded.SampleCount && !parametricStereo; i++)
+            for (int i = 0; i < decoded.SampleCount; i++)
             {
                 int offset = (position + i) * referenceChannels;
                 Assert.True(offset < reference.Length, $"More samples than FFmpeg's {reference.Length / referenceChannels}.");
@@ -76,15 +82,20 @@ public class SbrConformanceTests
         }
 
         Assert.Equal(reference.Length / referenceChannels, position);
-        if (parametricStereo)
-        {
-            return;
-        }
-
+        var stats = decoder.Statistics;
         for (int c = 0; c < channels; c++)
         {
             Assert.True(worst[c] <= MaxTolerance * Math.Max(1, peak[c]), $"Channel {c}: off by up to {worst[c]:E3} (peak {peak[c]:F3}).");
-            Assert.True(sum[c] / position <= MeanTolerance, $"Channel {c}: off by {sum[c] / position:E3} on average.");
+            Assert.True(sum[c] / position <= (channels == 2 && decoder.Statistics.PsAppliedFrames > 0 ? ParametricStereoMeanTolerance : MeanTolerance), $"Channel {c}: off by {sum[c] / position:E3} on average.");
+        }
+
+        if (sampleName.StartsWith("heaacv2", StringComparison.Ordinal))
+        {
+            // A mono core made stereo, every frame by its own parameters, transients ducked.
+            Assert.Equal(2, channels);
+            Assert.Equal(stats.PsFrames, stats.PsAppliedFrames);
+            Assert.Equal(packets, stats.PsAppliedFrames);
+            Assert.True(stats.PsDuckedSlots > 0, "No transients ducked.");
         }
 
         if (channels == 1)
@@ -100,7 +111,6 @@ public class SbrConformanceTests
             Assert.True(worst[3] <= QmfOnlyTolerance, $"LFE: off by up to {worst[3]:E3}.");
         }
 
-        var stats = decoder.Statistics;
         Assert.True(stats.SbrChirpBands > 0, "The HF generator never filtered.");
         Assert.True(stats.SbrLimitedGains > 0, "The limiter never cut a gain.");
         if (sampleName.Contains("header2", StringComparison.Ordinal))

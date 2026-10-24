@@ -73,7 +73,15 @@ public sealed class AacDecoder : IAudioDecoder
     /// <summary>The output's sample rate: with SBR twice the core's (or the rate the config gives it), known for SBR signalled only by its data once the first access unit is decoded.</summary>
     public int SampleRate => HasSbr ? _config.SbrRate : _config.SampleRate;
 
-    public int Channels => _config.Channels;
+    /// <summary>
+    /// The output's channels: the config's, but two for a mono stream with parametric stereo (HE-AAC v2), which its
+    /// config says or, signalled only by its data, the first access unit shows.
+    /// </summary>
+    public int Channels => HasParametricStereo ? 2 : _config.Channels;
+
+    /// <summary>Whether a mono stream is decoded as stereo by its parametric stereo data.</summary>
+    private bool HasParametricStereo =>
+        _config.Channels == 1 && HasSbr && (_config.PsPresent || (_sbr.Count > 0 && _sbr[0]?.Ps is not null));
 
     /// <summary>How often each coding tool was used, so tests can check samples exercise them.</summary>
     internal AacStatistics Statistics { get; } = new();
@@ -244,7 +252,17 @@ public sealed class AacDecoder : IAudioDecoder
     private AudioFrame DecodeWithSbr()
     {
         _sbrChannels ??= [.. Enumerable.Range(0, _config.Channels).Select(_ => new SbrChannel())];
-        var frame = new AudioFrame(SampleRate, _config.Channels, 2048);
+        var frame = new AudioFrame(SampleRate, Channels, 2048);
+        if (HasParametricStereo)
+        {
+            var stream = _streams[0];
+            ApplyTns(stream);
+            _filterbanks[0].Synthesize(stream.Info.WindowSequence, stream.Info.WindowShape, stream.Spectrum, _core);
+            var sbr = _sbr.Count > 0 ? _sbr[0] : null;
+            _sbrChannels[0].Process(sbr, 0, _core, frame.Samples[0], frame.Samples[1], Statistics);
+            return frame;
+        }
+
         for (int output = 0; output < _config.Channels; output++)
         {
             int source = _outputOrder[output];
@@ -1086,4 +1104,10 @@ internal sealed class AacStatistics
     public int PsExtensions { get; set; }
 
     public int PsMostUnreadBits { get; set; }
+
+    /// <summary>Frames mixed into two channels by parametric stereo (with this frame's data or the last).</summary>
+    public int PsAppliedFrames { get; set; }
+
+    /// <summary>Time slots and bands whose decorrelated signal a transient attenuated.</summary>
+    public int PsDuckedSlots { get; set; }
 }

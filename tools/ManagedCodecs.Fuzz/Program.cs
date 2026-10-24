@@ -47,7 +47,10 @@ static void WriteSeeds(string samples, string output)
         Directory.CreateDirectory(Path.Combine(output, name));
     }
 
-    foreach (var path in Directory.GetFiles(samples).Where(f => f.EndsWith(".avi") || f.EndsWith(".mp4") || f.EndsWith(".aac")).Order())
+    // samples/heaac holds the committed HE-AAC streams (the FDK encoder's), parametric stereo among them.
+    string heaac = Path.Combine(samples, "heaac");
+    var files = Directory.GetFiles(samples).Concat(Directory.Exists(heaac) ? Directory.GetFiles(heaac) : []);
+    foreach (var path in files.Where(f => f.EndsWith(".avi") || f.EndsWith(".mp4") || f.EndsWith(".aac")).Order())
     {
         string stem = Path.GetFileNameWithoutExtension(path);
         if (new FileInfo(path).Length <= 64 * 1024)

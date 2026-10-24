@@ -47,6 +47,16 @@ internal sealed class SbrChannel
     private readonly QmfAnalysis _analysis = new();
     private readonly QmfSynthesis _synthesis = new();
 
+    // Parametric stereo, once it comes: its processor, the right channel's synthesis bank, and the frame's synthesis
+    // input for the left (with the look-ahead slots) and the right.
+    private static readonly PsData NoPs = new();
+    private PsProcessor? _ps;
+    private QmfSynthesis? _rightSynthesis;
+    private double[][]? _stereoRe;
+    private double[][]? _stereoIm;
+    private double[][]? _rightRe;
+    private double[][]? _rightIm;
+
     // X_Low: the analysis' subbands by slot, slots 0 to 7 the previous frame's last.
     private readonly double[][] _lowReal = Buffers(Buffered, 32);
     private readonly double[][] _lowImaginary = Buffers(Buffered, 32);
@@ -77,7 +87,15 @@ internal sealed class SbrChannel
     /// the rate: with <paramref name="channel"/> of <paramref name="element"/>'s SBR data when it has this frame's, else
     /// with no high band.
     /// </summary>
-    public void Process(SbrElement? element, int channel, ReadOnlySpan<float> core, Span<float> output, AacStatistics statistics)
+    public void Process(SbrElement? element, int channel, ReadOnlySpan<float> core, Span<float> output, AacStatistics statistics) =>
+        Process(element, channel, core, output, [], statistics);
+
+    /// <summary>
+    /// As <see cref="Process(SbrElement?, int, ReadOnlySpan{float}, Span{float}, AacStatistics)"/>, and with parametric
+    /// stereo when <paramref name="right"/> is not empty: the mono channel becomes <paramref name="output"/> (left) and
+    /// <paramref name="right"/>, by the element's PS data (or its last).
+    /// </summary>
+    public void Process(SbrElement? element, int channel, ReadOnlySpan<float> core, Span<float> output, Span<float> right, AacStatistics statistics)
     {
         Span<double> input = stackalloc double[32];
         for (int slot = 0; slot < Slots; slot++)
@@ -105,7 +123,16 @@ internal sealed class SbrChannel
             Adjust(data, header, frequencies, statistics);
         }
 
-        Synthesize(output);
+        if (right.IsEmpty)
+        {
+            Synthesize(output);
+        }
+        else
+        {
+            SynthesizeStereo(element, output, right, statistics);
+        }
+
+        MoveOn();
     }
 
     // 4.6.18.6.2: each noise band's chirp factor, from its bs_invf_mode, smoothed with the previous frame's.
@@ -403,7 +430,7 @@ internal sealed class SbrChannel
     }
 
     // 4.6.18.4.2: each output slot from the low band's subbands below the slot's kx and the adjusted high band from it
-    // up; then the buffers move on a frame.
+    // up.
     private void Synthesize(Span<float> output)
     {
         Span<double> real = stackalloc double[64];
@@ -411,18 +438,67 @@ internal sealed class SbrChannel
         Span<double> samples = stackalloc double[64];
         for (int l = 0; l < Slots; l++)
         {
-            int kx = _highStart[l];
-            _lowReal[l + HfAdjust].AsSpan(0, kx).CopyTo(real);
-            _lowImaginary[l + HfAdjust].AsSpan(0, kx).CopyTo(imaginary);
-            _highReal[l].AsSpan(kx).CopyTo(real[kx..]);
-            _highImaginary[l].AsSpan(kx).CopyTo(imaginary[kx..]);
+            SynthesisInput(l, real, imaginary);
             _synthesis.Process(real, imaginary, samples);
-            for (int n = 0; n < 64; n++)
-            {
-                output[(64 * l) + n] = (float)(samples[n] / 32768);
-            }
+            Output(samples, output[(64 * l)..]);
+        }
+    }
+
+    // Slot l's synthesis input: the low band below the slot's kx, the adjusted high band from it up.
+    private void SynthesisInput(int l, Span<double> real, Span<double> imaginary)
+    {
+        int kx = _highStart[l];
+        _lowReal[l + HfAdjust].AsSpan(0, kx).CopyTo(real);
+        _lowImaginary[l + HfAdjust].AsSpan(0, kx).CopyTo(imaginary);
+        _highReal[l].AsSpan(kx).CopyTo(real[kx..]);
+        _highImaginary[l].AsSpan(kx).CopyTo(imaginary[kx..]);
+    }
+
+    private static void Output(ReadOnlySpan<double> samples, Span<float> output)
+    {
+        for (int n = 0; n < 64; n++)
+        {
+            output[n] = (float)(samples[n] / 32768);
+        }
+    }
+
+    // Parametric stereo: the frame's synthesis input (and the hybrid filters' 6 slots of the three lowest bands after it,
+    // from the low band) mixed into a left and a right channel, each through a synthesis bank of its own.
+    private void SynthesizeStereo(SbrElement? element, Span<float> left, Span<float> right, AacStatistics statistics)
+    {
+        _ps ??= new PsProcessor();
+        _rightSynthesis ??= new QmfSynthesis();
+        _stereoRe ??= Buffers(Slots + PsProcessor.LookAhead, 64);
+        _stereoIm ??= Buffers(Slots + PsProcessor.LookAhead, 64);
+        _rightRe ??= Buffers(Slots, 64);
+        _rightIm ??= Buffers(Slots, 64);
+        for (int l = 0; l < Slots; l++)
+        {
+            SynthesisInput(l, _stereoRe[l], _stereoIm[l]);
         }
 
+        for (int l = Slots; l < Slots + PsProcessor.LookAhead; l++)
+        {
+            _lowReal[l + HfAdjust].AsSpan(0, 3).CopyTo(_stereoRe[l]);
+            _lowImaginary[l + HfAdjust].AsSpan(0, 3).CopyTo(_stereoIm[l]);
+        }
+
+        int top = element is { HasFrame: true, Frequencies: { } frequencies } ? frequencies.Kx + frequencies.M : 32;
+        _ps.Apply(element?.Ps ?? NoPs, element is { HasPs: true }, _stereoRe, _stereoIm, _rightRe, _rightIm, top, statistics);
+
+        Span<double> samples = stackalloc double[64];
+        for (int l = 0; l < Slots; l++)
+        {
+            _synthesis.Process(_stereoRe[l], _stereoIm[l], samples);
+            Output(samples, left[(64 * l)..]);
+            _rightSynthesis.Process(_rightRe[l], _rightIm[l], samples);
+            Output(samples, right[(64 * l)..]);
+        }
+    }
+
+    // The buffers move on a frame.
+    private void MoveOn()
+    {
         for (int l = 0; l < Kept; l++)
         {
             (_lowReal[l], _lowReal[l + Slots]) = (_lowReal[l + Slots], _lowReal[l]);

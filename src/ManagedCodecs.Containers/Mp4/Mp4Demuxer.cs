@@ -1150,7 +1150,8 @@ public sealed class Mp4Demuxer : IDemuxer
         /// The start of an AudioSpecificConfig (14496-3 1.6.2.1): audioObjectType, then the sampling
         /// frequency index (or an explicit 24-bit rate) and channelConfiguration. With spectral band replication the rate
         /// is the SBR rate, as FFmpeg reports it (edit list times convert to the decoder's output at it): after object type
-        /// 5 or 29 (hierarchical signalling), or in the sync extension after an AAC LC core's GASpecificConfig.
+        /// 5 or 29 (hierarchical signalling), or in the sync extension after an AAC LC core's GASpecificConfig. A mono stream
+        /// with parametric stereo (object type 29, or its flag in the sync extension) decodes to stereo, and has two channels.
         /// </summary>
         private static bool TryReadAudioSpecificConfig(ReadOnlySpan<byte> config, out int sampleRate, out int channels)
         {
@@ -1190,6 +1191,7 @@ public sealed class Mp4Demuxer : IDemuxer
             int objectType = ObjectType(config);
             sampleRate = Rate(config);
             int configuration = Read(4, config);
+            bool parametricStereo = objectType == 29;
             if (objectType is 5 or 29)
             {
                 sampleRate = Rate(config); // then the core's object type
@@ -1207,11 +1209,13 @@ public sealed class Mp4Demuxer : IDemuxer
                 if (config.Length * 8 >= bit + 16 && Read(11, config) == 0x2B7 && ObjectType(config) == 5 && Read(1, config) == 1)
                 {
                     sampleRate = Rate(config);
+                    parametricStereo = config.Length * 8 >= bit + 12 && Read(11, config) == 0x548 && Read(1, config) == 1;
                 }
             }
 
             channels = configuration switch
             {
+                1 when parametricStereo => 2,
                 >= 1 and <= 6 => configuration,
                 7 => 8,
                 _ => 0,

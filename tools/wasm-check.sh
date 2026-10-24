@@ -17,7 +17,7 @@ dotnet build tools/ManagedCodecs.Cli -c Release -v q -nologo
 dotnet publish tools/ManagedCodecs.Wasm -c Release -v q -nologo -warnaserror -p:RunAOTCompilation=$aot
 bundle=tools/ManagedCodecs.Wasm/bin/Release/net10.0/browser-wasm/AppBundle
 
-files=$(ls samples/*.avi samples/*.mp4 samples/*.aac samples/jm/*.mp4 samples/openh264/*.mp4)
+files=$(ls samples/*.avi samples/*.mp4 samples/*.aac samples/heaac/*.mp4 samples/heaac/*.aac samples/jm/*.mp4 samples/openh264/*.mp4)
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 

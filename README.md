@@ -42,8 +42,8 @@ says feature by feature which encoder made the samples (libx264, OpenH264, JM) a
   or by an iTunSMPB tag without one.
 - **HE-AAC** (spectral band replication, at twice the core's rate): signalled in the config or only by its data, mono
   to 5.1, coupled pairs; within 1e-6 of FFmpeg's float output where its single precision is not the limit (see
-  docs/conformance.md). Parametric stereo (HE-AAC v2) is read (10 and 20 bands) but not decoded yet: such streams
-  come out as their mono core with SBR.
+  docs/conformance.md). Parametric stereo (HE-AAC v2): the baseline decoder (10 and 20 bands, mixing procedure Ra, no
+  IPD or OPD), a mono stream decoded to stereo; within 3e-4 of FFmpeg's output, 3e-6 on average.
 - **Containers**: AVI (video), MP4 (video and audio tracks, fragmented files too, edit lists of several edits)
   and raw AAC (ADTS), with packets and timestamps as FFmpeg's demuxers give them.
 - **Throughout**: an async API, malformed input that ends in `InvalidDataException` or `NotSupportedException`
@@ -51,7 +51,8 @@ says feature by feature which encoder made the samples (libx264, OpenH264, JM) a
 
 ### Open
 
-- AAC: parametric stereo (HE-AAC v2) and downsampled SBR; SBR's speed (FFT-based QMF banks: 5.1 HE-AAC at about 1 ms a
+- AAC: parametric stereo with 34 bands or mixing procedure Rb (no encoder at hand sends them), and downsampled SBR;
+  SBR's speed (FFT-based QMF banks: 5.1 HE-AAC at about 1 ms a
   frame, 40 times real time, 4 times FFmpeg's time). In ADTS: frames of several raw data blocks, and channel
   configuration 0.
 - MJPEG: files from real cameras (the samples are all FFmpeg's), and packets holding one field (FFmpeg decodes none).

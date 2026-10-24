@@ -152,10 +152,25 @@ coded_block_flag that 8x8 blocks have only in 4:4:4, Table 9-4's 4:4:4 coded_blo
 predicted with the luma intra modes and the luma 6-tap filter, dequantized at their own QP'C
 with their own scaling lists (12 in the PPS), and deblocked with the luma filter at QP_C on the
 luma edges, with CAVLC and CABAC, P and B frames, constrained intra prediction, cropping, MBAFF
-and 10 bits; I_PCM in 4:4:4 from hand-built streams. Separate colour planes are rejected. x264 before
+and 10 bits; I_PCM in 4:4:4 from hand-built streams. x264 before
 build 151 derived the context of an 8x8 block's coded_block_flag in 4:4:4 against the spec (a
 neighbour without 8x8 transforms counted as missing); FFmpeg decodes such streams by the encoder's
 version, this decoder by the spec, so they come out differently.
+
+### Separate colour planes
+
+4:4:4 with separate_colour_plane_flag codes each colour plane as a monochrome picture of its own
+(ChromaArrayType 0): its own slices (colour_plane_id), macroblocks, motion and deblocking, all as
+luma. FFmpeg decodes none of it (nor muxes it), so it is the one feature checked against JM's
+decoder instead (`samples/jm-ref/`, from `tools/make-jm-samples.sh`, muxed by
+`tools/mux-h264.py`): CABAC with B pictures (direct prediction reads the co-located motion of
+the same plane), CAVLC, scaling lists in the SPS and PPS (each plane takes its own
+lists, iYCbCr being colour_plane_id, 8.5.9), 10 bits, and chroma QP offsets in the PPS, which no
+plane applies (all three dequantize and deblock at QP_Y). The samples fail when a plane predicts
+from another plane's references, and the scaling-list and QP-offset ones when their rule is broken. Interlaced
+video with separate colour planes (field pictures, MBAFF) is rejected: JM's samples are progressive.
+With threads, a picture is reported done to the pictures that predict from it once all three
+planes are, not row by row.
 
 ### Lossless
 

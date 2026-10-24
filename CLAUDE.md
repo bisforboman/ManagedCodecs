@@ -2,7 +2,7 @@
 
 Pure managed C# media decoders: no native binaries, Native AOT friendly. MJPEG (bit-exact with FFmpeg), H.264
 Constrained Baseline, Main and High (CAVLC and CABAC, I/P/B, weighted prediction, 8x8 transform, scaling matrices,
-MBAFF, field pictures, monochrome, 4:2:2, 4:4:4, 9 to 14 bits, lossless, bit-exact), AAC LC (within 2^-17 of FFmpeg's float output, measured 3e-7), HE-AAC (SBR and parametric stereo; FFmpeg's single precision limits the match, docs/conformance.md), AVI, MP4
+MBAFF, field pictures, monochrome, 4:2:2, 4:4:4 (also separate colour planes), 9 to 14 bits, lossless, bit-exact), AAC LC (within 2^-17 of FFmpeg's float output, measured 3e-7), HE-AAC (SBR and parametric stereo; FFmpeg's single precision limits the match, docs/conformance.md), AVI, MP4
 and ADTS demuxing. README.md has the layout, the status and what is still open;
 docs/conformance.md what each feature is checked against.
 
@@ -45,7 +45,9 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
   and 4:0:0, bit depths 9, 12 and 14, I_PCM (heavy noise, QP 14 to 15), cabac_init_idc 1 and 2
   (`ContextInitMethod=0 FixedModelNumber=N`), Cb and Cr QP offsets of their own (`CbQPOffset`, `CrQPOffset`), B
   partitions below 8x8 (by default) and scaling lists in the SPS, PPS or both (`QmatrixFile`,
-  `ScalingMatrixPresentFlag`, `ScalingListPresentFlagN`); `tools/h264-add-weights.py` weights its field pictures afterwards (`tools/make-jm-samples.sh <JM tree> <names>` makes only those samples). Cover
+  `ScalingMatrixPresentFlag`, `ScalingListPresentFlagN`); `tools/h264-add-weights.py` weights its field pictures afterwards; separate colour planes, which FFmpeg neither
+  decodes nor muxes, go to `samples/jm-ref/` with JM's decoder's references, muxed by `tools/mux-h264.py`
+  (`tools/make-jm-samples.sh <JM tree> <names>` makes only those samples). Cover
   the rest with unit tests and say so in the docs.
   `tests/ManagedCodecs.Tests/H264/ParameterSetRewriter.cs` rewrites a sample's SPS and PPS for such tests.
   `tests/ManagedCodecs.Tests/H264/CabacEncoder.cs` (a CABAC encoder and bit writer) builds such H.264 streams.

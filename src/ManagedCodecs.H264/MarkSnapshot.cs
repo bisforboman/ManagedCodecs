@@ -30,7 +30,8 @@ internal sealed class MarkSnapshot
         }
     }
 
-    public bool IsShortTerm(Picture picture) => _shortTerm.Contains(picture);
+    // A frame's colour plane (separate colour planes) is marked as the frame is.
+    public bool IsShortTerm(Picture picture) => _shortTerm.Contains(picture.Parity < 0 ? picture.Frame : picture);
 
-    public bool IsLongTerm(Picture picture) => _longTerm.Count > 0 && _longTerm.Contains(picture);
+    public bool IsLongTerm(Picture picture) => _longTerm.Count > 0 && _longTerm.Contains(picture.Parity < 0 ? picture.Frame : picture);
 }

@@ -97,6 +97,22 @@ internal sealed class ScalingMatrix
     public static ScalingMatrix For(SequenceParameterSet sps, PictureParameterSet pps) =>
         pps.ScalingLists is { } lists ? Resolve(lists, sps.Scaling) : sps.Scaling ?? Flat;
 
+    /// <summary>
+    /// The matrix of colour plane <paramref name="plane"/> decoded as a monochrome picture (separate colour planes): its
+    /// Y lists are the plane's own, as iYCbCr is colour_plane_id (8.5.9).
+    /// </summary>
+    public ScalingMatrix ForPlane(int plane)
+    {
+        if (plane == 0)
+        {
+            return this;
+        }
+
+        var lists = (byte[][])_lists.Clone();
+        (lists[0], lists[3], lists[6], lists[7]) = (_lists[plane], _lists[3 + plane], _lists[6 + (2 * plane)], _lists[7 + (2 * plane)]);
+        return new ScalingMatrix(lists);
+    }
+
     private static byte[] DefaultList(int i) => i switch
     {
         < 3 => Default4x4Intra.ToArray(),

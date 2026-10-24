@@ -196,13 +196,6 @@ public class H264ConformanceTests
         }
 
         var avcC = video.CodecPrivate.Span;
-        if (avcC.Length < 2 || avcC[1] is not (66 or 77 or 100 or 110 or 122 or 244))
-        {
-            return false;
-        }
-
-        // Separate colour planes (JM's samples in samples/jm-ref/, with JM's references) are not decoded yet.
-        var sps = SequenceParameterSet.Parse(NalUnit.Parse(AvcConfiguration.Parse(avcC).Sps[0]).CreateReader());
-        return !sps.SeparateColourPlanes;
+        return avcC.Length > 1 && avcC[1] is 66 or 77 or 100 or 110 or 122 or 244;
     }
 }

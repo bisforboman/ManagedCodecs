@@ -13,18 +13,21 @@ internal sealed class SequenceParameterSet
 
     public int ChromaFormatIdc { get; internal init; } = 1;
 
-    /// <summary>MbHeightC (6.2): the chroma rows of a macroblock, 8 in 4:2:0 and 16 in 4:2:2 and 4:4:4, 0 in monochrome (4:0:0).</summary>
+    /// <summary>
+    /// MbHeightC (6.2): the chroma rows of a macroblock, 8 in 4:2:0 and 16 in 4:2:2 and 4:4:4, 0 in monochrome (4:0:0). As the
+    /// picture's planes have them: 16 with separate colour planes too, where 6.2 has 0 (each plane decodes as monochrome).
+    /// </summary>
     public int MbHeightC => ChromaFormatIdc switch { 0 => 0, 1 => 8, _ => 16 };
 
-    /// <summary>MbWidthC (6.2): the chroma columns of a macroblock, 16 in 4:4:4, 0 in monochrome and 8 otherwise.</summary>
+    /// <summary>MbWidthC (6.2): the chroma columns of a macroblock, 16 in 4:4:4, 0 in monochrome and 8 otherwise; as <see cref="MbHeightC"/>.</summary>
     public int MbWidthC => ChromaFormatIdc switch { 0 => 0, 3 => 16, _ => 8 };
 
-    /// <summary>ChromaArrayType (7.4.2.1.1): chroma_format_idc, or 0 with separate colour planes (which are rejected).</summary>
+    /// <summary>ChromaArrayType (7.4.2.1.1): chroma_format_idc, or 0 with separate colour planes, each coded as a monochrome picture.</summary>
     public int ChromaArrayType => SeparateColourPlanes ? 0 : ChromaFormatIdc;
 
     public int BitDepthLuma { get; internal init; } = 8;
 
-    /// <summary>separate_colour_plane_flag: 4:4:4 coded as three monochrome pictures (not supported).</summary>
+    /// <summary>separate_colour_plane_flag: 4:4:4 coded as three monochrome pictures (colour_plane_id in each slice header).</summary>
     public bool SeparateColourPlanes { get; internal init; }
 
     /// <summary>qpprime_y_zero_transform_bypass_flag: lossless macroblocks at QP'Y 0 (not supported).</summary>

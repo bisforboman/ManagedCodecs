@@ -43,6 +43,9 @@ internal sealed class SliceHeader
 
     public int PpsId { get; internal init; }
 
+    /// <summary>colour_plane_id: the colour plane (0 Y, 1 Cb, 2 Cr) the slice codes, with separate colour planes; else 0.</summary>
+    public int ColourPlaneId { get; internal init; }
+
     public int FrameNum { get; internal init; }
 
     public bool IsIdr { get; internal init; }
@@ -116,6 +119,12 @@ internal sealed class SliceHeader
         if (type is SliceType.SP or SliceType.SI)
         {
             throw new NotSupportedException($"{type} slices are not supported (Extended profile).");
+        }
+
+        int colourPlane = sps.SeparateColourPlanes ? (int)r.ReadBits(2) : 0;
+        if (colourPlane == 3)
+        {
+            throw new InvalidDataException("colour_plane_id 3 is reserved.");
         }
 
         bool isIdr = nal.Type == NalUnitType.IdrSlice;
@@ -236,6 +245,7 @@ internal sealed class SliceHeader
             BottomField = bottomField,
             Type = type,
             PpsId = ppsId,
+            ColourPlaneId = colourPlane,
             FrameNum = frameNum,
             IsIdr = isIdr,
             NalRefIdc = nal.RefIdc,

@@ -252,3 +252,4 @@ planes planes-cavlc 8 -p SymbolMode=0 -p NumberBFrames=0 -p IntraPeriod=3  # CAV
 planes planes-qm 8 -p NumberBFrames=1 -p QmatrixFile=qm.cfg -p ScalingMatrixPresentFlag=3 \
   $(k=0 qm 3 1 2 3 3 1 3 3 1 2 3 0)                 # scaling lists: each plane takes its colour's (8.5.9)
 planes planes-10bit 10 -p NumberBFrames=1           # 10 bits
+planes planes-qp 8 -p NumberBFrames=0 -p CbQPOffset=6 -p CrQPOffset=-6  # chroma QP offsets, which no plane applies

@@ -91,6 +91,11 @@ internal sealed partial class PictureDecoder<TPixel>
     /// </summary>
     private void ReportProgress(int decodedRows, int finalRows)
     {
+        if (Picture.SeparatePlanes)
+        {
+            return; // a colour plane's rows are not the frame's: the frame is reported done once all three planes are
+        }
+
         if (_fieldParity >= 0)
         {
             Picture.Field(_fieldParity).ReportProgress(decodedRows, 16 * finalRows);

@@ -124,8 +124,9 @@ internal sealed partial class PictureDecoder<TPixel>
             return AffNeighbor(mbAddr, xN, yN, maxW, maxH);
         }
 
+        // maxW and maxH are 8 or 16: the mask is (xN + maxW) % maxW for xN from -maxW on.
         int n = NeighborMb(mbAddr, xN, yN, maxW, maxH);
-        return (n, (xN + maxW) % maxW, (yN + maxH) % maxH);
+        return (n, xN & (maxW - 1), yN & (maxH - 1));
     }
 
     /// <summary>

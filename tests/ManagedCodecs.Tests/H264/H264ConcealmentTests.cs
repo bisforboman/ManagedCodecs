@@ -125,6 +125,10 @@ public class H264ConcealmentTests
     [InlineData("openh264/oh-cabac.mp4", 10, 1)] // long-term references
     [InlineData("h264-p-ref1-nodeblock.mp4", 10, 3)] // a gap longer than max_num_ref_frames (1): only its last frame is filled
     [InlineData("jm/jm-paff-b.mp4", 6, 2)]
+    [InlineData("jm/jm-paff-b.mp4", 7, 1)] // one field lost: an unpaired reference top field
+    [InlineData("jm/jm-paff-b.mp4", 9, 1)] // an unpaired non-reference top field
+    [InlineData("jm/jm-paff-b.mp4", 6, 1)] // an unpaired reference bottom field (its top lost)
+    [InlineData("jm/jm-paff-b.mp4", 8, 1)] // an unpaired non-reference bottom field
     [InlineData("jm-planes.mp4", 3, 1)] // separate colour planes
     public void DroppedPackets_ConcealedAndFlagged(string sampleName, int first, int count)
     {
@@ -142,7 +146,9 @@ public class H264ConcealmentTests
         Assert.Contains(concealed, f => f.Damaged);
         foreach (var frame in concealed)
         {
-            var expected = clean[frame.Pts].Data;
+            // An unpaired bottom field's frame has its own packet's timestamp, not the lost top field's that the clean
+            // frame took: it stands for the clean frame just before it.
+            var expected = (clean.TryGetValue(frame.Pts, out var same) ? same : clean.Values.Where(f => f.Pts < frame.Pts).MaxBy(f => f.Pts)).Data;
             if (frame.Damaged)
             {
                 Assert.True(Psnr(expected, frame.Data) > PsnrFloor, $"frame {frame.Pts}: {Psnr(expected, frame.Data):F1} dB");

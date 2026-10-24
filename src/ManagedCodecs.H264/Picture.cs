@@ -340,6 +340,33 @@ internal sealed class Picture
         set => Frame._damaged = value;
     }
 
+    /// <summary>Whether decoding the picture failed (<see cref="ReportFailed"/>).</summary>
+    public bool Failed => Frame._failed;
+
+    /// <summary>
+    /// Fills the rows of the field of parity <paramref name="parity"/> with copies of the other field's next to them (line
+    /// doubling), in every plane: the frame of a field whose second field was lost (error concealment).
+    /// </summary>
+    public void FillField(int parity)
+    {
+        var frame = Frame;
+        for (int c = 0; c < 3; c++)
+        {
+            var plane = frame._planes[c];
+            int stride = c == 0 ? LumaStride : ChromaStride;
+            if (plane.Length == 0 || stride == 0)
+            {
+                continue;
+            }
+
+            int rows = plane.Length / stride;
+            for (int y = parity; y < rows; y += 2)
+            {
+                Array.Copy(plane, (y ^ 1) * stride, plane, y * stride, stride);
+            }
+        }
+    }
+
     /// <summary>Before decoding into the picture again: nothing of it is decoded.</summary>
     public void ResetProgress()
     {

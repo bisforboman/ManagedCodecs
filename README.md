@@ -59,8 +59,9 @@ says feature by feature which encoder made the samples (libx264, OpenH264, JM) a
 - MJPEG: files from real cameras (the samples are all FFmpeg's), and packets holding one field (FFmpeg decodes none).
 - H.264: separate colour planes in interlaced video (rejected; JM's samples are progressive); luma and chroma bit depths that differ are rejected on purpose (no mainstream
   encoder or decoder, FFmpeg included, handles them, and they would need a bit depth for each plane in the frame
-  API); concealing a lost field of a field pair (an unpaired
-  field still throws), and guessing motion for concealed macroblocks (they copy their place in a reference).
+  API); guessing motion for concealed macroblocks (they copy their place in a reference); without concealment, a
+  lost reference fails pictures up to the next IDR picture, not an MMCO 5 one (by design: the MMCO 5 picture itself
+  would have to be decoded from lists that can no longer be trusted, so its marking never applies).
 - H.264 speed: 1.87 to 3.2 times FFmpeg's time on one thread (Benchmarking). With 4 threads a 720p P chain takes
   about half of one thread's time: each picture decodes about 28% slower than alone (its references were written on
   other cores) and threads wait for references' rows about a fifth of the time.

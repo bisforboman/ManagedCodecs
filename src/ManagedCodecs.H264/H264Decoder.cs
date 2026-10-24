@@ -113,8 +113,9 @@ public sealed class H264Decoder : IVideoDecoder
     /// decoded before the damage stay, the picture's other slices are decoded, and every macroblock left missing is a
     /// copy of the same place in a reference (list 0's first, else the latest reference, else mid-grey). The frame comes
     /// out with <see cref="VideoFrame.IsDamaged"/>, as does every later frame predicted from a damaged one, until a
-    /// picture that predicts from none (an IDR picture). Damaged headers and parameter sets still throw. Off by default:
-    /// a damaged picture then fails, and so does every later picture that predicts from it.
+    /// picture that predicts from none (an IDR picture). A field whose second field was lost gives a frame of its own,
+    /// the missing field's rows copied from its. Damaged headers and parameter sets still throw. Off by default: a damaged
+    /// picture then fails, and so does every later picture that predicts from it (and an unpaired field throws).
     /// </summary>
     public bool ConcealErrors { get; init; }
 
@@ -285,8 +286,13 @@ public sealed class H264Decoder : IVideoDecoder
 
         if (_firstField is not null)
         {
-            _held = frames;
-            throw new NotSupportedException("A field without its second field (an unpaired field) is not supported.");
+            if (!ConcealErrors)
+            {
+                _held = frames;
+                throw new NotSupportedException("A field without its second field (an unpaired field) is not supported without ConcealErrors.");
+            }
+
+            CompleteUnpaired(frames);
         }
 
         frames.AddRange(_output.Flush());
@@ -433,7 +439,7 @@ public sealed class H264Decoder : IVideoDecoder
     private void Output(PictureJob job, List<VideoFrame> frames)
     {
         var state = job.State;
-        if (state.Header.FieldPic && !state.SecondField)
+        if (state.Header.FieldPic && !state.SecondField && !job.Unpaired)
         {
             return;
         }
@@ -608,7 +614,12 @@ public sealed class H264Decoder : IVideoDecoder
             && !header.IsIdr && (first.Header.NalRefIdc != 0) == (header.NalRefIdc != 0);
         if (_firstField is not null && !secondField)
         {
-            throw new NotSupportedException("A field without its second field (an unpaired field) is not supported.");
+            if (!ConcealErrors)
+            {
+                throw new NotSupportedException("A field without its second field (an unpaired field) is not supported without ConcealErrors.");
+            }
+
+            CompleteUnpaired(frames);
         }
 
         if (header.IsIdr)
@@ -714,6 +725,39 @@ public sealed class H264Decoder : IVideoDecoder
 
     // The first field of a frame being decoded as two field pictures.
     private PictureJob? _firstField;
+
+    /// <summary>
+    /// With <see cref="ConcealErrors"/>: the frame of a first field whose second field did not come (lost), once the first is
+    /// decoded. The missing field's rows are copies of the present field's (line doubling, not a reference's samples), the
+    /// frame is damaged, and the missing field reports itself done before any later picture starts, so that pictures that
+    /// predict from the frame do not wait for it. A first field that failed gives no frame.
+    /// </summary>
+    private void CompleteUnpaired(List<VideoFrame> frames)
+    {
+        var job = _firstField!;
+        _firstField = null;
+        if (job.Task is { } task)
+        {
+            // What it threw comes out where it is drained, as for any picture.
+            task.ContinueWith(_ => { }, TaskScheduler.Default).Wait();
+        }
+
+        var picture = job.State.Picture;
+        if (picture.Failed)
+        {
+            return;
+        }
+
+        int missing = 1 - job.State.Header.Parity;
+        picture.FillField(missing);
+        picture.Damaged = true;
+        picture.Field(missing).ReportDone();
+        job.Unpaired = true;
+        if (!_inFlight.Contains(job))
+        {
+            Output(job, frames);
+        }
+    }
 
     /// <summary>How often field pictures were decoded, so tests can check samples exercise them.</summary>
     internal FieldStatistics FieldStatistics { get; } = new();
@@ -893,6 +937,9 @@ public sealed class H264Decoder : IVideoDecoder
 
         /// <summary>With threads, the frame its thread copied out of the picture once decoded.</summary>
         public VideoFrame? Frame { get; set; }
+
+        /// <summary>A first field whose second field was lost: its frame is output alone (<see cref="CompleteUnpaired"/>).</summary>
+        public bool Unpaired { get; set; }
 
         /// <summary>A second field's first field, whose <see cref="Begun"/> it waits for.</summary>
         public PictureJob? FirstField { get; init; }

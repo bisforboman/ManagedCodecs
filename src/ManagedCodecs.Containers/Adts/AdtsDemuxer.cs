@@ -24,7 +24,11 @@ public sealed class AdtsDemuxer : IDemuxer
 
     private readonly Stream _stream;
     private readonly bool _leaveOpen;
-    private readonly long _firstFrame;
+
+    // The frames found when opening (position, length, raw data blocks), and where one that runs past the end of the file
+    // starts (-1 if none does).
+    private readonly List<(long Position, int Length, int Blocks)> _frames = [];
+    private readonly long _truncatedFrame = -1;
 
     public AdtsDemuxer(Stream stream, bool leaveOpen = false)
     {
@@ -50,12 +54,18 @@ public sealed class AdtsDemuxer : IDemuxer
                 throw new NotSupportedException("ADTS with channel configuration 0 (a program config element in the stream) is not supported.");
             }
 
-            _firstFrame = start;
-            long frames = 0;
-            for (long pos = start; FindFrame(ref pos, out var header) && pos + header.FrameLength <= _stream.Length; pos += header.FrameLength)
+            for (long pos = start; FindFrame(ref pos, out var header); pos += header.FrameLength)
             {
-                frames++;
+                if (pos + header.FrameLength > _stream.Length)
+                {
+                    _truncatedFrame = pos;
+                    break;
+                }
+
+                _frames.Add((pos, header.FrameLength, header.RawDataBlocks));
             }
+
+            long frames = _frames.Count;
 
             int sampleRate = SampleRates[first.SampleRateIndex];
             int channels = first.ChannelConfiguration == 7 ? 8 : first.ChannelConfiguration;
@@ -78,10 +88,10 @@ public sealed class AdtsDemuxer : IDemuxer
     public static AdtsDemuxer Open(string path) => new(File.OpenRead(path));
 
     /// <inheritdoc cref="AdtsDemuxer"/>
-    public IEnumerable<Packet> ReadPackets() => Malformed.Guard(ReadPacketsCore(), "ADTS");
+    public IEnumerable<Packet> ReadPackets() => ReadSteps.Run(_stream, Steps(), "ADTS");
 
-    /// <inheritdoc/>
-    public IAsyncEnumerable<Packet> ReadPacketsAsync(CancellationToken cancellationToken = default) => AsyncPackets.Of(ReadPackets(), cancellationToken);
+    /// <inheritdoc cref="AviDemuxer.ReadPacketsAsync"/>
+    public IAsyncEnumerable<Packet> ReadPacketsAsync(CancellationToken cancellationToken = default) => ReadSteps.RunAsync(_stream, Steps(), "ADTS", cancellationToken);
 
     public void Dispose()
     {
@@ -112,23 +122,23 @@ public sealed class AdtsDemuxer : IDemuxer
         }
     }
 
-    private IEnumerable<Packet> ReadPacketsCore()
+    // Each frame's read and packet, then the error for a frame that runs past the end of the file.
+    private IEnumerable<ReadStep> Steps()
     {
         long sequence = 0;
         long time = 0;
-        for (long pos = _firstFrame; FindFrame(ref pos, out var header); pos += header.FrameLength)
+        foreach (var (pos, length, blocks) in _frames)
         {
-            if (pos + header.FrameLength > _stream.Length)
-            {
-                throw new InvalidDataException($"The frame at byte {pos} runs past the end of the file.");
-            }
-
-            var data = new byte[header.FrameLength];
-            _stream.Position = pos;
-            _stream.ReadExactly(data);
-            long duration = (long)SamplesPerBlock * header.RawDataBlocks;
-            yield return new Packet(0, sequence++, data, IsKeyframe: true, time, time, duration);
+            var data = new byte[length];
+            yield return ReadStep.Read(pos, data);
+            long duration = (long)SamplesPerBlock * blocks;
+            yield return ReadStep.Yield(new Packet(0, sequence++, data, IsKeyframe: true, time, time, duration));
             time += duration;
+        }
+
+        if (_truncatedFrame >= 0)
+        {
+            throw new InvalidDataException($"The frame at byte {_truncatedFrame} runs past the end of the file.");
         }
     }
 

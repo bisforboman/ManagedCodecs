@@ -111,15 +111,22 @@ public sealed class AviDemuxer : IDemuxer
     /// Packets come one at a time, so a file that breaks off inside a chunk gives the packets before it, then
     /// <see cref="InvalidDataException"/> (FFmpeg stops there without an error).
     /// </remarks>
-    public IEnumerable<Packet> ReadPackets() => Malformed.Guard(ReadPacketsCore(), "AVI");
+    public IEnumerable<Packet> ReadPackets() => ReadSteps.Run(_stream, Steps(), "AVI");
 
-    /// <inheritdoc/>
-    public IAsyncEnumerable<Packet> ReadPacketsAsync(CancellationToken cancellationToken = default) => AsyncPackets.Of(ReadPackets(), cancellationToken);
+    /// <summary>
+    /// <see cref="ReadPackets"/> as an asynchronous sequence: every read of the file (chunk headers and packets) is
+    /// awaited, and cancellation checked between them. The stream's own ReadAsync does the reading: a FileStream opened
+    /// without <see cref="FileOptions.Asynchronous"/> (as <see cref="Open"/> opens it) does it on the thread pool; pass
+    /// a stream opened with it for overlapped I/O.
+    /// </summary>
+    public IAsyncEnumerable<Packet> ReadPacketsAsync(CancellationToken cancellationToken = default) => ReadSteps.RunAsync(_stream, Steps(), "AVI", cancellationToken);
 
-    private IEnumerable<Packet> ReadPacketsCore()
+    // The walk through the movi list: each chunk header's read, and each video chunk's read and packet.
+    private IEnumerable<ReadStep> Steps()
     {
         string prefix = _videoStreamIndex.ToString("00", CultureInfo.InvariantCulture);
         long sequence = 0;
+        var header = new byte[8];
 
         // Explicit stack instead of recursion so nested 'rec ' lists work inside an iterator.
         var ranges = new Stack<(long Pos, long End)>();
@@ -130,8 +137,8 @@ public sealed class AviDemuxer : IDemuxer
             var (pos, end) = ranges.Pop();
             while (pos + 8 <= end)
             {
-                _stream.Position = pos;
-                var (id, size) = ReadChunkHeader(_stream);
+                yield return ReadStep.Read(pos, header);
+                var (id, size) = ParseChunkHeader(header);
                 long next = NextChunk(pos, size);
 
                 if (id == "LIST")
@@ -153,8 +160,8 @@ public sealed class AviDemuxer : IDemuxer
                     }
 
                     var data = new byte[size];
-                    _stream.ReadExactly(data);
-                    yield return new Packet(_videoStreamIndex, sequence, data, IsKeyframe: true, Dts: sequence, Pts: sequence, Duration: 1);
+                    yield return ReadStep.Read(pos + 8, data);
+                    yield return ReadStep.Yield(new Packet(_videoStreamIndex, sequence, data, IsKeyframe: true, Dts: sequence, Pts: sequence, Duration: 1));
                     sequence++;
                 }
 
@@ -260,8 +267,11 @@ public sealed class AviDemuxer : IDemuxer
     {
         Span<byte> buffer = stackalloc byte[8];
         stream.ReadExactly(buffer);
-        return (Encoding.ASCII.GetString(buffer[..4]), BinaryPrimitives.ReadUInt32LittleEndian(buffer[4..]));
+        return ParseChunkHeader(buffer);
     }
+
+    private static (string Id, uint Size) ParseChunkHeader(ReadOnlySpan<byte> header) =>
+        (Encoding.ASCII.GetString(header[..4]), BinaryPrimitives.ReadUInt32LittleEndian(header[4..]));
 
     private static string ReadFourCC(Stream stream)
     {

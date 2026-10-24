@@ -2,7 +2,10 @@ using System.Runtime.CompilerServices;
 
 namespace ManagedCodecs;
 
-/// <summary>The packets of a synchronous reader as an asynchronous sequence (<see cref="IDemuxer.ReadPacketsAsync"/>).</summary>
+/// <summary>
+/// The packets of a synchronous reader as an asynchronous sequence: the default of <see cref="IDemuxer.ReadPacketsAsync"/>
+/// for a demuxer without reads of its own to await.
+/// </summary>
 internal static class AsyncPackets
 {
     /// <summary>

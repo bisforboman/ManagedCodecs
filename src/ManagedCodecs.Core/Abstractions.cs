@@ -111,8 +111,9 @@ public interface IDemuxer : IDisposable
     IEnumerable<Packet> ReadPackets();
 
     /// <summary>
-    /// <see cref="ReadPackets"/> as an asynchronous sequence, for <c>await foreach</c>. Reading a packet is synchronous (the
-    /// demuxers read from a seekable stream); between packets the thread is yielded and cancellation checked.
+    /// <see cref="ReadPackets"/> as an asynchronous sequence, for <c>await foreach</c>. This library's demuxers await every
+    /// read of the file; this default, for a demuxer that has only <see cref="ReadPackets"/>, reads each packet
+    /// synchronously and yields the thread and checks cancellation between them.
     /// </summary>
     IAsyncEnumerable<Packet> ReadPacketsAsync(CancellationToken cancellationToken = default) => AsyncPackets.Of(ReadPackets(), cancellationToken);
 }

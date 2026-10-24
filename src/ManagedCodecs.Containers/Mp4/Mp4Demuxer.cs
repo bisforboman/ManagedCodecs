@@ -224,12 +224,13 @@ public sealed class Mp4Demuxer : IDemuxer
 
     public static Mp4Demuxer Open(string path) => new(File.OpenRead(path));
 
-    public IEnumerable<Packet> ReadPackets() => Malformed.Guard(ReadPacketsCore(), "MP4");
+    public IEnumerable<Packet> ReadPackets() => ReadSteps.Run(_stream, Steps(), "MP4");
 
-    /// <inheritdoc/>
-    public IAsyncEnumerable<Packet> ReadPacketsAsync(CancellationToken cancellationToken = default) => AsyncPackets.Of(ReadPackets(), cancellationToken);
+    /// <inheritdoc cref="AviDemuxer.ReadPacketsAsync"/>
+    public IAsyncEnumerable<Packet> ReadPacketsAsync(CancellationToken cancellationToken = default) => ReadSteps.RunAsync(_stream, Steps(), "MP4", cancellationToken);
 
-    private IEnumerable<Packet> ReadPacketsCore()
+    // Each sample's read, then its packet.
+    private IEnumerable<ReadStep> Steps()
     {
         var sequences = new Dictionary<int, long>();
         for (int i = 0; i < _samples.Length; i++)
@@ -246,11 +247,10 @@ public sealed class Mp4Demuxer : IDemuxer
             }
 
             var data = new byte[sample.Size];
-            _stream.Position = sample.Offset;
-            _stream.ReadExactly(data);
+            yield return ReadStep.Read(sample.Offset, data);
             long sequence = sequences.GetValueOrDefault(sample.StreamIndex);
             sequences[sample.StreamIndex] = sequence + 1;
-            yield return new Packet(sample.StreamIndex, sequence, data, sample.IsKeyframe, sample.Dts, sample.Pts, sample.Duration, sample.SkipSamples, sample.Discard);
+            yield return ReadStep.Yield(new Packet(sample.StreamIndex, sequence, data, sample.IsKeyframe, sample.Dts, sample.Pts, sample.Duration, sample.SkipSamples, sample.Discard));
         }
     }
 

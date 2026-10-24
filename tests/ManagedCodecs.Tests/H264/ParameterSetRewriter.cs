@@ -73,6 +73,30 @@ internal static class ParameterSetRewriter
     }
 
     /// <summary>
+    /// A seq_parameter_set_rbsp of a 4:0:0 SPS (High 4:4:4 Predictive) copied field by field, with
+    /// bit_depth_chroma_minus8 replaced: what JM writes (8 bits whatever the luma's), which no plane uses.
+    /// </summary>
+    public static byte[] SpsChromaDepth(byte[] spsNal, int chromaDepthMinus8)
+    {
+        var nal = NalUnit.Parse(spsNal);
+        var r = nal.CreateReader();
+        var w = new BitWriter();
+        int profile = (int)r.ReadBits(8);
+        Assert.Equal(244, profile);
+        w.Bits(profile, 8);
+        w.Bits(r.ReadBits(16), 16); // constraint flags, level_idc
+        w.Ue(r.ReadUe()); // seq_parameter_set_id
+        uint chromaFormat = r.ReadUe();
+        Assert.Equal(0u, chromaFormat);
+        w.Ue(chromaFormat);
+        w.Ue(r.ReadUe()); // bit_depth_luma_minus8
+        r.ReadUe(); // bit_depth_chroma_minus8
+        w.Ue((uint)chromaDepthMinus8);
+        CopyRest(r, w);
+        return w.ToNal(nal.RefIdc, (int)NalUnitType.Sps);
+    }
+
+    /// <summary>
     /// A pic_parameter_set_rbsp copied field by field, with the chroma QP offsets and the scaling
     /// lists replaced where given (<paramref name="replaceScaling"/>: by <paramref name="scaling"/>,
     /// null for no matrix).

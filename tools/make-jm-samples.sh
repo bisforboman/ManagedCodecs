@@ -160,9 +160,15 @@ deep() {
   local profile=244
   ((bits <= 10 && yuv <= 1)) && profile=110
   ((bits == 8 && yuv <= 1)) && profile=100
-  dur=512 encode-b "$name" -p InputFile="deep-$name.yuv" -p SourceWidth=176 -p SourceHeight=144 -p YUVFormat="$yuv" \
+  lencod "$name" -p InputFile="deep-$name.yuv" -p SourceWidth=176 -p SourceHeight=144 -p YUVFormat="$yuv" \
     -p SourceBitDepthLuma="$bits" -p SourceBitDepthChroma="$bits" -p OutputBitDepthLuma="$bits" -p OutputBitDepthChroma="$bits" \
     -p ProfileIDC="$profile" -p Transform8x8Mode=1 -p NumberBFrames=1 -p QPISlice=16 -p QPPSlice=16 -p QPBSlice=18 "$@"
+  # In 4:0:0 JM writes bit_depth_chroma 8 whatever the luma's, which no plane uses, but which FFmpeg refuses (it cannot
+  # even mux the stream): the SPS gets the luma's depth for chroma too.
+  if ((yuv == 0)); then
+    "$tools/h264-chroma-depth.py" "$work/$name.264" "$work/$name.fixed.264" && mv "$work/$name.fixed.264" "$work/$name.264"
+  fi
+  dur=512 mux-b "$name"
 }
 deep 9bit 9 1                                     # 9 bits: High 10
 deep 12bit 12 1 -p WeightedPrediction=1 -p WeightedBiprediction=1  # 12 bits, explicit weights in P and B
@@ -172,7 +178,10 @@ noise=40 deep 14bit-cavlc 14 1 -p SymbolMode=0 -p QPISlice=-6 -p QPPSlice=-6 -p 
           # (16 and more is in CavlcLevelTests: below QP -6 JM codes this source as I_PCM, and crashes with EnableIPCM=0)
 deep 12bit-422 12 2                               # 4:2:2
 deep 14bit-444 14 3                               # 4:4:4
-# No 4:0:0: JM writes bit_depth_chroma 8 there, and FFmpeg refuses luma and chroma depths that differ.
+# 4:0:0 above 10 bits (FFmpeg decodes them once the SPS's unused chroma depth matches, above; JM's own decoder gives
+# the same frames). Their references are taken as gray (make-samples.sh, by the name).
+deep gray-12bit 12 0                              # 4:0:0, 12 bits
+deep gray-14bit 14 0 -p QPISlice=-6 -p QPPSlice=-6 -p QPBSlice=-4  # 4:0:0, 14 bits at low QP
 
 # ---- 8 bits, through deep: what libx264 never writes ----
 # I_PCM: on heavy noise JM codes macroblocks as I_PCM below about QP 16, all of them below about QP 12; at QP 14 (CAVLC)

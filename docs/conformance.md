@@ -172,12 +172,16 @@ too, this decoder the spec.
 
 ### Monochrome
 
-Monochrome (chroma_format_idc 0) comes out as `Gray8` or `Gray10`, one plane; it is checked on
+Monochrome (chroma_format_idc 0) comes out as `Gray8` to `Gray14`, one plane; it is checked on
 libx264's gray output (High and High 10): no intra_chroma_pred_mode, the coded_block_pattern
 without a chroma part, no chroma weights in pred_weight_table, with CABAC and CAVLC, P and B
 frames, explicit weights, cropping, MBAFF, 10 bits and lossless; and on JM's field pictures
-(PAFF) in 4:0:0, alone and mixed with frame pictures, with B pictures and CAVLC; I_PCM from
-hand-built streams. FFmpeg's decoder outputs such streams as 4:2:0 with flat chroma, so the
+(PAFF) in 4:0:0, alone and mixed with frame pictures, with B pictures and CAVLC; at 12 and 14 bits on JM's
+progressive streams with B pictures (`jm-gray-12bit`, `jm-gray-14bit`, the 14-bit one at QP -6); I_PCM from
+hand-built streams. JM writes bit_depth_chroma 8 in 4:0:0 whatever the luma's depth, which no plane uses (7.4.2.1.1)
+but which FFmpeg refuses, so it cannot even mux those streams: `tools/h264-chroma-depth.py` gives the SPS the luma's
+depth for chroma too, FFmpeg then decodes them (JM's own decoder gives the same frames, all 10 of each), and
+`H264MonochromeDepthTests` decodes them with JM's 8-bit chroma depth put back, to the same frames. FFmpeg's decoder outputs such streams as 4:2:0 with flat chroma, so the
 references take its Y plane alone (`-vf extractplanes=y`, which leaves the samples as they are).
 
 ### What only JM writes, and what no encoder writes

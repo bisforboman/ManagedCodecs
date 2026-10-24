@@ -398,7 +398,7 @@ public sealed class H264Decoder : IVideoDecoder
             }
 
             pos += _lengthSize;
-            if (length <= 0 || pos + length > packet.Length)
+            if (length <= 0 || length > packet.Length - pos)
             {
                 throw new InvalidDataException($"NAL unit length {length} overruns the packet.");
             }

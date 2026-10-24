@@ -74,7 +74,7 @@ internal readonly record struct NalUnit(NalUnitType Type, int RefIdc, byte[] Rbs
             }
 
             pos += lengthSize;
-            if (length < 0 || pos + length > sample.Length)
+            if (length < 0 || length > sample.Length - pos)
             {
                 throw new InvalidDataException($"NAL unit length {length} overruns the sample.");
             }

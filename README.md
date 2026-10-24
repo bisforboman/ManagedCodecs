@@ -52,8 +52,8 @@ says feature by feature which encoder made the samples (libx264, OpenH264, JM) a
 ### Open
 
 - AAC: parametric stereo with 34 bands or mixing procedure Rb (no encoder at hand sends them, nor downsampled SBR with
-  parametric stereo, which decodes but is untested); SBR's speed (FFT-based QMF banks: 5.1 HE-AAC at about 1 ms a
-  frame, 40 times real time, 4 times FFmpeg's time). In ADTS: frames of several raw data blocks, and channel
+  parametric stereo, which decodes but is untested); SBR's speed (5.1 HE-AAC at about 0.7 ms a frame, 60 times real
+  time, twice FFmpeg's time; Benchmarking). In ADTS: frames of several raw data blocks, and channel
   configuration 0.
 - MJPEG: files from real cameras (the samples are all FFmpeg's), and packets holding one field (FFmpeg decodes none).
 - H.264: separate colour planes, luma and chroma bit depths that differ, monochrome above 10 bits (FFmpeg decodes
@@ -231,7 +231,8 @@ Both time the whole process, demuxing included; mcdec's also includes .NET's sta
 line shows the steady speed without them). mcdec disposes each frame once it has it, as a consumer done with them
 would, so H.264 frames reuse the planes of earlier ones. A snapshot, made that way (2026-10-23, FFmpeg 6.1.1,
 single-threaded on a 4-core 2.8 GHz Xeon cloud VM with AVX2 and AVX-512; the median of five runs interleaved with
-FFmpeg's, the order alternating; µs per frame, audio frames are 1024 samples):
+FFmpeg's, the order alternating; µs per frame, AAC frames are 1024 samples, HE-AAC frames 2048; the HE-AAC rows
+2026-10-24):
 
 | Sample | Loops | ManagedCodecs | FFmpeg | Ratio |
 | --- | ---: | ---: | ---: | ---: |
@@ -250,11 +251,13 @@ FFmpeg's, the order alternating; µs per frame, audio frames are 1024 samples):
 | `h264-10bit-motion.mp4` (the same at 10 bits, QP 34, which is QP 22's step size) | 20 | 6442 | 3156 | 2.04 |
 | `aac-stereo-48k.mp4` (AAC, stereo) | 100 | 45 | 86 | 0.52 |
 | `aac-5.1.mp4` (AAC, 5.1) | 100 | 138 | 123 | 1.13 |
+| `heaac/heaac-5.1.mp4` (HE-AAC, 5.1) | 100 | 715 | 360 | 1.98 |
+| `heaac/heaacv2-stereo.mp4` (HE-AAC v2: parametric stereo) | 100 | 317 | 208 | 1.53 |
 
 The short MJPEG and AAC runs are mostly .NET's startup and JIT: without them (`last loop`), `aac-5.1.mp4` takes about
-90 µs a frame. H.264 takes 2.3 to 3.6 times FFmpeg's time, less on noisier content, whose residual decoding weighs
-more; at 10 bits the ratio is close to the 8-bit one. A VM's speed moves from day to day, and FFmpeg's and ours do
-not move together: the previous snapshot (2026-10-22, in the history of this file) had `h264-bench-720p.mp4` at
+90 µs a frame, `heaac-5.1.mp4` about 570. H.264 takes 2.3 to 3.6 times FFmpeg's time, less on noisier content,
+whose residual decoding weighs more; at 10 bits the ratio is close to the 8-bit one. A VM's speed moves from day to
+day, and FFmpeg's and ours do not move together: the previous snapshot (2026-10-22, in the history of this file) had `h264-bench-720p.mp4` at
 7656 µs against 2412, while callgrind counts 1.5% more instructions for `h264-p-refs.mp4` since then. Only
 comparisons made on one machine at one time count.
 

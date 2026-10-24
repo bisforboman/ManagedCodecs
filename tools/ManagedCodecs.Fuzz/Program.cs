@@ -35,6 +35,12 @@ Fuzzer.OutOfProcess.Run(stream =>
     using var memory = new MemoryStream();
     stream.CopyTo(memory);
     Targets.Run(target, memory.ToArray());
+
+    // H.264 once more concealing errors, which decodes on where the first run stopped.
+    if (target is "h264" or "file")
+    {
+        Targets.Run(target, memory.ToArray(), conceal: true);
+    }
 });
 return 0;
 

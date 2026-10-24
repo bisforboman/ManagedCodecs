@@ -197,6 +197,29 @@ Produced by none of them, so not checked against FFmpeg: memory management opera
 and 5 (unit tests; JM writes 1 and OpenH264 1, 4 and 6). The scaling matrix unit tests (samples
 with rewritten parameter sets) stay as a second check.
 
+### Error concealment
+
+`H264Decoder.ConcealErrors` (off by default). A slice whose data fails (a syntax element out of range, or the data
+ending inside a macroblock) keeps the macroblocks it decoded; the failing one and the rest of the slice are marked
+missing at once, so the rows below them are neither deblocked nor reported to other pictures before they are filled.
+The picture's other slices are decoded, then every missing macroblock becomes an inter macroblock with zero motion
+from list 0 entry 0 of the picture's first P or B slice (an intra picture: the latest reference; none, after a damaged
+IDR picture, and for now an intra second field, whose latest reference is its own frame: mid-grey), no coefficients and the slice's QP, in a slice of its own. Deblocking, co-located motion and
+later direct prediction then read it as any other. The frame is flagged `VideoFrame.IsDamaged`, as is every picture
+whose motion names a damaged reference (checked once those references are done), up to the next IDR picture. Nothing
+of FFmpeg's (error_resilience.c guesses motion) is ported.
+
+Concealed frames match no reference, so `H264ConcealmentTests` checks the rest against the clean decode (bit-exact
+with FFmpeg by the conformance tests): one packet loses the second half of its last NAL unit (CAVLC and CABAC with four
+slices a picture, a B pyramid, MBAFF, 4:4:4, JM's field pictures; an IDR picture and an inter one), every frame comes
+out, the unflagged ones are bit-exact, the flagged ones within a loose PSNR floor, and three threads with random delays
+give the same frames and flags. Without concealment no frame comes out wrong. The malformed-input sweep and the fuzz
+target run concealing too. Measured against FFmpeg on the same damage (8 bytes flipped in a B picture of
+`h264-high-b.mp4`, 20 frames affected): mean PSNR against the clean decode 23.8 dB, as FFmpeg's (23.8 dB; worst frame
+18.2 dB, FFmpeg's 19.7). Damage that still parses is not detected and spreads unflagged: with 8 bytes flipped in one of 6
+packets of each of 21 samples, 13 samples had at least one such packet (CAVLC and CABAC alike). Cut slice data was detected in every case: a conforming
+CABAC slice ends inside its data (9.3.4.5 writes the stop bit last), so consuming bits past it is damage.
+
 ### Performance notes
 
 A profile of a

@@ -122,6 +122,7 @@ internal sealed partial class PictureDecoder<TPixel>
                 DecodeMacroblock(slice, r, mbAddr);
             }
 
+            CheckNotPastEnd(cabac.PastEnd);
             MacroblockDone(mbAddr);
             mbAddr += MbStep;
         }

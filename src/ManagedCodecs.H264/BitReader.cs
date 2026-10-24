@@ -41,6 +41,12 @@ internal sealed class BitReader
 
     public bool IsByteAligned => (_position & 7) == 0;
 
+    /// <summary>Whether reads went past the end of the RBSP (into the zero bits after it): the data was cut short.</summary>
+    public bool PastEnd => _position > _length * 8L;
+
+    /// <summary>The RBSP's length in bits.</summary>
+    public long BitLength => _length * 8L;
+
     /// <summary>more_rbsp_data() of 7.2: true while there is data before the trailing stop bit.</summary>
     public bool MoreRbspData() => _position < _trailingBitPosition;
 

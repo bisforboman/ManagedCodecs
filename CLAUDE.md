@@ -149,6 +149,9 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
   sandbox needs `AFL_SKIP_BIN_CHECK=1 AFL_SKIP_CPUFREQ=1 AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES=1` (fuzz.sh sets them),
   and the `sharpfuzz` global tool lives in `~/.dotnet/tools`, which is not on PATH by default. Many crash files are
   one bug: group them by the top frame of the stack before fixing.
+- H.264's `BitReader` reads zero bits past the end of a NAL unit, so a CABAC slice cut short decodes on through zeros
+  to the end of the picture without a syntax error; only the engine's consumed position (`Cabac.PastEnd`) shows it.
+  Damage for concealment tests: cut a NAL unit (always detected), not byte flips (often still parse).
 - WebAssembly (`tools/ManagedCodecs.Wasm`, `tools/wasm-check.sh`): a browser-wasm build needs the `wasm-tools`
   workload even without AOT (NETSDK1147), hence the project is outside the solution. `dotnet new wasmconsole` needs
   a NuGet search host the sandbox blocks: the project is written by hand. The browser has no MD5 (SHA-256 works),

@@ -37,6 +37,12 @@ public sealed class H264Decoder : IVideoDecoder
     private readonly Queue<PictureJob> _inFlight = new();
     private readonly int _threads = 1;
 
+    // Frames a call that threw had already taken out, for the next call to return first (TakeHeld).
+    private List<VideoFrame>? _held;
+
+    // The latest reference picture in decoding order: what an intra picture's missing macroblocks are copied from (ConcealErrors).
+    private Picture? _lastReference;
+
     // frame_num of the last reference picture (PrevRefFrameNum, 7.4.3); -1 before the first.
     private int _prevRefFrameNum = -1;
 
@@ -98,6 +104,16 @@ public sealed class H264Decoder : IVideoDecoder
     internal int RowDelay { get; init; }
 
     /// <summary>
+    /// Conceal damaged slice data instead of failing the picture's <see cref="Decode(Packet)"/>: the macroblocks a slice
+    /// decoded before the damage stay, the picture's other slices are decoded, and every macroblock left missing is a
+    /// copy of the same place in a reference (list 0's first, else the latest reference, else mid-grey). The frame comes
+    /// out with <see cref="VideoFrame.IsDamaged"/>, as does every later frame predicted from a damaged one, until a
+    /// picture that predicts from none (an IDR picture). Damaged headers and parameter sets still throw. Off by default:
+    /// a damaged picture then fails, and so does every later picture that predicts from it.
+    /// </summary>
+    public bool ConcealErrors { get; init; }
+
+    /// <summary>
     /// Decodes one packet, which holds one picture (MP4 sample), and returns the frames ready for
     /// display. A field picture is half a frame: the first of a pair gives no frame, the second
     /// the whole frame, with the first one's timestamp.
@@ -124,15 +140,49 @@ public sealed class H264Decoder : IVideoDecoder
             throw new NotSupportedException("Borrowed frames with more than one thread are not supported.");
         }
 
-        var frames = new List<VideoFrame>();
+        var frames = TakeHeld();
+        try
+        {
+            DecodeInto(data, pts, discard, frames);
+            return frames;
+        }
+        catch
+        {
+            _held = frames;
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// The frames a call that threw had already taken out (earlier pictures finished while it waited, or before the one
+    /// that failed): the next call returns them first, so that a failure loses no other picture's frame.
+    /// </summary>
+    private List<VideoFrame> TakeHeld()
+    {
+        var frames = _held ?? [];
+        _held = null;
+        return frames;
+    }
+
+    private void DecodeInto(ReadOnlySpan<byte> data, long pts, bool discard, List<VideoFrame> frames)
+    {
         _discard = discard;
         var job = ParsePicture(data, pts, frames);
         if (Threads == 1)
         {
-            Run(job);
-            Finish(job);
+            // A picture that fails is still marked as its headers say, as with threads: later pictures that predict
+            // from it fail (on its rows that were not done) rather than predict from other pictures in its place.
+            try
+            {
+                Run(job);
+            }
+            finally
+            {
+                Finish(job);
+            }
+
             Output(job, frames);
-            return frames;
+            return;
         }
 
         // A thread of its own, so that a picture always runs while the later ones that wait for it do: pictures
@@ -141,7 +191,6 @@ public sealed class H264Decoder : IVideoDecoder
         _inFlight.Enqueue(job);
         Finish(job);
         Drain(frames, all: false);
-        return frames;
     }
 
     /// <summary>
@@ -159,15 +208,23 @@ public sealed class H264Decoder : IVideoDecoder
             return Decode(packet);
         }
 
-        var frames = new List<VideoFrame>();
-        while (_inFlight.Count >= Threads)
+        var frames = TakeHeld();
+        try
         {
-            await WaitForAsync(_inFlight.Peek().Task!, cancellationToken).ConfigureAwait(false);
-            DrainOldest(frames);
+            while (_inFlight.Count >= Threads)
+            {
+                await WaitForAsync(_inFlight.Peek().Task!, cancellationToken).ConfigureAwait(false);
+                DrainOldest(frames);
+            }
+        }
+        catch
+        {
+            _held = frames;
+            throw;
         }
 
-        frames.AddRange(Decode(packet));
-        return frames;
+        _held = frames;
+        return Decode(packet);
     }
 
     /// <summary>
@@ -176,15 +233,23 @@ public sealed class H264Decoder : IVideoDecoder
     /// </summary>
     public async ValueTask<IReadOnlyList<VideoFrame>> FlushAsync(CancellationToken cancellationToken = default)
     {
-        var frames = new List<VideoFrame>();
-        while (_inFlight.TryPeek(out var job))
+        var frames = TakeHeld();
+        try
         {
-            await WaitForAsync(job.Task!, cancellationToken).ConfigureAwait(false);
-            DrainOldest(frames);
+            while (_inFlight.TryPeek(out var job))
+            {
+                await WaitForAsync(job.Task!, cancellationToken).ConfigureAwait(false);
+                DrainOldest(frames);
+            }
+        }
+        catch
+        {
+            _held = frames;
+            throw;
         }
 
-        frames.AddRange(Flush());
-        return frames;
+        _held = frames;
+        return Flush();
     }
 
     /// <summary>
@@ -202,10 +267,20 @@ public sealed class H264Decoder : IVideoDecoder
 
     public IReadOnlyList<VideoFrame> Flush()
     {
-        var frames = new List<VideoFrame>();
-        Drain(frames, all: true);
+        var frames = TakeHeld();
+        try
+        {
+            Drain(frames, all: true);
+        }
+        catch
+        {
+            _held = frames;
+            throw;
+        }
+
         if (_firstField is not null)
         {
+            _held = frames;
             throw new NotSupportedException("A field without its second field (an unpaired field) is not supported.");
         }
 
@@ -254,10 +329,20 @@ public sealed class H264Decoder : IVideoDecoder
 
             if (!state.Decoder.IsComplete)
             {
-                throw new InvalidDataException("The picture is missing macroblocks (error concealment is not supported).");
+                if (!state.Decoder.ConcealErrors)
+                {
+                    throw new InvalidDataException("The picture is missing macroblocks (ConcealErrors is off).");
+                }
+
+                state.Decoder.Conceal(job.ConcealFrom);
             }
 
             state.Decoder.Deblock();
+            if (state.Decoder.ConcealErrors && (state.Decoder.ConcealedMbCount > 0 || state.Decoder.ReadsDamagedReference()))
+            {
+                state.Picture.Damaged = true;
+            }
+
             view.ReportDone();
         }
         catch
@@ -286,6 +371,8 @@ public sealed class H264Decoder : IVideoDecoder
             {
                 _references.Mark(state.Header, picture, state.Sps);
             }
+
+            _lastReference = picture;
 
             // PrevRefFrameNum (7.4.3); after memory_management_control_operation 5 it is 0.
             _prevRefFrameNum = state.Header.MemoryManagement.Any(op => op.Op == 5) ? 0 : state.Header.FrameNum;
@@ -335,6 +422,7 @@ public sealed class H264Decoder : IVideoDecoder
         bool borrow = BorrowFrames && picture.BitDepth == 8;
         var frame = job.Frame ?? (borrow ? Borrow(picture, state.Sps) : Crop(picture, state.Sps));
         frame.Pts = job.Pts;
+        frame.IsDamaged = picture.Damaged;
         frames.AddRange(_output.Add(frame, picture.Poc, job.Restart, ReorderDepth(state.Sps), borrow ? picture : null));
     }
 
@@ -524,9 +612,18 @@ public sealed class H264Decoder : IVideoDecoder
 
         // A second field's frame is the first one's: its timestamp, and whether it starts a new sequence.
         var state = new PictureState(header, sps, decoder, picture, poc, secondField);
-        return secondField
+        var job = secondField
             ? new PictureJob(state, _firstField!.Pts, _firstField.Restart, _firstField.Discard) { FirstField = _firstField }
             : new PictureJob(state, pts, header.IsIdr || header.MemoryManagement.Any(op => op.Op == 5), _discard);
+        decoder.ConcealErrors = ConcealErrors;
+        if (ConcealErrors && _lastReference is { IsNonExisting: false } latest && _references.Contains(latest) && latest != picture)
+        {
+            // Kept from reuse while the picture is decoded, as its lists' pictures are; a field picture copies a field.
+            job.ConcealFrom = header.FieldPic ? latest.Field(header.Parity) : latest;
+            job.Uses.Add(latest);
+        }
+
+        return job;
     }
 
     /// <summary>
@@ -719,6 +816,9 @@ public sealed class H264Decoder : IVideoDecoder
         public List<SliceWork> Slices { get; } = [];
 
         public HashSet<Picture> Uses { get; } = [];
+
+        /// <summary>With <see cref="ConcealErrors"/>, the latest reference: what missing macroblocks are copied from when no slice has a list 0.</summary>
+        public Picture? ConcealFrom { get; set; }
 
         /// <summary>With threads, the thread decoding it.</summary>
         public Task? Task { get; set; }

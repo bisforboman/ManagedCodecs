@@ -36,7 +36,7 @@ says feature by feature which encoder made the samples (libx264, OpenH264, JM) a
 - **H.264**: Constrained Baseline to High 4:4:4 Predictive. CAVLC and CABAC; I, P and B pictures; weighted
   prediction, the 8x8 transform, scaling matrices; MBAFF frames and field pictures; monochrome, 4:2:0, 4:2:2 and
   4:4:4; 8, 9, 10, 12 and 14 bits; lossless. Bit-exact on streams from libx264, OpenH264 and JM. Frame threading
-  (`Threads`).
+  (`Threads`), and concealment of damaged slices (`ConcealErrors`, Malformed input).
 - **AAC LC**: mono to 7.1 and program config elements, every window sequence and shape, M/S and intensity stereo,
   PNS, TNS; within 2^-17 of FFmpeg's float output (measured: 3e-7). Encoder priming is trimmed by the MP4 edit list,
   or by an iTunSMPB tag without one.
@@ -57,8 +57,9 @@ says feature by feature which encoder made the samples (libx264, OpenH264, JM) a
   configuration 0.
 - MJPEG: files from real cameras (the samples are all FFmpeg's), and packets holding one field (FFmpeg decodes none).
 - H.264: separate colour planes, luma and chroma bit depths that differ, monochrome above 10 bits (FFmpeg decodes
-  none of these, so checking them needs another reference); error concealment (a damaged picture fails its
-  `Decode` call).
+  none of these, so checking them needs another reference); concealing a missing picture (a lost packet, a
+  damaged slice header or a frame inferred for a frame_num gap still fails the pictures predicted from it), and
+  guessing motion for concealed macroblocks (they copy their place in a reference).
 - H.264 speed: 1.9 to 3.6 times FFmpeg's time on one thread (Benchmarking). With 4 threads a 720p P chain takes
   about half of one thread's time: each picture decodes about 28% slower than alone (its references were written on
   other cores) and threads wait for references' rows about a fifth of the time.
@@ -170,8 +171,16 @@ Damaged, truncated or hostile files make the demuxers and decoders throw `Invali
 `NotSupportedException` for a valid stream using something not implemented), never another exception, and they
 neither hang nor allocate without bound: an MJPEG image over 2^26 samples is refused, and an AVI chunk running past
 the end of the file is an error rather than an allocation. A truncated file throws where the data runs
-out (FFmpeg stops quietly instead); packets already returned stay valid. There is no error concealment yet: a
-damaged H.264 picture fails its `Decode` call.
+out (FFmpeg stops quietly instead); packets already returned stay valid. A damaged H.264 picture fails its `Decode`
+call, and so does every later picture predicted from it (none comes out predicted from other pictures in its place),
+until an IDR picture; frames other pictures finished meanwhile still come out, from the next call. Slice data that
+ends inside a macroblock (cut short) counts as damaged: CABAC would otherwise decode the zeros past its end.
+
+With `H264Decoder.ConcealErrors` the decoder conceals damaged slice data instead: what a slice decoded before the
+damage stays, the picture's other slices are decoded, and each missing macroblock copies its place in a reference,
+with zero motion. Every frame comes out; the damaged ones, and the ones predicted from them until an IDR picture, have
+`VideoFrame.IsDamaged` set (docs/conformance.md, Error concealment). Damage that still parses is not detected, as in
+any decoder; damaged headers and parameter sets still throw.
 
 `tools/fuzz.sh <file|h264|mjpeg|aac> <minutes>` checks this with AFL++ through SharpFuzz (`file` demuxes a whole file
 and decodes every track; the others feed one decoder its configuration and packets), with seeds taken from

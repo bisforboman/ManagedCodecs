@@ -32,7 +32,19 @@ internal interface IPictureDecoder
     /// <summary>For tests of frame threading: sleep up to this many milliseconds after each macroblock row, at random.</summary>
     int RowDelay { get; set; }
 
+    /// <summary>Whether a slice whose data fails is concealed (<see cref="H264Decoder.ConcealErrors"/>) rather than failing the picture.</summary>
+    bool ConcealErrors { get; set; }
+
+    /// <summary>The macroblocks <see cref="Conceal"/> filled in.</summary>
+    int ConcealedMbCount { get; }
+
     void Deblock();
+
+    /// <summary>Fills in the macroblocks no slice decoded, from a reference (else <paramref name="fallback"/>, else grey).</summary>
+    void Conceal(Picture? fallback);
+
+    /// <summary>Whether a reference the picture's motion names is damaged (waits for each to be done).</summary>
+    bool ReadsDamagedReference();
 }
 
 /// <summary>
@@ -154,6 +166,7 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
         _deblockedRows = 0;
         _reportedRows = 0;
         _slices.Clear();
+        BeginConcealment();
         _fieldParity = fieldParity;
         _pairSlots = fieldParity >= 0;
         _mbaff = false;
@@ -165,6 +178,7 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
             return;
         }
 
+        picture.Damaged = false;
         Array.Fill(_sliceOfMb, -1);
         Array.Clear(_kind);
         Array.Clear(_qp);
@@ -216,8 +230,19 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
     // The distance between consecutive macroblock addresses: a field picture's take every other slot.
     private int MbStep => _fieldParity >= 0 ? 2 : 1;
 
-    /// <summary>slice_data (7.3.4).</summary>
+    /// <summary>slice_data (7.3.4); with <see cref="ConcealErrors"/>, what a failing slice leaves undecoded is filled in later (<see cref="Conceal"/>).</summary>
     public void DecodeSlice(SliceHeader header, PictureParameterSet pps, BitReader r, IReadOnlyList<Picture> refList0, IReadOnlyList<Picture> refList1, MarkSnapshot marks)
+    {
+        if (ConcealErrors)
+        {
+            DecodeSliceConcealed(header, pps, r, refList0, refList1, marks);
+            return;
+        }
+
+        DecodeSliceData(header, pps, r, refList0, refList1, marks);
+    }
+
+    private void DecodeSliceData(SliceHeader header, PictureParameterSet pps, BitReader r, IReadOnlyList<Picture> refList0, IReadOnlyList<Picture> refList1, MarkSnapshot marks)
     {
         int sliceNum = _slices.Count;
         _mbaff = header.Mbaff;
@@ -287,6 +312,7 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
                 }
 
                 DecodeMacroblock(slice, r, mbAddr);
+                CheckNotPastEnd(r.PastEnd);
                 PairDone(mbAddr);
                 MacroblockDone(mbAddr);
                 mbAddr += MbStep;
@@ -294,6 +320,15 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
             }
         }
         while (moreData);
+    }
+
+    /// <summary>A macroblock decoded from the zeros after the slice data (cut short) is not one: it fails.</summary>
+    private static void CheckNotPastEnd(bool pastEnd)
+    {
+        if (pastEnd)
+        {
+            throw new InvalidDataException("The slice data ends inside a macroblock (cut short or damaged).");
+        }
     }
 
     private int CheckAddress(int mbAddr)

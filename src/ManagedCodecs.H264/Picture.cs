@@ -230,6 +230,17 @@ internal sealed class Picture
     private volatile int _decodedMbRows;
     private volatile int _finalLumaRows;
     private volatile bool _failed;
+    private volatile bool _damaged;
+
+    /// <summary>
+    /// Whether the frame holds concealed macroblocks, or was predicted from a frame that does (error concealment,
+    /// <see cref="H264Decoder.ConcealErrors"/>); final once the frame is done.
+    /// </summary>
+    public bool Damaged
+    {
+        get => Frame._damaged;
+        set => Frame._damaged = value;
+    }
 
     /// <summary>Before decoding into the picture again: nothing of it is decoded.</summary>
     public void ResetProgress()

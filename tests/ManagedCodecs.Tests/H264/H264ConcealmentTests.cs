@@ -28,6 +28,8 @@ public class H264ConcealmentTests
     [InlineData("h264-444-b.mp4", true)]
     [InlineData("jm/jm-paff-b.mp4", false)] // field pictures
     [InlineData("jm/jm-paff-b.mp4", true)]
+    [InlineData("jm-planes.mp4", false)] // separate colour planes: the Cr plane's last slice is cut
+    [InlineData("jm-planes.mp4", true)]
     public void CutPacket_ConcealedAndFlagged(string sampleName, bool middle)
     {
         if (!ParameterSetRewriter.Exists(sampleName))
@@ -123,6 +125,7 @@ public class H264ConcealmentTests
     [InlineData("openh264/oh-cabac.mp4", 10, 1)] // long-term references
     [InlineData("h264-p-ref1-nodeblock.mp4", 10, 3)] // a gap longer than max_num_ref_frames (1): only its last frame is filled
     [InlineData("jm/jm-paff-b.mp4", 6, 2)]
+    [InlineData("jm-planes.mp4", 3, 1)] // separate colour planes
     public void DroppedPackets_ConcealedAndFlagged(string sampleName, int first, int count)
     {
         if (!ParameterSetRewriter.Exists(sampleName))

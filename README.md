@@ -13,7 +13,7 @@ on several threads if asked, and every decoder has an async API.
 | `src/ManagedCodecs.Core` | `VideoFrame`, `PixelFormat`, `Packet`, `Rational`, `IDemuxer`, `IVideoDecoder` |
 | `src/ManagedCodecs.Containers` | `AviDemuxer`, `Mp4Demuxer`, `AdtsDemuxer` (raw .aac), and `Demuxer.Open` to pick one by content |
 | `src/ManagedCodecs.Mjpeg` | `MjpegDecoder`: baseline/extended Huffman JPEG, interlaced AVI1, bit-exact with FFmpeg |
-| `src/ManagedCodecs.H264` | `H264Decoder`: Constrained Baseline, Main, High, High 10, High 4:2:2 and High 4:4:4 Predictive profile H.264 (CAVLC, CABAC, I/P/B, weighted prediction, 8x8 transform, scaling matrices, deblocking, monochrome, 4:2:0, 4:2:2 and 4:4:4, 8 to 14 bits, lossless, progressive and interlaced), bit-exact |
+| `src/ManagedCodecs.H264` | `H264Decoder`: Constrained Baseline, Main, High, High 10, High 4:2:2 and High 4:4:4 Predictive profile H.264 (CAVLC, CABAC, I/P/B, weighted prediction, 8x8 transform, scaling matrices, deblocking, monochrome, 4:2:0, 4:2:2 and 4:4:4, also as separate colour planes, 8 to 14 bits, lossless, progressive and interlaced), bit-exact |
 | `src/ManagedCodecs.Aac` | `AacDecoder`: AAC LC (mono to 7.1, M/S, intensity, PNS, TNS), within 3e-7 of FFmpeg's float output; HE-AAC (spectral band replication) |
 | `src/Shared` | Source files linked into several codec projects (the VLC decoder) |
 | `tools/ManagedCodecs.Cli` | `mcdec`: decodes a file and times it, to compare with `ffmpeg -benchmark` (`--threads N` for H.264 frame threading) |
@@ -35,7 +35,8 @@ says feature by feature which encoder made the samples (libx264, OpenH264, JM) a
   output straight into the frame's planes (`ZeroCopy`).
 - **H.264**: Constrained Baseline to High 4:4:4 Predictive. CAVLC and CABAC; I, P and B pictures; weighted
   prediction, the 8x8 transform, scaling matrices; MBAFF frames and field pictures; monochrome, 4:2:0, 4:2:2 and
-  4:4:4; 8, 9, 10, 12 and 14 bits; lossless. Bit-exact on streams from libx264, OpenH264 and JM. Frame threading
+  4:4:4, also as separate colour planes; 8, 9, 10, 12 and 14 bits; lossless. Bit-exact on streams from libx264,
+  OpenH264 and JM (separate colour planes against JM's decoder, as FFmpeg decodes none). Frame threading
   (`Threads`), and concealment of damaged slices (`ConcealErrors`, Malformed input).
 - **AAC LC**: mono to 7.1 and program config elements, every window sequence and shape, M/S and intensity stereo,
   PNS, TNS; within 2^-17 of FFmpeg's float output (measured: 3e-7). Encoder priming is trimmed by the MP4 edit list,
@@ -56,8 +57,7 @@ says feature by feature which encoder made the samples (libx264, OpenH264, JM) a
   time, twice FFmpeg's time; Benchmarking). In ADTS: frames of several raw data blocks, and channel
   configuration 0.
 - MJPEG: files from real cameras (the samples are all FFmpeg's), and packets holding one field (FFmpeg decodes none).
-- H.264: separate colour planes (FFmpeg decodes none: `samples/jm-ref/` holds JM's streams with JM's decoder's
-  references, for the decoder to come); luma and chroma bit depths that differ are rejected on purpose (no mainstream
+- H.264: separate colour planes in interlaced video (rejected; JM's samples are progressive); luma and chroma bit depths that differ are rejected on purpose (no mainstream
   encoder or decoder, FFmpeg included, handles them, and they would need a bit depth for each plane in the frame
   API); concealing a lost field of a field pair (an unpaired
   field still throws), and guessing motion for concealed macroblocks (they copy their place in a reference).

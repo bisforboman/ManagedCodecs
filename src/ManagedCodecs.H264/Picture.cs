@@ -9,7 +9,7 @@ namespace ManagedCodecs.H264;
 /// </summary>
 internal sealed class Picture
 {
-    public Picture(int widthInMbs, int heightInMbs, int mbHeightC = 8, int bitDepth = 8, int mbWidthC = 8)
+    public Picture(int widthInMbs, int heightInMbs, int mbHeightC = 8, int bitDepth = 8, int mbWidthC = 8, bool separatePlanes = false)
     {
         WidthInMbs = widthInMbs;
         HeightInMbs = heightInMbs;
@@ -37,6 +37,33 @@ internal sealed class Picture
         // Both views at once: decoding threads ask for them too (H264Decoder.Threads).
         _top = new Picture(this, 0);
         _bottom = new Picture(this, 1);
+        if (separatePlanes)
+        {
+            _colourPlanes = [new Picture(this, plane: 0, mbCount), new Picture(this, plane: 1, mbCount), new Picture(this, plane: 2, mbCount)];
+        }
+    }
+
+    /// <summary>
+    /// A view of one colour plane of <paramref name="frame"/> as a monochrome picture (separate colour planes): that plane
+    /// as its luma, a motion field of its own (each plane is coded with its own macroblocks), and the frame's identity,
+    /// order count, marking and progress.
+    /// </summary>
+    private Picture(Picture frame, int plane, int mbCount)
+    {
+        WidthInMbs = frame.WidthInMbs;
+        HeightInMbs = frame.HeightInMbs;
+        BitDepth = frame.BitDepth;
+        LumaStride = frame.LumaStride;
+        Array none = BitDepth > 8 ? Array.Empty<ushort>() : Array.Empty<byte>();
+        _planes = [frame._planes[plane], none, none];
+        MvX = [new short[mbCount * 16], new short[mbCount * 16]];
+        MvY = [new short[mbCount * 16], new short[mbCount * 16]];
+        RefIdx = [new sbyte[mbCount * 4], new sbyte[mbCount * 4]];
+        RefId = [new long[mbCount * 4], new long[mbCount * 4]];
+        RefParity = [new sbyte[mbCount * 4], new sbyte[mbCount * 4]];
+        FieldMb = new bool[mbCount];
+        Frame = frame;
+        Parity = -1;
     }
 
     /// <summary>A view of one field of <paramref name="frame"/>: the same arrays, every other row.</summary>
@@ -72,12 +99,23 @@ internal sealed class Picture
     /// </summary>
     public Picture Field(int parity) => parity == 0 ? Frame._top! : Frame._bottom!;
 
+    /// <summary>Colour plane <paramref name="plane"/> (colour_plane_id: 0 Y, 1 Cb, 2 Cr) as a monochrome picture, of a frame with separate colour planes.</summary>
+    public Picture ColourPlane(int plane) =>
+        Frame._colourPlanes is { } planes ? planes[plane] : throw new InvalidDataException("A reference picture was decoded without separate colour planes.");
+
+    /// <summary>Whether the frame is decoded as three colour planes (<see cref="ColourPlane"/>).</summary>
+    public bool SeparatePlanes => Frame._colourPlanes is not null;
+
     // The Y, Cb and Cr planes: byte[] for 8-bit samples, ushort[] for deeper ones.
     private readonly Array[] _planes;
     private Picture? _top;
     private Picture? _bottom;
+    private readonly Picture[]? _colourPlanes;
     private readonly Mark[] _marks = new Mark[2];
     private int _poc;
+    private int _topPoc;
+    private bool _nonExisting;
+    private int _bottomPoc;
     private long _id;
 
     public int WidthInMbs { get; }
@@ -117,14 +155,22 @@ internal sealed class Picture
     /// <summary>PicOrderCnt (8.2.1): of the frame, the smaller of its fields'; of a field view, that field's.</summary>
     public int Poc
     {
-        get => Parity < 0 ? _poc : Parity == 0 ? Frame.TopPoc : Frame.BottomPoc;
-        set => _poc = value;
+        get => Parity < 0 ? Frame._poc : Parity == 0 ? Frame.TopPoc : Frame.BottomPoc;
+        set => Frame._poc = value;
     }
 
     /// <summary>TopFieldOrderCnt and BottomFieldOrderCnt of the frame.</summary>
-    public int TopPoc { get; set; }
+    public int TopPoc
+    {
+        get => Frame._topPoc;
+        set => Frame._topPoc = value;
+    }
 
-    public int BottomPoc { get; set; }
+    public int BottomPoc
+    {
+        get => Frame._bottomPoc;
+        set => Frame._bottomPoc = value;
+    }
 
     /// <summary>Per macroblock (MBAFF addresses): coded as a field macroblock; all false outside MBAFF frames.</summary>
     public bool[] FieldMb { get; }
@@ -205,7 +251,11 @@ internal sealed class Picture
     /// A frame inferred for a gap in frame_num (8.2.5.2): it holds a place among the short-term
     /// references but has no samples, is never output and must not be predicted from.
     /// </summary>
-    public bool IsNonExisting { get; set; }
+    public bool IsNonExisting
+    {
+        get => Frame._nonExisting;
+        set => Frame._nonExisting = value;
+    }
 
     public bool IsReference => IsShortTermReference || IsLongTermReference;
 
@@ -232,6 +282,17 @@ internal sealed class Picture
             }
         }
 
+        ClearMotion();
+        foreach (var plane in _colourPlanes ?? [])
+        {
+            plane.ClearMotion();
+        }
+
+        Damaged = true;
+    }
+
+    private void ClearMotion()
+    {
         for (int list = 0; list < 2; list++)
         {
             Array.Clear(MvX[list]);
@@ -244,7 +305,6 @@ internal sealed class Picture
         Array.Clear(FieldMb);
         Mbaff = false;
         CodedAsFields = false;
-        Damaged = true;
     }
 
     public byte[] Plane(int component) => (byte[])_planes[component];

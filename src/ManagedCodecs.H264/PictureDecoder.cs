@@ -79,6 +79,10 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
     private readonly int _bitDepth;
     private readonly int _qpBdOffset;
 
+    // With separate colour planes, the colour plane (colour_plane_id) this decoder decodes as a monochrome picture: its
+    // scaling lists are that plane's.
+    private readonly int _plane;
+
     // Per macroblock.
     private readonly int[] _sliceOfMb;
     private readonly MbKind[] _kind;
@@ -104,16 +108,17 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
     // The scaling matrix of the last slice's parameter sets.
     private (SequenceParameterSet? Sps, PictureParameterSet? Pps, ScalingMatrix Matrix) _scaling = (null, null, ScalingMatrix.Flat);
 
-    public PictureDecoder(SequenceParameterSet sps)
+    public PictureDecoder(SequenceParameterSet sps, int plane = 0)
     {
         Sps = sps;
+        _plane = plane;
         _widthInMbs = sps.WidthInMbs;
         _mbCount = sps.WidthInMbs * sps.HeightInMbs;
-        _mbWidthC = sps.MbWidthC;
-        _mbHeightC = sps.MbHeightC;
+        _mbWidthC = sps.ChromaArrayType == 0 ? 0 : sps.MbWidthC;
+        _mbHeightC = sps.ChromaArrayType == 0 ? 0 : sps.MbHeightC;
         _chromaBlocks = _mbHeightC / 2;
-        _chroma444 = sps.ChromaFormatIdc == 3;
-        _monochrome = sps.ChromaFormatIdc == 0;
+        _chroma444 = sps.ChromaArrayType == 3;
+        _monochrome = sps.ChromaArrayType == 0;
         _noChromaSyntax = _chroma444 || _monochrome;
         _bitDepth = sps.BitDepthLuma;
         _qpBdOffset = 6 * (_bitDepth - 8);
@@ -249,7 +254,7 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
 
         if (_scaling.Sps != Sps || _scaling.Pps != pps)
         {
-            _scaling = (Sps, pps, ScalingMatrix.For(Sps, pps));
+            _scaling = (Sps, pps, ScalingMatrix.For(Sps, pps).ForPlane(_plane));
         }
 
         var slice = new SliceState(header, pps, sliceNum, refList0, refList1, marks)

@@ -4,14 +4,14 @@ namespace ManagedCodecs.H264;
 
 /// <summary>
 /// H.264 decoder for Constrained Baseline, Main, High, High 10, High 4:2:2 and High 4:4:4 Predictive profile streams
-/// (CAVLC or CABAC; I, P and B slices; 8, 9, 10, 12 or 14 bits; monochrome, 4:2:0, 4:2:2 or 4:4:4; lossless;
-/// progressive or interlaced (MBAFF frames, field pictures)), taking MP4-style samples: length-prefixed NAL units, one
+/// (CAVLC or CABAC; I, P and B slices; 8, 9, 10, 12 or 14 bits; monochrome, 4:2:0, 4:2:2 or 4:4:4, the latter also as
+/// separate colour planes; lossless; progressive or interlaced (MBAFF frames, field pictures)), taking MP4-style samples: length-prefixed NAL units, one
 /// picture per sample. It can decode several pictures at once (<see cref="Threads"/>).
 /// </summary>
 /// <remarks>
 /// Implemented from ITU-T H.264; output is bit-exact with any conforming decoder. Streams that use other features
-/// (slice groups (FMO), data partitioning, separate colour planes, 11 or 13 bits, luma and chroma bit depths that
-/// differ) are rejected with <see cref="NotSupportedException"/>. Frames come out in display order (picture order
+/// (slice groups (FMO), data partitioning, separate colour planes in interlaced video, 11 or 13 bits, luma and chroma
+/// bit depths that differ) are rejected with <see cref="NotSupportedException"/>. Frames come out in display order (picture order
 /// count, 8.2.1), held back as far as the stream's max_num_reorder_frames says reordering can
 /// reach; <see cref="Flush"/> returns the rest at the end.
 /// </remarks>
@@ -679,7 +679,8 @@ public sealed class H264Decoder : IVideoDecoder
     private IPictureDecoder TakeDecoder(SequenceParameterSet sps, List<VideoFrame> frames)
     {
         if (_decoders.Count > 0 && (_decoders[0].Sps.WidthInMbs != sps.WidthInMbs || _decoders[0].Sps.HeightInMbs != sps.HeightInMbs
-            || _decoders[0].Sps.ChromaFormatIdc != sps.ChromaFormatIdc || _decoders[0].Sps.BitDepthLuma != sps.BitDepthLuma))
+            || _decoders[0].Sps.ChromaArrayType != sps.ChromaArrayType || _decoders[0].Sps.ChromaFormatIdc != sps.ChromaFormatIdc
+            || _decoders[0].Sps.BitDepthLuma != sps.BitDepthLuma))
         {
             Drain(frames, all: true);
             _decoders.Clear();
@@ -696,9 +697,10 @@ public sealed class H264Decoder : IVideoDecoder
             if (_decoders.Count < Threads)
             {
                 // The statistics are shared, counted without locks: exact with one thread (which tests use).
-                IPictureDecoder decoder = sps.BitDepthLuma > 8
-                    ? new PictureDecoder<ushort>(sps) { Statistics = MbaffStatistics, FieldStatistics = FieldStatistics, RowDelay = RowDelay }
-                    : new PictureDecoder<byte>(sps) { Statistics = MbaffStatistics, FieldStatistics = FieldStatistics, RowDelay = RowDelay };
+                IPictureDecoder Plane(int plane) => sps.BitDepthLuma > 8
+                    ? new PictureDecoder<ushort>(sps, plane) { Statistics = MbaffStatistics, FieldStatistics = FieldStatistics, RowDelay = RowDelay }
+                    : new PictureDecoder<byte>(sps, plane) { Statistics = MbaffStatistics, FieldStatistics = FieldStatistics, RowDelay = RowDelay };
+                var decoder = sps.SeparateColourPlanes ? new SeparatePlanesDecoder([Plane(0), Plane(1), Plane(2)]) : Plane(0);
                 _decoders.Add(decoder);
                 return decoder;
             }
@@ -787,12 +789,12 @@ public sealed class H264Decoder : IVideoDecoder
         // A picture whose frame was returned by the previous call may be reused: borrowed frames
         // are valid until the next call. One waiting in the output queue may not.
         bool Fits(Picture p) => p.WidthInMbs == sps.WidthInMbs && p.HeightInMbs == sps.HeightInMbs && p.MbHeightC == sps.MbHeightC
-            && p.MbWidthC == sps.MbWidthC && p.BitDepth == sps.BitDepthLuma;
+            && p.MbWidthC == sps.MbWidthC && p.BitDepth == sps.BitDepthLuma && p.SeparatePlanes == sps.SeparateColourPlanes;
         _pictures.RemoveAll(p => !Fits(p) && !_references.Contains(p) && !_output.Holds(p) && !InUse(p));
         var picture = _pictures.Find(p => Fits(p) && !_references.Contains(p) && !_output.Holds(p) && !InUse(p));
         if (picture is null)
         {
-            picture = new Picture(sps.WidthInMbs, sps.HeightInMbs, sps.MbHeightC, sps.BitDepthLuma, sps.MbWidthC);
+            picture = new Picture(sps.WidthInMbs, sps.HeightInMbs, sps.MbHeightC, sps.BitDepthLuma, sps.MbWidthC, sps.SeparateColourPlanes);
             _pictures.Add(picture);
         }
 
@@ -911,9 +913,9 @@ public sealed class H264Decoder : IVideoDecoder
 
     private static void CheckSupported(SequenceParameterSet sps)
     {
-        if (sps.SeparateColourPlanes)
+        if (sps.SeparateColourPlanes && !sps.FrameMbsOnly)
         {
-            throw new NotSupportedException("Separate colour planes (separate_colour_plane_flag) are not supported.");
+            throw new NotSupportedException("Separate colour planes (separate_colour_plane_flag) in interlaced video are not supported.");
         }
 
         // 11 and 13 bits are left out: FFmpeg has no pixel format for them, so nothing to check them against.

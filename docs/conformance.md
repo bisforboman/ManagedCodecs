@@ -206,10 +206,14 @@ unoptimized fallback under valgrind, CLAUDE.md, Timing.) Stage timers (2026-10-2
 30% of `h264-bench-720p.mp4` and 22% of `h264-high-b.mp4`, three quarters of it the edge filters; 8-bit edges are now
 filtered in registers (rows loaded whole or transposed in registers, bS and tC0 spread to the lanes by shuffles, no
 gather buffer), about twice as fast an edge. The 16-bit path still gathers into a buffer. The bS derivation was most
-of the rest (about 250 ns a macroblock on the 720p stream, 84% of whose macroblocks have uniform motion and no
+of the rest (about 250 to 290 ns a macroblock on the 720p stream, 84% of whose macroblocks have uniform motion and no
 coefficients); an edge between two such macroblocks now takes one motion comparison for its four segments, which
-halves that (about 140 ns). Output planes are allocated
-without zeroing (callgrind: 0.4% fewer instructions on `h264-high-b.mp4`, 2.6% on `testsrc-420.avi`). Looked
+halves that (about 140 ns). Output planes come from a
+pool and are allocated without zeroing. Two earlier cuts, timed afterwards (2026-10-24) by a Stopwatch
+microbenchmark of the old and new code on the decoder's array layout, scaled by calls per frame: `StoreMotion`
+writing a row and an 8x8 partition at a time takes about 45 ns a call instead of 115 (about 5,600 calls a frame on
+the 720p libx264 default stream: about 3.5% of its frame), and skipping the bS of edges 1 and 3 in 8x8-transform
+macroblocks saves about 500 ns where it applies (about 1% there, nothing on `h264-bench-720p.mp4`). Looked
 at and left: dropping the whole-picture clears in `Begin` (skipped, direct and intra macroblocks rely on the
 zeros in `_absMvd` and the motion arrays, so each path would clear its own macroblock instead, about as many
 bytes), one transpose for all four vertical luma edges (`FilterEdge` already skips the transposes of edges whose

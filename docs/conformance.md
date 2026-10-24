@@ -287,10 +287,11 @@ no sample has both (the code path is the same; untested). The 32-band synthesis 
 other n, exp(i pi/128 (k + 0.5)(4n - 255)), with every other window coefficient: after the analysis bank it gives the
 signal back with a whole-sample delay of 289 and a gain of 1 within 6e-3 (`QmfTests`, which also check it against its
 sums). Reading the kernel as exp(i pi/64 (k + 0.5)(2n - 127)) instead delays it a quarter of a sample more, and misses
-FFmpeg's output by 2e-2 on average, 14 to 17% of the signal at 3 to 6 kHz, below the high band. The sample agrees with FFmpeg to 4e-3 at most,
-2e-5 on average (noise under its tones, as the HF generator's single precision needs: without it, the 11 kHz tone that
-fills much of this narrower band left 7e-5, in the frames where computing the prediction in single precision moves this
-decoder's output, log correlation 0.91).
+FFmpeg's output by 2e-2 on average, 14 to 17% of the signal at 3 to 6 kHz, below the high band. The sample agrees with FFmpeg to 3e-4 at most,
+6e-6 on average, with noise under its tones, as FFmpeg's single precision in the HF generator needs: without noise, the
+11 kHz tone that fills much of this narrower band left 7e-5 on average, in the frames where computing the prediction
+in single precision moves this decoder's output (log correlation 0.91); with a third as much, 4e-3 at most on x64 and
+1e-2 against FFmpeg's ARM64 build, past the bound.
 
 Parametric stereo (HE-AAC v2, `PsProcessor`) follows the spec's baseline decoder: the hybrid analysis filters on the
 three lowest QMF bands (six slots of look-ahead from the SBR low band), decorrelation by a fractional delay and three

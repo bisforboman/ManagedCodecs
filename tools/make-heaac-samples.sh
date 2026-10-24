@@ -91,10 +91,10 @@ assert source.count(default) == 1, "the encoder's SBR ratio default moved"
 open(path, "w").write(source.replace(default, "    } else {\n      hAacConfig->sbrRatio = 1;\n    }"))
 PY
   cmake -S "$work/fdk3" -B "$work/fdk3/build" > /dev/null && cmake --build "$work/fdk3/build" -j4 > /dev/null
-  # A little noise under the tones: a subband holding one pure sinusoid makes the HF generator's prediction nearly
-  # singular, which FFmpeg's single precision magnifies (docs/conformance.md); this sample's narrower band leaves more
-  # of its high band to the 11 kHz tone.
-  ff -f lavfi -i "aevalsrc=$music+0.003*(random(2)-0.5)|$music2+0.003*(random(3)-0.5):s=44100:d=3" -c:a pcm_s16le "$work/in.wav"
+  # Noise under the tones: a subband holding one pure sinusoid makes the HF generator's prediction nearly singular,
+  # which FFmpeg's single precision magnifies (docs/conformance.md), and this sample's narrower band leaves more of its
+  # high band to the 11 kHz tone. A third as much noise still left 4e-3 on x64 and 1e-2 under FFmpeg's ARM64 build.
+  ff -f lavfi -i "aevalsrc=$music+0.01*(random(2)-0.5)|$music2+0.01*(random(3)-0.5):s=44100:d=3" -c:a pcm_s16le "$work/in.wav"
   LD_LIBRARY_PATH=$work/fdk3/build fdkaac --silent -p 5 -b 48000 -o "$out/heaac-downsampled.mp4" "$work/in.wav"
 fi
 

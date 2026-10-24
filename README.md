@@ -62,7 +62,6 @@ says feature by feature which encoder made the samples (libx264, OpenH264, JM) a
 - H.264 speed: 2.3 to 3.6 times FFmpeg's time on one thread (Benchmarking). With 4 threads a 720p P chain takes
   about half of one thread's time: each picture decodes about 28% slower than alone (its references were written on
   other cores) and threads wait for references' rows about a fifth of the time.
-- `ReadPacketsAsync` reads each packet synchronously (it yields the thread between packets).
 
 ## Getting started
 
@@ -107,7 +106,8 @@ foreach (var frame in decoder.Flush())
 The same asynchronously, for servers and UI threads: `ReadPacketsAsync`, `DecodeAsync` and `FlushAsync` are on the
 interfaces (with defaults, so other implementations keep working). With `Threads` above 1, `H264Decoder.DecodeAsync`
 awaits the pictures being decoded where `Decode` would block the calling thread; a cancelled token stops the waiting,
-not a picture already started. Reading a packet is still synchronous (the demuxers yield the thread between packets).
+not a picture already started. The demuxers' `ReadPacketsAsync` awaits every read of the file (`Open(path)` opens it
+without `FileOptions.Asynchronous`, so the runtime reads on the thread pool; pass your own stream for overlapped I/O).
 
 ```csharp
 IVideoDecoder decoder = new H264Decoder(video) { Threads = 4 };

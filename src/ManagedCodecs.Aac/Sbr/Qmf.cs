@@ -1,3 +1,6 @@
+using System.Runtime.InteropServices;
+using System.Runtime.Intrinsics;
+
 namespace ManagedCodecs.Aac.Sbr;
 
 /// <summary>
@@ -22,33 +25,38 @@ internal sealed class QmfAnalysis
     private static readonly double[] OutCos = [.. Enumerable.Range(0, Bands).Select(k => 2 * QmfTrig.CosPi256(-((2 * k) + 1)))];
     private static readonly double[] OutSin = [.. Enumerable.Range(0, Bands).Select(k => 2 * QmfTrig.SinPi256(-((2 * k) + 1)))];
 
-    // x: the newest sample at x[0].
-    private readonly double[] _x = new double[320];
+    // c(2n), the window's coefficients this bank takes, in order.
+    private static readonly double[] Window = [.. Enumerable.Range(0, 320).Select(n => QmfWindow.Coefficients[2 * n])];
+
+    // x, the last 320 samples with the newest first, at _x[_start..]: each slot moves the start back by 32 rather than
+    // the samples forward, and copies them to the end only when the start reaches 0.
+    private readonly double[] _x = new double[320 + (32 * 15)];
+    private int _start = 32 * 15;
 
     /// <summary>One time slot: 32 new samples (oldest first) in, 32 complex subband samples out.</summary>
     public void Process(ReadOnlySpan<double> input, Span<double> real, Span<double> imaginary)
     {
-        var x = _x.AsSpan();
-        x[..288].CopyTo(x[32..]);
+        _start = QmfState.Step(_x, _start, 320, 32);
+        var x = _x.AsSpan(_start, 320);
         for (int n = 0; n < 32; n++)
         {
             x[31 - n] = input[n];
         }
 
         // z(n) = x(n) c(2n), u(n) = the sum of z(n + 64 j) over j in 0..4, turned by exp(i pi n / 64).
+        Span<double> u = stackalloc double[64];
         Span<double> re = stackalloc double[64];
         Span<double> im = stackalloc double[64];
-        var c = QmfWindow.Coefficients;
+        u.Clear();
+        for (int j = 0; j < 5; j++)
+        {
+            Vectors.MultiplyAdd(u, x.Slice(64 * j, 64), Window.AsSpan(64 * j, 64));
+        }
+
         for (int n = 0; n < 64; n++)
         {
-            double sum = 0;
-            for (int j = 0; j < 5; j++)
-            {
-                sum += x[n + (64 * j)] * c[2 * (n + (64 * j))];
-            }
-
-            re[n] = sum * InCos[n];
-            im[n] = sum * InSin[n];
+            re[n] = u[n] * InCos[n];
+            im[n] = u[n] * InSin[n];
         }
 
         Fft.Transform(re, im);
@@ -81,12 +89,17 @@ internal sealed class QmfSynthesis
     private static readonly Tables Halved = new(32);
 
     private readonly Tables _tables;
+
+    // v, the last 20B values with the newest first, at _v[_start..]: each slot moves the start back by 2B rather than
+    // the values forward (as the analysis bank's samples).
     private readonly double[] _v;
+    private int _start;
 
     public QmfSynthesis(bool downsampled = false)
     {
         _tables = downsampled ? Halved : Full;
-        _v = new double[20 * Bands];
+        _v = new double[(20 + 18) * Bands];
+        _start = 18 * Bands;
     }
 
     /// <summary>64, or 32 downsampled: the subband samples a slot takes and the output samples it gives.</summary>
@@ -97,39 +110,27 @@ internal sealed class QmfSynthesis
     {
         var t = _tables;
         int bands = t.Bands;
-        var v = _v.AsSpan();
-        v[..(18 * bands)].CopyTo(v[(2 * bands)..]);
+        _start = QmfState.Step(_v, _start, 20 * bands, 2 * bands);
+        var v = _v.AsSpan(_start, 20 * bands);
 
         Span<double> re = stackalloc double[2 * bands];
         Span<double> im = stackalloc double[2 * bands];
-        for (int k = 0; k < bands; k++)
-        {
-            re[k] = (real[k] * t.InCos[k]) - (imaginary[k] * t.InSin[k]);
-            im[k] = (real[k] * t.InSin[k]) + (imaginary[k] * t.InCos[k]);
-        }
+        QmfState.Rotate(real[..bands], imaginary[..bands], t.InCos, t.InSin, re, im);
 
         re[bands..].Clear();
         im[bands..].Clear();
         t.Fft.Transform(re, im);
-        for (int n = 0; n < 2 * bands; n++)
-        {
-            v[n] = (re[n] * t.OutCos[n]) - (im[n] * t.OutSin[n]);
-        }
+        QmfState.RealOfRotation(re, im, t.OutCos, t.OutSin, v[..(2 * bands)]);
 
         // g takes, of each 4B values of v, the first and the last B; w(n) = g(n) c(n (64 / B)); each output sample sums
-        // ten of w.
-        var c = QmfWindow.Coefficients;
-        int step = 64 / bands;
-        for (int n = 0; n < bands; n++)
+        // ten of w, in the order of n.
+        var window = t.Window.AsSpan();
+        output = output[..bands];
+        output.Clear();
+        for (int i = 0; i < 5; i++)
         {
-            double sum = 0;
-            for (int i = 0; i < 5; i++)
-            {
-                sum += v[(4 * bands * i) + n] * c[step * ((2 * bands * i) + n)];
-                sum += v[(4 * bands * i) + (3 * bands) + n] * c[step * ((2 * bands * i) + bands + n)];
-            }
-
-            output[n] = sum;
+            Vectors.MultiplyAdd(output, v.Slice(4 * bands * i, bands), window.Slice(2 * bands * i, bands));
+            Vectors.MultiplyAdd(output, v.Slice((4 * bands * i) + (3 * bands), bands), window.Slice((2 * bands * i) + bands, bands));
         }
     }
 
@@ -140,6 +141,9 @@ internal sealed class QmfSynthesis
 
         public QmfFft Fft { get; } = new(2 * bands);
 
+        // c(n (64 / B)), the window's coefficients the bank takes, in order.
+        public double[] Window { get; } = [.. Enumerable.Range(0, 10 * bands).Select(n => QmfWindow.Coefficients[64 / bands * n])];
+
         public double[] InCos { get; } = [.. Enumerable.Range(0, bands).Select(k => QmfTrig.CosPi256(-510 * k))];
 
         public double[] InSin { get; } = [.. Enumerable.Range(0, bands).Select(k => QmfTrig.SinPi256(-510 * k))];
@@ -147,6 +151,97 @@ internal sealed class QmfSynthesis
         public double[] OutCos { get; } = [.. Enumerable.Range(0, 2 * bands).Select(n => QmfTrig.CosPi256(((128 / bands) * n) - 255) / 64)];
 
         public double[] OutSin { get; } = [.. Enumerable.Range(0, 2 * bands).Select(n => QmfTrig.SinPi256(((128 / bands) * n) - 255) / 64)];
+    }
+}
+
+/// <summary>
+/// The banks' history buffers, kept in place with a moving start (newest value first), and their element-wise
+/// rotations, several elements at a time; each the scalar arithmetic in the same order, to the bit.
+/// </summary>
+internal static class QmfState
+{
+    /// <summary>(outRe + i outIm)[k] = (re + i im)[k] (cos + i sin)[k], for k below re's length.</summary>
+    public static void Rotate(ReadOnlySpan<double> re, ReadOnlySpan<double> im, ReadOnlySpan<double> cos, ReadOnlySpan<double> sin, Span<double> outRe, Span<double> outIm)
+    {
+        int length = re.Length;
+        if (im.Length < length || cos.Length < length || sin.Length < length || outRe.Length < length || outIm.Length < length)
+        {
+            throw new ArgumentException("The spans are shorter than the first.");
+        }
+
+        ref double a = ref MemoryMarshal.GetReference(re);
+        ref double b = ref MemoryMarshal.GetReference(im);
+        ref double c = ref MemoryMarshal.GetReference(cos);
+        ref double d = ref MemoryMarshal.GetReference(sin);
+        ref double x = ref MemoryMarshal.GetReference(outRe);
+        ref double y = ref MemoryMarshal.GetReference(outIm);
+        int k = 0;
+        if (Vector128.IsHardwareAccelerated)
+        {
+            for (; k <= length - Vector128<double>.Count; k += Vector128<double>.Count)
+            {
+                var r = Vector128.LoadUnsafe(ref a, (nuint)k);
+                var i = Vector128.LoadUnsafe(ref b, (nuint)k);
+                var cs = Vector128.LoadUnsafe(ref c, (nuint)k);
+                var sn = Vector128.LoadUnsafe(ref d, (nuint)k);
+                ((r * cs) - (i * sn)).StoreUnsafe(ref x, (nuint)k);
+                ((r * sn) + (i * cs)).StoreUnsafe(ref y, (nuint)k);
+            }
+        }
+
+        for (; k < length; k++)
+        {
+            outRe[k] = (re[k] * cos[k]) - (im[k] * sin[k]);
+            outIm[k] = (re[k] * sin[k]) + (im[k] * cos[k]);
+        }
+    }
+
+    /// <summary>output[n] = the real part of (re + i im)[n] (cos + i sin)[n], for n below output's length.</summary>
+    public static void RealOfRotation(ReadOnlySpan<double> re, ReadOnlySpan<double> im, ReadOnlySpan<double> cos, ReadOnlySpan<double> sin, Span<double> output)
+    {
+        int length = output.Length;
+        if (re.Length < length || im.Length < length || cos.Length < length || sin.Length < length)
+        {
+            throw new ArgumentException("The spans are shorter than the output.");
+        }
+
+        ref double a = ref MemoryMarshal.GetReference(re);
+        ref double b = ref MemoryMarshal.GetReference(im);
+        ref double c = ref MemoryMarshal.GetReference(cos);
+        ref double d = ref MemoryMarshal.GetReference(sin);
+        ref double x = ref MemoryMarshal.GetReference(output);
+        int n = 0;
+        if (Vector128.IsHardwareAccelerated)
+        {
+            for (; n <= length - Vector128<double>.Count; n += Vector128<double>.Count)
+            {
+                var r = Vector128.LoadUnsafe(ref a, (nuint)n);
+                var i = Vector128.LoadUnsafe(ref b, (nuint)n);
+                ((r * Vector128.LoadUnsafe(ref c, (nuint)n)) - (i * Vector128.LoadUnsafe(ref d, (nuint)n))).StoreUnsafe(ref x, (nuint)n);
+            }
+        }
+
+        for (; n < length; n++)
+        {
+            output[n] = (re[n] * cos[n]) - (im[n] * sin[n]);
+        }
+    }
+
+    /// <summary>
+    /// The start of the next slot's window of <paramref name="window"/> values in <paramref name="buffer"/>, the newest
+    /// <paramref name="step"/> of which the caller then writes: the start moves back by the step, and when it reaches 0
+    /// the window's values that stay are copied to the buffer's end first.
+    /// </summary>
+    public static int Step(double[] buffer, int start, int window, int step)
+    {
+        if (start >= step)
+        {
+            return start - step;
+        }
+
+        int kept = window - step;
+        buffer.AsSpan(start, kept).CopyTo(buffer.AsSpan(buffer.Length - kept));
+        return buffer.Length - window;
     }
 }
 
@@ -192,7 +287,13 @@ internal sealed class QmfFft
         }
     }
 
-    public void Transform(Span<double> re, Span<double> im)
+    /// <summary>
+    /// In place. The stages from a half-span of 2 take two butterflies at a time where Vector128 is accelerated (four from a
+    /// half-span of 4 where Vector256 is); each lane
+    /// does the scalar arithmetic in the same order (no fused multiply-add), so the result is the same to the bit
+    /// (<paramref name="scalar"/> for tests).
+    /// </summary>
+    public void Transform(Span<double> re, Span<double> im, bool scalar = false)
     {
         re = re[.._length];
         im = im[.._length];
@@ -215,6 +316,12 @@ internal sealed class QmfFft
             im[a] += ti;
         }
 
+        if (Vector128.IsHardwareAccelerated && !scalar)
+        {
+            VectorStages(re, im);
+            return;
+        }
+
         for (int half = 2; half < _length; half *= 2)
         {
             var cos = _cos.AsSpan(half, half);
@@ -233,6 +340,64 @@ internal sealed class QmfFft
                     im1[j] = im0[j] - ti;
                     re0[j] += tr;
                     im0[j] += ti;
+                }
+            }
+        }
+    }
+
+    // The stages from a half-span of 2, two or four butterflies at a time.
+    private void VectorStages(Span<double> re, Span<double> im)
+    {
+        ref double r = ref MemoryMarshal.GetReference(re);
+        ref double i = ref MemoryMarshal.GetReference(im);
+        ref double cos = ref MemoryMarshal.GetArrayDataReference(_cos);
+        ref double sin = ref MemoryMarshal.GetArrayDataReference(_sin);
+        for (int half = 2; half < _length; half *= 2)
+        {
+            if (Vector256.IsHardwareAccelerated && half >= Vector256<double>.Count)
+            {
+                for (int start = 0; start < _length; start += 2 * half)
+                {
+                    for (int j = 0; j < half; j += Vector256<double>.Count)
+                    {
+                        var c = Vector256.LoadUnsafe(ref cos, (nuint)(half + j));
+                        var s = Vector256.LoadUnsafe(ref sin, (nuint)(half + j));
+                        nuint a = (nuint)(start + j);
+                        nuint b = a + (nuint)half;
+                        var rb = Vector256.LoadUnsafe(ref r, b);
+                        var ib = Vector256.LoadUnsafe(ref i, b);
+                        var ra = Vector256.LoadUnsafe(ref r, a);
+                        var ia = Vector256.LoadUnsafe(ref i, a);
+                        var tr = (rb * c) - (ib * s);
+                        var ti = (rb * s) + (ib * c);
+                        (ra - tr).StoreUnsafe(ref r, b);
+                        (ia - ti).StoreUnsafe(ref i, b);
+                        (ra + tr).StoreUnsafe(ref r, a);
+                        (ia + ti).StoreUnsafe(ref i, a);
+                    }
+                }
+
+                continue;
+            }
+
+            for (int start = 0; start < _length; start += 2 * half)
+            {
+                for (int j = 0; j < half; j += Vector128<double>.Count)
+                {
+                    var c = Vector128.LoadUnsafe(ref cos, (nuint)(half + j));
+                    var s = Vector128.LoadUnsafe(ref sin, (nuint)(half + j));
+                    nuint a = (nuint)(start + j);
+                    nuint b = a + (nuint)half;
+                    var rb = Vector128.LoadUnsafe(ref r, b);
+                    var ib = Vector128.LoadUnsafe(ref i, b);
+                    var ra = Vector128.LoadUnsafe(ref r, a);
+                    var ia = Vector128.LoadUnsafe(ref i, a);
+                    var tr = (rb * c) - (ib * s);
+                    var ti = (rb * s) + (ib * c);
+                    (ra - tr).StoreUnsafe(ref r, b);
+                    (ia - ti).StoreUnsafe(ref i, b);
+                    (ra + tr).StoreUnsafe(ref r, a);
+                    (ia + ti).StoreUnsafe(ref i, a);
                 }
             }
         }

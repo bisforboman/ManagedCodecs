@@ -127,7 +127,56 @@ public class QmfTests
         Assert.True(worstGain < 6e-3 && worstQuadrature < 6e-3, $"Gain off by up to {worstGain:e2}, quadrature up to {worstQuadrature:e2}.");
     }
 
-    /// <summary>The FFT-based banks give the spec's sums (<see cref="QmfAnalysisReference"/>, <see cref="QmfSynthesisReference"/>) on random input, slot after slot.</summary>
+    /// <summary>The vector FFT does each butterfly's arithmetic in the scalar order: the same doubles, to the bit.</summary>
+    [Theory]
+    [InlineData(64)]
+    [InlineData(128)]
+    public void VectorFft_MatchesScalarExactly(int length)
+    {
+        var fft = new QmfFft(length);
+        var random = new Random(length);
+        var re = new double[length];
+        var im = new double[length];
+        for (int trial = 0; trial < 20; trial++)
+        {
+            for (int k = 0; k < length; k++)
+            {
+                re[k] = (random.NextDouble() - 0.5) * Math.Pow(10, random.Next(0, 6));
+                im[k] = (random.NextDouble() - 0.5) * Math.Pow(10, random.Next(0, 6));
+            }
+
+            var expectedRe = (double[])re.Clone();
+            var expectedIm = (double[])im.Clone();
+            fft.Transform(expectedRe, expectedIm, scalar: true);
+            fft.Transform(re, im);
+            Assert.Equal(expectedRe, re);
+            Assert.Equal(expectedIm, im);
+        }
+    }
+
+    /// <summary>The vector rotations give the scalar results, tails included.</summary>
+    [Fact]
+    public void VectorRotations_MatchScalarExactly()
+    {
+        var random = new Random(9);
+        for (int length = 0; length < 20; length++)
+        {
+            double[] Values() => [.. Enumerable.Range(0, length).Select(_ => (random.NextDouble() - 0.5) * 1e5)];
+            var (re, im, cos, sin) = (Values(), Values(), Values(), Values());
+            var (outRe, outIm, real) = (new double[length], new double[length], new double[length]);
+            QmfState.Rotate(re, im, cos, sin, outRe, outIm);
+            QmfState.RealOfRotation(re, im, cos, sin, real);
+            Assert.Equal(re.Select((x, k) => (x * cos[k]) - (im[k] * sin[k])), outRe);
+            Assert.Equal(re.Select((x, k) => (x * sin[k]) + (im[k] * cos[k])), outIm);
+            Assert.Equal(re.Select((x, k) => (x * cos[k]) - (im[k] * sin[k])), real);
+        }
+    }
+
+    /// <summary>
+    /// The FFT-based banks give the spec's sums (<see cref="QmfAnalysisReference"/>, <see cref="QmfSynthesisReference"/>)
+    /// on random input, slot after slot: past the point where their history buffers wrap around (after 15 slots of the
+    /// analysis bank, 9 of the synthesis bank).
+    /// </summary>
     [Fact]
     public void FastBanks_MatchTheSums()
     {

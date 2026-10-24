@@ -32,6 +32,12 @@ internal sealed class Cabac
     private ulong _value;
     private int _bits;
 
+    /// <summary>
+    /// Whether the engine has consumed bits past the end of the slice data (the bits it read ahead do not count): a
+    /// conforming slice ends inside its data (9.3.4.5 writes the stop bit last), so its data was cut short or damaged.
+    /// </summary>
+    public bool PastEnd => _reader.Position - _bits > _reader.BitLength;
+
     /// <summary>Initializes every context variable (9.3.1.1) for a slice.</summary>
     /// <param name="table">0 for I slices, else 1 + cabac_init_idc.</param>
     /// <param name="sliceQp">SliceQP_Y.</param>

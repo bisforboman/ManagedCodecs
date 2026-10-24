@@ -56,6 +56,19 @@ public class MalformedInputTests
         await Task.Run(() => Targets.Run(target, data, threads: 3)).WaitAsync(TimeSpan.FromSeconds(30));
     }
 
+    /// <summary>
+    /// The findings concealing errors (<c>H264Decoder.ConcealErrors</c>), on one thread and on three: decoding goes on
+    /// past damaged slices, into what the first runs never reached.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(Findings))]
+    public async Task Finding_KeepsTheContractConcealing(string target, string name)
+    {
+        var data = File.ReadAllBytes(Path.Combine(FindingsDirectory, target, name));
+        await Task.Run(() => Targets.Run(target, data, conceal: true)).WaitAsync(TimeSpan.FromSeconds(30));
+        await Task.Run(() => Targets.Run(target, data, threads: 3, conceal: true)).WaitAsync(TimeSpan.FromSeconds(30));
+    }
+
     // One sample per container and codec path: AVI MJPEG, MP4 with H.264 (CAVLC, CABAC with B frames, field
     // pictures) and AAC, fragmented MP4.
     public static TheoryData<string> SweepSamples() => new(new[]
@@ -151,7 +164,12 @@ public class MalformedInputTests
     [MemberData(nameof(SweepSamples))]
     public Task Mutants_KeepTheContractWithThreads(string sampleName) => SweepMutants(sampleName, threads: 3);
 
-    private static async Task SweepMutants(string sampleName, int threads)
+    /// <summary>The same mutants concealing errors, on three threads.</summary>
+    [Theory]
+    [MemberData(nameof(SweepSamples))]
+    public Task Mutants_KeepTheContractConcealing(string sampleName) => SweepMutants(sampleName, threads: 3, conceal: true);
+
+    private static async Task SweepMutants(string sampleName, int threads, bool conceal = false)
     {
         var original = File.ReadAllBytes(TestSamples.PathOf(sampleName));
         var random = new Random(sampleName.Length);
@@ -170,7 +188,7 @@ public class MalformedInputTests
                 }
             }
 
-            await Task.Run(() => Targets.Run("file", data, threads)).WaitAsync(TimeSpan.FromSeconds(30));
+            await Task.Run(() => Targets.Run("file", data, threads, conceal)).WaitAsync(TimeSpan.FromSeconds(30));
         }
     }
 }

@@ -55,6 +55,8 @@ internal sealed partial class PictureDecoder<TPixel>
     /// </summary>
     private void MacroblockDone(int mbAddr)
     {
+        _lastDoneMb = mbAddr;
+
         // Every macroblock marked as in a slice is decoded by now (they are marked as they start): some may be past this
         // one (slices out of order). A field picture's macroblocks are every other slot.
         while (_decodedPrefix < _mbCount && _sliceOfMb[_decodedPrefix] >= 0)

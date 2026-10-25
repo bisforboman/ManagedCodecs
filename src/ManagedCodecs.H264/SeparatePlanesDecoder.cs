@@ -67,5 +67,7 @@ internal sealed class SeparatePlanesDecoder : IPictureDecoder
         }
     }
 
-    private static Picture[] PlaneOf(IReadOnlyList<Picture> list, int plane) => [.. list.Select(p => p.ColourPlane(plane))];
+    // A reference frame's plane, or that plane's field of a reference field.
+    private static Picture[] PlaneOf(IReadOnlyList<Picture> list, int plane) =>
+        [.. list.Select(p => p.Parity < 0 ? p.ColourPlane(plane) : p.ColourPlane(plane).Field(p.Parity))];
 }

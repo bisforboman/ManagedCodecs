@@ -35,8 +35,9 @@ says feature by feature which encoder made the samples (libx264, OpenH264, JM) a
   output straight into the frame's planes (`ZeroCopy`).
 - **H.264**: Constrained Baseline to High 4:4:4 Predictive. CAVLC and CABAC; I, P and B pictures; weighted
   prediction, the 8x8 transform, scaling matrices; MBAFF frames and field pictures; monochrome, 4:2:0, 4:2:2 and
-  4:4:4, also as separate colour planes; 8, 9, 10, 12 and 14 bits; lossless. Bit-exact on streams from libx264,
-  OpenH264 and JM (separate colour planes against JM's decoder, as FFmpeg decodes none). Frame threading
+  4:4:4, also as separate colour planes (progressive and interlaced); 8, 9, 10, 12 and 14 bits; lossless. Bit-exact on
+  streams from libx264, OpenH264 and JM (separate colour planes against JM's decoder or, interlaced, against three
+  monochrome streams spliced into one, as FFmpeg decodes none). Frame threading
   (`Threads`), and concealment of damaged slices (`ConcealErrors`, Malformed input).
 - **AAC LC**: mono to 7.1 and program config elements (in MP4 and ADTS, in FFmpeg's channel order), every window
   sequence and shape, M/S and intensity stereo,
@@ -58,7 +59,7 @@ says feature by feature which encoder made the samples (libx264, OpenH264, JM) a
   parametric stereo, which decodes but is untested); SBR's speed (5.1 HE-AAC at about 0.41 ms a frame, 100 times
   real time, 2.2 times FFmpeg's time on one thread; Benchmarking).
 - MJPEG: files from real cameras (the samples are all FFmpeg's), and packets holding one field (FFmpeg decodes none).
-- H.264: separate colour planes in interlaced video (rejected; JM's samples are progressive); luma and chroma bit depths that differ are rejected on purpose (no mainstream
+- H.264: luma and chroma bit depths that differ are rejected on purpose (no mainstream
   encoder or decoder, FFmpeg included, handles them, and they would need a bit depth for each plane in the frame
   API); guessing motion for concealed macroblocks (they copy their place in a reference); without concealment, a
   lost reference fails pictures up to the next IDR picture, not an MMCO 5 one (by design: the MMCO 5 picture itself

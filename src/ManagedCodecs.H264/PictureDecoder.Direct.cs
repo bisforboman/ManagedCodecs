@@ -263,7 +263,7 @@ internal sealed partial class PictureDecoder<TPixel>
 
         int colMb = mbAddr;
         var scale = VerticalScale.OneToOne;
-        var colFrame = colPic.Frame;
+        var colFrame = colPic.Whole;
         if (_fieldParity >= 0)
         {
             // A field picture: the field RefPicList1[0] where it was decoded as a field (a field

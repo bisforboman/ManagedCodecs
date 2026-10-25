@@ -168,10 +168,21 @@ decoder instead (`samples/jm-ref/`, from `tools/make-jm-samples.sh`, muxed by
 the same plane), CAVLC, scaling lists in the SPS and PPS (each plane takes its own
 lists, iYCbCr being colour_plane_id, 8.5.9), 10 bits, and chroma QP offsets in the PPS, which no
 plane applies (all three dequantize and deblock at QP_Y). The samples fail when a plane predicts
-from another plane's references, and the scaling-list and QP-offset ones when their rule is broken. Interlaced
-video with separate colour planes (field pictures, MBAFF) is rejected: JM's samples are progressive.
+from another plane's references, and the scaling-list and QP-offset ones when their rule is broken.
 With threads, a picture is reported done to the pictures that predict from it once all three
 planes are, not row by row.
+
+Interlaced video with separate colour planes (field pictures, MBAFF) neither JM's encoder nor its
+decoder handles (both crash), so those samples are spliced: `tools/h264-splice-planes.py` joins
+three 4:0:0 JM encodes of one source's planes, with the same settings and so the same slice
+headers, into one stream (the SPS rewritten to separate colour planes in High 4:4:4, each slice
+given its colour_plane_id). Each plane decodes as its monochrome stream did, so the reference is
+FFmpeg's three monochrome decodes, stacked (the method checked first on a progressive splice,
+which JM's decoder decodes to the same frames). `jm-planes-paff-cavlc` (field pictures, CAVLC, P),
+`jm-planes-paff` (CABAC, B pictures, temporal direct: the co-located field is the plane's) and
+`jm-planes-mbaff`. They fail when a plane's field reads the frame's fields instead of its own;
+no sample has long-term references in such fields, so a unit test (ReferenceListTests) checks that a
+plane's fields carry the frame's marks.
 
 ### Lossless
 

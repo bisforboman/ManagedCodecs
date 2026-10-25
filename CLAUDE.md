@@ -46,7 +46,9 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
   (`ContextInitMethod=0 FixedModelNumber=N`), Cb and Cr QP offsets of their own (`CbQPOffset`, `CrQPOffset`), B
   partitions below 8x8 (by default) and scaling lists in the SPS, PPS or both (`QmatrixFile`,
   `ScalingMatrixPresentFlag`, `ScalingListPresentFlagN`); `tools/h264-add-weights.py` weights its field pictures afterwards; separate colour planes, which FFmpeg neither
-  decodes nor muxes, go to `samples/jm-ref/` with JM's decoder's references, muxed by `tools/mux-h264.py`
+  decodes nor muxes, go to `samples/jm-ref/` with JM's decoder's references, muxed by `tools/mux-h264.py` (JM handles them in
+  frames only, crashing on fields or MBAFF: interlaced ones are three 4:0:0 encodes spliced by
+  `tools/h264-splice-planes.py`, referenced by FFmpeg's gray decodes stacked)
   (`tools/make-jm-samples.sh <JM tree> <names>` makes only those samples). Cover
   the rest with unit tests and say so in the docs.
   `tests/ManagedCodecs.Tests/H264/ParameterSetRewriter.cs` rewrites a sample's SPS and PPS for such tests.

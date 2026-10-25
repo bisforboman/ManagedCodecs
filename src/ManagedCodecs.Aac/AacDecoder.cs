@@ -1,3 +1,4 @@
+using System.Numerics;
 using System.Runtime.ExceptionServices;
 using ManagedCodecs.Aac.Sbr;
 
@@ -809,10 +810,35 @@ public sealed class AacDecoder : IAudioDecoder
         }
     }
 
-    private static readonly double[] PowFourThirds = [.. Enumerable.Range(0, 8192).Select(i => Math.Pow(i, 4.0 / 3))];
+    // 2^0, 2^0.25, 2^0.5 and 2^0.75, correctly rounded (before Gains, which they make).
+    private static readonly double[] QuarterPowers = [1.0, 1.1892071150027210667, 1.4142135623730950488, 1.6817928305074290861];
+
+    private static readonly double[] PowFourThirds = [.. Enumerable.Range(0, 8192).Select(FourThirdsPower)];
 
     // 2^(0.25 (sf - 100)) for scalefactors 0..255.
-    private static readonly double[] Gains = [.. Enumerable.Range(0, 256).Select(sf => Math.Pow(2, 0.25 * (sf - 100)))];
+    private static readonly double[] Gains = [.. Enumerable.Range(0, 256).Select(sf => QuarterPowerOfTwo(sf - 100))];
+
+    /// <summary>
+    /// x^(4/3) as x cbrt(x), the cube root by Newton's method from a power of two above it, in additions,
+    /// multiplications and divisions alone: the same bits on every runtime, within 1.5 units in the last place of the
+    /// exact value. Math.Pow(x, 4.0 / 3) is not (WebAssembly's differs from glibc's in the last bit at 7 of the 8192
+    /// values, so a stream reaching one decodes differently there), and nor is its exponent quite 4/3.
+    /// </summary>
+    internal static double FourThirdsPower(int x)
+    {
+        if (x == 0)
+        {
+            return 0;
+        }
+
+        double y = Math.ScaleB(1.0, (32 - BitOperations.LeadingZeroCount((uint)x) + 2) / 3);
+        for (int i = 0; i < 8; i++)
+        {
+            y -= ((y * y * y) - x) / (3 * y * y);
+        }
+
+        return x * y;
+    }
 
     private static double InverseQuantize(int value)
     {
@@ -825,6 +851,9 @@ public sealed class AacDecoder : IAudioDecoder
         return value < 0 ? -PowFourThirds[magnitude] : PowFourThirds[magnitude];
     }
 
+    /// <summary>2^(<paramref name="quarters"/> / 4), correctly rounded and the same bits on every runtime, without Math.Pow.</summary>
+    internal static double QuarterPowerOfTwo(int quarters) => Math.ScaleB(QuarterPowers[quarters & 3], quarters >> 2);
+
     /// <summary>Random values with energy 2^(0.5 * energy) (4.6.13.3).</summary>
     private void FillNoise(Span<double> band, int energy)
     {
@@ -836,7 +865,7 @@ public sealed class AacDecoder : IAudioDecoder
             sum += band[i] * band[i];
         }
 
-        double scale = Math.Pow(2, 0.25 * energy) / Math.Sqrt(sum);
+        double scale = QuarterPowerOfTwo(energy) / Math.Sqrt(sum);
         for (int i = 0; i < band.Length; i++)
         {
             band[i] *= scale;
@@ -871,7 +900,7 @@ public sealed class AacDecoder : IAudioDecoder
                         sign = -sign;
                     }
 
-                    double scale = sign * Math.Pow(0.5, 0.25 * right.Scalefactor[index]);
+                    double scale = sign * QuarterPowerOfTwo(-right.Scalefactor[index]);
                     for (int w = 0; w < info.GroupLength[g]; w++)
                     {
                         int window = (windowBase + w) * 128;

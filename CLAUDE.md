@@ -203,7 +203,9 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
   one sinusoid, so its output moves by up to about 5e-3 of the peak there (this decoder's does too in float): compare
   with a loose largest and a tight mean difference, and check a suspected bug by whether it moves the mean. Math.Cos and
   Math.Sin differ in their last bit between .NET and the WebAssembly runtime, which that prediction can magnify into the
-  output (wasm-check.sh fails): tables that feed SBR are computed in arithmetic alone (`QmfTrig`). The FDK encoder
+  output (wasm-check.sh fails): tables that feed SBR are computed in arithmetic alone (`QmfTrig`). Math.Pow too: `Math.Pow(x, 4.0 / 3)` differs in the
+  last bit at 7 of AAC's 8192 dequantization values, which only a stream reaching one shows (an unseeded noise sample
+  made `wasm` fail now and then); `FourThirdsPower` and `QuarterPowerOfTwo` replace it. The FDK encoder
   writes the SBR header's second part only with non-default settings (a patched copy, `make-heaac-samples.sh`), and
   downsampled SBR only for ELD (another patched copy; with PS it stays dual-rate). The downsampled synthesis kernel is
   the full one at even n, (4n - 255): read as (2n - 127) it lags a quarter of a sample and misses FFmpeg by 14 to 17% at

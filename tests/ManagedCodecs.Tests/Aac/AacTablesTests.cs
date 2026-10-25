@@ -1,3 +1,4 @@
+using System.Numerics;
 using ManagedCodecs.Aac;
 
 namespace ManagedCodecs.Tests.Aac;
@@ -5,6 +6,44 @@ namespace ManagedCodecs.Tests.Aac;
 /// <summary>Transcription and construction checks for the AAC tables and windows.</summary>
 public class AacTablesTests
 {
+    [Fact]
+    public void FourThirdsPower_IsWithinTwoUnitsOfTheExactValue()
+    {
+        // The reference in integers: floor(x^(4/3) 2^60) = floor(cbrt(x^4 2^180)), by Newton's method from above.
+        for (int x = 1; x < 8192; x++)
+        {
+            var n = BigInteger.Pow(x, 4) << 180;
+            var root = BigInteger.One << (int)((n.GetBitLength() + 2) / 3);
+            while (((2 * root) + (n / (root * root))) / 3 is var next && next < root)
+            {
+                root = next;
+            }
+
+            double exact = (double)root * Math.ScaleB(1.0, -60);
+            double value = AacDecoder.FourThirdsPower(x);
+            Assert.True(Math.Abs(value - exact) <= 2 * (Math.BitIncrement(exact) - exact), $"{x}^(4/3): {value} against {exact}");
+        }
+
+        Assert.Equal(16.0, AacDecoder.FourThirdsPower(8));
+    }
+
+    [Fact]
+    public void QuarterPowerOfTwo_IsTwoToTheQuarter()
+    {
+        // Exact at whole powers; elsewhere within one unit in the last place of Math.Pow (which may itself be off by one).
+        for (int quarters = -400; quarters <= 400; quarters++)
+        {
+            double value = AacDecoder.QuarterPowerOfTwo(quarters);
+            if (quarters % 4 == 0)
+            {
+                Assert.Equal(Math.ScaleB(1.0, quarters / 4), value);
+            }
+
+            double reference = Math.Pow(2, quarters / 4.0);
+            Assert.True(Math.Abs(value - reference) <= Math.BitIncrement(reference) - reference, $"2^({quarters}/4): {value} against {reference}");
+        }
+    }
+
     [Fact]
     public void Codebooks_ArePrefixFreeAndComplete()
     {

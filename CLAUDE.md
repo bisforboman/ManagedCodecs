@@ -95,6 +95,9 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
 
 - make-samples.sh names references by the sample's stem: an `.aac` and an `.mp4` of the same stem overwrite each
   other's `.packets.framemd5` and `.f32` (name a remux `-remux.mp4`).
+- Short samples are mostly JIT: `jm-paff-b` (10 frames) took 3960 µs a frame at 20 loops and 2177 at 100. Time
+  them at 100 loops or more. Inlining a hot callee moves its perf share into its callers rather than removing it:
+  judge such a change by the share of a function it leaves alone (`ResidualBlock`), which rises if the total fell.
 - perf shares move by about a point between runs of one build (the HF generator read 6.7, 7.6 and 8.0% of 5.1 HE-AAC
   on three runs): profile the builds before and after back to back, and take a difference under a point as noise.
 - `ffmpeg ... -f framemd5` moves timestamps to start at 0; packet references need `-copyts`. Decoded-frame

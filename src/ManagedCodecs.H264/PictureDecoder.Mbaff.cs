@@ -427,9 +427,23 @@ internal sealed partial class PictureDecoder<TPixel>
     private void GatherPlane(int mbAddr, TPixel[] plane, TPixel[] scratch, int scratchStride, int maxW, int maxH, int topWidth)
     {
         bool luma = plane == PlaneY;
-        for (int yN = -1; yN < maxH; yN++)
+        Copy(-1, -1);
+
+        // Column -1 from A: the left pair found once, then Table 6-4's rows.
+        int pair = mbAddr >> 1;
+        int pairY = pair / _widthInMbs;
+        int leftTop = PairIfAvailable(mbAddr, pair - (pairY * _widthInMbs) - 1, pairY);
+        if (leftTop >= 0)
         {
-            Copy(-1, yN);
+            bool leftField = _fieldMb[leftTop];
+            bool frame = !_fieldMb[mbAddr];
+            bool isTop = (mbAddr & 1) == 0;
+            for (int yN = 0; yN < maxH; yN++)
+            {
+                var (n, y) = AffLeft(leftTop, leftField, frame, isTop, yN, maxH);
+                var (origin, stride) = luma ? LumaPlace(n) : ChromaPlace(n);
+                scratch[(yN + 1) * scratchStride] = plane[origin + (y * stride) + maxW - 1];
+            }
         }
 
         // Row -1 comes from B (x below maxW) and C (from maxW on), each a run of one row of one macroblock.

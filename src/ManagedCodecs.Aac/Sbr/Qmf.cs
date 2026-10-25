@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics;
 
@@ -256,6 +257,9 @@ internal sealed class QmfFft
     // The bit-reversal permutation as the pairs it swaps, and each stage's twiddle factors in a row of their own
     // (a stage of half-span h uses exp(2 pi i j / (2h)) for j < h, kept from index h on).
     private readonly int[] _swaps;
+
+    // The bit-reversal permutation itself: where each index's input comes from.
+    private readonly int[] _reversed;
     private readonly double[] _cos;
     private readonly double[] _sin;
 
@@ -264,9 +268,11 @@ internal sealed class QmfFft
         _length = length;
         int bits = System.Numerics.BitOperations.Log2((uint)length);
         var swaps = new List<int>();
+        _reversed = new int[length];
         for (int i = 0; i < length; i++)
         {
             int j = (int)(ReverseBits((uint)i) >> (32 - bits));
+            _reversed[i] = j;
             if (j > i)
             {
                 swaps.Add(i);
@@ -297,6 +303,13 @@ internal sealed class QmfFft
     {
         re = re[.._length];
         im = im[.._length];
+        if (Vector128.IsHardwareAccelerated && !scalar)
+        {
+            ReorderFirstStage(re, im);
+            VectorStages(re, im);
+            return;
+        }
+
         for (int s = 0; s < _swaps.Length; s += 2)
         {
             int i = _swaps[s];
@@ -314,12 +327,6 @@ internal sealed class QmfFft
             im[a + 1] = im[a] - ti;
             re[a] += tr;
             im[a] += ti;
-        }
-
-        if (Vector128.IsHardwareAccelerated && !scalar)
-        {
-            VectorStages(re, im);
-            return;
         }
 
         for (int half = 2; half < _length; half *= 2)
@@ -346,6 +353,38 @@ internal sealed class QmfFft
     }
 
     // The stages from a half-span of 2, two or four butterflies at a time.
+    /// <summary>
+    /// The bit-reversal permutation and the first stage (whose twiddle factor is 1) in one pass, from a copy of the
+    /// input: each pair is read from its bit-reversed places, with the scalar path's sums (a + b and a - b; addition
+    /// commutes to the bit), so the result is the same.
+    /// </summary>
+    [SkipLocalsInit]
+    private void ReorderFirstStage(Span<double> re, Span<double> im)
+    {
+        Span<double> copyRe = stackalloc double[_length];
+        Span<double> copyIm = stackalloc double[_length];
+        re.CopyTo(copyRe);
+        im.CopyTo(copyIm);
+        ref double sourceRe = ref MemoryMarshal.GetReference(copyRe);
+        ref double sourceIm = ref MemoryMarshal.GetReference(copyIm);
+        ref double r = ref MemoryMarshal.GetReference(re);
+        ref double i = ref MemoryMarshal.GetReference(im);
+        ref int reversed = ref MemoryMarshal.GetArrayDataReference(_reversed);
+        for (int a = 0; a < _length; a += 2)
+        {
+            int x = Unsafe.Add(ref reversed, a);
+            int y = Unsafe.Add(ref reversed, a + 1);
+            double xr = Unsafe.Add(ref sourceRe, x);
+            double xi = Unsafe.Add(ref sourceIm, x);
+            double yr = Unsafe.Add(ref sourceRe, y);
+            double yi = Unsafe.Add(ref sourceIm, y);
+            Unsafe.Add(ref r, a) = xr + yr;
+            Unsafe.Add(ref i, a) = xi + yi;
+            Unsafe.Add(ref r, a + 1) = xr - yr;
+            Unsafe.Add(ref i, a + 1) = xi - yi;
+        }
+    }
+
     private void VectorStages(Span<double> re, Span<double> im)
     {
         ref double r = ref MemoryMarshal.GetReference(re);

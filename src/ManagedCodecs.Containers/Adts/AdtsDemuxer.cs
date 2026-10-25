@@ -14,8 +14,9 @@ namespace ManagedCodecs.Containers.Adts;
 /// <para>
 /// Timestamps count samples (<see cref="AudioStreamInfo.TimeBase"/> is one over the sample rate; FFmpeg's is 1/28224000,
 /// which fits every rate, for the same times). <see cref="AudioStreamInfo.CodecPrivate"/> is the AudioSpecificConfig
-/// the first header stands for, where FFmpeg has none (its decoder reads the headers). Not supported: channel
-/// configuration 0 (a program config element in the stream).
+/// the first header stands for, where FFmpeg has none (its decoder reads the headers); with channel configuration 0, the
+/// program config element at the start of the first frame's data follows it there, as in an MP4 file (that frame must
+/// start with one, as both encoders' first frames do).
 /// </para>
 /// </remarks>
 public sealed class AdtsDemuxer : IDemuxer
@@ -49,9 +50,18 @@ public sealed class AdtsDemuxer : IDemuxer
                 throw new InvalidDataException("Not an ADTS file.");
             }
 
+            int channels = first.ChannelConfiguration == 7 ? 8 : first.ChannelConfiguration;
+            byte[] config = first.AudioSpecificConfig();
             if (first.ChannelConfiguration == 0)
             {
-                throw new NotSupportedException("ADTS with channel configuration 0 (a program config element in the stream) is not supported.");
+                // The channels come from the program config element that starts the first frame's data.
+                var frame = new byte[first.FrameLength];
+                _stream.Position = start;
+                _stream.ReadAtLeast(frame, frame.Length, throwOnEndOfStream: false);
+                if (!first.TryProgramConfig(frame, out config, out channels))
+                {
+                    throw new NotSupportedException("ADTS with channel configuration 0 and no program config element at the start of its first frame is not supported.");
+                }
             }
 
             for (long pos = start; FindFrame(ref pos, out var header); pos += header.FrameLength)
@@ -68,8 +78,7 @@ public sealed class AdtsDemuxer : IDemuxer
             long frames = _frames.Count;
 
             int sampleRate = SampleRates[first.SampleRateIndex];
-            int channels = first.ChannelConfiguration == 7 ? 8 : first.ChannelConfiguration;
-            Audio = new AudioStreamInfo(CodecIds.Aac, sampleRate, channels, frames, new Rational(1, sampleRate), first.AudioSpecificConfig(), 0);
+            Audio = new AudioStreamInfo(CodecIds.Aac, sampleRate, channels, frames, new Rational(1, sampleRate), config, 0);
         }
         catch (Exception e) when (Malformed.IsMalformedInput(e))
         {

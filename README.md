@@ -38,7 +38,8 @@ says feature by feature which encoder made the samples (libx264, OpenH264, JM) a
   4:4:4, also as separate colour planes; 8, 9, 10, 12 and 14 bits; lossless. Bit-exact on streams from libx264,
   OpenH264 and JM (separate colour planes against JM's decoder, as FFmpeg decodes none). Frame threading
   (`Threads`), and concealment of damaged slices (`ConcealErrors`, Malformed input).
-- **AAC LC**: mono to 7.1 and program config elements, every window sequence and shape, M/S and intensity stereo,
+- **AAC LC**: mono to 7.1 and program config elements (in MP4 and ADTS, in FFmpeg's channel order), every window
+  sequence and shape, M/S and intensity stereo,
   PNS, TNS; within 2^-17 of FFmpeg's float output (measured: 3e-7). Encoder priming is trimmed by the MP4 edit list,
   or by an iTunSMPB tag without one.
 - **HE-AAC** (spectral band replication, at twice the core's rate, or downsampled at the core's own): signalled in the
@@ -54,8 +55,8 @@ says feature by feature which encoder made the samples (libx264, OpenH264, JM) a
 
 - AAC: parametric stereo with 34 bands or mixing procedure Rb (no encoder at hand sends them, nor downsampled SBR with
   parametric stereo, which decodes but is untested); SBR's speed (5.1 HE-AAC at about 0.46 ms a frame, 90 times
-  real time, 2.3 times FFmpeg's time; Benchmarking). In ADTS: frames of several raw data blocks, and channel
-  configuration 0.
+  real time, 2.3 times FFmpeg's time; Benchmarking); correlated noise as FFmpeg decodes it (it does not
+  correlate; docs/conformance.md). In ADTS: frames of several raw data blocks.
 - MJPEG: files from real cameras (the samples are all FFmpeg's), and packets holding one field (FFmpeg decodes none).
 - H.264: separate colour planes in interlaced video (rejected; JM's samples are progressive); luma and chroma bit depths that differ are rejected on purpose (no mainstream
   encoder or decoder, FFmpeg included, handles them, and they would need a bit depth for each plane in the frame

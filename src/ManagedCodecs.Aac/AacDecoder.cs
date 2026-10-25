@@ -10,8 +10,9 @@ namespace ManagedCodecs.Aac;
 /// <remarks>
 /// Supports single and channel pair elements, LFE, M/S and intensity stereo, perceptual noise
 /// substitution, TNS, pulse data, long and short windows with sine and KBD shapes, and channel
-/// configurations 0 (program config element, channels in bitstream order) to 7. Output is in the
-/// WAVE / FFmpeg channel order (5.1: FL FR FC LFE BL BR; configuration 7: FL FR FC LFE BL BR SL SR). Not supported: other object types (Main, SSR, LTP),
+/// configurations 0 (a program config element) to 7. Output is in the WAVE / FFmpeg channel order (5.1: FL FR FC LFE
+/// BL BR; configuration 7: FL FR FC LFE BL BR SL SR; a program config element as
+/// <see cref="ProgramConfigElement.OutputOrder"/> says). Not supported: other object types (Main, SSR, LTP),
 /// coupling channel elements and 960-sample frames. Spectral band replication is signalled in the
 /// config or only by its data (from the first access unit on, which <see cref="SampleRate"/> then follows); every channel
 /// goes through it, an LFE without a high band. Parametric stereo (HE-AAC v2) makes a mono stream stereo
@@ -57,7 +58,7 @@ public sealed class AacDecoder : IAudioDecoder
         int channels = _config.Channels;
         _filterbanks = [.. Enumerable.Range(0, channels).Select(_ => new Filterbank())];
         _streams = [.. Enumerable.Range(0, channels).Select(_ => new ChannelStream())];
-        _outputOrder = OutputOrder(_config.ChannelConfiguration, channels);
+        _outputOrder = _config.Pce?.OutputOrder() ?? OutputOrder(_config.ChannelConfiguration, channels);
         _channelElement = new int[channels];
         _channelInElement = new int[channels];
     }
@@ -196,7 +197,11 @@ public sealed class AacDecoder : IAudioDecoder
                     }
 
                 case PceElement:
-                    ProgramConfigElement.Parse(r);
+                    if (ProgramConfigElement.Parse(r).Channels != _config.Channels)
+                    {
+                        throw new NotSupportedException("A program config element that changes the stream's channels is not supported.");
+                    }
+
                     break;
 
                 case FilElement:

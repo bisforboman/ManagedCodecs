@@ -142,4 +142,34 @@ public class SbrConformanceTests
             Assert.True(stats.SbrSinusoids > 0, "No sinusoids added.");
         }
     }
+
+    /// <summary>
+    /// Decoding with <see cref="AacDecoder.Threads"/> gives the samples of decoding on one thread, to the bit, and the
+    /// same counts of the tools used: each channel goes through the filterbank and SBR with state of its own, so no
+    /// channel reads another's work and no ordering between them can show (unlike H.264's frame threading, which needs
+    /// random delays to make races show).
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(Samples))]
+    public void ThreadsGiveTheSameSamples(string sampleName)
+    {
+        using var demuxer = Demuxer.Open(TestSamples.PathOf(sampleName));
+        var audio = demuxer.Audio!;
+        var one = new AacDecoder(audio);
+        var four = new AacDecoder(audio) { Threads = 4 };
+        foreach (var packet in demuxer.ReadPackets().Where(p => p.StreamIndex == audio.StreamIndex))
+        {
+            var expected = one.Decode(packet);
+            var actual = four.Decode(packet);
+            for (int c = 0; c < expected.Channels; c++)
+            {
+                Assert.Equal(expected.Samples[c].Select(BitConverter.SingleToInt32Bits), actual.Samples[c].Select(BitConverter.SingleToInt32Bits));
+            }
+        }
+
+        var (s1, s4) = (one.Statistics, four.Statistics);
+        Assert.Equal(
+            (s1.SbrChirpBands, s1.SbrTransientEnvelopes, s1.SbrSmoothedEnvelopes, s1.SbrSinusoids, s1.SbrLimitedGains, s1.SbrFrames),
+            (s4.SbrChirpBands, s4.SbrTransientEnvelopes, s4.SbrSmoothedEnvelopes, s4.SbrSinusoids, s4.SbrLimitedGains, s4.SbrFrames));
+    }
 }

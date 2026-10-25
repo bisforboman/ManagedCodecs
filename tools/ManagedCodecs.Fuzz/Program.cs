@@ -100,10 +100,44 @@ static void WriteSeeds(string samples, string output)
             {
                 byte[] seed = [(byte)audio.CodecPrivate.Length, .. audio.CodecPrivate.Span, .. first.Data.Span];
                 File.WriteAllBytes(Path.Combine(output, "aac", stem + ".bin"), seed);
+
+                // ADTS: the first frames again as frames of 2 to 4 raw data blocks with CRCs, which no sample has.
+                if (path.EndsWith(".aac") && JoinedFrames(packets.Take(12).Select(p => p.Data.ToArray()).ToList()) is { Count: > 0 } joined)
+                {
+                    File.WriteAllBytes(Path.Combine(output, "file", stem + "-blocks.aac"), [.. joined.SelectMany(f => f)]);
+                    File.WriteAllBytes(Path.Combine(output, "aac", stem + "-blocks.bin"), [(byte)audio.CodecPrivate.Length, .. audio.CodecPrivate.Span, .. joined[0]]);
+                }
             }
         }
         catch (Exception e) when (e is InvalidDataException or NotSupportedException)
         {
         }
     }
+}
+
+// ADTS frames (one raw data block each, no CRC) joined 2, 3, 4, 2, ... at a time under one header with CRCs (of no
+// value: the decoder does not check them): the header's after the positions of the blocks but the first, one after
+// each block (ISO/IEC 14496-3 1.A.3.2.1).
+static List<byte[]> JoinedFrames(List<byte[]> frames)
+{
+    var joined = new List<byte[]>();
+    if (frames.Any(f => f.Length < 7 || (f[1] & 1) == 0 || (f[6] & 3) != 0))
+    {
+        return joined;
+    }
+
+    for (int i = 0, n = 2; i + n <= frames.Count; i += n, n = (n % 4) + 2)
+    {
+        var data = frames.Skip(i).Take(n).SelectMany(f => f[7..].Concat(new byte[] { 0x12, 0x34 })).ToList();
+        int length = 7 + (2 * n) + data.Count;
+        var header = frames[i][..7];
+        header[1] &= 0xFE; // protection_absent 0
+        header[3] = (byte)((header[3] & 0xFC) | (length >> 11));
+        header[4] = (byte)(length >> 3);
+        header[5] = (byte)((header[5] & 0x1F) | ((length & 7) << 5));
+        header[6] = (byte)((header[6] & 0xFC) | (n - 1));
+        joined.Add([.. header, .. Enumerable.Repeat((byte)0xAB, 2 * n), .. data]);
+    }
+
+    return joined;
 }

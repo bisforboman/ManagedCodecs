@@ -294,3 +294,4 @@ PY
 planes-il planes-paff-cavlc -p PicInterlace=1 -p SymbolMode=0 -p NumberBFrames=0  # field pictures, CAVLC, P
 planes-il planes-paff -p PicInterlace=1 -p NumberBFrames=1 -p DirectModeType=0    # field pictures, CABAC, B, temporal direct
 planes-il planes-mbaff -p MbInterlace=2 -p ReferenceReorder=0 -p PocMemoryManagement=0 -p NumberBFrames=1  # MBAFF
+planes-il planes-mbaff-ltr -p MbInterlace=2 -p ReferenceReorder=0 -p PocMemoryManagement=0 -p NumberBFrames=1 -p DirectModeType=0 -p SetFirstAsLongTerm=1  # MBAFF B, temporal direct over a long-term frame (JM crashes with long-term field pictures, and with implicit weights here)

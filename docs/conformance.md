@@ -180,9 +180,12 @@ given its colour_plane_id). Each plane decodes as its monochrome stream did, so 
 FFmpeg's three monochrome decodes, stacked (the method checked first on a progressive splice,
 which JM's decoder decodes to the same frames). `jm-planes-paff-cavlc` (field pictures, CAVLC, P),
 `jm-planes-paff` (CABAC, B pictures, temporal direct: the co-located field is the plane's) and
-`jm-planes-mbaff`. They fail when a plane's field reads the frame's fields instead of its own;
-no sample has long-term references in such fields, so a unit test (ReferenceListTests) checks that a
-plane's fields carry the frame's marks.
+`jm-planes-mbaff`. They fail when a plane's field reads the frame's fields instead of its own.
+`jm-planes-mbaff-ltr` (MBAFF, B pictures, temporal direct, the IDR picture marked long-term) fails
+when a plane's field is not marked as the frame's field is: temporal direct asks whether a field
+macroblock's reference field is long-term. JM's encoder crashes with long-term references in field
+pictures (and with implicit weights in this sample), so a unit test (ReferenceListTests) also checks
+the marks of a plane's fields directly.
 
 ### Lossless
 

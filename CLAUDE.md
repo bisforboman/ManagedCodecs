@@ -135,6 +135,8 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
   the packet rate (compare with `-f framemd5` or add `-fps_mode passthrough`); its frame takes the first field's pts.
   JM's encoder: `make -C lencod CFLAGS="-fcommon -O2"`, `PicInterlace=1` (fields) or `2` (adaptive), about a minute
   for 10 frames at 320x256; it crashes with `WeightedPrediction=1` or `WeightedBiprediction=2` and field pictures,
+  with `SetFirstAsLongTerm=1` and field pictures (MBAFF frames take it: `IsLongTerm` is read only by temporal
+  direct and implicit weights, so a long-term sample needs B pictures),
   and refuses `PicInterlace=2` with `MbInterlace=2` (`MbInterlace=1` works, every pair a field pair, with
   `ReferenceReorder=0 PocMemoryManagement=0`); in 4:0:0 it exits 100 after writing the stream. In field pictures
   without num_ref_idx_active_override_flag the active count is the PPS default as it is (FFmpeg and JM; not

@@ -16,7 +16,7 @@ on several threads if asked, and every decoder has an async API.
 | `src/ManagedCodecs.H264` | `H264Decoder`: Constrained Baseline, Main, High, High 10, High 4:2:2 and High 4:4:4 Predictive profile H.264 (CAVLC, CABAC, I/P/B, weighted prediction, 8x8 transform, scaling matrices, deblocking, monochrome, 4:2:0, 4:2:2 and 4:4:4, also as separate colour planes, 8 to 14 bits, lossless, progressive and interlaced), bit-exact |
 | `src/ManagedCodecs.Aac` | `AacDecoder`: AAC LC (mono to 7.1, M/S, intensity, PNS, TNS), within 3e-7 of FFmpeg's float output; HE-AAC (spectral band replication) |
 | `src/Shared` | Source files linked into several codec projects (the VLC decoder) |
-| `tools/ManagedCodecs.Cli` | `mcdec`: decodes a file and times it, to compare with `ffmpeg -benchmark` (`--threads N` for H.264 frame threading) |
+| `tools/ManagedCodecs.Cli` | `mcdec`: decodes a file and times it, to compare with `ffmpeg -benchmark` (`--threads N` for H.264 frame threading and HE-AAC's channels) |
 | `tools/make-samples.sh` | Generates the test samples and FFmpeg's references |
 | `tools/compare.sh` | Times mcdec and FFmpeg on the same file |
 | `tools/ManagedCodecs.Fuzz`, `tools/fuzz.sh` | Fuzzing targets for SharpFuzz and AFL++ (see Malformed input) |
@@ -45,7 +45,8 @@ says feature by feature which encoder made the samples (libx264, OpenH264, JM) a
 - **HE-AAC** (spectral band replication, at twice the core's rate, or downsampled at the core's own): signalled in the
   config or only by its data, mono to 5.1, coupled pairs; within 1e-6 of FFmpeg's float output where its single precision is not the limit (see
   docs/conformance.md). Parametric stereo (HE-AAC v2): the baseline decoder (10 and 20 bands, mixing procedure Ra, no
-  IPD or OPD), a mono stream decoded to stereo; within 3e-4 of FFmpeg's output, 3e-6 on average.
+  IPD or OPD), a mono stream decoded to stereo; within 3e-4 of FFmpeg's output, 3e-6 on average. A frame's channels
+  through SBR on several threads (`Threads`).
 - **Containers**: AVI (video), MP4 (video and audio tracks, fragmented files too, edit lists of several edits)
   and raw AAC (ADTS), with packets and timestamps as FFmpeg's demuxers give them.
 - **Throughout**: an async API, malformed input that ends in `InvalidDataException` or `NotSupportedException`
@@ -161,6 +162,12 @@ instructions than before frame threading existed (callgrind).
 `AacDecoder.Decode(packet)` returns one `AudioFrame`: the packet's 1024 samples per channel, less the
 `packet.SkipSamples` at its start. The MP4 demuxer sets those from the edit list, so encoder priming is dropped and the
 output matches FFmpeg's default (`Decode(packet.Data.Span)` gives all 1024).
+
+`new AacDecoder(audio) { Threads = 4 }` puts up to four channels of an HE-AAC frame through the filterbank and SBR at
+once, on the thread pool; the samples are the same as with one thread (`ThreadsGiveTheSameSamples`). On a 4-core cloud
+VM, `heaac-5.1.mp4` took 305 µs a frame against 403 with one thread (about 1.3 times as fast; medians of 12 interleaved
+`mcdec --threads N` runs, last loop); stereo no faster: a channel's 70 µs of work is little more than handing it over.
+AAC LC and parametric stereo decode on the calling thread either way.
 
 An edit list can also leave packets out, repeat them, or need some decoded only to be able to decode others: the MP4
 demuxer gives every packet FFmpeg's does, those to be decoded and not shown marked `Packet.Discard` (the frames from

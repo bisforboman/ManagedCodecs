@@ -1,3 +1,4 @@
+using System.Runtime.ExceptionServices;
 using ManagedCodecs.Aac.Sbr;
 
 namespace ManagedCodecs.Aac;
@@ -49,6 +50,12 @@ public sealed class AacDecoder : IAudioDecoder
     private readonly int[] _channelInElement;
     private readonly float[] _core = new float[1024];
 
+    // With Threads above 1: each channel's core output and SBR counters, and the options of the parallel loop.
+    private float[][]? _channelCores;
+    private AacStatistics[]? _channelStatistics;
+    private ParallelOptions? _parallel;
+    private readonly int _threads = 1;
+
     // Samples still to drop at the start of the next packets, from a Packet.SkipSamples larger than its packet's output.
     private int _pendingSkip;
 
@@ -89,6 +96,20 @@ public sealed class AacDecoder : IAudioDecoder
     /// element (implicit signalling).
     /// </summary>
     public bool HasSbr => _config.SbrPresent || _sbr.Count > 0;
+
+    /// <summary>
+    /// How many channels of a frame with spectral band replication to put through the filterbank and SBR at once, each
+    /// on a thread of the pool: they share nothing, so more threads decode a multichannel HE-AAC stream faster on more
+    /// cores and give the same samples (on a 4-core VM, 4 decoded 5.1 about 1.3 times as fast, stereo no faster: a
+    /// channel's work, about 70 µs, is not much more than handing it to another core). 1, the default, decodes
+    /// on the calling thread, as WebAssembly in a browser needs. AAC LC, whose channels take a fraction of the time, and
+    /// parametric stereo (one channel) decode on the calling thread either way.
+    /// </summary>
+    public int Threads
+    {
+        get => _threads;
+        init => _threads = value >= 1 ? value : throw new ArgumentOutOfRangeException(nameof(value), value, "At least one thread is needed.");
+    }
 
     /// <summary>For tests: read SBR data and output the core's samples without it, rather than refusing SBR.</summary>
     internal bool SbrParseOnly { get; init; }
@@ -297,18 +318,47 @@ public sealed class AacDecoder : IAudioDecoder
             return frame;
         }
 
-        for (int output = 0; output < _config.Channels; output++)
+        if (_threads == 1 || _config.Channels == 1)
         {
-            int source = _outputOrder[output];
-            var stream = _streams[source];
-            ApplyTns(stream);
-            _filterbanks[source].Synthesize(stream.Info.WindowSequence, stream.Info.WindowShape, stream.Spectrum, _core);
-            int element = _channelElement[source];
-            var sbr = element >= 0 && element < _sbr.Count ? _sbr[element] : null;
-            _sbrChannels[source].Process(sbr, _channelInElement[source], _core, frame.Samples[output], Statistics);
+            for (int output = 0; output < _config.Channels; output++)
+            {
+                SynthesizeWithSbr(output, _core, frame, Statistics);
+            }
+
+            return frame;
+        }
+
+        // Each channel's own core buffer and counters, the counters added up after: nothing else is shared.
+        _channelCores ??= [.. Enumerable.Range(0, _config.Channels).Select(_ => new float[1024])];
+        _channelStatistics ??= [.. Enumerable.Range(0, _config.Channels).Select(_ => new AacStatistics())];
+        _parallel ??= new ParallelOptions { MaxDegreeOfParallelism = _threads };
+        try
+        {
+            Parallel.For(0, _config.Channels, _parallel, output => SynthesizeWithSbr(output, _channelCores[output], frame, _channelStatistics[output]));
+        }
+        catch (AggregateException e) when (e.InnerExceptions.Count > 0)
+        {
+            ExceptionDispatchInfo.Throw(e.InnerExceptions[0]); // as on one thread
+        }
+
+        foreach (var statistics in _channelStatistics)
+        {
+            Statistics.AddSbrChannel(statistics);
         }
 
         return frame;
+    }
+
+    // One output channel's core samples (into core) and SBR output (into the frame).
+    private void SynthesizeWithSbr(int output, float[] core, AudioFrame frame, AacStatistics statistics)
+    {
+        int source = _outputOrder[output];
+        var stream = _streams[source];
+        ApplyTns(stream);
+        _filterbanks[source].Synthesize(stream.Info.WindowSequence, stream.Info.WindowShape, stream.Spectrum, core);
+        int element = _channelElement[source];
+        var sbr = element >= 0 && element < _sbr.Count ? _sbr[element] : null;
+        _sbrChannels![source].Process(sbr, _channelInElement[source], core, frame.Samples[output], statistics);
     }
 
     // The SBR state of SCE or CPE number index, made when its first SBR data comes; at the rate the config gives SBR,
@@ -1039,6 +1089,17 @@ public sealed class AacDecoder : IAudioDecoder
 /// <summary>Counts of coding tools seen while decoding.</summary>
 internal sealed class AacStatistics
 {
+    /// <summary>Adds what one channel's SBR processing (<see cref="Sbr.SbrChannel.Process(Sbr.SbrElement?, int, ReadOnlySpan{float}, Span{float}, AacStatistics)"/>) counted to these, and clears them there.</summary>
+    public void AddSbrChannel(AacStatistics channel)
+    {
+        SbrChirpBands += channel.SbrChirpBands;
+        SbrTransientEnvelopes += channel.SbrTransientEnvelopes;
+        SbrSmoothedEnvelopes += channel.SbrSmoothedEnvelopes;
+        SbrSinusoids += channel.SbrSinusoids;
+        SbrLimitedGains += channel.SbrLimitedGains;
+        channel.SbrChirpBands = channel.SbrTransientEnvelopes = channel.SbrSmoothedEnvelopes = channel.SbrSinusoids = channel.SbrLimitedGains = 0;
+    }
+
     public int LongFrames { get; set; }
 
     public int StartFrames { get; set; }

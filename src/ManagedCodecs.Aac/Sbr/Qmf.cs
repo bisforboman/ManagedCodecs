@@ -35,6 +35,7 @@ internal sealed class QmfAnalysis
     private int _start = 32 * 15;
 
     /// <summary>One time slot: 32 new samples (oldest first) in, 32 complex subband samples out.</summary>
+    [SkipLocalsInit]
     public void Process(ReadOnlySpan<double> input, Span<double> real, Span<double> imaginary)
     {
         _start = QmfState.Step(_x, _start, 320, 32);
@@ -54,18 +55,13 @@ internal sealed class QmfAnalysis
             Vectors.MultiplyAdd(u, x.Slice(64 * j, 64), Window.AsSpan(64 * j, 64));
         }
 
-        for (int n = 0; n < 64; n++)
-        {
-            re[n] = u[n] * InCos[n];
-            im[n] = u[n] * InSin[n];
-        }
-
+        // In vectors: u(n) cos and u(n) sin (products commute to the bit), then the output turn as QmfState.Rotate does it.
+        u.CopyTo(re);
+        Vectors.Multiply(re, InCos);
+        u.CopyTo(im);
+        Vectors.Multiply(im, InSin);
         Fft.Transform(re, im);
-        for (int k = 0; k < Bands; k++)
-        {
-            real[k] = (re[k] * OutCos[k]) - (im[k] * OutSin[k]);
-            imaginary[k] = (re[k] * OutSin[k]) + (im[k] * OutCos[k]);
-        }
+        QmfState.Rotate(re[..Bands], im[..Bands], OutCos, OutSin, real, imaginary);
     }
 }
 
@@ -107,6 +103,7 @@ internal sealed class QmfSynthesis
     public int Bands => _tables.Bands;
 
     /// <summary>One time slot: <see cref="Bands"/> complex subband samples in, as many output samples (oldest first) out.</summary>
+    [SkipLocalsInit]
     public void Process(ReadOnlySpan<double> real, ReadOnlySpan<double> imaginary, Span<double> output)
     {
         var t = _tables;

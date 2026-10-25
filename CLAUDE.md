@@ -91,6 +91,10 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
 - Comparing CABAC with a reference decoder: OpenH264 builds in scratch (`make USE_ASM=No h264dec`), and a trace of
   every bin as (state, MPS, value) in both decoders, diffed, shows the first syntax element that differs.
 
+- make-samples.sh names references by the sample's stem: an `.aac` and an `.mp4` of the same stem overwrite each
+  other's `.packets.framemd5` and `.f32` (name a remux `-remux.mp4`).
+- perf shares move by about a point between runs of one build (the HF generator read 6.7, 7.6 and 8.0% of 5.1 HE-AAC
+  on three runs): profile the builds before and after back to back, and take a difference under a point as noise.
 - `ffmpeg ... -f framemd5` moves timestamps to start at 0; packet references need `-copyts`. Decoded-frame
   references are in the encoder's time base (1/25 for MJPEG), not the stream's: compare times as rationals.
 - framemd5 lines can carry side data after the hash (`S=1, size, md5` on AAC's first packet): the hash is field 6.

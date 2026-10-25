@@ -1,0 +1,55 @@
+name: Compare
+
+# A branch against a base before a performance change is kept: both builds of mcdec on the same samples, interleaved
+# with the order alternating, medians of 7 runs (tools/bench.py --base), on x64 and ARM64 runners, the tables in the
+# run summary. Dispatch it on the branch ("Run workflow", or `gh workflow run compare.yml --ref <branch>`). Hosted
+# runners are quieter than a cloud VM, but a difference of a percent or two is still noise (CLAUDE.md, Timing).
+on:
+  workflow_dispatch:
+    inputs:
+      base:
+        description: The branch, tag or commit to compare with
+        default: main
+      samples:
+        description: Samples to time, space-separated as tools/bench.py names them (empty for all)
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  compare:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
+        with:
+          dotnet-version: 10.0.x
+
+      - uses: ./.github/actions/samples
+
+      - name: Build the branch and the base
+        env:
+          BASE: ${{ inputs.base }}
+        run: |
+          dotnet build tools/ManagedCodecs.Cli -c Release
+          git worktree add "$RUNNER_TEMP/base" "$(git rev-parse --verify "origin/$BASE" 2>/dev/null || git rev-parse --verify "$BASE")"
+          dotnet build "$RUNNER_TEMP/base/tools/ManagedCodecs.Cli" -c Release
+
+      - name: Compare
+        env:
+          BASE: ${{ inputs.base }}
+          SAMPLES: ${{ inputs.samples }}
+        run: |
+          # shellcheck disable=SC2086
+          tools/bench.py --base "$RUNNER_TEMP/base/tools/ManagedCodecs.Cli/bin/Release/net10.0/mcdec.dll" --runs 7 \
+            ${SAMPLES:+--only $SAMPLES} --report compare.md
+          { echo "### $(uname -m): $(git rev-parse --short HEAD) against $BASE"; echo; cat compare.md; } >> "$GITHUB_STEP_SUMMARY"

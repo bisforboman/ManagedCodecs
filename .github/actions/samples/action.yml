@@ -1,0 +1,19 @@
+name: FFmpeg and samples
+description: >-
+  FFmpeg and ImageMagick (../ffmpeg), then tools/make-samples.sh's samples, cached on the scripts and the packages.
+runs:
+  using: composite
+  steps:
+    - uses: ./.github/actions/ffmpeg
+      id: ffmpeg
+
+    - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      id: samples
+      with:
+        path: samples
+        key: samples-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools/make-samples.sh', 'tools/*.py') }}-${{ steps.ffmpeg.outputs.key }}
+
+    - name: Generate samples
+      if: steps.samples.outputs.cache-hit != 'true'
+      shell: bash
+      run: tools/make-samples.sh

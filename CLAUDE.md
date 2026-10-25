@@ -59,7 +59,10 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
   `--verify-no-changes`. The tool's version (.config/dotnet-tools.json) and the analyzers' (Directory.Packages.props)
   move together, by hand while StyleBro is a prerelease. Package versions are central (Directory.Packages.props).
 - **Timing**: `tools/compare.sh <file> <loops>` runs `mcdec` (tools/ManagedCodecs.Cli) and
-  `ffmpeg -benchmark -threads 1` on the same file (README, Benchmarking). Cloud VMs are noisy: compare before/after
+  `ffmpeg -benchmark -threads 1` on the same file (README, Benchmarking); `tools/bench.py` runs README's whole list,
+  interleaved, and `--base <mcdec.dll>` one build against another. `compare.yml` (dispatch it on the branch) does that on
+  hosted x64 and ARM64 runners, quieter than a cloud VM; `benchmark.yml` runs weekly and keeps the history (the
+  `benchmarks` branch: a ratio moving there across runs is a regression, one run's number is not). Cloud VMs are noisy: compare before/after
   on one machine, repeat runs, and don't trust one number. Comparing two builds: interleave their runs and
   alternate which goes first (with the same one first in every pair, an A/A test of one build against itself once
   showed a 10% "regression"), and `DOTNET_TieredCompilation=0` takes JIT tiering out of the noise.

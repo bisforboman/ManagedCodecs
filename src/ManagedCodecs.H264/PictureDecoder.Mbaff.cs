@@ -137,6 +137,7 @@ internal sealed partial class PictureDecoder<TPixel>
         PairIfAvailable(_sliceOfMb, _widthInMbs, mbAddr, pairX, pairY, anySlice, Math.Max(_fieldParity, 0));
 
     /// <remarks>A field picture's pairs hold only one of its macroblocks, at <paramref name="slotParity"/>: availability is that one's.</remarks>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static int PairIfAvailable(ReadOnlySpan<int> sliceOfMb, int widthInMbs, int mbAddr, int pairX, int pairY, bool anySlice, int slotParity = 0)
     {
         if (pairX < 0 || pairX >= widthInMbs || pairY < 0)
@@ -164,9 +165,15 @@ internal sealed partial class PictureDecoder<TPixel>
             return (-1, 0, 0);
         }
 
+        if (xN >= 0 && yN >= 0)
+        {
+            return (mbAddr, xN, yN);
+        }
+
+        // One division: the inside case above needs none, and the remainder is a multiplication away.
         int pair = mbAddr >> 1;
-        int pairX = pair % widthInMbs;
         int pairY = pair / widthInMbs;
+        int pairX = pair - (pairY * widthInMbs);
         bool isTop = (mbAddr & 1) == 0;
         bool frame = !fieldMb[mbAddr];
         int n;
@@ -205,27 +212,7 @@ internal sealed partial class PictureDecoder<TPixel>
                 return (-1, 0, 0);
             }
 
-            bool leftField = fieldMb[n];
-            if (frame)
-            {
-                // Frame row (isTop ? 0 : 16) + yN of the pair.
-                int row = (isTop ? 0 : maxH) + yN;
-                (n, yM) = leftField ? (n + (row & 1), row >> 1) : (n + (row >= maxH ? 1 : 0), row % maxH);
-            }
-            else if (leftField)
-            {
-                (n, yM) = (n + (isTop ? 0 : 1), yN);
-            }
-            else
-            {
-                // Field row yN of the current parity is frame row 2 * yN (+ 1 for the bottom field).
-                int row = (2 * yN) + (isTop ? 0 : 1);
-                (n, yM) = (n + (row >= maxH ? 1 : 0), row % maxH);
-            }
-        }
-        else if (xN < maxW && yN >= 0)
-        {
-            return (mbAddr, xN, yN);
+            (n, yM) = AffLeft(n, fieldMb[n], frame, isTop, yN, maxH);
         }
         else
         {
@@ -253,6 +240,30 @@ internal sealed partial class PictureDecoder<TPixel>
         }
 
         return (n, xN & (maxW - 1), yM & (maxH - 1));
+    }
+
+    /// <summary>
+    /// Table 6-4's A rows: the macroblock of the left pair (top macroblock <paramref name="leftTop"/>, available) that
+    /// row <paramref name="yN"/> of a block <paramref name="maxH"/> rows high looks into, and the row in it.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static (int Mb, int Y) AffLeft(int leftTop, bool leftField, bool frame, bool isTop, int yN, int maxH)
+    {
+        if (frame)
+        {
+            // Frame row (isTop ? 0 : maxH) + yN of the pair.
+            int row = (isTop ? 0 : maxH) + yN;
+            return leftField ? (leftTop + (row & 1), row >> 1) : (leftTop + (row >= maxH ? 1 : 0), row & (maxH - 1));
+        }
+
+        if (leftField)
+        {
+            return (leftTop + (isTop ? 0 : 1), yN);
+        }
+
+        // Field row yN of the current parity is frame row 2 * yN (+ 1 for the bottom field).
+        int fieldRow = (2 * yN) + (isTop ? 0 : 1);
+        return (leftTop + (fieldRow >= maxH ? 1 : 0), fieldRow & (maxH - 1));
     }
 
     /// <summary>mb_field_decoding_flag of a pair (7.3.4): one bit, or with CABAC ctxIdx 70 + whether the left and the above pair are field pairs.</summary>
@@ -421,9 +432,15 @@ internal sealed partial class PictureDecoder<TPixel>
             Copy(-1, yN);
         }
 
-        for (int xN = 0; xN < topWidth; xN++)
+        // Row -1 comes from B (x below maxW) and C (from maxW on), each a run of one row of one macroblock.
+        for (int xN = 0; xN < topWidth; xN += maxW)
         {
-            Copy(xN, -1);
+            var (n, x, y) = AffNeighbor(mbAddr, xN, -1, maxW, maxH);
+            if (n >= 0)
+            {
+                var (origin, stride) = luma ? LumaPlace(n) : ChromaPlace(n);
+                plane.AsSpan(origin + (y * stride) + x, Math.Min(maxW, topWidth - xN)).CopyTo(scratch.AsSpan(xN + 1));
+            }
         }
 
         void Copy(int xN, int yN)
@@ -491,6 +508,7 @@ internal sealed partial class PictureDecoder<TPixel>
             // The left pair, and the macroblock above: the top one of a frame pair has its own
             // pair's top macroblock above it; the others the pair above.
             bool left = pairX > 0 && (!sameSliceOnly || PairIfAvailable(mbAddr, pairX - 1, pairY) >= 0);
+            int leftTop = (pair - 1) * 2;
             bool withinPair = !isTop && !field;
             bool top = withinPair || (pairY > 0 && (!sameSliceOnly || PairIfAvailable(mbAddr, pairX, pairY - 1) >= 0));
 
@@ -520,9 +538,11 @@ internal sealed partial class PictureDecoder<TPixel>
             // Luma (and 4:4:4 chroma, at the same places): vertical edges, then horizontal ones.
             if (left)
             {
+                bool leftField = _fieldMb[leftTop];
                 for (int y = 0; y < 16; y++)
                 {
-                    var (p, xP, yP) = AffNeighbor(mbAddr, -1, y, 16, 16, anySlice: true);
+                    var (p, yP) = AffLeft(leftTop, leftField, !field, isTop, y, 16);
+                    const int xP = 15;
                     leftLines[y] = (byte)MbaffStrength(p, ((yP >> 2) * 4) + 3, mbAddr, (y >> 2) * 4, horizontalEdge: false);
                     if (leftLines[y] != 0)
                     {
@@ -581,9 +601,11 @@ internal sealed partial class PictureDecoder<TPixel>
             // as each chroma line, and the edge in the middle.
             if (left)
             {
+                bool leftField = _fieldMb[leftTop];
                 for (int y = 0; y < 8; y++)
                 {
-                    var (p, xP, yP) = AffNeighbor(mbAddr, -1, y, 8, 8, anySlice: true);
+                    var (p, yP) = AffLeft(leftTop, leftField, !field, isTop, y, 8);
+                    const int xP = 7;
                     int bS = leftLines[field && !_fieldMb[p] ? y << 1 : ((y >> 1) << 2) + (y & 1)];
                     if (bS != 0)
                     {

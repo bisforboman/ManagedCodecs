@@ -59,7 +59,8 @@ says feature by feature which encoder made the samples (libx264, OpenH264, JM) a
   parametric stereo, which decodes but is untested); SBR's speed (5.1 HE-AAC at about 0.41 ms a frame, 100 times
   real time, 2.2 times FFmpeg's time on one thread; Benchmarking).
 - MJPEG: files from real cameras (the samples are all FFmpeg's), and packets holding one field (FFmpeg decodes none).
-- H.264: luma and chroma bit depths that differ are rejected on purpose (no mainstream
+- H.264: long-term marking of field pictures, and memory management operations other than 1 in them (rejected:
+  JM's encoder cannot write them and FFmpeg mishandles one, docs/conformance.md); luma and chroma bit depths that differ are rejected on purpose (no mainstream
   encoder or decoder, FFmpeg included, handles them, and they would need a bit depth for each plane in the frame
   API); guessing motion for concealed macroblocks (they copy their place in a reference); without concealment, a
   lost reference fails pictures up to the next IDR picture, not an MMCO 5 one (by design: the MMCO 5 picture itself

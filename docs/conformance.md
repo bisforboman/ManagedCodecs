@@ -94,7 +94,14 @@ its co-located field pair in display order (so the bottom field is the nearer on
 frame over a field pair partitioned below 16x16. Field marking that JM's streams never reach
 (the second field of a frame not sliding the window, memory management operation 1 by field
 PicNum) and the field B lists' list 1 swap have unit tests; other memory management operations
-in field pictures and a field without its pair throw NotSupportedException.
+in field pictures and a field without its pair throw NotSupportedException. Long-term references
+used by field pictures: `jm-paff-b-adaptive-temporal-ltr` codes its IDR picture as a frame marked
+long-term and later pictures as fields, so the P and B field lists carry its fields after the
+short-term ones (parity alternating) and temporal direct asks whether they are long-term; the
+sample fails when either is broken. Marking field pictures long-term (an IDR field pair, operation
+6 in a second field) stays rejected: JM's encoder crashes writing it, and FFmpeg (6.1.1, and its
+master) mishandles it, dropping the first field's reference when the second field takes the same
+LongTermFrameIdx, so neither can check it.
 
 ### OpenH264 and rewritten libx264 streams
 

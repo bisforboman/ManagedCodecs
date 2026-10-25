@@ -95,6 +95,10 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
 
 - make-samples.sh names references by the sample's stem: an `.aac` and an `.mp4` of the same stem overwrite each
   other's `.packets.framemd5` and `.f32` (name a remux `-remux.mp4`).
+- FFmpeg (6.1.1 and master, h264_refs.c MMCO_LONG) loses a long-term field pair's first field when the second field
+  takes the same LongTermFrameIdx with MMCO 6 (`remove_long(h, j, 0)` clears both fields' reference bits, then only
+  the current field's are set): it is no oracle for long-term marking in field pictures ("Missing reference picture"
+  is the sign).
 - Short samples are mostly JIT: `jm-paff-b` (10 frames) took 3960 µs a frame at 20 loops and 2177 at 100. Time
   them at 100 loops or more. Inlining a hot callee moves its perf share into its callers rather than removing it:
   judge such a change by the share of a function it leaves alone (`ResidualBlock`), which rises if the total fell.
@@ -135,8 +139,9 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
   the packet rate (compare with `-f framemd5` or add `-fps_mode passthrough`); its frame takes the first field's pts.
   JM's encoder: `make -C lencod CFLAGS="-fcommon -O2"`, `PicInterlace=1` (fields) or `2` (adaptive), about a minute
   for 10 frames at 320x256; it crashes with `WeightedPrediction=1` or `WeightedBiprediction=2` and field pictures,
-  with `SetFirstAsLongTerm=1` and field pictures (MBAFF frames take it: `IsLongTerm` is read only by temporal
-  direct and implicit weights, so a long-term sample needs B pictures),
+  with `SetFirstAsLongTerm=1` and field pictures (MBAFF frames take it, and `PicInterlace=2` with the IDR picture coded
+  as a frame: `IsLongTerm` is read only by temporal direct and implicit weights, so a long-term sample needs B
+  pictures),
   and refuses `PicInterlace=2` with `MbInterlace=2` (`MbInterlace=1` works, every pair a field pair, with
   `ReferenceReorder=0 PocMemoryManagement=0`); in 4:0:0 it exits 100 after writing the stream. In field pictures
   without num_ref_idx_active_override_flag the active count is the PPS default as it is (FFmpeg and JM; not

@@ -357,6 +357,11 @@ across the core's band to the window's ripple (about 1e-3; the bank is nearly, n
 of 578 output samples, and no fractional delay (unit tests; reading samples in the wrong order, the window's odd taps
 or a kernel offset by one breaks them). The kernels' cos and sin are computed without Math.Cos and Math.Sin, whose
 last bits differ between .NET and WebAssembly's runtime, which the HF generator's prediction can magnify.
+The vector paths (the QMF FFTs and rotations, the gains, noise and sinusoids added to the high band, the parametric
+stereo all-pass links) do each lane's arithmetic in the scalar loop's order, without fused multiply-adds, and add noise
+under a mask rather than as zero, so a negative zero stays: each is compared bit for bit with its scalar loop on random
+input (`VectorFft_MatchesScalarExactly`, `VectorRotations_MatchScalarExactly`, `SbrApplyGains_MatchesScalar`,
+`PsAllPassRow_MatchesScalar`), and each speed change left every sample's output the same to the bit.
 
 Decoded output (`SbrConformanceTests`) against FFmpeg's (name.sbr.f32: at the SBR rate; MP4 without the 2048 samples of
 encoder delay its iTunSMPB tag gives, which the demuxer reads as FFmpeg's does when there is no edit list; mono in

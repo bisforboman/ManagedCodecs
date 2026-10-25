@@ -1,3 +1,6 @@
+using System.Runtime.CompilerServices;
+using System.Runtime.Intrinsics;
+
 namespace ManagedCodecs.Aac.Sbr;
 
 /// <summary>
@@ -75,7 +78,7 @@ internal sealed class PsProcessor
     internal static readonly (double[] Re, double[] Im) HybridPhase = Phases(HybridCentres, Fraction);
     internal static readonly (double[] Re, double[] Im) QmfPhase = Phases(QmfCentres(), Fraction);
     private static readonly (double[] Re, double[] Im)[] HybridLinkPhase = [.. LinkFractions.Select(q => Phases(HybridCentres, q))];
-    private static readonly (double[] Re, double[] Im)[] QmfLinkPhase = [.. LinkFractions.Select(q => Phases(QmfCentres(), q))];
+    internal static readonly (double[] Re, double[] Im)[] QmfLinkPhase = [.. LinkFractions.Select(q => Phases(QmfCentres(), q))];
 
     // The IID's scale factors (8.6.4.6.2), sqrt(2 / (1 + c^2)) with c = 10^(IID / 20) for IID index -7 to 7 (coarse)
     // or -15 to 15 (fine), and the ICC's angle alpha = acos(rho) / 2 for index 0 to 7; computed from the spec's IID and
@@ -351,90 +354,154 @@ internal sealed class PsProcessor
             }
         }
 
-        int delayIndex = _delayIndex;
+        // Slot by slot: the all-pass delay's position and each link's are the same for every subband (each starts from
+        // the stored ones and moves one a slot), so a slot's subbands go through in order along contiguous rows. Every
+        // (slot, subband) is computed as it would be subband by subband, so the output is the same to the bit.
         Span<int> linkIndex = stackalloc int[3];
-        for (int gr = 0; gr < Groups; gr++)
+        _linkIndex.CopyTo(linkIndex);
+        Span<double> allPassRe = stackalloc double[AllPassBands];
+        Span<double> allPassIm = stackalloc double[AllPassBands];
+        int d = _delayIndex;
+        for (int i = 0; i < Slots; i++)
         {
-            int bin = GroupBins[gr];
-            bool hybrid = gr < SubQmfGroups;
-            int first = GroupBorders[gr];
-            int last = hybrid ? first + 1 : GroupBorders[gr + 1];
-            for (int sb = first; sb < last; sb++)
+            var hybridDelayRe = _hybridDelayRe[d];
+            var hybridDelayIm = _hybridDelayIm[d];
+            for (int gr = 0; gr < SubQmfGroups; gr++)
             {
-                double decay = hybrid || sb <= DecayCutoff ? 1 : Math.Max(0, 1 + (DecayCutoff * DecaySlope) - (DecaySlope * sb));
-                int d = _delayIndex;
-                _linkIndex.CopyTo(linkIndex);
-                for (int i = 0; i < Slots; i++)
+                int sb = GroupBorders[gr];
+                var (outRe, outIm) = AllPass(_leftRe[i][sb], _leftIm[i][sb], sb, 1, hybridDelayRe, hybridDelayIm, HybridPhase, _hybridLinkRe, _hybridLinkIm, HybridLinkPhase, linkIndex);
+                double duck = ratio[i][GroupBins[gr]];
+                _rightRe[i][sb] = duck * outRe;
+                _rightIm[i][sb] = duck * outIm;
+            }
+
+            var inRe = re[i];
+            var inIm = im[i];
+            var outRow = rightRe[i];
+            var outRowIm = rightIm[i];
+            AllPassRow(inRe, inIm, GroupBorders[SubQmfGroups], AllPassBands, _qmfDelayRe[d], _qmfDelayIm[d], _qmfLinkRe, _qmfLinkIm, linkIndex, allPassRe, allPassIm);
+            for (int gr = SubQmfGroups; gr < Groups; gr++)
+            {
+                double duck = ratio[i][GroupBins[gr]];
+                for (int sb = GroupBorders[gr]; sb < GroupBorders[gr + 1]; sb++)
                 {
-                    double inRe = hybrid ? _leftRe[i][sb] : re[i][sb];
-                    double inIm = hybrid ? _leftIm[i][sb] : im[i][sb];
                     double outRe;
                     double outIm;
-                    if (!hybrid && sb >= AllPassBands)
+                    if (sb >= AllPassBands)
                     {
                         int index = _qmfDelayIndex[sb];
                         outRe = _qmfDelayRe[index][sb];
                         outIm = _qmfDelayIm[index][sb];
-                        _qmfDelayRe[index][sb] = inRe;
-                        _qmfDelayIm[index][sb] = inIm;
+                        _qmfDelayRe[index][sb] = inRe[sb];
+                        _qmfDelayIm[index][sb] = inIm[sb];
                         _qmfDelayIndex[sb] = index + 1 >= (sb < 35 ? 14 : 1) ? 0 : index + 1;
                     }
                     else
                     {
-                        var delayRe = hybrid ? _hybridDelayRe : _qmfDelayRe;
-                        var delayIm = hybrid ? _hybridDelayIm : _qmfDelayIm;
-                        var phase = hybrid ? HybridPhase : QmfPhase;
-                        double delayedRe = delayRe[d][sb];
-                        double delayedIm = delayIm[d][sb];
-                        delayRe[d][sb] = inRe;
-                        delayIm[d][sb] = inIm;
-                        double r = (delayedRe * phase.Re[sb]) - (delayedIm * phase.Im[sb]);
-                        double m = (delayedRe * phase.Im[sb]) + (delayedIm * phase.Re[sb]);
-                        for (int link = 0; link < 3; link++)
-                        {
-                            var bufRe = hybrid ? _hybridLinkRe[link] : _qmfLinkRe[link];
-                            var bufIm = hybrid ? _hybridLinkIm[link] : _qmfLinkIm[link];
-                            var linkPhase = hybrid ? HybridLinkPhase[link] : QmfLinkPhase[link];
-                            double a = decay * LinkDecays[link];
-                            double storedRe = bufRe[linkIndex[link]][sb];
-                            double storedIm = bufIm[linkIndex[link]][sb];
-                            double nextRe = (storedRe * linkPhase.Re[sb]) - (storedIm * linkPhase.Im[sb]) - (a * r);
-                            double nextIm = (storedRe * linkPhase.Im[sb]) + (storedIm * linkPhase.Re[sb]) - (a * m);
-                            bufRe[linkIndex[link]][sb] = r + (a * nextRe);
-                            bufIm[linkIndex[link]][sb] = m + (a * nextIm);
-                            r = nextRe;
-                            m = nextIm;
-                        }
-
-                        outRe = r;
-                        outIm = m;
+                        (outRe, outIm) = (allPassRe[sb], allPassIm[sb]);
                     }
 
-                    double duck = ratio[i][bin];
-                    if (hybrid)
-                    {
-                        _rightRe[i][sb] = duck * outRe;
-                        _rightIm[i][sb] = duck * outIm;
-                    }
-                    else
-                    {
-                        rightRe[i][sb] = duck * outRe;
-                        rightIm[i][sb] = duck * outIm;
-                    }
-
-                    d = d + 1 >= AllPassDelay ? 0 : d + 1;
-                    for (int link = 0; link < 3; link++)
-                    {
-                        linkIndex[link] = linkIndex[link] + 1 >= LinkDelays[link] ? 0 : linkIndex[link] + 1;
-                    }
+                    outRow[sb] = duck * outRe;
+                    outRowIm[sb] = duck * outIm;
                 }
+            }
 
-                delayIndex = d;
+            d = d + 1 >= AllPassDelay ? 0 : d + 1;
+            for (int link = 0; link < 3; link++)
+            {
+                linkIndex[link] = linkIndex[link] + 1 >= LinkDelays[link] ? 0 : linkIndex[link] + 1;
             }
         }
 
-        _delayIndex = delayIndex;
+        _delayIndex = d;
         linkIndex.CopyTo(_linkIndex);
+    }
+
+    // The decay of the all-pass links by QMF subband: 1 up to DecayCutoff, then falling by DecaySlope a subband.
+    private static readonly double[] QmfDecay = [.. Enumerable.Range(0, 64).Select(sb => sb <= DecayCutoff ? 1 : Math.Max(0, 1 + (DecayCutoff * DecaySlope) - (DecaySlope * sb)))];
+
+    /// <summary>
+    /// The QMF subbands <paramref name="first"/> .. <paramref name="end"/> - 1 of one slot through the all-pass filter
+    /// (<see cref="AllPass"/>), into <paramref name="outRe"/> and <paramref name="outIm"/> at the same indices: four
+    /// subbands at a time where Vector256 is accelerated, each lane with AllPass's operations in its order (no fused
+    /// multiply-adds), so the output is the same to the bit (<c>PsAllPassRow_MatchesScalar</c>); the rest one by one.
+    /// </summary>
+    internal static void AllPassRow(ReadOnlySpan<double> inRe, ReadOnlySpan<double> inIm, int first, int end, double[] delayRe, double[] delayIm, double[][][] linkRe, double[][][] linkIm, ReadOnlySpan<int> linkIndex, Span<double> outRe, Span<double> outIm)
+    {
+        int sb = first;
+        if (Vector256.IsHardwareAccelerated)
+        {
+            for (; sb + 4 <= end; sb += 4)
+            {
+                var delayedRe = Vector256.Create<double>(delayRe.AsSpan(sb));
+                var delayedIm = Vector256.Create<double>(delayIm.AsSpan(sb));
+                Vector256.Create<double>(inRe[sb..]).CopyTo(delayRe.AsSpan(sb));
+                Vector256.Create<double>(inIm[sb..]).CopyTo(delayIm.AsSpan(sb));
+                var phaseRe = Vector256.Create<double>(QmfPhase.Re.AsSpan(sb));
+                var phaseIm = Vector256.Create<double>(QmfPhase.Im.AsSpan(sb));
+                var r = (delayedRe * phaseRe) - (delayedIm * phaseIm);
+                var m = (delayedRe * phaseIm) + (delayedIm * phaseRe);
+                var decay = Vector256.Create<double>(QmfDecay.AsSpan(sb));
+                for (int link = 0; link < 3; link++)
+                {
+                    var bufRe = linkRe[link][linkIndex[link]].AsSpan(sb);
+                    var bufIm = linkIm[link][linkIndex[link]].AsSpan(sb);
+                    var lp = QmfLinkPhase[link];
+                    var lpRe = Vector256.Create<double>(lp.Re.AsSpan(sb));
+                    var lpIm = Vector256.Create<double>(lp.Im.AsSpan(sb));
+                    var a = decay * Vector256.Create(LinkDecays[link]);
+                    var storedRe = Vector256.Create<double>(bufRe);
+                    var storedIm = Vector256.Create<double>(bufIm);
+                    var nextRe = (storedRe * lpRe) - (storedIm * lpIm) - (a * r);
+                    var nextIm = (storedRe * lpIm) + (storedIm * lpRe) - (a * m);
+                    (r + (a * nextRe)).CopyTo(bufRe);
+                    (m + (a * nextIm)).CopyTo(bufIm);
+                    r = nextRe;
+                    m = nextIm;
+                }
+
+                r.CopyTo(outRe[sb..]);
+                m.CopyTo(outIm[sb..]);
+            }
+        }
+
+        for (; sb < end; sb++)
+        {
+            (outRe[sb], outIm[sb]) = AllPass(inRe[sb], inIm[sb], sb, QmfDecay[sb], delayRe, delayIm, QmfPhase, linkRe, linkIm, QmfLinkPhase, linkIndex);
+        }
+    }
+
+    /// <summary>
+    /// One subband's sample through the all-pass filter: the fractional delay (the delay line's row at this slot, and
+    /// its phase), then the three links (their rows at <paramref name="linkIndex"/>), each decayed by
+    /// <paramref name="decay"/> times its own factor.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static (double Re, double Im) AllPass(double inRe, double inIm, int sb, double decay, double[] delayRe, double[] delayIm, (double[] Re, double[] Im) phase, double[][][] linkRe, double[][][] linkIm, (double[] Re, double[] Im)[] linkPhase, ReadOnlySpan<int> linkIndex)
+    {
+        double delayedRe = delayRe[sb];
+        double delayedIm = delayIm[sb];
+        delayRe[sb] = inRe;
+        delayIm[sb] = inIm;
+        double r = (delayedRe * phase.Re[sb]) - (delayedIm * phase.Im[sb]);
+        double m = (delayedRe * phase.Im[sb]) + (delayedIm * phase.Re[sb]);
+        for (int link = 0; link < 3; link++)
+        {
+            var bufRe = linkRe[link][linkIndex[link]];
+            var bufIm = linkIm[link][linkIndex[link]];
+            var lp = linkPhase[link];
+            double a = decay * LinkDecays[link];
+            double storedRe = bufRe[sb];
+            double storedIm = bufIm[sb];
+            double nextRe = (storedRe * lp.Re[sb]) - (storedIm * lp.Im[sb]) - (a * r);
+            double nextIm = (storedRe * lp.Im[sb]) + (storedIm * lp.Re[sb]) - (a * m);
+            bufRe[sb] = r + (a * nextRe);
+            bufIm[sb] = m + (a * nextIm);
+            r = nextRe;
+            m = nextIm;
+        }
+
+        return (r, m);
     }
 
     // 8.6.4.6: per envelope, each parameter band's matrix (Ra); per group, the matrix stepped linearly from the previous

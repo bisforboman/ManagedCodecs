@@ -83,6 +83,8 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
 
 ## Gotchas (each cost time once)
 
+- A worktree has no generated samples: link them with `ln -s <main checkout>/samples/*.* samples/`, without `-f`
+  (`ln -sf samples/*` once replaced the tracked `samples/README.md` with a link, and linked directories into themselves).
 - Temporary instrumentation (coverage counters, traces): commit the real work first. `git checkout <file>` to
   remove the instrumentation otherwise also throws away the file's other uncommitted changes, and so does
   reversing a `git diff` taken against HEAD.

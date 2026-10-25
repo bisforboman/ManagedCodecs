@@ -1,7 +1,8 @@
 version: 2
 updates:
   - package-ecosystem: github-actions
-    directory: /
+    # The workflows and the composite actions (their pins too).
+    directories: ["/", "/.github/actions/*"]
     schedule:
       interval: weekly
     # One PR a week instead of one per action (each is a full CI run): minor and patch updates together, which

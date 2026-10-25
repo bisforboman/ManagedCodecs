@@ -1,0 +1,87 @@
+name: Benchmark
+
+# ManagedCodecs against FFmpeg (single-threaded) on the samples README's Benchmarking section lists, plus the 720p
+# sample with 4 threads against 1 (tools/bench.py: medians of 5 interleaved runs, the order alternating), on x64 and
+# ARM64 runners. The tables go in the run summary; on main, each run's JSON record is also committed to the
+# `benchmarks` branch, whose README (tools/bench-history.py) is the history. Weekly and on demand: hosted runners are
+# quieter than a cloud VM, but numbers still vary by a few percent between runs.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '23 4 * * 0'
+
+# The token only reads the repository; the history job alone writes, to the benchmarks branch.
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.os }}
+    # One pass of bench.py takes about 80 s on a 4-core VM: 5 runs about 7 minutes, the rest room for make-samples.sh on a cache miss.
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
+        with:
+          dotnet-version: 10.0.x
+
+      - uses: ./.github/actions/samples
+
+      - name: Build
+        run: dotnet build tools/ManagedCodecs.Cli -c Release
+
+      - name: Benchmark
+        run: |
+          tools/bench.py --runs 5 --report bench.md --json bench.json
+          { echo "### $(uname -m)"; echo; cat bench.md; } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: bench-${{ runner.arch }}
+          path: bench.json
+
+  # Adds the runs' records to the benchmarks branch (made on the first run) and rewrites its README from all of them;
+  # also when one runner failed, so the other's record is kept.
+  history:
+    needs: benchmark
+    if: ${{ !cancelled() && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    concurrency: benchmark-history
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: bench-*
+          path: records
+
+      - name: Commit the records and the history page
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git ls-remote --exit-code --heads origin benchmarks > /dev/null; then
+            git fetch -q origin benchmarks
+            git worktree add -B benchmarks history FETCH_HEAD
+          else
+            git worktree add --orphan -b benchmarks history
+          fi
+          mkdir -p history/runs
+          shopt -s nullglob
+          for record in records/*/bench.json; do
+            name="$(jq -r '.date[:10]' "$record")-$(jq -r .machine.arch "$record")-${{ github.run_id }}-${{ github.run_attempt }}.json"
+            cp "$record" "history/runs/$name"
+          done
+          tools/bench-history.py history/runs > history/README.md
+          git -C history add -A
+          if ! git -C history diff --cached --quiet; then
+            git -C history commit -q -m "Benchmark run ${{ github.run_id }} ($(git rev-parse --short HEAD))"
+            git -C history push -q origin benchmarks
+          fi

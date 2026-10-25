@@ -1,0 +1,35 @@
+name: FFmpeg
+description: >-
+  Ubuntu's FFmpeg (6.1 on 24.04, the version the samples and references were set up with, as in ci.yml) and ImageMagick,
+  their packages from the Actions cache.
+outputs:
+  key:
+    description: The packages' cache key, which changes with their versions
+    value: ${{ steps.apt.outputs.key }}
+runs:
+  using: composite
+  steps:
+    # As ci.yml: the key is the list of package files apt would fetch now, versions included.
+    - name: List the FFmpeg and ImageMagick packages to fetch
+      id: apt
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install --print-uris -qq --no-install-recommends ffmpeg imagemagick | awk '{print $2}' | sort > "$RUNNER_TEMP/apt-files.txt"
+        echo "key=apt-${{ runner.os }}-${{ runner.arch }}-$(sha256sum "$RUNNER_TEMP/apt-files.txt" | cut -c1-16)" >> "$GITHUB_OUTPUT"
+
+    - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/apt-archives
+        key: ${{ steps.apt.outputs.key }}
+        restore-keys: apt-${{ runner.os }}-${{ runner.arch }}-
+
+    - name: Install FFmpeg and ImageMagick
+      shell: bash
+      run: |
+        mkdir -p ~/apt-archives/partial
+        sudo apt-get install -y --no-install-recommends -o Dir::Cache::Archives="$HOME/apt-archives" \
+          -o APT::Keep-Downloaded-Packages=true ffmpeg imagemagick
+        sudo rm -rf ~/apt-archives/partial ~/apt-archives/lock
+        sudo chown -R "$(id -u):$(id -g)" ~/apt-archives
+        ffmpeg -hide_banner -version | head -1

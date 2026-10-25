@@ -265,43 +265,28 @@ ffmpeg -benchmark -threads 1 -stream_loop 9 -i $f -f null -
 
 Both time the whole process, demuxing included; mcdec's also includes .NET's startup and JIT (mcdec's `last loop`
 line shows the steady speed without them). mcdec disposes each frame once it has it, as a consumer done with them
-would, so H.264 frames reuse the planes of earlier ones. A snapshot, made that way (2026-10-25 afternoon, after H.264 speed
-round 3, FFmpeg 6.1.1,
-single-threaded on a 4-core 2.8 GHz Xeon cloud VM with AVX2 and AVX-512; the median of five runs interleaved with
-FFmpeg's, the order alternating; µs per frame, AAC frames are 1024 samples, HE-AAC frames 2048):
+would, so H.264 frames reuse the planes of earlier ones.
 
-| Sample | Loops | ManagedCodecs | FFmpeg | Ratio |
-| --- | ---: | ---: | ---: | ---: |
-| `testsrc-420.avi` (320x240 MJPEG 4:2:0) | 100 | 302 | 368 | 0.82 |
-| `testsrc-444.avi` (MJPEG 4:4:4) | 100 | 487 | 494 | 0.99 |
-| `noise-q1.avi` (MJPEG, noise at the highest quality) | 100 | 1098 | 1382 | 0.79 |
-| `h264-p-refs.mp4` (320x240 H.264, P frames) | 40 | 611 | 216 | 2.83 |
-| `h264-bench-720p.mp4` (1280x720 H.264) | 10 | 6862 | 2356 | 2.91 |
-| `h264-main-p-refs.mp4` (320x240 H.264 Main, CABAC) | 40 | 826 | 342 | 2.42 |
-| `h264-b-pyramid.mp4` (320x240 H.264 Main, CABAC, B frames) | 20 | 1400 | 482 | 2.90 |
-| `h264-wp-default.mp4` (320x240 H.264, libx264's Main defaults: B frames, weighted prediction) | 20 | 1157 | 377 | 3.07 |
-| `h264-high-default.mp4` (320x240 H.264, libx264's High defaults: also the 8x8 transform) | 20 | 1292 | 393 | 3.29 |
-| `h264-high-b.mp4` (320x240 H.264 High, B frames, all partitions) | 40 | 1560 | 586 | 2.66 |
-| `h264-10bit-b.mp4` (the same at 10 bits, High 10) | 40 | 1957 | 604 | 3.24 |
-| `h264-high-motion.mp4` (320x240 H.264 High, fast motion and noise, QP 22) | 20 | 5838 | 3148 | 1.85 |
-| `h264-10bit-motion.mp4` (the same at 10 bits, QP 34, which is QP 22's step size) | 20 | 6300 | 3224 | 1.95 |
-| `h264-mbaff-default.mp4` (320x240 H.264 MBAFF, libx264's interlaced defaults) | 40 | 1627 | 561 | 2.90 |
-| `jm/jm-paff-b.mp4` (320x256 H.264 field pictures from JM, CABAC, B pictures) | 200 | 1425 | 614 | 2.32 |
-| `aac-stereo-48k.mp4` (AAC, stereo) | 100 | 46 | 61 | 0.75 |
-| `aac-5.1.mp4` (AAC, 5.1) | 100 | 130 | 89 | 1.46 |
-| `heaac/heaac-5.1.mp4` (HE-AAC, 5.1) | 100 | 518 | 228 | 2.27 |
-| `heaac/heaacv2-stereo.mp4` (HE-AAC v2: parametric stereo) | 100 | 210 | 133 | 1.58 |
+`tools/bench.py` times the samples below that way, each against FFmpeg (or one build of mcdec against another, with
+`--base <mcdec.dll>`), five runs a side interleaved with the order alternating, and takes the medians; one more row
+times the 720p sample with 4 threads against 1. The [weekly benchmark](https://github.com/bisforboman/ManagedCodecs/actions/workflows/benchmark.yml)
+(`.github/workflows/benchmark.yml`, also on demand) runs it on GitHub's x64 and ARM64 runners with Ubuntu's FFmpeg 6.1
+and puts the tables in each run's summary; each run's record goes to the `benchmarks` branch, whose
+[history](https://github.com/bisforboman/ManagedCodecs/tree/benchmarks) has every run's ratios.
+[`compare.yml`](https://github.com/bisforboman/ManagedCodecs/actions/workflows/compare.yml) times a branch against its
+base on the same two runners, before a performance change is kept (`gh workflow run compare.yml --ref <branch>`).
 
-The short MJPEG and AAC runs are mostly .NET's startup and JIT: without them (`last loop`), `aac-5.1.mp4` takes about
-90 µs a frame, `heaac-5.1.mp4` about 410, `heaacv2-stereo.mp4` about 140. H.264 takes 1.85 to 3.29 times FFmpeg's time,
-less on noisier content, whose residual decoding weighs more; at 10 bits the ratio is close to the 8-bit one. A VM's
-speed moves from hour to hour, and FFmpeg's and ours do not move together: between the midday snapshot (in the
-history of this file) and this one, the progressive H.264, AAC and HE-AAC code did not change, yet their ratios moved
-by -14 to +16%. The third H.264 round was on interlaced video, which took 3.2 to 3.6 (MBAFF) and 4.0 to 4.5 (field
-pictures) times FFmpeg's time before it, timed at 100 loops: Table 6-4's neighbour lookups made cheaper, the left
-pair found once per macroblock rather than once per line, and the macroblock edges where both sides line up through
-the vector edge filter rather than line by line. The lookups' perf share fell from 17.6 to 10.0% (MBAFF) and the
-deblocking filter's from 19.7 to 8.3%. Only comparisons made on one machine at one time count.
+The samples: MJPEG `testsrc-420.avi`, `testsrc-444.avi` and `noise-q1.avi`; H.264 `h264-p-refs.mp4`,
+`h264-bench-720p.mp4`, `h264-main-p-refs.mp4` (CABAC), `h264-b-pyramid.mp4`, `h264-wp-default.mp4` and
+`h264-high-default.mp4` (libx264's Main and High defaults), `h264-high-b.mp4`, `h264-10bit-b.mp4`,
+`h264-high-motion.mp4`, `h264-10bit-motion.mp4`, `h264-mbaff-default.mp4` and `jm/jm-paff-b.mp4` (field pictures);
+AAC `aac-stereo-48k.mp4` and `aac-5.1.mp4`, HE-AAC `heaac/heaac-5.1.mp4` and `heaac/heaacv2-stereo.mp4`. On a 4-core
+cloud VM (2026-10-25, FFmpeg 6.1.1), MJPEG took 0.8 to 1.0 times FFmpeg's time, AAC 0.75 (stereo) to 1.5 (5.1), HE-AAC
+1.6 to 2.3 and H.264 1.85 to 3.3: less on noisier content, whose residual decoding weighs more, and at 10 bits about
+the 8-bit ratio. The short MJPEG and AAC runs are mostly .NET's startup and JIT: without them (`last loop`),
+`aac-5.1.mp4` takes about 90 µs a frame, `heaac-5.1.mp4` about 410, `heaacv2-stereo.mp4` about 140. A VM's speed
+moves from hour to hour, and FFmpeg's and ours do not move together (unchanged code's ratios once moved by -14 to +16%
+between two snapshots of a day): only comparisons made on one machine at one time count.
 
 Cloud VMs are noisy (single runs differed by up to a third), so compare before and after on one machine. For
 statistics on the decoder alone there is BenchmarkDotNet, `dotnet run -c Release --project

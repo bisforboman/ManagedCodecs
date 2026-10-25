@@ -11,7 +11,7 @@ docs/conformance.md what each feature is checked against.
 Correct first, then fast. Every decoder is checked against FFmpeg sample by sample (frames by MD5, packets by
 timestamps and MD5, audio by value), and every fast path (SIMD, FFT, direct reads) keeps a scalar or by-the-definition
 reference that a test compares it with on random input. Implement from the specs (ITU-T T.81, ITU-T H.264,
-ISO/IEC 14496-3 and -12), never by porting FFmpeg's LGPL code; README's license note lists the exceptions (the MJPEG
+ISO/IEC 14496-3 and -12), never by porting FFmpeg's LGPL code; README's License section lists the exceptions (the MJPEG
 IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
 
 ## Working on this repository

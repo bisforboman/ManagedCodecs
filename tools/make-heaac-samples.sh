@@ -98,6 +98,14 @@ PY
   LD_LIBRARY_PATH=$work/fdk3/build fdkaac --silent -p 5 -b 48000 -o "$out/heaac-downsampled.mp4" "$work/in.wav"
 fi
 
+# AAC LC stereo at 64 kbit/s: the FDK encoder sets M/S in bands both channels fill with noise (the spec's correlated
+# noise), which FFmpeg decodes with noise of its own in each channel (docs/conformance.md); FFmpeg's encoder never does.
+if wanted aac-fdk-pns-ms; then
+  ff -f lavfi -i "aevalsrc=0.3*sin(2*PI*440*t)+0.1*sin(2*PI*6000*t)|0.25*sin(2*PI*660*t)+0.1*sin(2*PI*6100*t):s=48000:d=1" \
+    -c:a pcm_s16le "$work/in.wav"
+  "$fdk/aac-enc" -r 64000 "$work/in.wav" "$out/aac-fdk-pns-ms.aac" > /dev/null
+fi
+
 # AAC LC 5.1 with its channels in a program config element (channel configuration 0) rather than configuration 6, as
 # the spec lists them (centre, front pair, back pair, LFE): FFmpeg names that layout and outputs it in WAVE order,
 # unlike its own encoder's program config elements, which it outputs as listed (docs/conformance.md). The encoder has

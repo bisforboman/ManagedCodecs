@@ -9,8 +9,8 @@ goes for `jm/`: field pictures (PAFF), also next to MBAFF frames, in 4:0:0 and w
 (separate colour planes), muxed by `tools/mux-h264.py`, each with its references already made: the frames from JM's
 own decoder (ldecod) and the packets as ffprobe lists them; `tools/make-samples.sh` copies them here last. These are
 the only references not from FFmpeg. And for `heaac/`: HE-AAC (spectral band
-replication, parametric stereo, and the header's second part from a patched copy; and an AAC LC 5.1 stream with a
-program config element, from another) from the Fraunhofer FDK encoder, made
+replication, parametric stereo, and the header's second part from a patched copy; and AAC LC: noise in M/S bands, and
+a 5.1 stream with a program config element, from another patched copy) from the Fraunhofer FDK encoder, made
 again by `tools/make-heaac-samples.sh <fdk-aac tree>`. From the repository root:
 
 ```

@@ -4,7 +4,7 @@ namespace ManagedCodecs.Aac;
 
 /// <summary>
 /// AAC LC and HE-AAC decoder (ISO/IEC 14496-3 subpart 4, and spectral band replication of 4.6.18) for raw access units
-/// as stored in MP4, or ADTS frames: one packet in, 1024 samples per channel out, or with SBR 2048 at twice the rate
+/// as stored in MP4, or ADTS frames: one packet in, 1024 samples per channel out for each raw data block, or with SBR 2048 at twice the rate
 /// (downsampled SBR, which the config signals by giving SBR the core's own rate: 1024 at the core's).
 /// </summary>
 /// <remarks>
@@ -110,32 +110,64 @@ public sealed class AacDecoder : IAudioDecoder
 
     /// <summary>
     /// Decodes one access unit: a raw one as stored in MP4, or an ADTS frame (header included, as the ADTS demuxer gives
-    /// them) of one raw data block, whose header must match the decoder's configuration.
+    /// them), whose header must match the decoder's configuration; a frame of several raw data blocks gives all their
+    /// samples in one frame.
     /// </summary>
     public AudioFrame Decode(ReadOnlySpan<byte> packet)
     {
         // A raw access unit can't pass for an ADTS frame: one starting with 0xFF starts with an END element.
-        if (AdtsHeader.TryParse(packet, out var adts) && adts.FrameLength == packet.Length)
+        if (!AdtsHeader.TryParse(packet, out var adts) || adts.FrameLength != packet.Length)
         {
-            if (adts.RawDataBlocks != 1)
-            {
-                throw new NotSupportedException("ADTS frames of more than one raw data block are not supported.");
-            }
-
-            if (adts.Profile + 1 != _config.ObjectType || adts.SampleRateIndex != _config.SampleRateIndex || adts.ChannelConfiguration != _config.ChannelConfiguration)
-            {
-                throw new NotSupportedException("An ADTS header that changes the stream's configuration is not supported.");
-            }
-
-            packet = packet[adts.HeaderLength..];
+            return DecodeBlock(new AacBitReader(packet));
         }
 
+        if (adts.Profile + 1 != _config.ObjectType || adts.SampleRateIndex != _config.SampleRateIndex || adts.ChannelConfiguration != _config.ChannelConfiguration)
+        {
+            throw new NotSupportedException("An ADTS header that changes the stream's configuration is not supported.");
+        }
+
+        var r = new AacBitReader(packet[adts.HeaderLength..]);
+        if (adts.RawDataBlocks == 1)
+        {
+            return DecodeBlock(r);
+        }
+
+        // Several raw data blocks (1.A.3.2.1): each ends byte-aligned, followed by its CRC when the frame has them (the
+        // header's then gives the blocks' positions, which reading them in turn makes unneeded).
+        var blocks = new AudioFrame[adts.RawDataBlocks];
+        for (int i = 0; i < blocks.Length; i++)
+        {
+            blocks[i] = DecodeBlock(r);
+            r.ByteAlign();
+            r.Skip(adts.HasCrc ? 16 : 0);
+        }
+
+        int count = blocks[0].SampleCount;
+        var frame = new AudioFrame(blocks[0].SampleRate, blocks[0].Channels, count * blocks.Length);
+        for (int i = 0; i < blocks.Length; i++)
+        {
+            if (blocks[i].SampleCount != count || blocks[i].Channels != frame.Channels)
+            {
+                throw new NotSupportedException("SBR signalled only by its data, first inside a frame of several raw data blocks, is not supported.");
+            }
+
+            for (int c = 0; c < frame.Channels; c++)
+            {
+                blocks[i].Samples[c].CopyTo(frame.Samples[c].AsSpan(i * count));
+            }
+        }
+
+        return frame;
+    }
+
+    // raw_data_block (4.4.2.1): its elements up to END.
+    private AudioFrame DecodeBlock(AacBitReader r)
+    {
         foreach (var sbr in _sbr)
         {
             sbr?.StartFrame();
         }
 
-        var r = new AacBitReader(packet);
         int channel = 0;
         int element = -1; // the SCE or CPE an SBR payload belongs to: the one before it
         int elementChannels = 0;

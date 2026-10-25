@@ -68,8 +68,11 @@ says feature by feature which encoder made the samples (libx264, OpenH264, JM) a
 - H.264 speed: 1.85 to 3.29 times FFmpeg's time on one thread, interlaced video included (Benchmarking); MBAFF
   frames still look neighbours up through Table 6-4 call by call (about 10% of their time), where progressive
   pictures read a table made once a picture. With 4 threads a 720p P chain takes
-  about half of one thread's time: each picture decodes about 28% slower than alone (its references were written on
-  other cores) and threads wait for references' rows about a fifth of the time.
+  about half of one thread's time (Decoding a file), on 4 cores without SMT where four single-threaded decodes run side
+  by side unslowed: each picture takes about 28% more CPU than alone, and workers wait for references' rows about 18%
+  of the time, a third of it P pictures trailing the IDR picture, which decodes in 2.4 times a P picture's time
+  (mcdec starts each loop on one). The waiting itself costs little: locks and progress reports are under 0.2% of the
+  CPU, switching threads about 3%.
 
 ## Getting started
 

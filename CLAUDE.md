@@ -193,6 +193,10 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
   breaking it and seeing that test fail (the co-located motion wait is the exception, covered in practice by the motion
   compensation waits before it). A frame's second field runs on a decoder of its own alongside its first: it waits for
   the first's `Begin` (which resets both fields' slots), and its frame is copied out only once the first is done.
+- Measuring frame threading: perf samples only threads that run, so blocked time is invisible to it; time the waits
+  (a Stopwatch around `Picture.Wait`, logging waiter, reference, row and duration, in a scratch copy) and the front
+  end's wait for the oldest picture. mcdec's loops each start a fresh decoder on an IDR picture, whose followers
+  trail its slower intra rows: a third of the 720p sample's waits are that.
 - In fragmented MP4, FFmpeg's packet durations are not the file's: its demuxer leaves them unset and libavformat
   fills in the codec frame size (1024 for AAC). Compare with FFmpeg's next dts instead (Mp4ConformanceTests does).
 - HE-AAC: FFmpeg's SBR is single precision, and the HF generator's prediction is nearly singular for a subband holding

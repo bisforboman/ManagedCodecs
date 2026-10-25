@@ -65,14 +65,19 @@ says feature by feature which encoder made the samples (libx264, OpenH264, JM) a
   API); guessing motion for concealed macroblocks (they copy their place in a reference); without concealment, a
   lost reference fails pictures up to the next IDR picture, not an MMCO 5 one (by design: the MMCO 5 picture itself
   would have to be decoded from lists that can no longer be trusted, so its marking never applies).
-- H.264 speed: 1.85 to 3.29 times FFmpeg's time on one thread, interlaced video included (Benchmarking); MBAFF
-  frames still look neighbours up through Table 6-4 call by call (about 10% of their time), where progressive
-  pictures read a table made once a picture. With 4 threads a 720p P chain takes
-  about half of one thread's time (Decoding a file), on 4 cores without SMT where four single-threaded decodes run side
-  by side unslowed: each picture takes about 28% more CPU than alone, and workers wait for references' rows about 18%
-  of the time, a third of it P pictures trailing the IDR picture, which decodes in 2.4 times a P picture's time
-  (mcdec starts each loop on one). The waiting itself costs little: locks and progress reports are under 0.2% of the
-  CPU, switching threads about 3%.
+- H.264 speed: 1.85 to 3.29 times FFmpeg's time on one thread, interlaced video included (Benchmarking); at 720p
+  every class sits at 2.2 to 2.8 times (CAVLC and CABAC, P and intra-only, High), so the gap is general rather than
+  one class's (the CAVLC residual reader's compiled code is clean). MBAFF frames still look neighbours up through
+  Table 6-4 call by call (about 10% of their time), where progressive pictures read a table made once a picture.
+  With 4 threads a 720p P chain takes 0.52 of one thread's time over 50 frames and 0.41 over 250 (one IDR picture
+  each, which decodes in 2.4 times a P picture's time with the P pictures trailing it: short GOPs gain less; medians
+  of five interleaved runs), on 4 cores without SMT where four single-threaded decodes run side by side about 7%
+  slower. Workers wait for references' rows about 18% of the time, and each picture takes about 30% more CPU than
+  alone at 720p, 60% at 320x240 (perf stat's task clock): spread over every hot function, the ones reading
+  references most (in one profile), and not waiting (locks and progress
+  reports are under 0.2% of the CPU). It is not yet explained; this VM has no hardware counters to tell cache misses
+  from the rest. Decoding a picture's rows on several threads would mostly shorten the
+  IDR picture's lead: about a tenth of a 50-frame GOP's time, little of a 250-frame one's.
 
 ## Getting started
 
@@ -163,7 +168,10 @@ them up to that many packets later (`Flush` returns the rest), and borrowed fram
 take 0.73 of one thread's time, 4 threads 0.50 and 6 threads 0.42 (`mcdec --threads N`, medians of five interleaved
 runs): a thread waiting for a reference's rows leaves its core idle, so a few more threads than cores help. The two
 fields of a frame coded as field pictures are decoded at once too (JM's `jm-paff-b.mp4` with 4 threads: 0.79 of one
-thread's time). The default, 1, decodes on the calling thread, which WebAssembly in a browser needs; it costs 0.3% more
+thread's time). Each decoder slot keeps a thread of its own for its pictures (it ends after `Flush`, or two seconds
+without a picture), and the front end blocks rather than spins while it waits: a new thread a picture, and the
+spinning, had cost 12% of the CPU and 22% of the time of 320x240 video at 4 threads (within the noise at 720p). The
+default, 1, decodes on the calling thread, which WebAssembly in a browser needs; it costs 0.3% more
 instructions than before frame threading existed (callgrind).
 
 `AacDecoder.Decode(packet)` returns one `AudioFrame`: the packet's 1024 samples per channel, less the

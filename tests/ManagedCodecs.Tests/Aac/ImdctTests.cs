@@ -77,6 +77,10 @@ public class ImdctTests
             Vectors.MultiplyAdd(sum, b, w);
             Assert.Equal(a.Select((x, n) => x + (b[n] * w[n])), sum);
 
+            var magnitudes = (double[])w.Clone();
+            Vectors.AddMagnitudes(magnitudes, a, b);
+            Assert.Equal(w.Select((x, n) => x + ((a[n] * a[n]) + (b[n] * b[n]))), magnitudes);
+
             var output = new float[length];
             Vectors.AddScaleToSingle(a, b, 1.0 / 32768, output);
             Assert.Equal(a.Select((x, n) => (float)((x + b[n]) * (1.0 / 32768))), output);

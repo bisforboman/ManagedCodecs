@@ -529,6 +529,38 @@ internal static class Vectors
         }
     }
 
+    /// <summary>sum[n] += (re[n] * re[n]) + (im[n] * im[n]).</summary>
+    public static void AddMagnitudes(Span<double> sum, ReadOnlySpan<double> re, ReadOnlySpan<double> im)
+    {
+        ref double s = ref MemoryMarshal.GetReference(sum);
+        ref double x = ref MemoryMarshal.GetReference(re);
+        ref double y = ref MemoryMarshal.GetReference(im);
+        int n = 0;
+        if (Vector256.IsHardwareAccelerated)
+        {
+            for (; n <= sum.Length - Vector256<double>.Count; n += Vector256<double>.Count)
+            {
+                var a = Vector256.LoadUnsafe(ref x, (nuint)n);
+                var b = Vector256.LoadUnsafe(ref y, (nuint)n);
+                (Vector256.LoadUnsafe(ref s, (nuint)n) + ((a * a) + (b * b))).StoreUnsafe(ref s, (nuint)n);
+            }
+        }
+        else if (Vector128.IsHardwareAccelerated)
+        {
+            for (; n <= sum.Length - Vector128<double>.Count; n += Vector128<double>.Count)
+            {
+                var a = Vector128.LoadUnsafe(ref x, (nuint)n);
+                var b = Vector128.LoadUnsafe(ref y, (nuint)n);
+                (Vector128.LoadUnsafe(ref s, (nuint)n) + ((a * a) + (b * b))).StoreUnsafe(ref s, (nuint)n);
+            }
+        }
+
+        for (; n < sum.Length; n++)
+        {
+            sum[n] += (re[n] * re[n]) + (im[n] * im[n]);
+        }
+    }
+
     /// <summary>output[n] = (float)((a[n] + b[n]) * scale).</summary>
     public static void AddScaleToSingle(ReadOnlySpan<double> a, ReadOnlySpan<double> b, double scale, Span<float> output)
     {

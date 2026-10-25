@@ -276,6 +276,7 @@ internal sealed class SbrChannel(bool downsampled = false)
         }
 
         Span<double> estimate = stackalloc double[64];
+        Span<double> energy = stackalloc double[64];
         Span<double> reference = stackalloc double[64];
         Span<double> gain = stackalloc double[64];
         Span<double> noise = stackalloc double[64];
@@ -290,6 +291,15 @@ internal sealed class SbrChannel(bool downsampled = false)
             int noiseBand = 0;
             statistics.SbrTransientEnvelopes += noNoise ? 1 : 0;
 
+            // Each subband's energy over the envelope's slots, summed slot by slot along the rows (each subband's terms in
+            // the same order as subband by subband).
+            var energies = energy[..m];
+            energies.Clear();
+            for (int t = first; t < last; t++)
+            {
+                Vectors.AddMagnitudes(energies, _highReal[t].AsSpan(kx, m), _highImaginary[t].AsSpan(kx, m));
+            }
+
             for (int band = 0; band < table.Length - 1; band++)
             {
                 int low = table[band];
@@ -297,13 +307,7 @@ internal sealed class SbrChannel(bool downsampled = false)
                 bool sineInBand = false;
                 for (int k = low; k < high; k++)
                 {
-                    double energy = 0;
-                    for (int t = first; t < last; t++)
-                    {
-                        energy += (_highReal[t][k] * _highReal[t][k]) + (_highImaginary[t][k] * _highImaginary[t][k]);
-                    }
-
-                    estimate[k - kx] = last > first ? energy / (last - first) : 0;
+                    estimate[k - kx] = last > first ? energies[k - kx] / (last - first) : 0;
                     sineInBand |= harmonic[k] && (l >= transient || _previousHarmonic[k]);
                 }
 

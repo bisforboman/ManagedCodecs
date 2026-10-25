@@ -246,4 +246,35 @@ public class QmfTests
 
         return output;
     }
+
+    /// <summary>
+    /// The vector gain loop of SBR's HF adjustment gives the scalar one's samples to the bit: with and without noise,
+    /// sinusoids in some subbands, every sine phase, a noise index that wraps at 512 inside the row, odd and even kx,
+    /// tails included.
+    /// </summary>
+    [Theory]
+    [InlineData(4, 60, 500, false)]
+    [InlineData(5, 59, 509, true)]
+    [InlineData(17, 3, 2, false)]
+    [InlineData(20, 44, 511, false)]
+    public void SbrApplyGains_MatchesScalar(int kx, int m, int noiseIndex, bool noNoise)
+    {
+        var random = new Random((kx * 64) + m);
+        double Next() => (random.NextDouble() - 0.5) * Math.Pow(10, random.Next(-3, 4));
+        for (int sine = 0; sine < 4; sine++)
+        {
+            double[] real = [.. Enumerable.Range(0, m).Select(_ => Next())];
+            double[] imaginary = [.. Enumerable.Range(0, m).Select(_ => Next())];
+            double[] gain = [.. Enumerable.Range(0, m).Select(_ => Math.Abs(Next()))];
+            double[] noise = [.. Enumerable.Range(0, m).Select(_ => Math.Abs(Next()))];
+            double[] tone = [.. Enumerable.Range(0, m).Select(_ => random.Next(3) == 0 ? Math.Abs(Next()) : 0)];
+            real[0] = -0.0; // a negative zero must stay one where nothing is added to it
+            var expectedReal = (double[])real.Clone();
+            var expectedImaginary = (double[])imaginary.Clone();
+            SbrChannel.ApplyGainsScalar(expectedReal, expectedImaginary, gain, noise, tone, kx, noiseIndex, sine, noNoise);
+            SbrChannel.ApplyGains(real, imaginary, gain, noise, tone, kx, noiseIndex, sine, noNoise);
+            Assert.Equal(expectedReal.Select(BitConverter.DoubleToInt64Bits), real.Select(BitConverter.DoubleToInt64Bits));
+            Assert.Equal(expectedImaginary.Select(BitConverter.DoubleToInt64Bits), imaginary.Select(BitConverter.DoubleToInt64Bits));
+        }
+    }
 }

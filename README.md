@@ -292,12 +292,14 @@ into memory, from `samples/testsrc-420.avi`, `samples/h264-bench-720p.mp4` and `
 in `MANAGEDCODECS_SAMPLE`, `MANAGEDCODECS_H264_SAMPLE` and `MANAGEDCODECS_AAC_SAMPLE`), so its numbers leave out
 what the two commands above include and are not comparable with FFmpeg's `bench:` line.
 
-## License note
+## License
+
+MIT ([LICENSE](LICENSE)).
 
 FFmpeg is LGPL-2.1-or-later (some parts GPL). Code ported from FFmpeg's sources must keep that
 license. Implementing from the public specifications (ITU-T T.81 for JPEG, ITU-T H.264,
-ISO/IEC 14496-12 for MP4) and using FFmpeg only as a reference for test output keeps the
-license choice open. Codec patents (e.g. H.264, AAC) apply regardless of language.
+ISO/IEC 14496-12 for MP4) and using FFmpeg only as a reference for test output is what lets
+this code be MIT. Codec patents (e.g. H.264, AAC) apply regardless of language.
 
 Two exceptions to "from the spec only": the MJPEG IDCT reproduces FFmpeg's integer IDCT arithmetic
 (that is what bit-exact JPEG output requires; see `SimpleIdct`), and the H.264 CAVLC tables, kept

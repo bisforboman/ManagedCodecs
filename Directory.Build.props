@@ -15,6 +15,7 @@
   <!-- Shared package metadata for the src/ libraries. -->
   <PropertyGroup>
     <Authors>Jakob Boman</Authors>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageTags>video;audio;codec;decoder;mjpeg;h264;avi;mp4;pure-managed;aot</PackageTags>
     <Description>Pure managed C# media codecs. No native binaries, Native AOT friendly.</Description>
   </PropertyGroup>

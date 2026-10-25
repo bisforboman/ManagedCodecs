@@ -277,4 +277,50 @@ public class QmfTests
             Assert.Equal(expectedImaginary.Select(BitConverter.DoubleToInt64Bits), imaginary.Select(BitConverter.DoubleToInt64Bits));
         }
     }
+
+    /// <summary>
+    /// The HF generator's covariances, four subbands at a time, are the scalar ones to the bit, for every subband count
+    /// (the vector part's whole groups, then the scalar tail), on random low-band slots over six decades.
+    /// </summary>
+    [Theory]
+    [InlineData(32)]
+    [InlineData(23)]
+    [InlineData(3)]
+    public void SbrCovariances_MatchScalar(int count)
+    {
+        var random = new Random(count);
+        double Next() => (random.NextDouble() - 0.5) * Math.Pow(10, random.Next(-3, 4));
+        double[][] real = [.. Enumerable.Range(0, 40).Select(_ => Enumerable.Range(0, 32).Select(_ => Next()).ToArray())];
+        double[][] imaginary = [.. Enumerable.Range(0, 40).Select(_ => Enumerable.Range(0, 32).Select(_ => Next()).ToArray())];
+        var expected = new double[SbrChannel.Covariance.Length];
+        var actual = new double[SbrChannel.Covariance.Length];
+        SbrChannel.CovariancesScalar(real, imaginary, 0, count, expected);
+        SbrChannel.Covariances(real, imaginary, count, actual);
+        Assert.Equal(expected.Select(BitConverter.DoubleToInt64Bits), actual.Select(BitConverter.DoubleToInt64Bits));
+    }
+
+    /// <summary>
+    /// The HF generator's patch filter, four subbands at a time, gives the formula's samples to the bit, element by
+    /// element in its order, for patches of every length up to a whole vector and a tail.
+    /// </summary>
+    [Fact]
+    public void SbrFilterPatch_MatchesFormula()
+    {
+        var random = new Random(7);
+        double Next() => (random.NextDouble() - 0.5) * Math.Pow(10, random.Next(-3, 4));
+        for (int length = 0; length <= 13; length++)
+        {
+            double[][] v = [.. Enumerable.Range(0, 10).Select(_ => Enumerable.Range(0, length).Select(_ => Next()).ToArray())];
+            var real = new double[length];
+            var imaginary = new double[length];
+            SbrChannel.FilterPatch(v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7], v[8], v[9], real, imaginary);
+            for (int i = 0; i < length; i++)
+            {
+                double re = v[0][i] + (v[6][i] * v[2][i]) - (v[7][i] * v[3][i]) + (v[8][i] * v[4][i]) - (v[9][i] * v[5][i]);
+                double im = v[1][i] + (v[7][i] * v[2][i]) + (v[6][i] * v[3][i]) + (v[9][i] * v[4][i]) + (v[8][i] * v[5][i]);
+                Assert.Equal(BitConverter.DoubleToInt64Bits(re), BitConverter.DoubleToInt64Bits(real[i]));
+                Assert.Equal(BitConverter.DoubleToInt64Bits(im), BitConverter.DoubleToInt64Bits(imaginary[i]));
+            }
+        }
+    }
 }

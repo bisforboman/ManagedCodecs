@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics;
 
 namespace ManagedCodecs.Aac.Sbr;
@@ -163,7 +164,8 @@ internal sealed class SbrChannel(bool downsampled = false)
 
     // 4.6.18.6: the high band of the frame's envelope slots, each patch copying low subbands up, filtered by the
     // subband's second-order linear prediction (from the covariance over 38 slots), scaled by its noise band's chirp
-    // factor, to whiten what the core's tonality would make too tonal. Subbands past the last patch stay empty.
+    // factor, to whiten what the core's tonality would make too tonal. Subbands past the last patch stay empty. The
+    // predictions come for every source subband at once, and the slots are filled row by row.
     private void GenerateHighBand(SbrChannelData data, SbrFrequencies frequencies, ReadOnlySpan<double> chirp)
     {
         int first = 2 * data.Borders[0];
@@ -176,6 +178,21 @@ internal sealed class SbrChannel(bool downsampled = false)
             _highStart[l] = kx;
         }
 
+        int sources = 0;
+        for (int p = 0; p < frequencies.PatchStart.Length; p++)
+        {
+            sources = Math.Max(sources, frequencies.PatchStart[p] + frequencies.PatchBands[p]);
+        }
+
+        // Up to a whole vector of subbands: the rows hold 32, and the ones past the last source go unused.
+        Span<double> phi = stackalloc double[Covariance.Length];
+        Covariances(_lowReal, _lowImaginary, Math.Min((sources + 3) & ~3, 32), phi);
+
+        // Each destination subband's coefficients, scaled by its chirp factor (none where the factor is 0).
+        Span<double> a0Real = stackalloc double[64];
+        Span<double> a0Imaginary = stackalloc double[64];
+        Span<double> a1Real = stackalloc double[64];
+        Span<double> a1Imaginary = stackalloc double[64];
         int destination = kx;
         int noiseBand = 0;
         for (int p = 0; p < frequencies.PatchStart.Length; p++)
@@ -189,54 +206,216 @@ internal sealed class SbrChannel(bool downsampled = false)
                 }
 
                 double bw = chirp[noiseBand];
-                var (a0Real, a0Imaginary, a1Real, a1Imaginary) = bw > 0 ? Prediction(source) : default;
-                a0Real *= bw;
-                a0Imaginary *= bw;
-                a1Real *= bw * bw;
-                a1Imaginary *= bw * bw;
-                for (int l = first; l < last; l++)
-                {
-                    int t = l + HfAdjust;
-                    double re1 = _lowReal[t - 1][source];
-                    double im1 = _lowImaginary[t - 1][source];
-                    double re2 = _lowReal[t - 2][source];
-                    double im2 = _lowImaginary[t - 2][source];
-                    _highReal[l][destination] = _lowReal[t][source] + (a0Real * re1) - (a0Imaginary * im1) + (a1Real * re2) - (a1Imaginary * im2);
-                    _highImaginary[l][destination] = _lowImaginary[t][source] + (a0Imaginary * re1) + (a0Real * im1) + (a1Imaginary * re2) + (a1Real * im2);
-                }
+                var (r0, i0, r1, i1) = bw > 0 ? Prediction(phi, source) : default;
+                a0Real[destination] = r0 * bw;
+                a0Imaginary[destination] = i0 * bw;
+                a1Real[destination] = r1 * (bw * bw);
+                a1Imaginary[destination] = i1 * (bw * bw);
+            }
+        }
+
+        for (int l = first; l < last; l++)
+        {
+            int t = l + HfAdjust;
+            destination = kx;
+            for (int p = 0; p < frequencies.PatchStart.Length; p++)
+            {
+                int count = frequencies.PatchBands[p];
+                int source = frequencies.PatchStart[p];
+                FilterPatch(
+                    _lowReal[t].AsSpan(source, count),
+                    _lowImaginary[t].AsSpan(source, count),
+                    _lowReal[t - 1].AsSpan(source, count),
+                    _lowImaginary[t - 1].AsSpan(source, count),
+                    _lowReal[t - 2].AsSpan(source, count),
+                    _lowImaginary[t - 2].AsSpan(source, count),
+                    a0Real.Slice(destination, count),
+                    a0Imaginary.Slice(destination, count),
+                    a1Real.Slice(destination, count),
+                    a1Imaginary.Slice(destination, count),
+                    _highReal[l].AsSpan(destination, count),
+                    _highImaginary[l].AsSpan(destination, count));
+                destination += count;
             }
         }
     }
 
-    // 4.6.18.6.2: the prediction coefficients alpha0 and alpha1 of subband k, from the covariances
-    // phi(i, j) = the sum over n in 0..37 of X_Low(k, n + 2 - i) X_Low*(k, n + 2 - j); both zero if either reaches 4.
-    private (double A0Real, double A0Imaginary, double A1Real, double A1Imaginary) Prediction(int k)
+    // A patch's subbands of one slot: X_High = X_Low(l) + alpha0 X_Low(l - 1) + alpha1 X_Low(l - 2), complex, each
+    // element's sums in the same order in the vector lanes as in the scalar tail.
+    internal static void FilterPatch(
+        ReadOnlySpan<double> re0,
+        ReadOnlySpan<double> im0,
+        ReadOnlySpan<double> re1,
+        ReadOnlySpan<double> im1,
+        ReadOnlySpan<double> re2,
+        ReadOnlySpan<double> im2,
+        ReadOnlySpan<double> a0Real,
+        ReadOnlySpan<double> a0Imaginary,
+        ReadOnlySpan<double> a1Real,
+        ReadOnlySpan<double> a1Imaginary,
+        Span<double> real,
+        Span<double> imaginary)
     {
-        double phi01Real = 0;
-        double phi01Imaginary = 0;
-        double phi02Real = 0;
-        double phi02Imaginary = 0;
-        double phi11 = 0;
-        double phi12Real = 0;
-        double phi12Imaginary = 0;
-        double phi22 = 0;
-        for (int n = 0; n < Buffered - 2; n++)
+        int i = 0;
+        int length = real.Length;
+        if (Vector256.IsHardwareAccelerated && length >= 4 && re0.Length >= length && im0.Length >= length && re1.Length >= length
+            && im1.Length >= length && re2.Length >= length && im2.Length >= length && a0Real.Length >= length
+            && a0Imaginary.Length >= length && a1Real.Length >= length && a1Imaginary.Length >= length && imaginary.Length >= length)
         {
-            double re0 = _lowReal[n + 2][k];
-            double im0 = _lowImaginary[n + 2][k];
-            double re1 = _lowReal[n + 1][k];
-            double im1 = _lowImaginary[n + 1][k];
-            double re2 = _lowReal[n][k];
-            double im2 = _lowImaginary[n][k];
-            phi01Real += (re0 * re1) + (im0 * im1);
-            phi01Imaginary += (im0 * re1) - (re0 * im1);
-            phi02Real += (re0 * re2) + (im0 * im2);
-            phi02Imaginary += (im0 * re2) - (re0 * im2);
-            phi11 += (re1 * re1) + (im1 * im1);
-            phi12Real += (re1 * re2) + (im1 * im2);
-            phi12Imaginary += (im1 * re2) - (re1 * im2);
-            phi22 += (re2 * re2) + (im2 * im2);
+            ref double x0 = ref MemoryMarshal.GetReference(re0);
+            ref double y0 = ref MemoryMarshal.GetReference(im0);
+            ref double x1 = ref MemoryMarshal.GetReference(re1);
+            ref double y1 = ref MemoryMarshal.GetReference(im1);
+            ref double x2 = ref MemoryMarshal.GetReference(re2);
+            ref double y2 = ref MemoryMarshal.GetReference(im2);
+            ref double c0 = ref MemoryMarshal.GetReference(a0Real);
+            ref double d0 = ref MemoryMarshal.GetReference(a0Imaginary);
+            ref double c1 = ref MemoryMarshal.GetReference(a1Real);
+            ref double d1 = ref MemoryMarshal.GetReference(a1Imaginary);
+            ref double outRe = ref MemoryMarshal.GetReference(real);
+            ref double outIm = ref MemoryMarshal.GetReference(imaginary);
+            for (; i + 4 <= length; i += 4)
+            {
+                var r1 = Vector256.LoadUnsafe(ref x1, (nuint)i);
+                var j1 = Vector256.LoadUnsafe(ref y1, (nuint)i);
+                var r2 = Vector256.LoadUnsafe(ref x2, (nuint)i);
+                var j2 = Vector256.LoadUnsafe(ref y2, (nuint)i);
+                var ar0 = Vector256.LoadUnsafe(ref c0, (nuint)i);
+                var ai0 = Vector256.LoadUnsafe(ref d0, (nuint)i);
+                var ar1 = Vector256.LoadUnsafe(ref c1, (nuint)i);
+                var ai1 = Vector256.LoadUnsafe(ref d1, (nuint)i);
+                (Vector256.LoadUnsafe(ref x0, (nuint)i) + (ar0 * r1) - (ai0 * j1) + (ar1 * r2) - (ai1 * j2)).StoreUnsafe(ref outRe, (nuint)i);
+                (Vector256.LoadUnsafe(ref y0, (nuint)i) + (ai0 * r1) + (ar0 * j1) + (ai1 * r2) + (ar1 * j2)).StoreUnsafe(ref outIm, (nuint)i);
+            }
         }
+
+        for (; i < real.Length; i++)
+        {
+            real[i] = re0[i] + (a0Real[i] * re1[i]) - (a0Imaginary[i] * im1[i]) + (a1Real[i] * re2[i]) - (a1Imaginary[i] * im2[i]);
+            imaginary[i] = im0[i] + (a0Imaginary[i] * re1[i]) + (a0Real[i] * im1[i]) + (a1Imaginary[i] * re2[i]) + (a1Real[i] * im2[i]);
+        }
+    }
+
+    /// <summary>Where each covariance of <see cref="Covariances"/> starts in its span: a run of 32 subbands each.</summary>
+    internal static class Covariance
+    {
+        public const int Phi01Real = 0;
+        public const int Phi01Imaginary = 32;
+        public const int Phi02Real = 64;
+        public const int Phi02Imaginary = 96;
+        public const int Phi11 = 128;
+        public const int Phi12Real = 160;
+        public const int Phi12Imaginary = 192;
+        public const int Phi22 = 224;
+        public const int Length = 256;
+    }
+
+    /// <summary>
+    /// 4.6.18.6.2's covariances phi(i, j) = the sum over n in 0..37 of X_Low(k, n + 2 - i) X_Low*(k, n + 2 - j) of the
+    /// subbands below <paramref name="count"/>, into <paramref name="phi"/> (<see cref="Covariance"/> runs of 32): four
+    /// subbands at a time, each lane summing in <see cref="CovariancesScalar"/>'s order, which does the rest.
+    /// </summary>
+    internal static void Covariances(double[][] real, double[][] imaginary, int count, Span<double> phi)
+    {
+        int k = 0;
+        if (Vector256.IsHardwareAccelerated)
+        {
+            for (; k + 4 <= count; k += 4)
+            {
+                var phi01Real = Vector256<double>.Zero;
+                var phi01Imaginary = Vector256<double>.Zero;
+                var phi02Real = Vector256<double>.Zero;
+                var phi02Imaginary = Vector256<double>.Zero;
+                var phi11 = Vector256<double>.Zero;
+                var phi12Real = Vector256<double>.Zero;
+                var phi12Imaginary = Vector256<double>.Zero;
+                var phi22 = Vector256<double>.Zero;
+                for (int n = 0; n < Buffered - 2; n++)
+                {
+                    var re0 = Vector256.Create(real[n + 2].AsSpan(k));
+                    var im0 = Vector256.Create(imaginary[n + 2].AsSpan(k));
+                    var re1 = Vector256.Create(real[n + 1].AsSpan(k));
+                    var im1 = Vector256.Create(imaginary[n + 1].AsSpan(k));
+                    var re2 = Vector256.Create(real[n].AsSpan(k));
+                    var im2 = Vector256.Create(imaginary[n].AsSpan(k));
+                    phi01Real += (re0 * re1) + (im0 * im1);
+                    phi01Imaginary += (im0 * re1) - (re0 * im1);
+                    phi02Real += (re0 * re2) + (im0 * im2);
+                    phi02Imaginary += (im0 * re2) - (re0 * im2);
+                    phi11 += (re1 * re1) + (im1 * im1);
+                    phi12Real += (re1 * re2) + (im1 * im2);
+                    phi12Imaginary += (im1 * re2) - (re1 * im2);
+                    phi22 += (re2 * re2) + (im2 * im2);
+                }
+
+                phi01Real.CopyTo(phi[(Covariance.Phi01Real + k)..]);
+                phi01Imaginary.CopyTo(phi[(Covariance.Phi01Imaginary + k)..]);
+                phi02Real.CopyTo(phi[(Covariance.Phi02Real + k)..]);
+                phi02Imaginary.CopyTo(phi[(Covariance.Phi02Imaginary + k)..]);
+                phi11.CopyTo(phi[(Covariance.Phi11 + k)..]);
+                phi12Real.CopyTo(phi[(Covariance.Phi12Real + k)..]);
+                phi12Imaginary.CopyTo(phi[(Covariance.Phi12Imaginary + k)..]);
+                phi22.CopyTo(phi[(Covariance.Phi22 + k)..]);
+            }
+        }
+
+        CovariancesScalar(real, imaginary, k, count, phi);
+    }
+
+    /// <summary>The covariances of subbands <paramref name="from"/> to <paramref name="count"/>, one at a time: the reference.</summary>
+    internal static void CovariancesScalar(double[][] real, double[][] imaginary, int from, int count, Span<double> phi)
+    {
+        for (int k = from; k < count; k++)
+        {
+            double phi01Real = 0;
+            double phi01Imaginary = 0;
+            double phi02Real = 0;
+            double phi02Imaginary = 0;
+            double phi11 = 0;
+            double phi12Real = 0;
+            double phi12Imaginary = 0;
+            double phi22 = 0;
+            for (int n = 0; n < Buffered - 2; n++)
+            {
+                double re0 = real[n + 2][k];
+                double im0 = imaginary[n + 2][k];
+                double re1 = real[n + 1][k];
+                double im1 = imaginary[n + 1][k];
+                double re2 = real[n][k];
+                double im2 = imaginary[n][k];
+                phi01Real += (re0 * re1) + (im0 * im1);
+                phi01Imaginary += (im0 * re1) - (re0 * im1);
+                phi02Real += (re0 * re2) + (im0 * im2);
+                phi02Imaginary += (im0 * re2) - (re0 * im2);
+                phi11 += (re1 * re1) + (im1 * im1);
+                phi12Real += (re1 * re2) + (im1 * im2);
+                phi12Imaginary += (im1 * re2) - (re1 * im2);
+                phi22 += (re2 * re2) + (im2 * im2);
+            }
+
+            phi[Covariance.Phi01Real + k] = phi01Real;
+            phi[Covariance.Phi01Imaginary + k] = phi01Imaginary;
+            phi[Covariance.Phi02Real + k] = phi02Real;
+            phi[Covariance.Phi02Imaginary + k] = phi02Imaginary;
+            phi[Covariance.Phi11 + k] = phi11;
+            phi[Covariance.Phi12Real + k] = phi12Real;
+            phi[Covariance.Phi12Imaginary + k] = phi12Imaginary;
+            phi[Covariance.Phi22 + k] = phi22;
+        }
+    }
+
+    // 4.6.18.6.2: the prediction coefficients alpha0 and alpha1 of subband k from its covariances; both zero if either
+    // reaches 4.
+    private static (double A0Real, double A0Imaginary, double A1Real, double A1Imaginary) Prediction(ReadOnlySpan<double> phi, int k)
+    {
+        double phi01Real = phi[Covariance.Phi01Real + k];
+        double phi01Imaginary = phi[Covariance.Phi01Imaginary + k];
+        double phi02Real = phi[Covariance.Phi02Real + k];
+        double phi02Imaginary = phi[Covariance.Phi02Imaginary + k];
+        double phi11 = phi[Covariance.Phi11 + k];
+        double phi12Real = phi[Covariance.Phi12Real + k];
+        double phi12Imaginary = phi[Covariance.Phi12Imaginary + k];
+        double phi22 = phi[Covariance.Phi22 + k];
 
         double a1Real = 0;
         double a1Imaginary = 0;

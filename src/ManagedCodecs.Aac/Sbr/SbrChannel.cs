@@ -1,3 +1,5 @@
+using System.Runtime.Intrinsics;
+
 namespace ManagedCodecs.Aac.Sbr;
 
 /// <summary>
@@ -44,6 +46,13 @@ internal sealed class SbrChannel(bool downsampled = false)
     // The phase of an added sinusoid, by slot (the imaginary part's sign also alternating by subband).
     private static readonly double[] SineReal = [1, 0, -1, 0];
     private static readonly double[] SineImaginary = [0, 1, 0, -1];
+
+    // The noise table's real and imaginary values apart, each 64 longer than the table (its start again), so that the
+    // values of a row of up to 64 subbands are one run without the wrap at 512; and the sign of the sine's imaginary part
+    // by subband (-1 at odd ones).
+    private static readonly double[] NoiseReal = [.. Enumerable.Range(0, 512 + 64).Select(i => SbrNoiseTable.Values[2 * (i & 511)])];
+    private static readonly double[] NoiseImaginary = [.. Enumerable.Range(0, 512 + 64).Select(i => SbrNoiseTable.Values[(2 * (i & 511)) + 1])];
+    private static readonly double[] SineSign = [.. Enumerable.Range(0, 128).Select(k => (k & 1) != 0 ? -1.0 : 1)];
 
     private readonly QmfAnalysis _analysis = new();
     private readonly QmfSynthesis _synthesis = new(downsampled);
@@ -396,32 +405,35 @@ internal sealed class SbrChannel(bool downsampled = false)
                 var imaginary = _highImaginary[t].AsSpan(kx, m);
                 gain[..m].CopyTo(_gainHistory[4]);
                 noise[..m].CopyTo(_noiseHistory[4]);
-                for (int i = 0; i < m; i++)
+                if (smooth)
                 {
-                    double g = gain[i];
-                    double n = noise[i];
-                    if (smooth)
+                    for (int i = 0; i < m; i++)
                     {
-                        g = 0;
-                        n = 0;
+                        double g = 0;
+                        double n = 0;
                         for (int j = 0; j < 5; j++)
                         {
                             g += _gainHistory[j][i] * Smoothing[j];
                             n += _noiseHistory[j][i] * Smoothing[j];
                         }
-                    }
 
-                    _noiseIndex = (_noiseIndex + 1) & 511;
-                    real[i] *= g;
-                    imaginary[i] *= g;
-                    if (tone[i] == 0 && !noNoise)
-                    {
-                        real[i] += n * SbrNoiseTable.Values[2 * _noiseIndex];
-                        imaginary[i] += n * SbrNoiseTable.Values[(2 * _noiseIndex) + 1];
-                    }
+                        _noiseIndex = (_noiseIndex + 1) & 511;
+                        real[i] *= g;
+                        imaginary[i] *= g;
+                        if (tone[i] == 0 && !noNoise)
+                        {
+                            real[i] += n * SbrNoiseTable.Values[2 * _noiseIndex];
+                            imaginary[i] += n * SbrNoiseTable.Values[(2 * _noiseIndex) + 1];
+                        }
 
-                    real[i] += tone[i] * SineReal[_sineIndex];
-                    imaginary[i] += tone[i] * (((kx + i) & 1) != 0 ? -1 : 1) * SineImaginary[_sineIndex];
+                        real[i] += tone[i] * SineReal[_sineIndex];
+                        imaginary[i] += tone[i] * (((kx + i) & 1) != 0 ? -1 : 1) * SineImaginary[_sineIndex];
+                    }
+                }
+                else
+                {
+                    ApplyGains(real, imaginary, gain[..m], noise[..m], tone[..m], kx, _noiseIndex, _sineIndex, noNoise);
+                    _noiseIndex = (_noiseIndex + m) & 511;
                 }
 
                 _sineIndex = (_sineIndex + 1) & 3;
@@ -523,4 +535,72 @@ internal sealed class SbrChannel(bool downsampled = false)
     }
 
     private static double[][] Buffers(int count, int length) => [.. Enumerable.Range(0, count).Select(_ => new double[length])];
+
+    /// <summary>
+    /// One slot's subbands kx .. kx + m - 1 (<paramref name="real"/>, <paramref name="imaginary"/>) times their gains, plus
+    /// their noise (where there is no sinusoid, and the envelope has noise) and their sinusoids, without smoothing: the
+    /// noise index moves one a subband from <paramref name="noiseIndex"/>. Four subbands at a time where Vector256 is
+    /// accelerated, each lane with <see cref="ApplyGainsScalar"/>'s operations in its order (the noise added under a mask,
+    /// not as a zero), so the output is the same to the bit (<c>SbrApplyGains_MatchesScalar</c>).
+    /// </summary>
+    internal static void ApplyGains(Span<double> real, Span<double> imaginary, ReadOnlySpan<double> gain, ReadOnlySpan<double> noise, ReadOnlySpan<double> tone, int kx, int noiseIndex, int sineIndex, bool noNoise)
+    {
+        int m = gain.Length;
+        if (real.Length < m || imaginary.Length < m || noise.Length < m || tone.Length < m || m > 64)
+        {
+            throw new ArgumentException("The spans are shorter than the gains, or longer than 64.");
+        }
+
+        int i = 0;
+        if (Vector256.IsHardwareAccelerated)
+        {
+            var noiseRe = NoiseReal.AsSpan((noiseIndex + 1) & 511, m);
+            var noiseIm = NoiseImaginary.AsSpan((noiseIndex + 1) & 511, m);
+            var sign = SineSign.AsSpan(kx, m);
+            var sineRe = Vector256.Create(SineReal[sineIndex]);
+            var sineIm = Vector256.Create(SineImaginary[sineIndex]);
+            var addNoise = noNoise ? Vector256<double>.Zero : Vector256<double>.AllBitsSet;
+            for (; i + 4 <= m; i += 4)
+            {
+                var g = Vector256.Create(gain[i..]);
+                var n = Vector256.Create(noise[i..]);
+                var t = Vector256.Create(tone[i..]);
+                var re = Vector256.Create<double>(real[i..]) * g;
+                var im = Vector256.Create<double>(imaginary[i..]) * g;
+                var mask = Vector256.Equals(t, Vector256<double>.Zero) & addNoise;
+                re = Vector256.ConditionalSelect(mask, re + (n * Vector256.Create(noiseRe[i..])), re);
+                im = Vector256.ConditionalSelect(mask, im + (n * Vector256.Create(noiseIm[i..])), im);
+                re += t * sineRe;
+                im += t * Vector256.Create(sign[i..]) * sineIm;
+                re.CopyTo(real[i..]);
+                im.CopyTo(imaginary[i..]);
+            }
+        }
+
+        ApplyGainsScalar(real[i..m], imaginary[i..m], gain[i..], noise[i..], tone[i..], kx + i, (noiseIndex + i) & 511, sineIndex, noNoise);
+    }
+
+    /// <summary>
+    /// <see cref="ApplyGains"/> one subband at a time, as the decoding process says it (4.6.18.7.5): the reference for it and
+    /// its tail.
+    /// </summary>
+    internal static void ApplyGainsScalar(Span<double> real, Span<double> imaginary, ReadOnlySpan<double> gain, ReadOnlySpan<double> noise, ReadOnlySpan<double> tone, int kx, int noiseIndex, int sineIndex, bool noNoise)
+    {
+        for (int i = 0; i < real.Length; i++)
+        {
+            double g = gain[i];
+            double n = noise[i];
+            noiseIndex = (noiseIndex + 1) & 511;
+            real[i] *= g;
+            imaginary[i] *= g;
+            if (tone[i] == 0 && !noNoise)
+            {
+                real[i] += n * SbrNoiseTable.Values[2 * noiseIndex];
+                imaginary[i] += n * SbrNoiseTable.Values[(2 * noiseIndex) + 1];
+            }
+
+            real[i] += tone[i] * SineReal[sineIndex];
+            imaginary[i] += tone[i] * (((kx + i) & 1) != 0 ? -1 : 1) * SineImaginary[sineIndex];
+        }
+    }
 }

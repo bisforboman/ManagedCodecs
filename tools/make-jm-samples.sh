@@ -253,3 +253,44 @@ planes planes-qm 8 -p NumberBFrames=1 -p QmatrixFile=qm.cfg -p ScalingMatrixPres
   $(k=0 qm 3 1 2 3 3 1 3 3 1 2 3 0)                 # scaling lists: each plane takes its colour's (8.5.9)
 planes planes-10bit 10 -p NumberBFrames=1           # 10 bits
 planes planes-qp 8 -p NumberBFrames=0 -p CbQPOffset=6 -p CrQPOffset=-6  # chroma QP offsets, which no plane applies
+
+# Separate colour planes in interlaced video: JM's encoder and decoder support separate colour planes in frames only
+# (both crash on field pictures and MBAFF frames), so each sample is three 4:0:0 encodes of one GOP, the Y, Cb and Cr
+# planes of a 4:4:4 source with the same settings, spliced into one stream by tools/h264-splice-planes.py. A plane
+# decodes as its monochrome stream did, so the reference is FFmpeg's three monochrome decodes stacked.
+# planes-il name [lencod options]: 176x160 (two pair rows a frame of 32 lines), 10 frames, High, QP 22.
+planes-il() {
+  local name=$1; shift
+  wanted "$name" || return 0
+  mkdir -p "$ref"
+  ffmpeg -hide_banner -loglevel error -y -f lavfi -i "testsrc2=size=176x160:rate=25,scroll=h=0.01:v=0.005,noise=alls=8:allf=t" \
+    -frames:v 10 -pix_fmt yuv444p -f rawvideo "$work/$name.444.yuv"
+  python3 - "$work/$name.444.yuv" "$work/$name" <<'PY'
+import sys
+data, n = open(sys.argv[1], 'rb').read(), 176 * 160
+for p in range(3):
+    open(f'{sys.argv[2]}.plane{p}.yuv', 'wb').write(b''.join(data[(f * 3 + p) * n:(f * 3 + p + 1) * n] for f in range(len(data) // (3 * n))))
+PY
+  for p in 0 1 2; do
+    lencod "$name.plane$p" -p InputFile="$name.plane$p.yuv" -p SourceWidth=176 -p SourceHeight=160 -p YUVFormat=0 \
+      -p ProfileIDC=100 -p QPISlice=22 -p QPPSlice=22 -p QPBSlice=24 -p IntraPeriod=3 "$@"
+    ffmpeg -hide_banner -loglevel error -y -i "$work/$name.plane$p.264" -vf extractplanes=y -f rawvideo -pix_fmt gray \
+      "$work/$name.plane$p.dec.yuv"
+  done
+  "$tools/h264-splice-planes.py" "$work/$name.plane0.264" "$work/$name.plane1.264" "$work/$name.plane2.264" "$work/$name.264"
+  "$tools/mux-h264.py" "$work/$name.264" "$ref/jm-$name.mp4" 512
+  python3 - "$work/$name" <<'PY'
+import sys
+n = 176 * 160
+planes = [open(f'{sys.argv[1]}.plane{p}.dec.yuv', 'rb').read() for p in range(3)]
+open(f'{sys.argv[1]}.dec.yuv', 'wb').write(b''.join(planes[p][f * n:(f + 1) * n] for f in range(len(planes[0]) // n) for p in range(3)))
+PY
+  ffmpeg -hide_banner -loglevel error -y -f rawvideo -pix_fmt yuv444p -s 176x160 -r 25 -i "$work/$name.dec.yuv" \
+    -f framemd5 "$ref/jm-$name.framemd5"
+  ffmpeg -hide_banner -loglevel quiet -y -copyts -i "$ref/jm-$name.mp4" -c copy -f framemd5 "$ref/jm-$name.packets.framemd5"
+  ffprobe -v quiet -show_packets -show_data_hash MD5 -show_entries packet=stream_index,pts,dts,duration,size,flags,data_hash \
+    -of csv=p=0 "$ref/jm-$name.mp4" > "$ref/jm-$name.packets.csv"
+}
+planes-il planes-paff-cavlc -p PicInterlace=1 -p SymbolMode=0 -p NumberBFrames=0  # field pictures, CAVLC, P
+planes-il planes-paff -p PicInterlace=1 -p NumberBFrames=1 -p DirectModeType=0    # field pictures, CABAC, B, temporal direct
+planes-il planes-mbaff -p MbInterlace=2 -p ReferenceReorder=0 -p PocMemoryManagement=0 -p NumberBFrames=1  # MBAFF

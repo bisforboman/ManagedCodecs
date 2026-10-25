@@ -301,4 +301,33 @@ public class ReferenceListTests
         };
 
     private static int[] FrameNums(IEnumerable<Picture> pictures) => [.. pictures.Select(p => p.FrameNum)];
+
+    /// <summary>
+    /// Separate colour planes in field pictures: a colour plane's field is a view of that plane's samples and motion
+    /// (not of the frame's field), every other row of it, and is marked as the frame's field is, which spatial direct
+    /// prediction's co-located check asks (no sample has a long-term reference field, or a static enough scene for it).
+    /// </summary>
+    [Fact]
+    public void ColourPlaneFields_AreThePlanesFieldsAndMarkedAsTheFramesFields()
+    {
+        var frame = new Picture(2, 2, mbHeightC: 16, mbWidthC: 16, separatePlanes: true);
+        frame.Field(0).IsShortTermReference = true;
+        frame.Field(1).IsLongTermReference = true;
+        var marks = new MarkSnapshot([frame]);
+        for (int p = 0; p < 3; p++)
+        {
+            var plane = frame.ColourPlane(p);
+            var (top, bottom) = (plane.Field(0), plane.Field(1));
+            Assert.Equal((0, 1), (top.Parity, bottom.Parity));
+            Assert.Same(plane, top.Whole);
+            Assert.Same(frame, top.Frame);
+            Assert.NotSame(frame.Field(0), top);
+            Assert.Same(plane.Plane<byte>(0), top.Plane<byte>(0));
+            Assert.Same(plane.MvX, bottom.MvX);
+            Assert.Same(bottom, top.Field(1));
+            Assert.Same(top, frame.Field(0).ColourPlane(p).Field(0));
+            Assert.Equal((true, false), (marks.IsShortTerm(top), marks.IsLongTerm(top)));
+            Assert.Equal((false, true), (marks.IsShortTerm(bottom), marks.IsLongTerm(bottom)));
+        }
+    }
 }

@@ -10,7 +10,7 @@ namespace ManagedCodecs.H264;
 /// </summary>
 /// <remarks>
 /// Implemented from ITU-T H.264; output is bit-exact with any conforming decoder. Streams that use other features
-/// (slice groups (FMO), data partitioning, separate colour planes in interlaced video, 11 or 13 bits, luma and chroma
+/// (slice groups (FMO), data partitioning, 11 or 13 bits, luma and chroma
 /// bit depths that differ) are rejected with <see cref="NotSupportedException"/>. Frames come out in display order (picture order
 /// count, 8.2.1), held back as far as the stream's max_num_reorder_frames says reordering can
 /// reach; <see cref="Flush"/> returns the rest at the end.
@@ -960,11 +960,6 @@ public sealed class H264Decoder : IVideoDecoder
 
     private static void CheckSupported(SequenceParameterSet sps)
     {
-        if (sps.SeparateColourPlanes && !sps.FrameMbsOnly)
-        {
-            throw new NotSupportedException("Separate colour planes (separate_colour_plane_flag) in interlaced video are not supported.");
-        }
-
         // 11 and 13 bits are left out: FFmpeg has no pixel format for them, so nothing to check them against.
         if (sps.BitDepthLuma is not (8 or 9 or 10 or 12 or 14) || (sps.ChromaFormatIdc != 0 && sps.BitDepthChroma != sps.BitDepthLuma))
         {

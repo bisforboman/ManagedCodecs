@@ -32,6 +32,7 @@ internal sealed class Picture
         RefParity = [new sbyte[mbCount * 4], new sbyte[mbCount * 4]];
         FieldMb = new bool[mbCount];
         Frame = this;
+        Whole = this;
         Parity = -1;
 
         // Both views at once: decoding threads ask for them too (H264Decoder.Threads).
@@ -63,10 +64,16 @@ internal sealed class Picture
         RefParity = [new sbyte[mbCount * 4], new sbyte[mbCount * 4]];
         FieldMb = new bool[mbCount];
         Frame = frame;
+        Whole = this;
         Parity = -1;
+        _top = new Picture(this, 0);
+        _bottom = new Picture(this, 1);
     }
 
-    /// <summary>A view of one field of <paramref name="frame"/>: the same arrays, every other row.</summary>
+    /// <summary>
+    /// A view of one field of <paramref name="frame"/> (a frame, or a colour plane of one): the same arrays, every other
+    /// row, and the frame's identity, order count, marking and progress.
+    /// </summary>
     private Picture(Picture frame, int parity)
     {
         WidthInMbs = frame.WidthInMbs;
@@ -83,12 +90,19 @@ internal sealed class Picture
         RefId = frame.RefId;
         RefParity = frame.RefParity;
         FieldMb = frame.FieldMb;
-        Frame = frame;
+        Frame = frame.Frame;
+        Whole = frame;
         Parity = parity;
     }
 
-    /// <summary>The frame this picture is, or is a field of.</summary>
+    /// <summary>The frame this picture is, or is a field of (or the frame of the colour plane it is, or is a field of).</summary>
     public Picture Frame { get; }
+
+    /// <summary>
+    /// The picture this one is, or is a field of: the frame, or with separate colour planes the colour plane (whose
+    /// samples and motion its fields share).
+    /// </summary>
+    public Picture Whole { get; }
 
     /// <summary>-1 for a frame; 0 or 1 for the top or bottom field view (<see cref="Field"/>).</summary>
     public int Parity { get; }
@@ -97,7 +111,7 @@ internal sealed class Picture
     /// The top (0) or bottom (1) field of this frame as a reference for field macroblocks: one
     /// object per field, so that comparing references compares fields.
     /// </summary>
-    public Picture Field(int parity) => parity == 0 ? Frame._top! : Frame._bottom!;
+    public Picture Field(int parity) => parity == 0 ? Whole._top! : Whole._bottom!;
 
     /// <summary>Colour plane <paramref name="plane"/> (colour_plane_id: 0 Y, 1 Cb, 2 Cr) as a monochrome picture, of a frame with separate colour planes.</summary>
     public Picture ColourPlane(int plane) =>

@@ -459,7 +459,7 @@ internal sealed partial class PictureDecoder<TPixel>
 
         if (_fieldParity >= 0)
         {
-            FieldStatistics.FromOwnFirstField += reference.Frame == Picture ? 1 : 0;
+            FieldStatistics.FromOwnFirstField += reference.Whole == Picture ? 1 : 0;
         }
 
         // Motion vectors are stored a 4x4 block, references an 8x8 partition: each row and each

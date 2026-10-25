@@ -128,7 +128,7 @@ internal sealed partial class PictureDecoder<TPixel>
 
         // Reference index 0: of a field macroblock in an MBAFF frame, the field of its own parity (8.4.2.1).
         _kind[mbAddr] = MbKind.Inter;
-        var reference = IsMbaffFieldMb(mbAddr) ? source.Frame.Field(mbAddr & 1) : source;
+        var reference = IsMbaffFieldMb(mbAddr) ? source.Field(mbAddr & 1) : source;
         _refIdx[0].AsSpan(mbAddr * 4, 4).Fill(0);
         _refId[0].AsSpan(mbAddr * 4, 4).Fill(source.Id);
         _refParity[0].AsSpan(mbAddr * 4, 4).Fill((sbyte)reference.Parity);

@@ -55,8 +55,7 @@ says feature by feature which encoder made the samples (libx264, OpenH264, JM) a
 
 - AAC: parametric stereo with 34 bands or mixing procedure Rb (no encoder at hand sends them, nor downsampled SBR with
   parametric stereo, which decodes but is untested); SBR's speed (5.1 HE-AAC at about 0.46 ms a frame, 90 times
-  real time, 2.3 times FFmpeg's time; Benchmarking); correlated noise as FFmpeg decodes it (it does not
-  correlate; docs/conformance.md).
+  real time, 2.3 times FFmpeg's time; Benchmarking).
 - MJPEG: files from real cameras (the samples are all FFmpeg's), and packets holding one field (FFmpeg decodes none).
 - H.264: separate colour planes in interlaced video (rejected; JM's samples are progressive); luma and chroma bit depths that differ are rejected on purpose (no mainstream
   encoder or decoder, FFmpeg included, handles them, and they would need a bit depth for each plane in the frame

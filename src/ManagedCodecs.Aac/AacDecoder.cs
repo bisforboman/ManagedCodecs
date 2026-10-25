@@ -795,8 +795,9 @@ public sealed class AacDecoder : IAudioDecoder
 
     /// <summary>
     /// M/S (4.6.8.1) where signalled and neither channel uses intensity or noise in the band;
-    /// intensity stereo (4.6.8.2.3), where the right channel copies the left, scaled; and
-    /// correlated noise where both channels use noise and ms_used is set.
+    /// intensity stereo (4.6.8.2.3), where the right channel copies the left, scaled. Where both
+    /// channels use noise and ms_used is set, the spec has the right channel reuse the left's
+    /// random vector (correlated noise, 4.6.13.3); FFmpeg keeps the right channel's own, and so do we.
     /// </summary>
     private void ApplyStereo(ChannelStream left, ChannelStream right, int msMaskPresent, ReadOnlySpan<bool> msUsed)
     {
@@ -836,20 +837,7 @@ public sealed class AacDecoder : IAudioDecoder
                 bool noise = left.Codebook[index] == ChannelStream.NoiseBook || rightBook == ChannelStream.NoiseBook;
                 if (msUsed[index] && left.Codebook[index] == ChannelStream.NoiseBook && rightBook == ChannelStream.NoiseBook)
                 {
-                    // Correlated noise (4.6.13.3): the right channel reuses the left channel's
-                    // random vector, scaled to its own energy.
-                    double ratio = Math.Pow(2, 0.25 * (right.Scalefactor[index] - left.Scalefactor[index]));
-                    for (int w = 0; w < info.GroupLength[g]; w++)
-                    {
-                        int window = (windowBase + w) * 128;
-                        for (int k = start; k < end; k++)
-                        {
-                            right.Spectrum[window + k] = left.Spectrum[window + k] * ratio;
-                        }
-                    }
-
                     Statistics.CorrelatedNoiseBands++;
-                    continue;
                 }
 
                 if (!msUsed[index] || noise)
@@ -1067,7 +1055,10 @@ internal sealed class AacStatistics
 
     public int NoiseBands { get; set; }
 
-    /// <summary>Bands where both channels of a pair use noise and ms_used is set.</summary>
+    /// <summary>
+    /// Bands where both channels of a pair use noise and ms_used is set: the spec's correlated noise, decoded as FFmpeg
+    /// decodes it, each channel with noise of its own.
+    /// </summary>
     public int CorrelatedNoiseBands { get; set; }
 
     public int TnsFilters { get; set; }

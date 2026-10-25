@@ -332,9 +332,10 @@ below what interleaved runs resolve.
 AAC LC: channel configurations 1 to 7 and program config elements (1 to 8
 channels), all window sequences and shapes, M/S, intensity, PNS, TNS. Both decoders are floating
 point, so the tests compare values: they require 2^-17 (about 7.6e-6) and measure at most 3e-7.
-Implemented but never produced by FFmpeg's encoder, so untested against it: pulse data and
-correlated noise (the FDK encoder writes it, where M/S is set in a band both channels fill with noise, and FFmpeg
-gives the right channel noise of its own there instead of the left's: such streams differ from FFmpeg by up to 3e-2).
+Implemented but never produced by FFmpeg's encoder, so untested against it: pulse data. M/S set in a band both
+channels of a pair fill with noise (which FFmpeg's encoder never writes, the FDK encoder does: aac-fdk-pns-ms) is the
+spec's correlated noise, the right channel reusing the left's random vector; FFmpeg gives the right channel noise of
+its own, and so does this decoder, on purpose (correlated, the sample was up to 3e-2 off).
 Priming before the edit list's start is trimmed (`Packet.SkipSamples`); like FFmpeg, the
 padding in the last packet is not.
 

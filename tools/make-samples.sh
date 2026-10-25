@@ -427,7 +427,7 @@ ff -f lavfi -i "aevalsrc=$eight:s=48000:d=1:c=7.1(wide)" -c:a aac -b:a 320k -aac
 # A program config element with two front pairs (6.0(front): FL FR FLC FRC SL SR), the inner listed first: FFmpeg
 # outputs them in WAVE order, outer pair first, not as listed (the only one of its encoder's layouts it reorders).
 ff -f lavfi -i "aevalsrc=0.2*sin(2*PI*147*t)|0.2*sin(2*PI*257*t)|0.2*sin(2*PI*367*t)|0.2*sin(2*PI*477*t)|0.2*sin(2*PI*587*t)|0.2*sin(2*PI*697*t):s=48000:d=1:c=6.0(front)" -c:a aac -b:a 256k -aac_pns 0 -aac_pce 1 samples/aac-pce-front.mp4
-ff -f lavfi -i "anoisesrc=color=pink:amplitude=0.3:sample_rate=44100:duration=2,highpass=f=4000" -c:a aac -b:a 48k samples/aac-pns.mp4
+ff -f lavfi -i "anoisesrc=color=pink:amplitude=0.3:sample_rate=44100:duration=2:seed=1,highpass=f=4000" -c:a aac -b:a 48k samples/aac-pns.mp4
 ff -f lavfi -i "anoisesrc=color=pink:amplitude=0.3:sample_rate=44100:duration=2:seed=1,highpass=f=4000[a];anoisesrc=color=pink:amplitude=0.3:sample_rate=44100:duration=2:seed=2,highpass=f=4000[b];[a][b]amerge=inputs=2" -c:a aac -b:a 64k samples/aac-pns-stereo.mp4
 ff -f lavfi -i "testsrc2=size=320x240:rate=25,scroll=h=0.01" -f lavfi -i "sine=frequency=330:sample_rate=48000:duration=1" -t 1 -c:v libx264 -profile:v baseline -pix_fmt yuv420p -refs 2 -c:a aac -ac 2 -aac_pns 0 samples/h264-with-audio.mp4
 # Raw AAC in ADTS frames (the ADTS demuxer): stereo at 44.1 kHz, and 5.1 behind an ID3v2 tag (which the demuxer skips).

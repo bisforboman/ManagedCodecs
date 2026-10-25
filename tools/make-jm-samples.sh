@@ -116,6 +116,8 @@ encode-b paff-b-adaptive -p PicInterlace=2 -p NumberBFrames=1 -p IntraPeriod=4  
                                                                                   # fields, a B frame over fields
 encode-b paff-b-adaptive-temporal -p PicInterlace=2 -p NumberBFrames=1 -p IntraPeriod=4 -p DirectModeType=0  # temporal
                                                                                   # direct; B frames over fields
+encode-b paff-b-adaptive-temporal-ltr -p PicInterlace=2 -p NumberBFrames=1 -p IntraPeriod=4 -p DirectModeType=0 \
+  -p SetFirstAsLongTerm=1  # the same over a long-term IDR frame: long-term references in field pictures' lists and temporal direct
 # Temporal direct over the noisy source: B fields over a frame, from co-located partitions smaller than 8x8.
 encode-b paff-b-noisy -p InputFile=noisy.yuv -p PicInterlace=2 -p NumberBFrames=1 -p IntraPeriod=3 -p DirectModeType=0
 # 4:2:2 (High 4:2:2): field pairs with 16 chroma rows a macroblock; and frames switching between frame and field

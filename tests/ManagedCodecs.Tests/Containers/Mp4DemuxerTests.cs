@@ -41,6 +41,18 @@ public class Mp4DemuxerTests
     }
 
     [Fact]
+    public void ReadingTwiceGivesTheSamePackets()
+    {
+        using var demuxer = new Mp4Demuxer(new MemoryStream(TinyMp4()));
+
+        string Describe(Packet p) => $"{p.StreamIndex} {p.Sequence} {p.Dts} {p.Pts} {Convert.ToHexString(p.Data.Span)}";
+        var first = demuxer.ReadPackets().Select(Describe).ToList();
+
+        Assert.Equal(first, demuxer.ReadPackets().Select(Describe));
+        Assert.Equal([0L, 1, 2, 0], demuxer.ReadPackets().Select(p => p.Sequence)); // each track's from 0, video first in the file
+    }
+
+    [Fact]
     public void ReadsAudioTrackFromAudioSpecificConfig()
     {
         using var demuxer = new Mp4Demuxer(new MemoryStream(TinyMp4()));

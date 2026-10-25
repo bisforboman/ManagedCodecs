@@ -35,6 +35,8 @@ internal sealed class PsProcessor
     private const int SubQmfGroups = 10;
     private const int Groups = 22;
     private const int AllPassBands = 23;
+    private const int ShortDelayBands = 35;
+    private const int LongDelay = 14;
     private const int DecayCutoff = 3;
     private const double DecaySlope = 0.05;
     private const double PeakDecay = 0.765928338364649;
@@ -124,16 +126,17 @@ internal sealed class PsProcessor
     private readonly double[][] _rightIm = Buffers(Slots, HybridBands);
 
     // The decorrelator's state: per (sub-)subband, the 2-slot fractional delay and each link's delay line (sharing
-    // their indices), and the plain delays of the QMF bands from 23 up (14 or 1 slots, an index each).
+    // their indices), and the plain delays of the QMF bands from 23 up: 14 slots below band 35, one from it up, each
+    // band's index moving one a slot from the same start, so one index serves all the 14-slot ones.
     private readonly double[][] _hybridDelayRe = Buffers(AllPassDelay, HybridBands);
     private readonly double[][] _hybridDelayIm = Buffers(AllPassDelay, HybridBands);
-    private readonly double[][] _qmfDelayRe = Buffers(14, 64);
-    private readonly double[][] _qmfDelayIm = Buffers(14, 64);
+    private readonly double[][] _qmfDelayRe = Buffers(LongDelay, 64);
+    private readonly double[][] _qmfDelayIm = Buffers(LongDelay, 64);
     private readonly double[][][] _hybridLinkRe = [.. LinkDelays.Select(d => Buffers(d, HybridBands))];
     private readonly double[][][] _hybridLinkIm = [.. LinkDelays.Select(d => Buffers(d, HybridBands))];
     private readonly double[][][] _qmfLinkRe = [.. LinkDelays.Select(d => Buffers(d, 64))];
     private readonly double[][][] _qmfLinkIm = [.. LinkDelays.Select(d => Buffers(d, 64))];
-    private readonly int[] _qmfDelayIndex = new int[64];
+    private int _qmfDelayIndex;
     private readonly int[] _linkIndex = new int[3];
     private int _delayIndex;
 
@@ -323,44 +326,58 @@ internal sealed class PsProcessor
         // The transient detector: each parameter band's power by slot, against its smoothed peak.
         var ratio = _ratio;
         Span<double> power = stackalloc double[Bins];
+        int ducked = 0;
         for (int i = 0; i < Slots; i++)
         {
             power.Clear();
+            var hybridRe = _leftRe[i];
+            var hybridIm = _leftIm[i];
+            var rowRe = re[i];
+            var rowIm = im[i];
             for (int gr = 0; gr < Groups; gr++)
             {
+                // Each band's sum in subband order, as it was added to power[bin] one by one.
                 int bin = GroupBins[gr];
+                double sum = power[bin];
                 if (gr < SubQmfGroups)
                 {
                     int sb = GroupBorders[gr];
-                    power[bin] += (_leftRe[i][sb] * _leftRe[i][sb]) + (_leftIm[i][sb] * _leftIm[i][sb]);
+                    sum += (hybridRe[sb] * hybridRe[sb]) + (hybridIm[sb] * hybridIm[sb]);
                 }
                 else
                 {
                     for (int sb = GroupBorders[gr]; sb < GroupBorders[gr + 1]; sb++)
                     {
-                        power[bin] += (re[i][sb] * re[i][sb]) + (im[i][sb] * im[i][sb]);
+                        sum += (rowRe[sb] * rowRe[sb]) + (rowIm[sb] * rowIm[sb]);
                     }
                 }
+
+                power[bin] = sum;
             }
 
+            var slotRatio = ratio[i];
             for (int bin = 0; bin < Bins; bin++)
             {
-                _peakDecay[bin] = Math.Max(_peakDecay[bin] * PeakDecay, power[bin]);
-                _peakDifference[bin] += EnergySmoothing * (_peakDecay[bin] - power[bin] - _peakDifference[bin]);
-                _energy[bin] += EnergySmoothing * (power[bin] - _energy[bin]);
-                bool transient = TransientImpact * _peakDifference[bin] > _energy[bin];
-                ratio[i][bin] = transient ? _energy[bin] / (TransientImpact * _peakDifference[bin]) : 1;
-                statistics.PsDuckedSlots += transient ? 1 : 0;
+                double p = power[bin];
+                double peak = Math.Max(_peakDecay[bin] * PeakDecay, p);
+                double difference = _peakDifference[bin] + (EnergySmoothing * (peak - p - _peakDifference[bin]));
+                double energy = _energy[bin] + (EnergySmoothing * (p - _energy[bin]));
+                (_peakDecay[bin], _peakDifference[bin], _energy[bin]) = (peak, difference, energy);
+                bool transient = TransientImpact * difference > energy;
+                slotRatio[bin] = transient ? energy / (TransientImpact * difference) : 1;
+                ducked += transient ? 1 : 0;
             }
         }
+
+        statistics.PsDuckedSlots += ducked;
 
         // Slot by slot: the all-pass delay's position and each link's are the same for every subband (each starts from
         // the stored ones and moves one a slot), so a slot's subbands go through in order along contiguous rows. Every
         // (slot, subband) is computed as it would be subband by subband, so the output is the same to the bit.
         Span<int> linkIndex = stackalloc int[3];
         _linkIndex.CopyTo(linkIndex);
-        Span<double> allPassRe = stackalloc double[AllPassBands];
-        Span<double> allPassIm = stackalloc double[AllPassBands];
+        Span<double> delayedRe = stackalloc double[64];
+        Span<double> delayedIm = stackalloc double[64];
         int d = _delayIndex;
         for (int i = 0; i < Slots; i++)
         {
@@ -379,30 +396,19 @@ internal sealed class PsProcessor
             var inIm = im[i];
             var outRow = rightRe[i];
             var outRowIm = rightIm[i];
-            AllPassRow(inRe, inIm, GroupBorders[SubQmfGroups], AllPassBands, _qmfDelayRe[d], _qmfDelayIm[d], _qmfLinkRe, _qmfLinkIm, linkIndex, allPassRe, allPassIm);
+            AllPassRow(inRe, inIm, GroupBorders[SubQmfGroups], AllPassBands, _qmfDelayRe[d], _qmfDelayIm[d], _qmfLinkRe, _qmfLinkIm, linkIndex, delayedRe, delayedIm);
+
+            // The plain delays: what went in 14 slots ago below band 35, one slot ago from it up.
+            Delay(inRe, inIm, AllPassBands, ShortDelayBands, _qmfDelayRe[_qmfDelayIndex], _qmfDelayIm[_qmfDelayIndex], delayedRe, delayedIm);
+            Delay(inRe, inIm, ShortDelayBands, 64, _qmfDelayRe[0], _qmfDelayIm[0], delayedRe, delayedIm);
+            _qmfDelayIndex = _qmfDelayIndex + 1 >= LongDelay ? 0 : _qmfDelayIndex + 1;
             for (int gr = SubQmfGroups; gr < Groups; gr++)
             {
                 double duck = ratio[i][GroupBins[gr]];
                 for (int sb = GroupBorders[gr]; sb < GroupBorders[gr + 1]; sb++)
                 {
-                    double outRe;
-                    double outIm;
-                    if (sb >= AllPassBands)
-                    {
-                        int index = _qmfDelayIndex[sb];
-                        outRe = _qmfDelayRe[index][sb];
-                        outIm = _qmfDelayIm[index][sb];
-                        _qmfDelayRe[index][sb] = inRe[sb];
-                        _qmfDelayIm[index][sb] = inIm[sb];
-                        _qmfDelayIndex[sb] = index + 1 >= (sb < 35 ? 14 : 1) ? 0 : index + 1;
-                    }
-                    else
-                    {
-                        (outRe, outIm) = (allPassRe[sb], allPassIm[sb]);
-                    }
-
-                    outRow[sb] = duck * outRe;
-                    outRowIm[sb] = duck * outIm;
+                    outRow[sb] = duck * delayedRe[sb];
+                    outRowIm[sb] = duck * delayedIm[sb];
                 }
             }
 
@@ -415,6 +421,15 @@ internal sealed class PsProcessor
 
         _delayIndex = d;
         linkIndex.CopyTo(_linkIndex);
+    }
+
+    // Subbands first .. end - 1 of a plain delay line's row: out what it held, in what comes now.
+    private static void Delay(ReadOnlySpan<double> inRe, ReadOnlySpan<double> inIm, int first, int end, double[] rowRe, double[] rowIm, Span<double> outRe, Span<double> outIm)
+    {
+        rowRe.AsSpan(first..end).CopyTo(outRe[first..end]);
+        rowIm.AsSpan(first..end).CopyTo(outIm[first..end]);
+        inRe[first..end].CopyTo(rowRe.AsSpan(first..end));
+        inIm[first..end].CopyTo(rowIm.AsSpan(first..end));
     }
 
     // The decay of the all-pass links by QMF subband: 1 up to DecayCutoff, then falling by DecaySlope a subband.
@@ -587,7 +602,7 @@ internal sealed class PsProcessor
 
     private void ClearDelays(int sb)
     {
-        for (int k = 0; k < 14; k++)
+        for (int k = 0; k < LongDelay; k++)
         {
             _qmfDelayRe[k][sb] = _qmfDelayIm[k][sb] = 0;
         }

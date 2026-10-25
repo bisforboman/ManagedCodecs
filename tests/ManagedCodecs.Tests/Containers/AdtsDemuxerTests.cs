@@ -123,6 +123,45 @@ public class AdtsDemuxerTests
         Assert.Equal(Decode(file), Decode([.. withCrc]));
     }
 
+    /// <summary>
+    /// Channel configuration 0: the AudioSpecificConfig the demuxer builds from the program config element at the start
+    /// of the first frame is the one FFmpeg's ADTS-to-MP4 filter writes for the same stream, byte for byte (FFmpeg's
+    /// element ends with a comment, after the bits realigned at their new place in the config; the FDK encoder's has
+    /// none).
+    /// </summary>
+    [Theory]
+    [InlineData("aac-adts-pce")]
+    [InlineData("aac-fdk-pce")]
+    public void ProgramConfig_IsFfmpegsMp4Config(string name)
+    {
+        if (TestSamples.Directory is null || !File.Exists(TestSamples.PathOf(name + ".aac")))
+        {
+            return;
+        }
+
+        using var adts = Demuxer.Open(TestSamples.PathOf(name + ".aac"));
+        using var mp4 = Demuxer.Open(TestSamples.PathOf(name + "-remux.mp4"));
+        Assert.Equal(mp4.Audio!.CodecPrivate.ToArray(), adts.Audio!.CodecPrivate.ToArray());
+        Assert.Equal((6, 6), (adts.Audio.Channels, new AacDecoder(adts.Audio).Channels));
+    }
+
+    /// <summary>
+    /// Channel configuration 0 without a program config element at the start of the first frame (FFmpeg writes it in
+    /// the first frame only, so a file cut after that one) is refused.
+    /// </summary>
+    [Fact]
+    public void ProgramConfigMissing_NotSupported()
+    {
+        if (TestSamples.Directory is null || !File.Exists(TestSamples.PathOf("aac-adts-pce.aac")))
+        {
+            return;
+        }
+
+        var file = File.ReadAllBytes(TestSamples.PathOf("aac-adts-pce.aac"));
+        var frames = Packets(file);
+        Assert.Throws<NotSupportedException>(() => new AdtsDemuxer(new MemoryStream(file[frames[0].Length..])));
+    }
+
     [Fact]
     public void SeveralRawDataBlocks_NotSupported()
     {

@@ -53,4 +53,128 @@ internal readonly record struct AdtsHeader(
         int bits = (objectType << 11) | (SampleRateIndex << 7) | (ChannelConfiguration << 3);
         return [(byte)(bits >> 8), (byte)bits];
     }
+
+    /// <summary>
+    /// For channel configuration 0: the AudioSpecificConfig of <see cref="AudioSpecificConfig()"/> followed by the
+    /// program config element (4.4.1.1) that starts the frame's first raw data block, and the channels it describes;
+    /// false if the block does not start with one (or it runs past the frame). The element's byte alignment, before its
+    /// comment, is redone at its new place in the config.
+    /// </summary>
+    public bool TryProgramConfig(ReadOnlySpan<byte> frame, out byte[] audioSpecificConfig, out int channels)
+    {
+        audioSpecificConfig = [];
+        channels = 0;
+        var r = new BitReader(frame[HeaderLength..Math.Min(frame.Length, FrameLength)].ToArray());
+        if (r.Read(3) != 5)
+        {
+            return false; // ID_PCE
+        }
+
+        var w = new BitWriter();
+        w.Write((ulong)(Profile + 1), 5);
+        w.Write((ulong)SampleRateIndex, 4);
+        w.Write(0, 4); // channelConfiguration
+        w.Write(0, 3); // frameLengthFlag, dependsOnCoreCoder, extensionFlag
+
+        int Copy(int count)
+        {
+            int value = r.Read(count);
+            w.Write((ulong)value, count);
+            return value;
+        }
+
+        Copy(4 + 2 + 4); // element_instance_tag, object_type, sampling_frequency_index
+        int front = Copy(4);
+        int side = Copy(4);
+        int back = Copy(4);
+        int lfe = Copy(2);
+        int assocData = Copy(3);
+        int cc = Copy(4);
+        for (int i = 0; i < 3; i++)
+        {
+            if (Copy(1) == 1)
+            {
+                Copy(i < 2 ? 4 : 3); // mono and stereo mixdown element numbers; matrix_mixdown_idx, pseudo_surround_enable
+            }
+        }
+
+        for (int i = 0; i < front + side + back; i++)
+        {
+            channels += Copy(1) + 1; // *_element_is_cpe
+            Copy(4);
+        }
+
+        channels += lfe;
+        for (int i = 0; i < lfe + assocData; i++)
+        {
+            Copy(4);
+        }
+
+        for (int i = 0; i < cc; i++)
+        {
+            Copy(5);
+        }
+
+        r.ByteAlign();
+        w.ByteAlign();
+        int comment = Copy(8);
+        for (int i = 0; i < comment; i++)
+        {
+            Copy(8);
+        }
+
+        if (r.PastEnd || channels == 0)
+        {
+            return false;
+        }
+
+        audioSpecificConfig = w.ToArray();
+        return true;
+    }
+
+    // MSB-first bits of a span; zeros past its end, which PastEnd then shows.
+    private sealed class BitReader(byte[] data)
+    {
+        private readonly byte[] _data = data;
+        private int _position;
+
+        public bool PastEnd => _position > _data.Length * 8;
+
+        public int Read(int count)
+        {
+            int value = 0;
+            for (int i = 0; i < count; i++, _position++)
+            {
+                int bit = _position < _data.Length * 8 ? (_data[_position >> 3] >> (7 - (_position & 7))) & 1 : 0;
+                value = (value << 1) | bit;
+            }
+
+            return value;
+        }
+
+        public void ByteAlign() => _position = (_position + 7) & ~7;
+    }
+
+    private sealed class BitWriter
+    {
+        private readonly List<byte> _bytes = [];
+        private int _bits;
+
+        public void Write(ulong value, int count)
+        {
+            for (int i = count - 1; i >= 0; i--, _bits++)
+            {
+                if ((_bits & 7) == 0)
+                {
+                    _bytes.Add(0);
+                }
+
+                _bytes[^1] |= (byte)(((value >> i) & 1) << (7 - (_bits & 7)));
+            }
+        }
+
+        public void ByteAlign() => _bits = (_bits + 7) & ~7;
+
+        public byte[] ToArray() => [.. _bytes];
+    }
 }

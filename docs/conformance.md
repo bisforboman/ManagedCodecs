@@ -43,7 +43,8 @@ it rewrites those of the packets an edit goes back for. FFmpeg's reading, which 
   filterbank, the noise generator's state). The first edit starts inside the packet its media time falls in (skip
   samples), a later one at the next whole packet, so up to 1023 samples late; each edit takes the whole packet its
   end falls in. Packet durations run up to the next packet's dts where that comes later, and the last one's to the
-  end of the edits, longer than 1024 if need be.
+  end of the edits, longer than 1024 if need be, but not past the media's end (an edit whose duration, rounded up in
+  the movie's timescale, runs past it: aac-fdk-pce-remux).
 - An empty edit after a real one plays the media from its start for its duration, FFmpeg reading its media time, -1,
   as a time like any other (the spec has it as a gap).
 
@@ -332,8 +333,21 @@ AAC LC: channel configurations 1 to 7 and program config elements (1 to 8
 channels), all window sequences and shapes, M/S, intensity, PNS, TNS. Both decoders are floating
 point, so the tests compare values: they require 2^-17 (about 7.6e-6) and measure at most 3e-7.
 Implemented but never produced by FFmpeg's encoder, so untested against it: pulse data and
-correlated noise. Priming before the edit list's start is trimmed (`Packet.SkipSamples`); like FFmpeg, the
+correlated noise (the FDK encoder writes it, where M/S is set in a band both channels fill with noise, and FFmpeg
+gives the right channel noise of its own there instead of the left's: such streams differ from FFmpeg by up to 3e-2).
+Priming before the edit list's start is trimmed (`Packet.SkipSamples`); like FFmpeg, the
 padding in the last packet is not.
+
+A program config element (channel configuration 0) comes out in FFmpeg's order. When it places every channel on a
+speaker (a front centre first and front pairs from the centre outward, as the spec lists them; a side pair; back pairs
+from front to back and a back centre after them, as the FDK encoder writes them and FFmpeg reads them; an LFE), FFmpeg
+names the layout and outputs WAVE order:
+aac-fdk-pce (the FDK encoder's 5.1, as configuration 6) and aac-pce-front (two front pairs, the outer one first).
+FFmpeg's own encoder lists the front pair before the centre and codes the LFE as a side channel, and FFmpeg outputs
+those layouts as listed (aac-pce-8ch, aac-adts-pce). The rule was checked against FFmpeg on all 28 layouts its encoder
+writes with `-aac_pce 1` (up to 16 channels) and on the FDK encoder's PCEs for 1 to 8 channels (configuration 0 forced in a copy of
+its tree; the 7.1 rear-surround and front-centre modes write one anyway); `ProgramConfigTests` holds the shapes,
+and the ones no encoder at hand writes, which keep the listed order.
 
 ## HE-AAC (spectral band replication)
 
@@ -428,4 +442,8 @@ skipped, as the spec's baseline decoder skips it.
 Raw AAC files (ADTS, `AdtsDemuxer`) demux packet by packet as FFmpeg's
 demuxer does (whole frames, header included; ID3v2 tags skipped, junk between frames skipped as FFmpeg
 resynchronizes) and decode as FFmpeg decodes them; frames with a CRC (which FFmpeg's muxer never writes) from
-rewritten samples. Not supported there: several raw data blocks in a frame, channel configuration 0.
+rewritten samples. Channel configuration 0: the AudioSpecificConfig is the stream's header fields and the program config
+element that starts the first frame (FFmpeg writes it there only, the FDK encoder in every tenth frame), its byte
+alignment redone at its new place, byte for byte what FFmpeg's ADTS-to-MP4 filter writes (aac-adts-pce, whose element
+carries a comment, and aac-fdk-pce, both remuxed); a stream whose first frame has none is refused. Not supported:
+several raw data blocks in a frame.

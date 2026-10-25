@@ -98,6 +98,23 @@ PY
   LD_LIBRARY_PATH=$work/fdk3/build fdkaac --silent -p 5 -b 48000 -o "$out/heaac-downsampled.mp4" "$work/in.wav"
 fi
 
+# AAC LC 5.1 with its channels in a program config element (channel configuration 0) rather than configuration 6, as
+# the spec lists them (centre, front pair, back pair, LFE): FFmpeg names that layout and outputs it in WAVE order,
+# unlike its own encoder's program config elements, which it outputs as listed (docs/conformance.md). The encoder has
+# no setting for it, so a copy of the tree writes one for every channel mode; ADTS, the element repeated every 10th
+# frame (tools/make-samples.sh remuxes it into MP4). At 256 kbit/s, no noise substitution: FFmpeg does not correlate
+# noise in M/S bands as the FDK encoder means it to.
+if wanted aac-fdk-pce; then
+  git -C "$fdk/.." archive HEAD | (mkdir "$work/fdk4" && tar -x -C "$work/fdk4")
+  file=$(find "$work/fdk4" -path '*libAACenc/src/aacenc_lib.cpp')
+  grep -q 'cc->channelConfigZero = 0;' "$file" || { echo "the encoder's channelConfigZero default moved" >&2; exit 1; }
+  sed -i 's/cc->channelConfigZero = 0;/cc->channelConfigZero = 1;/' "$file"
+  cmake -S "$work/fdk4" -B "$work/fdk4/build" -DBUILD_PROGRAMS=ON > /dev/null && cmake --build "$work/fdk4/build" -j4 > /dev/null
+  ff -f lavfi -i "aevalsrc=0.2*sin(2*PI*147*t)|0.2*sin(2*PI*247*t)|0.2*sin(2*PI*347*t)|0.2*sin(2*PI*47*t)|0.2*sin(2*PI*547*t)|0.2*sin(2*PI*647*t):s=48000:d=1:c=5.1" \
+    -c:a pcm_s16le "$work/in.wav"
+  LD_LIBRARY_PATH=$work/fdk4/build "$work/fdk4/build/aac-enc" -r 256000 "$work/in.wav" "$out/aac-fdk-pce.aac" > /dev/null
+fi
+
 # HE-AAC v2: a mono core with SBR and parametric stereo data in the SBR extension.
 if wanted heaacv2-stereo; then
   ff -f lavfi -i "aevalsrc=$music|$music2:s=44100:d=3" -c:a pcm_s16le "$work/in.wav"

@@ -766,12 +766,18 @@ public sealed class Mp4Demuxer : IDemuxer
             }
 
             // Audio durations as FFmpeg gives them: up to the next packet's dts where that comes later, else the sample's
-            // own; the last packet's up to the end of the edits (shorter or longer than the sample's). Video keeps its own.
+            // own; the last packet's up to the end of the edits (shorter or longer than the sample's), but not past the
+            // media's end (an edit rounded up in the movie's timescale). Video keeps its own.
             var last = edits[^1];
             long end = last.Duration > 0 ? last.Start + last.Duration : long.MinValue;
             for (int i = 0; _isAudio && i < samples.Count; i++)
             {
                 long until = i + 1 < samples.Count ? samples[i + 1].Dts - samples[i].Dts : end - samples[i].Pts;
+                if (i + 1 == samples.Count && media.Length > 0 && samples[i].Offset == media[^1].Offset)
+                {
+                    until = Math.Min(until, samples[i].Duration);
+                }
+
                 if (until > 0 && until <= int.MaxValue)
                 {
                     samples[i] = samples[i] with { Duration = (int)until };

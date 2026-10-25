@@ -37,4 +37,54 @@ public class PsTests
         Assert.Equal(-0.1525546163, PsProcessor.HybridPhase.Im[0], 1e-7);
         Assert.Equal(0.8181497455, PsProcessor.QmfPhase.Re[0], 1e-7);
     }
+
+    /// <summary>
+    /// The decorrelator's vector all-pass row does each subband's arithmetic in the scalar order: the same outputs, delay
+    /// line and link states, to the bit, from the first subband it filters to one past the last, tails included.
+    /// </summary>
+    [Theory]
+    [InlineData(3, 23)]
+    [InlineData(0, 22)]
+    [InlineData(5, 6)]
+    public void PsAllPassRow_MatchesScalar(int first, int end)
+    {
+        var random = new Random((first * 64) + end);
+        double Next() => (random.NextDouble() - 0.5) * Math.Pow(10, random.Next(-3, 4));
+        double[] Row() => [.. Enumerable.Range(0, 64).Select(_ => Next())];
+        for (int trial = 0; trial < 20; trial++)
+        {
+            var inRe = Row();
+            var inIm = Row();
+            var delayRe = Row();
+            var delayIm = Row();
+            double[][][] linkRe = [.. new[] { 3, 4, 5 }.Select(n => Enumerable.Range(0, n).Select(_ => Row()).ToArray())];
+            double[][][] linkIm = [.. new[] { 3, 4, 5 }.Select(n => Enumerable.Range(0, n).Select(_ => Row()).ToArray())];
+            int[] linkIndex = [random.Next(3), random.Next(4), random.Next(5)];
+
+            var expectedDelayRe = (double[])delayRe.Clone();
+            var expectedDelayIm = (double[])delayIm.Clone();
+            double[][][] expectedLinkRe = [.. linkRe.Select(l => l.Select(r => (double[])r.Clone()).ToArray())];
+            double[][][] expectedLinkIm = [.. linkIm.Select(l => l.Select(r => (double[])r.Clone()).ToArray())];
+            var expectedRe = new double[64];
+            var expectedIm = new double[64];
+            for (int sb = first; sb < end; sb++)
+            {
+                double decay = sb <= 3 ? 1 : Math.Max(0, 1 + (3 * 0.05) - (0.05 * sb));
+                (expectedRe[sb], expectedIm[sb]) = PsProcessor.AllPass(inRe[sb], inIm[sb], sb, decay, expectedDelayRe, expectedDelayIm, PsProcessor.QmfPhase, expectedLinkRe, expectedLinkIm, PsProcessor.QmfLinkPhase, linkIndex);
+            }
+
+            var outRe = new double[64];
+            var outIm = new double[64];
+            PsProcessor.AllPassRow(inRe, inIm, first, end, delayRe, delayIm, linkRe, linkIm, linkIndex, outRe, outIm);
+            Assert.Equal(expectedRe, outRe);
+            Assert.Equal(expectedIm, outIm);
+            Assert.Equal(expectedDelayRe, delayRe);
+            Assert.Equal(expectedDelayIm, delayIm);
+            for (int link = 0; link < 3; link++)
+            {
+                Assert.Equal(expectedLinkRe[link], linkRe[link]);
+                Assert.Equal(expectedLinkIm[link], linkIm[link]);
+            }
+        }
+    }
 }

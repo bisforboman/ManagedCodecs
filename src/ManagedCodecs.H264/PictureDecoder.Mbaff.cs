@@ -484,6 +484,7 @@ internal sealed partial class PictureDecoder<TPixel>
         Span<byte> horizontal = stackalloc byte[16];
         Span<byte> leftLines = stackalloc byte[16];
         Span<byte> topSegments = stackalloc byte[4];
+        Span<byte> leftSegments = stackalloc byte[4];
         int lumaRow = Picture.LumaStride;
         int chromaRow = Picture.ChromaStride;
 
@@ -536,7 +537,20 @@ internal sealed partial class PictureDecoder<TPixel>
             }
 
             // Luma (and 4:4:4 chroma, at the same places): vertical edges, then horizontal ones.
-            if (left)
+            if (left && _fieldMb[leftTop] == field)
+            {
+                // Both pairs of one kind: line y meets line y of the left pair's macroblock of the same position, a
+                // plain vertical edge of four segments.
+                int p = leftTop + (mbAddr & 1);
+                for (int k = 0; k < 4; k++)
+                {
+                    leftLines.Slice(k * 4, 4).Fill((byte)MbaffStrength(p, (k * 4) + 3, mbAddr, k * 4, horizontalEdge: false));
+                    leftSegments[k] = leftLines[k * 4];
+                }
+
+                FilterLumaEdge(luma, 1, lumaStride, leftSegments, _qp[p], qp, slice);
+            }
+            else if (left)
             {
                 bool leftField = _fieldMb[leftTop];
                 for (int y = 0; y < 16; y++)
@@ -569,6 +583,14 @@ internal sealed partial class PictureDecoder<TPixel>
                 }
 
                 var (pOrigin, pStride) = LumaPlace(p);
+                int q0 = luma + (qOffset * lumaRow);
+                if (pStep == qStep && pOrigin + (pRow * pStride) == q0 - (qStep * lumaRow))
+                {
+                    // p0 is the line above q0 at q's step: a plain horizontal edge.
+                    FilterLumaEdge(q0, qStep * lumaRow, 1, topSegments, _qp[p], qp, slice);
+                    continue;
+                }
+
                 for (int x = 0; x < 16; x++)
                 {
                     if (topSegments[x >> 2] != 0)
@@ -599,7 +621,13 @@ internal sealed partial class PictureDecoder<TPixel>
 
             // Chroma (4:2:0): the macroblock edges, with the bS of luma lines of the same parity
             // as each chroma line, and the edge in the middle.
-            if (left)
+            if (left && _fieldMb[leftTop] == field)
+            {
+                // As luma's: chroma segment k (lines 2k, 2k + 1) is luma segment k's.
+                int p = leftTop + (mbAddr & 1);
+                FilterChromaEdge(PlaneCb, PlaneCr, chroma, 1, chromaStride, leftSegments, ChromaQp(_qp[p], slice.CbQpOffset, _qpBdOffset), qpCb, ChromaQp(_qp[p], slice.CrQpOffset, _qpBdOffset), qpCr, slice.AlphaOffset, slice.BetaOffset, bitDepth: _bitDepth);
+            }
+            else if (left)
             {
                 bool leftField = _fieldMb[leftTop];
                 for (int y = 0; y < 8; y++)
@@ -627,6 +655,13 @@ internal sealed partial class PictureDecoder<TPixel>
                 }
 
                 var (pOrigin, pStride) = ChromaPlace(p);
+                int q0 = chroma + (qOffset * chromaRow);
+                if (pStep == qStep && pOrigin + (pRow * pStride) == q0 - (qStep * chromaRow))
+                {
+                    FilterChromaEdge(PlaneCb, PlaneCr, q0, qStep * chromaRow, 1, topSegments, ChromaQp(_qp[p], slice.CbQpOffset, _qpBdOffset), qpCb, ChromaQp(_qp[p], slice.CrQpOffset, _qpBdOffset), qpCr, slice.AlphaOffset, slice.BetaOffset, bitDepth: _bitDepth);
+                    continue;
+                }
+
                 for (int x = 0; x < 8; x++)
                 {
                     if (topSegments[x >> 1] != 0)
@@ -773,15 +808,20 @@ internal sealed partial class PictureDecoder<TPixel>
     }
 
     /// <summary>An internal luma edge of an MBAFF macroblock, and in 4:4:4 the Cb and Cr edges at the same place.</summary>
-    private void FilterInternalLumaEdge(int q0, int across, int along, ReadOnlySpan<byte> strengths, int qp, SliceInfo slice)
+    private void FilterInternalLumaEdge(int q0, int across, int along, ReadOnlySpan<byte> strengths, int qp, SliceInfo slice) =>
+        FilterLumaEdge(q0, across, along, strengths, qp, qp, slice);
+
+    /// <summary>
+    /// A luma edge of 16 lines whose p samples continue q's at the same step (p0 at q0 - across), between macroblocks of
+    /// QPs <paramref name="qpP"/> and <paramref name="qpQ"/>, and in 4:4:4 the Cb and Cr edges at the same place.
+    /// </summary>
+    private void FilterLumaEdge(int q0, int across, int along, ReadOnlySpan<byte> strengths, int qpP, int qpQ, SliceInfo slice)
     {
-        FilterEdge(PlaneY, q0, across, along, 16, strengths, qp, qp, slice.AlphaOffset, slice.BetaOffset, chroma: false, bitDepth: _bitDepth);
+        FilterEdge(PlaneY, q0, across, along, 16, strengths, qpP, qpQ, slice.AlphaOffset, slice.BetaOffset, chroma: false, bitDepth: _bitDepth);
         if (_chroma444)
         {
-            int qpCb = ChromaQp(qp, slice.CbQpOffset, _qpBdOffset);
-            int qpCr = ChromaQp(qp, slice.CrQpOffset, _qpBdOffset);
-            FilterEdge(PlaneCb, q0, across, along, 16, strengths, qpCb, qpCb, slice.AlphaOffset, slice.BetaOffset, chroma: false, bitDepth: _bitDepth);
-            FilterEdge(PlaneCr, q0, across, along, 16, strengths, qpCr, qpCr, slice.AlphaOffset, slice.BetaOffset, chroma: false, bitDepth: _bitDepth);
+            FilterEdge(PlaneCb, q0, across, along, 16, strengths, ChromaQp(qpP, slice.CbQpOffset, _qpBdOffset), ChromaQp(qpQ, slice.CbQpOffset, _qpBdOffset), slice.AlphaOffset, slice.BetaOffset, chroma: false, bitDepth: _bitDepth);
+            FilterEdge(PlaneCr, q0, across, along, 16, strengths, ChromaQp(qpP, slice.CrQpOffset, _qpBdOffset), ChromaQp(qpQ, slice.CrQpOffset, _qpBdOffset), slice.AlphaOffset, slice.BetaOffset, chroma: false, bitDepth: _bitDepth);
         }
     }
 

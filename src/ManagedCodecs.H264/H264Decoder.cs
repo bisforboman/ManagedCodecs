@@ -35,6 +35,7 @@ public sealed class H264Decoder : IVideoDecoder
     // with threads, the pictures being decoded (or decoded and not yet output), in decoding order.
     private readonly List<IPictureDecoder> _decoders = [];
     private readonly Queue<PictureJob> _inFlight = new();
+    private readonly Dictionary<IPictureDecoder, PictureThread> _threadsOf = [];
     private readonly int _threads = 1;
 
     // Without ConcealErrors: a reference picture was lost (a gap in frame_num the SPS does not allow) since the last IDR
@@ -191,9 +192,10 @@ public sealed class H264Decoder : IVideoDecoder
             return;
         }
 
-        // A thread of its own, so that a picture always runs while the later ones that wait for it do: pictures
+        // Its decoder's thread, so that a picture always runs while the later ones that wait for it do: pictures
         // start in decoding order, and wait only for earlier ones. The front end goes on from the headers alone.
-        job.Task = Task.Factory.StartNew(() => RunAndCrop(job), CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+        job.Start();
+        ThreadOf(job.State.Decoder).Post(() => job.Complete(() => RunAndCrop(job)));
         _inFlight.Enqueue(job);
         Finish(job);
         Drain(frames, all: false);
@@ -283,6 +285,10 @@ public sealed class H264Decoder : IVideoDecoder
             _held = frames;
             throw;
         }
+        finally
+        {
+            StopThreads();
+        }
 
         if (_firstField is not null)
         {
@@ -312,7 +318,7 @@ public sealed class H264Decoder : IVideoDecoder
     private void DrainOldest(List<VideoFrame> frames)
     {
         var job = _inFlight.Dequeue();
-        job.Task!.GetAwaiter().GetResult();
+        job.Wait();
         Output(job, frames);
     }
 
@@ -430,7 +436,7 @@ public sealed class H264Decoder : IVideoDecoder
         if (!job.Discard && (!state.Header.FieldPic || state.SecondField))
         {
             // A second field can be done before its first (which it need not predict from): the frame is both.
-            job.FirstField?.Task!.GetAwaiter().GetResult();
+            job.FirstField?.Wait();
             job.Frame = Crop(state.Picture, state.Sps);
         }
     }
@@ -694,6 +700,7 @@ public sealed class H264Decoder : IVideoDecoder
             || _decoders[0].Sps.BitDepthLuma != sps.BitDepthLuma))
         {
             Drain(frames, all: true);
+            StopThreads();
             _decoders.Clear();
         }
 
@@ -718,6 +725,29 @@ public sealed class H264Decoder : IVideoDecoder
 
             DrainOldest(frames);
         }
+    }
+
+    /// <summary>The thread that decodes <paramref name="decoder"/>'s pictures.</summary>
+    private PictureThread ThreadOf(IPictureDecoder decoder)
+    {
+        if (!_threadsOf.TryGetValue(decoder, out var thread))
+        {
+            thread = new PictureThread();
+            _threadsOf.Add(decoder, thread);
+        }
+
+        return thread;
+    }
+
+    /// <summary>Ends the decoders' threads once they are idle (the next picture starts them again).</summary>
+    private void StopThreads()
+    {
+        foreach (var thread in _threadsOf.Values)
+        {
+            thread.Stop();
+        }
+
+        _threadsOf.Clear();
     }
 
     /// <summary>Whether a picture being decoded (or decoded and not yet output) is <paramref name="picture"/> or predicts from it.</summary>
@@ -954,8 +984,50 @@ public sealed class H264Decoder : IVideoDecoder
         /// <summary>With <see cref="ConcealErrors"/>, the latest reference: what missing macroblocks are copied from when no slice has a list 0.</summary>
         public Picture? ConcealFrom { get; set; }
 
-        /// <summary>With threads, the thread decoding it.</summary>
-        public Task? Task { get; set; }
+        /// <summary>With threads, set once it is given to its decoder's thread, and done when that has decoded it (either way).</summary>
+        public Task? Task => _done?.Task;
+
+        private TaskCompletionSource? _done;
+        private bool _completed;
+
+        public void Start() => _done = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        /// <summary>Runs <paramref name="decode"/> (on the decoder's thread) and completes <see cref="Task"/> with what it threw, if anything.</summary>
+        public void Complete(Action decode)
+        {
+            try
+            {
+                decode();
+                _done!.SetResult();
+            }
+            catch (Exception exception)
+            {
+                _done!.SetException(exception);
+            }
+
+            lock (_done)
+            {
+                _completed = true;
+                Monitor.PulseAll(_done);
+            }
+        }
+
+        /// <summary>
+        /// Waits until it is decoded and rethrows what decoding threw. It blocks on a monitor: waiting on the task itself
+        /// spins first, which took a core from the pictures being decoded.
+        /// </summary>
+        public void Wait()
+        {
+            lock (_done!)
+            {
+                while (!_completed)
+                {
+                    Monitor.Wait(_done);
+                }
+            }
+
+            _done.Task.GetAwaiter().GetResult();
+        }
     }
 
     private static void CheckSupported(SequenceParameterSet sps)

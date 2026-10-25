@@ -2,7 +2,7 @@ namespace ManagedCodecs.Containers.Adts;
 
 /// <summary>
 /// Raw AAC in ADTS frames (ISO/IEC 14496-3 1.A.3, the usual .aac file): one audio stream, a packet per frame, the ADTS
-/// header included as in FFmpeg's packets (<c>AacDecoder</c> skips it).
+/// header included as in FFmpeg's packets (<c>AacDecoder</c> skips it), 1024 samples long for each of its raw data blocks.
 /// </summary>
 /// <remarks>
 /// <para>

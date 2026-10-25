@@ -445,5 +445,9 @@ resynchronizes) and decode as FFmpeg decodes them; frames with a CRC (which FFmp
 rewritten samples. Channel configuration 0: the AudioSpecificConfig is the stream's header fields and the program config
 element that starts the first frame (FFmpeg writes it there only, the FDK encoder in every tenth frame), its byte
 alignment redone at its new place, byte for byte what FFmpeg's ADTS-to-MP4 filter writes (aac-adts-pce, whose element
-carries a comment, and aac-fdk-pce, both remuxed); a stream whose first frame has none is refused. Not supported:
-several raw data blocks in a frame.
+carries a comment, and aac-fdk-pce, both remuxed); a stream whose first frame has none is refused. Frames of several
+raw data blocks (up to four; FFmpeg's muxer and the FDK encoder write one, FFmpeg's demuxer refuses more) are one packet
+of 1024 samples a block, decoded block after block into one frame; with CRCs, the header's comes after the positions of
+the blocks but the first, and each block has its own. No encoder at hand writes them, so the tests join a sample's
+frames, 1 to 4 under one header, with and without CRCs, AAC LC and HE-AAC (the SBR state runs on across blocks), and
+require the same samples as the frames one by one.

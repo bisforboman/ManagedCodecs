@@ -18,8 +18,11 @@ internal readonly record struct AdtsHeader(
     /// <summary>The fixed and variable header, without the CRC.</summary>
     public const int Size = 7;
 
-    /// <summary>The bytes before the first raw data block: the header, and its CRC when there is one.</summary>
-    public int HeaderLength => HasCrc ? Size + 2 : Size;
+    /// <summary>
+    /// The bytes before the first raw data block: the header, and with CRCs the header's (adts_error_check), after the
+    /// positions of the blocks but the first when there are several (adts_header_error_check).
+    /// </summary>
+    public int HeaderLength => HasCrc ? Size + (2 * RawDataBlocks) : Size;
 
     /// <summary>
     /// Reads the header at the start of <paramref name="data"/>: false unless it has the sync word, layer 0, a sample rate

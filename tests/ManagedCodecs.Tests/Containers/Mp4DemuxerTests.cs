@@ -1,7 +1,6 @@
 using System.Buffers.Binary;
 using System.Text;
 using ManagedCodecs.Containers;
-using ManagedCodecs.Containers.Mp4;
 
 namespace ManagedCodecs.Tests.Containers;
 

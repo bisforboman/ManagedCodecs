@@ -1,7 +1,7 @@
 namespace ManagedCodecs.Mjpeg;
 
 /// <summary>JPEG marker codes (ITU-T T.81, Table B.1), without the leading 0xFF.</summary>
-public static class JpegMarker
+internal static class JpegMarker
 {
     public const byte Sof0 = 0xC0; // Baseline DCT
     public const byte Sof1 = 0xC1; // Extended sequential DCT, Huffman
@@ -29,7 +29,7 @@ public static class JpegMarker
 /// One marker segment. Offsets index into the buffer passed to
 /// <see cref="JpegMarkerReader.ReadSegments"/>. Only SOS segments have entropy-coded data.
 /// </summary>
-public readonly record struct JpegSegment(
+internal readonly record struct JpegSegment(
     byte Marker,
     int PayloadOffset,
     int PayloadLength,
@@ -37,7 +37,7 @@ public readonly record struct JpegSegment(
     int EntropyDataLength = 0);
 
 /// <summary>Splits a JPEG (one MJPEG frame) into its marker segments.</summary>
-public static class JpegMarkerReader
+internal static class JpegMarkerReader
 {
     public static List<JpegSegment> ReadSegments(ReadOnlySpan<byte> data)
     {

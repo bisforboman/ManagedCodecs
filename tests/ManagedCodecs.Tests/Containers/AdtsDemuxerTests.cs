@@ -1,6 +1,5 @@
 using ManagedCodecs.Aac;
 using ManagedCodecs.Containers;
-using ManagedCodecs.Containers.Adts;
 
 namespace ManagedCodecs.Tests.Containers;
 

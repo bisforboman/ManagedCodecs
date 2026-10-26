@@ -2,7 +2,7 @@ using System.Buffers.Binary;
 using System.Globalization;
 using System.Text;
 
-namespace ManagedCodecs.Containers.Avi;
+namespace ManagedCodecs.Containers;
 
 /// <summary>
 /// Minimal AVI (RIFF) demuxer: finds the first video stream and yields its packets from the

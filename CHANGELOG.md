@@ -9,6 +9,16 @@ them all.
 
 ## Unreleased
 
+The public API before it freezes ([docs/decisions/2026-10-26-api-before-0.1.0.md](docs/decisions/2026-10-26-api-before-0.1.0.md)).
+
+### Breaking changes
+
+- `Mp4Demuxer`, `AviDemuxer` and `AdtsDemuxer` are in `ManagedCodecs.Containers`, beside `Demuxer` (they were in
+  `ManagedCodecs.Containers.Mp4`, `.Avi` and `.Adts`): drop those `using` lines.
+- No longer public, as implementation details: MJPEG's JPEG parser (`JpegComponent`, `JpegFrameHeader`,
+  `JpegMarker`, `JpegMarkerReader`, `JpegSegment`), `PixelFormatExtensions.Of`, `AudioFrame.DropStart`,
+  `VideoFramePool`, and `VideoFrame.IsDamaged`'s setter (the decoder sets it).
+
 ## 0.1.0-preview.1 – 2026-10-26
 
 The first preview: what the README's Status section lists, as it stands.

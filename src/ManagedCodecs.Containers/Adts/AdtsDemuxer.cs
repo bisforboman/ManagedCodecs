@@ -1,4 +1,4 @@
-namespace ManagedCodecs.Containers.Adts;
+namespace ManagedCodecs.Containers;
 
 /// <summary>
 /// Raw AAC in ADTS frames (ISO/IEC 14496-3 1.A.3, the usual .aac file): one audio stream, a packet per frame, the ADTS

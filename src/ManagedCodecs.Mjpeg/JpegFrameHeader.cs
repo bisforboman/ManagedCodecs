@@ -1,9 +1,9 @@
 namespace ManagedCodecs.Mjpeg;
 
-public sealed record JpegComponent(byte Id, int HorizontalSampling, int VerticalSampling, int QuantizationTableId);
+internal sealed record JpegComponent(byte Id, int HorizontalSampling, int VerticalSampling, int QuantizationTableId);
 
 /// <summary>Parsed SOFn segment: image size and component layout.</summary>
-public sealed record JpegFrameHeader(byte Marker, int Precision, int Width, int Height, IReadOnlyList<JpegComponent> Components)
+internal sealed record JpegFrameHeader(byte Marker, int Precision, int Width, int Height, IReadOnlyList<JpegComponent> Components)
 {
     public static JpegFrameHeader Parse(byte marker, ReadOnlySpan<byte> payload)
     {

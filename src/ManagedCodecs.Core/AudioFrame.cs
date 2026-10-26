@@ -28,7 +28,7 @@ public sealed class AudioFrame
     public float[][] Samples { get; }
 
     /// <summary>This frame without its first <paramref name="count"/> samples (all of them if it has fewer).</summary>
-    public AudioFrame DropStart(int count)
+    internal AudioFrame DropStart(int count)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(count);
         if (count == 0)

@@ -62,9 +62,9 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
   reproduces FFmpeg rather than the spec, a rule only some streams reach) gets an entry; one that survives means a
   missing test, not a mutation to drop. `--only <text>` runs some; it undoes each with `git checkout`, so run it in a
   worktree with the mutated files committed.
-- **Code style**: StyleBro (analyzers on build; rules in `.editorconfig`, chosen by `stylebro-migrate init` from this
+- **Code style**: StyleBro (analyzers on build; rules in `.editorconfig`, chosen by `bro init` from this
   code's own conventions). The pre-commit hook formats the staged .cs files (`git config core.hooksPath .githooks`
-  once per clone); by hand: `dotnet tool run stylebro-migrate format ManagedCodecs.slnx`. CI checks it with
+  once per clone); by hand: `dotnet tool run bro format ManagedCodecs.slnx`. CI checks it with
   `--verify-no-changes`. The tool's version (.config/dotnet-tools.json) and the analyzers' (Directory.Packages.props)
   move together, by hand while StyleBro is a prerelease. Package versions are central (Directory.Packages.props).
 - **Timing**: `tools/compare.sh <file> <loops>` runs `mcdec` (tools/ManagedCodecs.Cli) and

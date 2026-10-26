@@ -2,10 +2,10 @@
   "version": 1,
   "isRoot": true,
   "tools": {
-    "stylebro.migrate": {
-      "version": "0.7.0-alpha.1",
+    "stylebro.tool": {
+      "version": "0.8.0-alpha.1",
       "commands": [
-        "stylebro-migrate"
+        "bro"
       ],
       "rollForward": false
     }

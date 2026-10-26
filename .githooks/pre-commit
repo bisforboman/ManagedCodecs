@@ -13,9 +13,9 @@ if [ -n "$partial" ]; then
 fi
 
 dotnet tool restore > /dev/null || exit 1
-if ! dotnet tool run stylebro-migrate format ManagedCodecs.slnx --files $files > /dev/null; then
-  echo "pre-commit: stylebro-migrate format failed; run it yourself to see why:"
-  echo "  dotnet tool run stylebro-migrate format ManagedCodecs.slnx"
+if ! dotnet tool run bro format ManagedCodecs.slnx --files $files > /dev/null; then
+  echo "pre-commit: bro format failed; run it yourself to see why:"
+  echo "  dotnet tool run bro format ManagedCodecs.slnx"
   exit 1
 fi
 

@@ -62,7 +62,7 @@ jobs:
       - name: Format (StyleBro)
         run: |
           dotnet tool restore
-          dotnet tool run stylebro-migrate format ManagedCodecs.slnx --verify-no-changes
+          dotnet tool run bro format ManagedCodecs.slnx --verify-no-changes
 
       - name: Generate samples
         run: tools/make-samples.sh
@@ -178,7 +178,7 @@ jobs:
       - name: Format (StyleBro) of the wasm project
         run: |
           dotnet tool restore
-          dotnet tool run stylebro-migrate format tools/ManagedCodecs.Wasm/ManagedCodecs.Wasm.csproj --verify-no-changes
+          dotnet tool run bro format tools/ManagedCodecs.Wasm/ManagedCodecs.Wasm.csproj --verify-no-changes
 
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:

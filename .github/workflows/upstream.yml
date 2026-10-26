@@ -52,7 +52,7 @@ jobs:
 
           To move to it (one PR):
           - [ ] The analyzers' version in \`Directory.Packages.props\` and the tool's in \`.config/dotnet-tools.json\` (they move together).
-          - [ ] \`dotnet tool restore\`, \`dotnet tool run stylebro-migrate format ManagedCodecs.slnx\`, then \`--verify-no-changes\` and a build with \`-warnaserror\`.
+          - [ ] \`dotnet tool restore\`, \`dotnet tool run bro format ManagedCodecs.slnx\`, then \`--verify-no-changes\` and a build with \`-warnaserror\`.
           - [ ] Keep today's style where a new rule or setting would change it across the code (\`.editorconfig\`), and list the files the formatter changed in the PR.
           EOF
 

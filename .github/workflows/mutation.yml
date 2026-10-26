@@ -1,13 +1,12 @@
 name: Mutation checks
 
 # Breaks each guard listed in tools/mutation/mutations.py (the frame threading waits, and code that reproduces what
-# FFmpeg does) and checks that a test fails: a guard no test covers shows as SURVIVED. On pull requests that change
-# more than docs, and on demand. (Should it become a required check, docs-only pull requests would wait for it
-# forever: replace paths-ignore by a job that skips the steps instead, as ShotDetector's mutation.yml does.)
+# FFmpeg does) and checks that a test fails: a guard no test covers shows as SURVIVED. On every pull request and on
+# demand. A pull request that changes only docs (*.md, docs/) skips the steps but still reports, so that `mutation` can
+# be a required check (a workflow left out by paths-ignore never reports, and the pull request would wait for it).
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]   # drafts run nothing until marked ready
-    paths-ignore: ['**.md', 'docs/**']
   workflow_dispatch:
 
 concurrency:
@@ -25,13 +24,33 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
+      # The pull request's merge commit and its first parent, the base it merges into: their difference is the change.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 2
+
+      - name: Docs only?
+        id: changes
+        run: |
+          docs_only=false
+          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            files=$(git diff --name-only HEAD^1 HEAD)
+            echo "$files"
+            if [ -n "$files" ] && ! echo "$files" | grep -qvE '(\.md$|^docs/)'; then
+              docs_only=true
+              echo "Only docs changed: nothing to mutate." >> "$GITHUB_STEP_SUMMARY"
+            fi
+          fi
+          echo "docs_only=$docs_only" >> "$GITHUB_OUTPUT"
 
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
+        if: steps.changes.outputs.docs_only != 'true'
         with:
           dotnet-version: 10.0.x
 
       - uses: ./.github/actions/samples
+        if: steps.changes.outputs.docs_only != 'true'
 
       - name: Mutate and test
+        if: steps.changes.outputs.docs_only != 'true'
         run: tools/mutation/mutate.py

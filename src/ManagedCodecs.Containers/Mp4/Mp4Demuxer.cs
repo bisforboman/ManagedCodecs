@@ -1095,7 +1095,6 @@ public sealed class Mp4Demuxer : IDemuxer
             }
         }
 
-        /// <summary>pts - dts per sample from 'ctts'; zero where the table is absent or ends early.</summary>
         /// <summary>
         /// pts - dts per sample from 'ctts' (zero where the table is absent or ends early), and how far back the dts go:
         /// the most negative offset, as FFmpeg takes it, from every entry but the last two.

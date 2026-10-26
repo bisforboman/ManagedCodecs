@@ -438,6 +438,9 @@ ff -f lavfi -i "anoisesrc=color=pink:amplitude=0.3:sample_rate=44100:duration=2:
 ff -f lavfi -i "testsrc2=size=320x240:rate=25,scroll=h=0.01" -f lavfi -i "sine=frequency=330:sample_rate=48000:duration=1" -t 1 -c:v libx264 -profile:v baseline -pix_fmt yuv420p -refs 2 -c:a aac -ac 2 -aac_pns 0 samples/h264-with-audio.mp4
 # Raw AAC in ADTS frames (the ADTS demuxer): stereo at 44.1 kHz, and 5.1 behind an ID3v2 tag (which the demuxer skips).
 ff -f lavfi -i "aevalsrc=0.4*sin(2*PI*440*t)|0.3*sin(2*PI*660*t):s=44100:d=1" -c:a aac -b:a 96k -aac_pns 0 -f adts samples/aac-adts.aac
+# The same, its encoder name (in the first frame's fill element) rewritten to read as FAAC's, where FFmpeg's decoder
+# looks for it: it then skips FAAC's encoder delay, 1024 samples, which FAAC signals nowhere else (Sintel's trailer).
+cp samples/aac-adts.aac samples/aac-faac-delay.aac && python3 -I tools/aac-encoder-name.py samples/aac-faac-delay.aac > /dev/null
 ff -f lavfi -i "aevalsrc=0.3*sin(2*PI*220*t)|0.3*sin(2*PI*330*t)|0.3*sin(2*PI*440*t)|0.3*sin(2*PI*55*t)|0.3*sin(2*PI*660*t)|0.3*sin(2*PI*880*t):s=48000:d=1:c=5.1" -c:a aac -b:a 256k -aac_pns 0 -f adts -write_id3v2 1 -metadata title=ManagedCodecs samples/aac-adts-5.1-id3.aac
 # Channel configuration 0 in ADTS: the 5.1 channels in a program config element, which FFmpeg writes at the start of the
 # first frame only.
@@ -519,7 +522,7 @@ done
 # Raw AAC: packets as FFmpeg's demuxer gives them (whole ADTS frames), and every decoded sample (no edit list).
 for f in samples/*.aac; do
   ff -copyts -i "$f" -c copy -f framemd5 "${f%.aac}.packets.framemd5"
-  [[ $f == samples/heaac-* ]] || ff -i "$f" -f f32le "${f%.aac}.f32"  # HE-AAC: below
+  [[ $f == samples/heaac-* || $f == *faac* ]] || ff -i "$f" -f f32le "${f%.aac}.f32"  # HE-AAC: below
 done
 # H.264 streams FFmpeg does not decode (separate colour planes), from JM, committed with references from JM's own
 # decoder (tools/make-jm-samples.sh): copied after FFmpeg's references, which would fail on them.
@@ -532,5 +535,7 @@ done
 # file's iTunSMPB tag gives (ADTS has none), and in stereo for a mono stream (FFmpeg's decoder assumes parametric
 # stereo could come).
 for f in samples/heaac-*.mp4 samples/heaacv2-*.mp4 samples/heaac-*.aac; do ff -i "$f" -f f32le "${f%.*}.sbr.f32"; done
+# A stream naming FAAC: name.delay.f32, decoded audio as FFmpeg gives it, without FAAC's encoder delay.
+for f in samples/*faac*.aac; do ff -i "$f" -f f32le "${f%.*}.delay.f32"; done
 
 echo "Samples and references written to samples/."

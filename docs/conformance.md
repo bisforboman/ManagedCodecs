@@ -365,7 +365,10 @@ channels of a pair fill with noise (which FFmpeg's encoder never writes, the FDK
 spec's correlated noise, the right channel reusing the left's random vector; FFmpeg gives the right channel noise of
 its own, and so does this decoder, on purpose (correlated, the sample was up to 3e-2 off).
 Priming before the edit list's start is trimmed (`Packet.SkipSamples`); like FFmpeg, the
-padding in the last packet is not.
+padding in the last packet is not. FAAC signals its encoder delay nowhere but in its name, "libfaac" and a version as text in its first
+frame's fill element: FFmpeg then drops the first 1024 samples, and `Decode(Packet)` does too, unless the container says
+what to skip (aac-faac-delay: FFmpeg's encoder name rewritten to read as FAAC's, `tools/aac-encoder-name.py`; Blender's
+Sintel trailer, from FAAC 1.26.1, matches FFmpeg once it is dropped).
 
 A program config element (channel configuration 0) comes out in FFmpeg's order. When it places every channel on a
 speaker (a front centre first and front pairs from the centre outward, as the spec lists them; a side pair; back pairs

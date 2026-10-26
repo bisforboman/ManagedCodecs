@@ -20,13 +20,15 @@ namespace ManagedCodecs.Aac;
 /// goes through it, an LFE without a high band. Parametric stereo (HE-AAC v2) makes a mono stream stereo
 /// (<see cref="Channels"/>). Every packet yields its samples whole, encoder priming included; the container's timestamps (negative
 /// for priming) and the last packet's duration say what to trim, and <see cref="Decode(Packet)"/> drops what
-/// <see cref="Packet.SkipSamples"/> says, running on into the next packets if it is more than one packet's.
+/// <see cref="Packet.SkipSamples"/> says, running on into the next packets if it is more than one packet's. Without one,
+/// it drops FAAC's encoder delay, 1024 samples, after an access unit that names FAAC as its encoder, as FFmpeg does.
 /// </remarks>
 public sealed class AacDecoder : IAudioDecoder
 {
     private const int SceElement = 0;
     private const int CpeElement = 1;
     private const int CceElement = 2;
+    private const int ExtensionFill = 0;
     private const int LfeElement = 3;
     private const int DseElement = 4;
     private const int PceElement = 5;
@@ -59,6 +61,11 @@ public sealed class AacDecoder : IAudioDecoder
 
     // Samples still to drop at the start of the next packets, from a Packet.SkipSamples larger than its packet's output.
     private int _pendingSkip;
+
+    // FAAC's encoder delay, which it signals only by naming itself in a fill element of its first access unit; and
+    // whether the access unit just decoded did.
+    private const int FaacDelay = 1024;
+    private bool _faacSignature;
 
     public AacDecoder(ReadOnlySpan<byte> audioSpecificConfig)
     {
@@ -118,13 +125,16 @@ public sealed class AacDecoder : IAudioDecoder
     /// <inheritdoc/>
     public AudioFrame Decode(Packet packet)
     {
+        _faacSignature = false;
         var frame = Decode(packet.Data.Span);
         if (packet.Discard)
         {
             return frame.DropStart(frame.SampleCount);
         }
 
-        int skip = _pendingSkip + packet.SkipSamples;
+        // An access unit that names FAAC as its encoder starts FAAC's delay, as FFmpeg reads it, unless the container
+        // says what to skip (an edit list's priming).
+        int skip = _pendingSkip + (packet.SkipSamples > 0 ? packet.SkipSamples : _faacSignature ? FaacDelay : 0);
         int dropped = Math.Min(skip, frame.SampleCount);
         _pendingSkip = skip - dropped;
         return frame.DropStart(dropped);
@@ -274,6 +284,10 @@ public sealed class AacDecoder : IAudioDecoder
                             int type = r.Read(4);
                             SbrFor(element, elementChannels).Read(r, end - r.Position, type == SbrElement.ExtensionSbrCrc, Statistics);
                         }
+                        else if (count > 0 && r.Peek(4) == ExtensionFill)
+                        {
+                            _faacSignature |= NamesFaac(r, end);
+                        }
 
                         r.Skip(end - r.Position);
                         break;
@@ -301,6 +315,53 @@ public sealed class AacDecoder : IAudioDecoder
         }
 
         return frame;
+    }
+
+    /// <summary>
+    /// Whether a fill extension payload (EXT_FILL, 4.4.2.7), from its type on to <paramref name="end"/>, holds FAAC's
+    /// encoder name: "libfaac" and a version, as text 13 bits after the type where FAAC writes it (and FFmpeg reads it;
+    /// the spec has fill bits there). It reads only within the payload, which the caller then skips to its end.
+    /// </summary>
+    private static bool NamesFaac(AacBitReader r, int end)
+    {
+        const int Offset = 4 + 13;
+        if (end - r.Position < Offset + (7 * 8))
+        {
+            return false;
+        }
+
+        r.Skip(Offset);
+        Span<byte> text = stackalloc byte[Math.Min((end - r.Position) / 8, 255)];
+        for (int i = 0; i < text.Length; i++)
+        {
+            text[i] = (byte)r.Read(8);
+        }
+
+        // "libfaac %d.%d" as FFmpeg scans it: the name, white space, digits, a point, digits.
+        if (!text.StartsWith("libfaac"u8))
+        {
+            return false;
+        }
+
+        int p = 7;
+        while (p < text.Length && text[p] is (byte)' ' or (byte)'\t' or (byte)'\n' or (byte)'\r' or (byte)'\v' or (byte)'\f')
+        {
+            p++;
+        }
+
+        int digits = p;
+        while (p < text.Length && char.IsAsciiDigit((char)text[p]))
+        {
+            p++;
+        }
+
+        if (p == digits || p >= text.Length || text[p] != '.')
+        {
+            return false;
+        }
+
+        p++;
+        return p < text.Length && char.IsAsciiDigit((char)text[p]);
     }
 
     // Each channel's core output through SBR, 2048 samples at its rate: an SCE's or CPE's with its SBR data of this access

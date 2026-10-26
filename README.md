@@ -21,6 +21,7 @@ on several threads if asked, and every decoder has an async API.
 | `tools/compare.sh` | Times mcdec and FFmpeg on the same file |
 | `tools/realworld.py` | Decodes real public films with mcdec and FFmpeg and compares them (nightly, `realworld.yml`) |
 | `tools/mutation/mutate.py` | Breaks each guard in `tools/mutation/mutations.py` and checks that a test fails (on pull requests, `mutation.yml`) |
+| `tools/upstream-issue.sh` | Files `upstream.yml`'s weekly issues: a new StyleBro, or a new release of an encoder the committed samples come from |
 | `tools/ManagedCodecs.Fuzz`, `tools/fuzz.sh` | Fuzzing targets for SharpFuzz and AFL++ (see Malformed input) |
 | `tools/ManagedCodecs.Wasm`, `tools/wasm-check.sh` | The decoders on WebAssembly, checked against the native build (see WebAssembly) |
 | `tests/ManagedCodecs.Tests` | Unit tests and FFmpeg conformance tests (framemd5 for frames and packets) |

@@ -10,7 +10,8 @@
 #
 # Usage: tools/make-jm-samples.sh <JM source tree with lencod built> [sample names, to make only those]
 #   (git clone https://github.com/shihuade/JM && make -C lencod CFLAGS="-fcommon -O2"; the separate colour plane
-#   samples also need make -C ldecod; made with JM 19.0)
+#   samples also need make -C ldecod; made with JM 19.0, the mirror's
+#   commit 032b8d7)
 set -euo pipefail
 
 jm=$(cd "${1:?usage: tools/make-jm-samples.sh <JM tree> [names]}" && pwd)

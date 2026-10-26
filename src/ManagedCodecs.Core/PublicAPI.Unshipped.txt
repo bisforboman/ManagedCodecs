@@ -1,0 +1,9 @@
+#nullable enable
+ManagedCodecs.AudioFrame.Pts.get -> long
+ManagedCodecs.AudioFrame.Pts.set -> void
+*REMOVED*ManagedCodecs.AudioFrame.DropStart(int count) -> ManagedCodecs.AudioFrame!
+*REMOVED*ManagedCodecs.VideoFrame.IsDamaged.set -> void
+*REMOVED*ManagedCodecs.VideoFramePool
+*REMOVED*ManagedCodecs.VideoFramePool.Rent(int width, int height, ManagedCodecs.PixelFormat format) -> ManagedCodecs.VideoFrame!
+*REMOVED*ManagedCodecs.VideoFramePool.VideoFramePool(int capacity = 8) -> void
+*REMOVED*static ManagedCodecs.PixelFormatExtensions.Of(int chroma, int bitDepth) -> ManagedCodecs.PixelFormat

@@ -1,0 +1,49 @@
+#nullable enable
+ManagedCodecs.Containers.AdtsDemuxer
+ManagedCodecs.Containers.AdtsDemuxer.AdtsDemuxer(System.IO.Stream! stream, bool leaveOpen = false) -> void
+ManagedCodecs.Containers.AdtsDemuxer.Audio.get -> ManagedCodecs.AudioStreamInfo!
+ManagedCodecs.Containers.AdtsDemuxer.Dispose() -> void
+ManagedCodecs.Containers.AdtsDemuxer.ReadPackets() -> System.Collections.Generic.IEnumerable<ManagedCodecs.Packet>!
+ManagedCodecs.Containers.AdtsDemuxer.ReadPacketsAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerable<ManagedCodecs.Packet>!
+ManagedCodecs.Containers.AdtsDemuxer.Video.get -> ManagedCodecs.VideoStreamInfo?
+ManagedCodecs.Containers.AviDemuxer
+ManagedCodecs.Containers.AviDemuxer.Audio.get -> ManagedCodecs.AudioStreamInfo?
+ManagedCodecs.Containers.AviDemuxer.AviDemuxer(System.IO.Stream! stream, bool leaveOpen = false) -> void
+ManagedCodecs.Containers.AviDemuxer.Dispose() -> void
+ManagedCodecs.Containers.AviDemuxer.ReadPackets() -> System.Collections.Generic.IEnumerable<ManagedCodecs.Packet>!
+ManagedCodecs.Containers.AviDemuxer.ReadPacketsAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerable<ManagedCodecs.Packet>!
+ManagedCodecs.Containers.AviDemuxer.Video.get -> ManagedCodecs.VideoStreamInfo!
+ManagedCodecs.Containers.Mp4Demuxer
+ManagedCodecs.Containers.Mp4Demuxer.Audio.get -> ManagedCodecs.AudioStreamInfo?
+ManagedCodecs.Containers.Mp4Demuxer.Dispose() -> void
+ManagedCodecs.Containers.Mp4Demuxer.Mp4Demuxer(System.IO.Stream! stream, bool leaveOpen = false) -> void
+ManagedCodecs.Containers.Mp4Demuxer.ReadPackets() -> System.Collections.Generic.IEnumerable<ManagedCodecs.Packet>!
+ManagedCodecs.Containers.Mp4Demuxer.ReadPacketsAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerable<ManagedCodecs.Packet>!
+ManagedCodecs.Containers.Mp4Demuxer.Video.get -> ManagedCodecs.VideoStreamInfo?
+static ManagedCodecs.Containers.AdtsDemuxer.Open(string! path) -> ManagedCodecs.Containers.AdtsDemuxer!
+static ManagedCodecs.Containers.AviDemuxer.Open(string! path) -> ManagedCodecs.Containers.AviDemuxer!
+static ManagedCodecs.Containers.Mp4Demuxer.Open(string! path) -> ManagedCodecs.Containers.Mp4Demuxer!
+*REMOVED*ManagedCodecs.Containers.Adts.AdtsDemuxer
+*REMOVED*ManagedCodecs.Containers.Adts.AdtsDemuxer.AdtsDemuxer(System.IO.Stream! stream, bool leaveOpen = false) -> void
+*REMOVED*ManagedCodecs.Containers.Adts.AdtsDemuxer.Audio.get -> ManagedCodecs.AudioStreamInfo!
+*REMOVED*ManagedCodecs.Containers.Adts.AdtsDemuxer.Dispose() -> void
+*REMOVED*ManagedCodecs.Containers.Adts.AdtsDemuxer.ReadPackets() -> System.Collections.Generic.IEnumerable<ManagedCodecs.Packet>!
+*REMOVED*ManagedCodecs.Containers.Adts.AdtsDemuxer.ReadPacketsAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerable<ManagedCodecs.Packet>!
+*REMOVED*ManagedCodecs.Containers.Adts.AdtsDemuxer.Video.get -> ManagedCodecs.VideoStreamInfo?
+*REMOVED*ManagedCodecs.Containers.Avi.AviDemuxer
+*REMOVED*ManagedCodecs.Containers.Avi.AviDemuxer.Audio.get -> ManagedCodecs.AudioStreamInfo?
+*REMOVED*ManagedCodecs.Containers.Avi.AviDemuxer.AviDemuxer(System.IO.Stream! stream, bool leaveOpen = false) -> void
+*REMOVED*ManagedCodecs.Containers.Avi.AviDemuxer.Dispose() -> void
+*REMOVED*ManagedCodecs.Containers.Avi.AviDemuxer.ReadPackets() -> System.Collections.Generic.IEnumerable<ManagedCodecs.Packet>!
+*REMOVED*ManagedCodecs.Containers.Avi.AviDemuxer.ReadPacketsAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerable<ManagedCodecs.Packet>!
+*REMOVED*ManagedCodecs.Containers.Avi.AviDemuxer.Video.get -> ManagedCodecs.VideoStreamInfo!
+*REMOVED*ManagedCodecs.Containers.Mp4.Mp4Demuxer
+*REMOVED*ManagedCodecs.Containers.Mp4.Mp4Demuxer.Audio.get -> ManagedCodecs.AudioStreamInfo?
+*REMOVED*ManagedCodecs.Containers.Mp4.Mp4Demuxer.Dispose() -> void
+*REMOVED*ManagedCodecs.Containers.Mp4.Mp4Demuxer.Mp4Demuxer(System.IO.Stream! stream, bool leaveOpen = false) -> void
+*REMOVED*ManagedCodecs.Containers.Mp4.Mp4Demuxer.ReadPackets() -> System.Collections.Generic.IEnumerable<ManagedCodecs.Packet>!
+*REMOVED*ManagedCodecs.Containers.Mp4.Mp4Demuxer.ReadPacketsAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerable<ManagedCodecs.Packet>!
+*REMOVED*ManagedCodecs.Containers.Mp4.Mp4Demuxer.Video.get -> ManagedCodecs.VideoStreamInfo?
+*REMOVED*static ManagedCodecs.Containers.Adts.AdtsDemuxer.Open(string! path) -> ManagedCodecs.Containers.Adts.AdtsDemuxer!
+*REMOVED*static ManagedCodecs.Containers.Avi.AviDemuxer.Open(string! path) -> ManagedCodecs.Containers.Avi.AviDemuxer!
+*REMOVED*static ManagedCodecs.Containers.Mp4.Mp4Demuxer.Open(string! path) -> ManagedCodecs.Containers.Mp4.Mp4Demuxer!

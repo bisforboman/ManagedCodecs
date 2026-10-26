@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The meta-package: no code, every ManagedCodecs package as a dependency, at this release's version. -->
+  <PropertyGroup>
+    <PackageId>ManagedCodecs</PackageId>
+    <Description>Pure managed C# media codecs, every package at once: MJPEG and H.264 (bit-exact with FFmpeg), AAC and HE-AAC, AVI, MP4 and ADTS demuxing. No native binaries, Native AOT friendly.</Description>
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <IncludeSymbols>false</IncludeSymbols>
+    <!-- NU5128: no lib/ folder, on purpose. -->
+    <NoWarn>$(NoWarn);NU5128</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ManagedCodecs.Core\ManagedCodecs.Core.csproj" />
+    <ProjectReference Include="..\ManagedCodecs.Containers\ManagedCodecs.Containers.csproj" />
+    <ProjectReference Include="..\ManagedCodecs.Mjpeg\ManagedCodecs.Mjpeg.csproj" />
+    <ProjectReference Include="..\ManagedCodecs.H264\ManagedCodecs.H264.csproj" />
+    <ProjectReference Include="..\ManagedCodecs.Aac\ManagedCodecs.Aac.csproj" />
+  </ItemGroup>
+
+</Project>

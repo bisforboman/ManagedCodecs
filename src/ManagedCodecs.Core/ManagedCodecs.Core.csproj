@@ -3,6 +3,7 @@
   <PropertyGroup>
     <RootNamespace>ManagedCodecs</RootNamespace>
     <PackageId>ManagedCodecs.Core</PackageId>
+    <Description>ManagedCodecs' shared types: VideoFrame, AudioFrame, Packet, PixelFormat, Rational and the demuxer and decoder interfaces. Pure managed, Native AOT friendly.</Description>
     <IsAotCompatible>true</IsAotCompatible>
   </PropertyGroup>
 

@@ -3,6 +3,7 @@
   <PropertyGroup>
     <RootNamespace>ManagedCodecs.Containers</RootNamespace>
     <PackageId>ManagedCodecs.Containers</PackageId>
+    <Description>AVI, MP4 (and QuickTime, fragmented MP4, edit lists as FFmpeg applies them) and ADTS demuxers, in pure managed C#; Demuxer.Open picks one by content.</Description>
     <IsAotCompatible>true</IsAotCompatible>
   </PropertyGroup>
 

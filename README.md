@@ -85,7 +85,16 @@ every frame identical, the audio within 2^-17.
 
 ## Getting started
 
-Requires the .NET 10 SDK. The tests also need samples made with FFmpeg (with libx264) and ImageMagick:
+The packages (once the first preview is out, [CHANGELOG.md](CHANGELOG.md)): `ManagedCodecs` for everything, or one of
+`ManagedCodecs.Containers`, `.Mjpeg`, `.H264` and `.Aac` (each with `ManagedCodecs.Core`). They share internals, so
+keep them at one version. Until the API is frozen they are previews, `0.1.0-preview.N`, and any of them can change the
+public API.
+
+```
+dotnet add package ManagedCodecs --prerelease
+```
+
+Building from source requires the .NET 10 SDK. The tests also need samples made with FFmpeg (with libx264) and ImageMagick:
 
 ```
 tools/make-samples.sh    # once; Git Bash or WSL on Windows

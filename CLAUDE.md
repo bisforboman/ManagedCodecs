@@ -20,6 +20,10 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
   "Allow auto-merge" in the repository settings). Drafts excepted, and a PR the owner must decide on says so in its
   body and waits for the answer. Don't push to main directly; once branch protection is on it requires `build`
   (ci.yml).
+- **Releases**: CHANGELOG.md's "## Unreleased" section collects what is merged and not released (add a line there in a
+  PR a consumer would notice); a release is a PR that renames it to "## X.Y.Z – date" (0.1.0-preview.N until the API
+  freeze), and `release.yml` then tests, packs every package at that version, publishes to nuget.org (trusted
+  publishing) and tags it. Every package has the one version.
 - **Files an open PR changes**: before editing a file, check the open PRs for one that changes it; if one does, wait
   for it to merge and branch from main after it, rather than editing the same lines in parallel.
 - **Worktrees**: `git worktree add .claude/worktrees/<name> -b <branch> origin/main` (ignored). Sessions working at

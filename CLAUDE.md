@@ -106,7 +106,9 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
 
 - A worktree has no generated samples: link them with `ln -s <main checkout>/samples/*.* samples/`, without `-f`
   (`ln -sf samples/*` once replaced the tracked `samples/README.md` with a link, and linked directories into themselves).
-  A worktree made before a sample was generated has no link to it: a new theory row then reads "no data".
+  A worktree made before a sample was generated has no link to it: a new theory row then reads "no data". References
+  generated inside a worktree (a new `.audioframes.csv`) go with it when it is removed: generate them in the main
+  checkout's `samples/` too, and link them, or the next worktree reads "no data" for them.
 - The cloud sandbox reaches download.blender.org but not archive.org or test-videos.co.uk (CI reaches all three).
 - A dts after its pts (a 'ctts' whose last two entries are more negative than the shift; docs/conformance.md, MP4):
   FFmpeg reports "Invalid timestamps" (`-v debug`) and keeps it for H.264, but fills a dts in from the pts for a codec

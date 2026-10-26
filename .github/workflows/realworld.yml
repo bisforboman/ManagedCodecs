@@ -1,0 +1,57 @@
+name: Real world
+
+# ManagedCodecs against FFmpeg on real public films (tools/realworld.py: Blender's open movies, real H.264 and AAC from
+# real encoders, where every sample in samples/ is a test pattern): every video frame must be identical and the audio
+# within 2^-17. Nightly and on demand, not on pull requests (minutes of film each); a job per film, so one difference
+# doesn't hide another. The films are cached; the first run downloads about 490 MB.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '41 2 * * *'
+
+# The token only reads the repository.
+permissions:
+  contents: read
+
+jobs:
+  realworld:
+    name: Real world (${{ matrix.film }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        film:
+          - sintel_trailer-1080p.mp4
+          - elephantsdream-480-h264-st-aac.mov
+          - tears_of_steel_720p.mov
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
+        with:
+          dotnet-version: 10.0.x
+
+      # Ubuntu's FFmpeg 6.1, as ci.yml has it (the version the conformance references come from).
+      - uses: ./.github/actions/ffmpeg
+
+      - name: Install numpy
+        run: pip install --user numpy
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: samples/realworld/${{ matrix.film }}
+          key: realworld-${{ matrix.film }}-${{ hashFiles('tools/realworld.py') }}
+
+      - name: Build
+        run: dotnet build tools/ManagedCodecs.Cli -c Release
+
+      - name: Compare with FFmpeg
+        env:
+          FILM: ${{ matrix.film }}
+        run: |
+          set +e
+          tools/realworld.py "$FILM" --report realworld.md
+          status=$?
+          { echo "### $FILM"; echo; cat realworld.md; } >> "$GITHUB_STEP_SUMMARY"
+          exit $status

@@ -16,5 +16,6 @@ samples/*.framemd5
 samples/*.flags
 samples/*.csv
 samples/*.f32
+samples/realworld
 .claude/worktrees/
 fuzz-work/

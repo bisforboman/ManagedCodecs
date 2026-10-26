@@ -19,6 +19,7 @@ on several threads if asked, and every decoder has an async API.
 | `tools/ManagedCodecs.Cli` | `mcdec`: decodes a file and times it, to compare with `ffmpeg -benchmark` (`--threads N` for H.264 frame threading and HE-AAC's channels) |
 | `tools/make-samples.sh` | Generates the test samples and FFmpeg's references |
 | `tools/compare.sh` | Times mcdec and FFmpeg on the same file |
+| `tools/realworld.py` | Decodes real public films with mcdec and FFmpeg and compares them (nightly, `realworld.yml`) |
 | `tools/ManagedCodecs.Fuzz`, `tools/fuzz.sh` | Fuzzing targets for SharpFuzz and AFL++ (see Malformed input) |
 | `tools/ManagedCodecs.Wasm`, `tools/wasm-check.sh` | The decoders on WebAssembly, checked against the native build (see WebAssembly) |
 | `tests/ManagedCodecs.Tests` | Unit tests and FFmpeg conformance tests (framemd5 for frames and packets) |
@@ -28,7 +29,10 @@ on several threads if asked, and every decoder has an async API.
 
 Every decoder is checked against FFmpeg, on samples generated to isolate one feature each; where an encoder never
 writes a feature, unit tests and hand-built or rewritten streams cover it. [docs/conformance.md](docs/conformance.md)
-says feature by feature which encoder made the samples (libx264, OpenH264, JM) and what is not checked.
+says feature by feature which encoder made the samples (libx264, OpenH264, JM) and what is not checked. Every night
+the [real-world check](https://github.com/bisforboman/ManagedCodecs/actions/workflows/realworld.yml)
+(`tools/realworld.py`) decodes three of Blender's open movies, real H.264 and AAC from real encoders, against FFmpeg:
+every frame identical, the audio within 2^-17.
 
 - **MJPEG**: baseline and extended Huffman JPEG in 4:2:0, 4:2:2, 4:4:4 and gray, restart markers, missing Huffman
   tables, interlaced AVI1 frames; bit-exact. A vector IDCT (AVX2, and `Vector128` for ARM64 and WebAssembly), and

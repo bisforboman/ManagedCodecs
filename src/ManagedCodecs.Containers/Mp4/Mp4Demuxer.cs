@@ -29,9 +29,9 @@ namespace ManagedCodecs.Containers.Mp4;
 /// </para>
 /// <para>
 /// A fragment's samples start at its 'tfdt' decode time, or right after the track's previous sample without one.
-/// Negative composition offsets move every pts of their track forward by the largest of them, as FFmpeg does (which,
-/// for 'ctts', looks at all entries but the last two). Not yet supported: compressed 'cmov' headers, and further
-/// tracks.
+/// Negative composition offsets keep pts from coming before dts, as FFmpeg does: in 'ctts' every dts of the track moves
+/// back by the most negative offset (of all entries but the last two), in fragments every pts forward by it. Not yet
+/// supported: compressed 'cmov' headers, and further tracks.
 /// </para>
 /// </remarks>
 public sealed class Mp4Demuxer : IDemuxer
@@ -784,28 +784,25 @@ public sealed class Mp4Demuxer : IDemuxer
             var flags = new byte[total];
             ReadKeyframes(flags.AsSpan(0, count));
             var ptsOffsets = new int[total];
-            ReadCompositionOffsets(ptsOffsets.AsSpan(0, count));
+            int dtsShift = ReadCompositionOffsets(ptsOffsets.AsSpan(0, count));
 
-            // Negative composition offsets ('ctts' or 'trun' version 1): like FFmpeg, every pts moves
-            // forward by the largest of them, so that no pts comes before its dts.
-            int ptsShift = 0;
-            for (int i = 0; i < count; i++)
-            {
-                ptsShift = Math.Max(ptsShift, -ptsOffsets[i]);
-            }
-
+            // Negative composition offsets, as FFmpeg reads them, so that no pts comes before its dts: in 'ctts', every dts
+            // moves back by the largest of them (pts keep their times, which edit lists are in); in fragments ('trun'
+            // version 1), every pts moves forward by the largest of theirs (or of 'ctts').
+            int ptsShift = dtsShift;
             foreach (var fragmentSample in _fragmentSamples)
             {
                 ptsShift = Math.Max(ptsShift, -fragmentSample.CompositionOffset);
             }
 
-            for (int i = 0; i < count; i++)
-            {
-                ptsOffsets[i] = checked(ptsOffsets[i] + ptsShift);
-            }
-
             // Fragment samples continue from the last sample unless 'tfdt' says where they start.
             long next = count > 0 ? dts[count - 1] + durations[count - 1] : 0;
+            for (int i = 0; i < count; i++)
+            {
+                dts[i] -= dtsShift;
+                ptsOffsets[i] = checked(ptsOffsets[i] + dtsShift);
+            }
+
             for (int i = 0; i < _fragmentSamples.Count; i++)
             {
                 var (offset, size, decodeTime, duration, compositionOffset, isKeyframe) = _fragmentSamples[i];
@@ -1099,22 +1096,35 @@ public sealed class Mp4Demuxer : IDemuxer
         }
 
         /// <summary>pts - dts per sample from 'ctts'; zero where the table is absent or ends early.</summary>
-        private void ReadCompositionOffsets(Span<int> offsets)
+        /// <summary>
+        /// pts - dts per sample from 'ctts' (zero where the table is absent or ends early), and how far back the dts go:
+        /// the most negative offset, as FFmpeg takes it, from every entry but the last two.
+        /// </summary>
+        private int ReadCompositionOffsets(Span<int> offsets)
         {
             int count = offsets.Length;
             var ctts = Entries(_ctts, 8, "ctts");
+            int entries = ctts.Length / 8;
+            int dtsShift = 0;
             int sample = 0;
-            for (int e = 0; e < ctts.Length / 8 && sample < count; e++)
+            for (int e = 0; e < entries; e++)
             {
                 uint runLength = ReadUInt32(ctts, e * 8);
 
                 // Signed in version 1; FFmpeg reads version 0 offsets as signed too.
                 int offset = (int)ReadUInt32(ctts, (e * 8) + 4);
+                if (e + 2 < entries && offset < 0 && runLength > 0)
+                {
+                    dtsShift = Math.Max(dtsShift, offset == int.MinValue ? int.MaxValue : -offset);
+                }
+
                 for (uint n = 0; n < runLength && sample < count; n++)
                 {
                     offsets[sample++] = offset;
                 }
             }
+
+            return dtsShift;
         }
 
         private void ReadKeyframes(Span<byte> flags)
@@ -1240,8 +1250,9 @@ public sealed class Mp4Demuxer : IDemuxer
         /// <summary>
         /// AudioSampleEntry (14496-12 12.2.3): SampleEntry (8), version and reserved fields,
         /// channelcount at 16, samplesize, two reserved shorts, 16.16 samplerate at 24, then child
-        /// boxes after 28 bytes; QuickTime sound descriptions version 1 and 2 add 16 or 36 bytes.
-        /// The AudioSpecificConfig, when there is one, overrides rate and channel count.
+        /// boxes after 28 bytes; QuickTime sound descriptions version 1 and 2 add 16 or 36 bytes, and may put the 'esds'
+        /// in a 'wave' box (QuickTime's decompression parameters: 'frma', a copy of the entry's header, 'esds', a
+        /// terminator). The AudioSpecificConfig, when there is one, overrides rate and channel count.
         /// </summary>
         private void ParseAudioSampleEntry(uint format, ReadOnlySpan<byte> entry)
         {
@@ -1256,7 +1267,9 @@ public sealed class Mp4Demuxer : IDemuxer
                 _ => 28,
             };
 
-            if (format == Box.Mp4a && entry.Length > childrenStart && FindChild(entry[childrenStart..], Box.Esds, out var esds))
+            var children = entry.Length > childrenStart ? entry[childrenStart..] : default;
+            if (format == Box.Mp4a && (FindChild(children, Box.Esds, out var esds)
+                || (FindChild(children, Box.Wave, out var wave) && FindChild(wave, Box.Esds, out esds))))
             {
                 ParseEsds(esds);
                 if (Codec == CodecIds.Aac && TryReadAudioSpecificConfig(CodecPrivate.Span, out int rate, out int channels))
@@ -1502,6 +1515,7 @@ public sealed class Mp4Demuxer : IDemuxer
         public const uint AvcC = 0x61766343;
         public const uint Mp4v = 0x6D703476;
         public const uint Esds = 0x65736473;
+        public const uint Wave = 0x77617665;
         public const uint Jpeg = 0x6A706567;
         public const uint Mjpa = 0x6D6A7061;
         public const uint Udta = 0x75647461;

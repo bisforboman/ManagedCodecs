@@ -48,6 +48,13 @@ it rewrites those of the packets an edit goes back for. FFmpeg's reading, which 
 - An empty edit after a real one plays the media from its start for its duration, FFmpeg reading its media time, -1,
   as a time like any other (the spec has it as a gap).
 
+Negative composition offsets: in the `moov`'s own `ctts` (`h264-negative-ctts`, `-movflags negative_cts_offsets`
+unfragmented), FFmpeg moves every dts back by the most negative offset (of all entries but the last two), so the pts
+keep their times and an edit list's end is taken in them; in fragments (`fmp4-negative-cts`), every pts forward by it.
+Elephants Dream (an Apple-made MOV, offsets down to -600 of a second's 600) had its last 24 frames discarded as past
+its edit's end until the first was read that way. QuickTime files (`aac-quicktime`, FFmpeg's `-f mov`) put the AAC
+`esds` in a `wave` box of the sound description.
+
 ## H.264
 
 ### Profiles and tools

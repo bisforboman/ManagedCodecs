@@ -3,6 +3,7 @@
   <PropertyGroup>
     <RootNamespace>ManagedCodecs.Mjpeg</RootNamespace>
     <PackageId>ManagedCodecs.Mjpeg</PackageId>
+    <Description>Motion JPEG decoder (baseline and extended Huffman JPEG, interlaced AVI1), bit-exact with FFmpeg, in pure managed C# with SIMD.</Description>
     <IsAotCompatible>true</IsAotCompatible>
   </PropertyGroup>
 

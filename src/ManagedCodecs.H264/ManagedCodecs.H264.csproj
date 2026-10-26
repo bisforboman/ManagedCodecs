@@ -3,6 +3,7 @@
   <PropertyGroup>
     <RootNamespace>ManagedCodecs.H264</RootNamespace>
     <PackageId>ManagedCodecs.H264</PackageId>
+    <Description>H.264 decoder (Constrained Baseline, Main, High, High 10, 4:2:2 and 4:4:4; CAVLC and CABAC, interlaced, 8 to 14 bits, lossless, frame threading), bit-exact with FFmpeg, in pure managed C#.</Description>
     <IsAotCompatible>true</IsAotCompatible>
     <DefineConstants>$(DefineConstants);MANAGEDCODECS_H264</DefineConstants>
   </PropertyGroup>

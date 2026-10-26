@@ -3,6 +3,7 @@
   <PropertyGroup>
     <RootNamespace>ManagedCodecs.Aac</RootNamespace>
     <PackageId>ManagedCodecs.Aac</PackageId>
+    <Description>AAC decoder (AAC LC mono to 7.1, HE-AAC with SBR and parametric stereo), checked against FFmpeg, in pure managed C#.</Description>
     <IsAotCompatible>true</IsAotCompatible>
     <DefineConstants>$(DefineConstants);MANAGEDCODECS_AAC</DefineConstants>
   </PropertyGroup>

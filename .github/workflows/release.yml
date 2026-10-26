@@ -1,0 +1,143 @@
+name: Release
+
+# Merging a release pull request releases: on every push to main, if CHANGELOG.md's newest version heading
+# ("## X.Y.Z – date"; "## Unreleased" is none) isn't tagged yet, the tests run, every package is packed at that version,
+# given build provenance, published to nuget.org, and tagged vX.Y.Z with a GitHub release whose notes are the
+# version's section. Pushing a v* tag by hand releases that version. Publishing uses nuget.org's trusted publishing
+# (OIDC: no stored API key), set up once by the owner (the repository variable NUGET_USER, and a trusted publishing
+# policy on nuget.org for this workflow); prereleases (a '-' in the version) use the 'prerelease' environment, others
+# 'release', which can be set to wait for approval.
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+
+# One release at a time, never cancelled half way.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+# The default token for every job: read the repository, nothing else (the release job says what more it needs).
+permissions:
+  contents: read
+
+jobs:
+  # The version, and whether it still needs releasing (most pushes to main: no, and nothing else runs).
+  version:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      due: ${{ steps.version.outputs.due }}
+      environment: ${{ steps.version.outputs.environment }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - id: version
+        run: |
+          v=$(grep -m1 -oE '^## [0-9]+\.[0-9]+\.[0-9]+[^ ]*' CHANGELOG.md | cut -c4- || true)
+          due=false
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            v="${GITHUB_REF_NAME#v}"; due=true
+          elif [ -n "$v" ] && ! git ls-remote --exit-code --tags origin "refs/tags/v$v" > /dev/null; then
+            due=true
+          fi
+          env=release; [[ "$v" == *-* ]] && env=prerelease
+          if [ "$due" = true ]; then echo "Releasing $v" >> "$GITHUB_STEP_SUMMARY"; else echo "Nothing to release (newest: ${v:-none})" >> "$GITHUB_STEP_SUMMARY"; fi
+          { echo "version=$v"; echo "due=$due"; echo "environment=$env"; } >> "$GITHUB_OUTPUT"
+
+  # The tests, against FFmpeg's references, in a job of their own with read-only permissions: FFmpeg and ImageMagick
+  # (Ubuntu's) run here, not where the publishing token is.
+  test:
+    needs: version
+    if: needs.version.outputs.due == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
+        with:
+          dotnet-version: 10.0.x
+
+      - uses: ./.github/actions/samples
+
+      - name: Test
+        run: dotnet test ManagedCodecs.slnx -c Release
+
+  # Packs, attests and publishes: only this repository's code runs here.
+  release:
+    needs: [version, test]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: ${{ needs.version.outputs.environment }}
+    permissions:
+      contents: write   # the tag and the GitHub release
+      id-token: write   # the OIDC token NuGet/login exchanges for a temporary API key
+      attestations: write   # build provenance for the packages
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
+        with:
+          dotnet-version: 10.0.x
+
+      # Every package at one version; the meta-package (src/ManagedCodecs) depends on the others at it.
+      - name: Pack
+        run: |
+          for p in ManagedCodecs.Core ManagedCodecs.Containers ManagedCodecs.Mjpeg ManagedCodecs.H264 ManagedCodecs.Aac ManagedCodecs; do
+            dotnet pack "src/$p" -c Release -p:Version="$VERSION" --output artifacts
+          done
+          ls artifacts
+
+      # Signed provenance (built by this workflow from this commit): gh attestation verify <file> --repo bisforboman/ManagedCodecs
+      - name: Attest the packages
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: 'artifacts/*.nupkg, artifacts/*.snupkg'
+
+      # Right before pushing: the temporary key is valid for an hour.
+      - name: NuGet login
+        uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1
+        id: login
+        with:
+          user: ${{ vars.NUGET_USER }}
+
+      # One file at a time, each with a few tries, Core first and the meta-package last (each package's dependencies
+      # before it), then the symbols: an error from nuget.org on one doesn't stop the others, and a re-run skips what
+      # is already there.
+      - name: Push to nuget.org
+        env:
+          NUGET_API_KEY: ${{ steps.login.outputs.NUGET_API_KEY }}
+        run: |
+          failed=0
+          for p in ManagedCodecs.Core ManagedCodecs.Containers ManagedCodecs.Mjpeg ManagedCodecs.H264 ManagedCodecs.Aac ManagedCodecs; do
+            for f in "artifacts/$p.$VERSION.nupkg" "artifacts/$p.$VERSION.snupkg"; do
+              [ -f "$f" ] || continue
+              case "$f" in *.nupkg) only=--no-symbols ;; *) only= ;; esac
+              for try in 1 2 3; do
+                if dotnet nuget push "$f" $only --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate; then
+                  break
+                elif [ "$try" -lt 3 ]; then
+                  sleep 60
+                else
+                  echo "::error::Pushing $f failed"
+                  failed=1
+                fi
+              done
+            done
+          done
+          exit $failed
+
+      # The tag on this commit (unless it was pushed by hand), the version's CHANGELOG section ("## X.Y.Z – date" up to
+      # the next "## ") as the notes, else GitHub's list of pull requests, and the packages.
+      - name: GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          awk -v v="## $VERSION " 'index($0, v) == 1 { on = 1; next } on && /^## / { exit } on' CHANGELOG.md > notes.md
+          if [ -s notes.md ]; then notes=(--notes-file notes.md); else notes=(--generate-notes); fi
+          prerelease=""; [[ "$VERSION" == *-* ]] && prerelease="--prerelease"
+          gh release create "v$VERSION" artifacts/*.nupkg --target "$GITHUB_SHA" --title "ManagedCodecs $VERSION" "${notes[@]}" $prerelease

@@ -17,6 +17,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+import zipfile
 
 import numpy as np
 
@@ -25,7 +26,8 @@ CACHE = os.path.join(ROOT, "samples", "realworld")
 MCDEC = os.path.join(ROOT, "tools", "ManagedCodecs.Cli", "bin", "Release", "net10.0", "mcdec.dll")
 TOLERANCE = 2.0 ** -17
 
-# name: (url, sha256, what it is). Add a line (download once, `sha256sum` it) and a matrix entry in realworld.yml.
+# name: (url, sha256, what it is). Add a line (download once, `sha256sum` it) and a matrix entry in realworld.yml. A
+# film served in a .zip is extracted (the archive's one file); its SHA-256 is the film's, not the archive's.
 FILMS = {
     "sintel_trailer-1080p.mp4": (
         "https://download.blender.org/durian/trailer/sintel_trailer-1080p.mp4",
@@ -39,6 +41,18 @@ FILMS = {
         "https://download.blender.org/demo/movies/ToS/tears_of_steel_720p.mov",
         "efa9062d9cdb7a338e40ad530dfdf234806743f29ae6a1a136b97ece4e588e8f",
         "Tears of Steel, the whole film: 1280x534 H.264 Main in a MOV, 12 minutes, live action (its MP3 audio is not decoded)"),
+    "caminandes_gran_dillama.mp4": (
+        "https://download.blender.org/demo/movies/caminandes_gran_dillama.mp4.zip",
+        "468e6743c674689a728726bbe4bb4b2a65bd8702a89f021af26a8bb4d450eebd",
+        "Caminandes 2: 1920x1080 H.264 High from MainConcept, 2.5 minutes, CABAC, B pictures, explicit weights in P slices, four PPS, stereo AAC LC at 48 kHz"),
+    "BigBuckBunny_640x360.m4v": (
+        "https://download.blender.org/peach/bigbuckbunny_movies/BigBuckBunny_640x360.m4v.zip",
+        "738e2f999860553d056dd79c952f58f63cbb73892a57c72342ce9e5330d9d2d7",
+        "Big Buck Bunny, the whole film: 640x360 H.264 Constrained Baseline from Apple, 10 minutes, two slices a picture, deblocking off, 359 rows in the sample entry, stereo AAC LC at 44.1 kHz first"),
+    "BigBuckBunny_320x180.mp4": (
+        "https://download.blender.org/peach/bigbuckbunny_movies/BigBuckBunny_320x180.mp4.zip",
+        "f78f39603e6774907f2faafabf26a667f4a6fc31769ec304a8a8f7c62d280508",
+        "Big Buck Bunny, the whole film: 320x180 H.264 Constrained Baseline (Lavf52 era), 10 minutes, deblocking off, stereo AAC LC at 48 kHz"),
 }
 
 
@@ -67,9 +81,17 @@ def fetch(name):
                 with urllib.request.urlopen(request, timeout=60) as response, open(path + ".part", "wb") as out:
                     while chunk := response.read(1 << 20):
                         out.write(chunk)
-                os.replace(path + ".part", path)
+                if url.endswith(".zip"):
+                    with zipfile.ZipFile(path + ".part") as archive, archive.open(archive.namelist()[0]) as film, \
+                            open(path + ".film", "wb") as out:
+                        while chunk := film.read(1 << 20):
+                            out.write(chunk)
+                    os.replace(path + ".film", path)
+                    os.remove(path + ".part")
+                else:
+                    os.replace(path + ".part", path)
                 break
-            except (urllib.error.URLError, OSError) as e:
+            except (urllib.error.URLError, OSError, zipfile.BadZipFile) as e:
                 if attempt == 4:
                     fail(f"{name}: download failed: {e}")
                 time.sleep(10 * attempt)

@@ -45,8 +45,8 @@ public class Mp4DemuxerTests
     {
         // Raw dts 0, 3000, 6000 with offsets -1000, 3000, -2000, one sample each, and no edit list: as FFmpeg (ffprobe
         // shows the same times), every dts moves back by 1000, the most negative offset of every entry but the last two,
-        // and the pts keep their times. The last dts, 5000, comes after its pts, which FFmpeg's generic demuxing then
-        // reports as invalid and replaces by the pts; that is not the rule tested here.
+        // and the pts keep their times. The last dts, 5000, comes after its pts: FFmpeg keeps such a dts for H.264
+        // (h264-negative-ctts-last) but gives this MJPEG track the pts as its dts, which is not matched (conformance.md).
         var ctts = FullBox("ctts", 1, U32(3), U32(1), U32(unchecked((uint)-1000)), U32(1), U32(3000), U32(1), U32(unchecked((uint)-2000)));
         using var demuxer = new Mp4Demuxer(new MemoryStream(TinyMp4(ctts, editList: false)));
 

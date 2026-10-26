@@ -66,8 +66,10 @@ it rewrites those of the packets an edit goes back for. FFmpeg's reading, which 
 Negative composition offsets: in the `moov`'s own `ctts` (`h264-negative-ctts`, `-movflags negative_cts_offsets`
 unfragmented), FFmpeg moves every dts back by the most negative offset (of all entries but the last two), so the pts
 keep their times and an edit list's end is taken in them; in fragments (`fmp4-negative-cts`), every pts forward by it.
-Not matched: an offset in the last two entries more negative than that puts a pts before its dts, which FFmpeg's
-generic demuxing then replaces by the pts (Mp4DemuxerTests checks the shift on such a table, not that dts).
+An offset in the last two entries more negative than that puts a pts before its dts, which FFmpeg keeps for H.264
+(`h264-negative-ctts-last`, packets only: FFmpeg's command line drops that frame as its pts goes back). Not matched:
+for a codec without reordering (MJPEG, audio), which no encoder gives a 'ctts', FFmpeg's generic demuxing makes the dts
+the pts (Mp4DemuxerTests checks the shift on such a table, not that dts).
 Elephants Dream (an Apple-made MOV, offsets down to -600 of a second's 600) had its last 24 frames discarded as past
 its edit's end until the first was read that way. QuickTime files (`aac-quicktime`, FFmpeg's `-f mov`) put the AAC
 `esds` in a `wave` box of the sound description.

@@ -101,9 +101,10 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
   (`ln -sf samples/*` once replaced the tracked `samples/README.md` with a link, and linked directories into themselves).
   A worktree made before a sample was generated has no link to it: a new theory row then reads "no data".
 - The cloud sandbox reaches download.blender.org but not archive.org or test-videos.co.uk (CI reaches all three).
-- FFmpeg's generic demuxing replaces a dts that comes after its pts by the pts ("Invalid timestamps" at `-v debug`);
-  Mp4Demuxer doesn't, so a 'ctts' whose last two entries are more negative than the shift (docs/conformance.md, MP4)
-  gives those samples another dts than FFmpeg's.
+- A dts after its pts (a 'ctts' whose last two entries are more negative than the shift; docs/conformance.md, MP4):
+  FFmpeg reports "Invalid timestamps" (`-v debug`) and keeps it for H.264, but fills a dts in from the pts for a codec
+  without reordering (MJPEG, audio), which Mp4Demuxer doesn't. Its command line then drops the frame whose pts goes
+  back, so such a sample has packet references only.
 - Temporary instrumentation (coverage counters, traces): commit the real work first. `git checkout <file>` to
   remove the instrumentation otherwise also throws away the file's other uncommitted changes, and so does
   reversing a `git diff` taken against HEAD.

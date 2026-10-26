@@ -9,8 +9,10 @@ DELAYED_THREADS = "DisplayName~MatchesFfmpegWithDelayedThreads"
 
 MUTATIONS = [
     # ---- Frame threading: a picture reads only what an earlier one has reported final (CLAUDE.md, Frame threading).
-    # Not listed: the co-located motion wait (PictureDecoder.Direct.cs), which the motion compensation waits before it
-    # cover in practice, so breaking it alone fails no test.
+    # Not listed, because breaking them alone fails no test: the co-located motion wait (PictureDecoder.Direct.cs), which
+    # the motion compensation waits before it cover in practice, and ListsDamaged's wait for each picture in the lists
+    # (H264Decoder.cs), which the motion compensation waits cover too: a picture reads its references' bottom rows,
+    # final only once the reference is done and its Damaged set.
 
     # A second field starts after its first field's Begin, which resets both fields' state.
     dict(file="src/ManagedCodecs.H264/H264Decoder.cs",
@@ -37,10 +39,6 @@ MUTATIONS = [
     # Concealment of a missing picture copies the latest reference once it is done.
     dict(file="src/ManagedCodecs.H264/H264Decoder.cs",
          find="latest.WaitForRow(int.MaxValue);", replace="",
-         tests="FullyQualifiedName~H264ConcealmentTests", repeat=3),
-    # A picture is damaged if a picture in its lists is, known once each is done.
-    dict(file="src/ManagedCodecs.H264/H264Decoder.cs",
-         find="picture.WaitForRow(int.MaxValue);", replace="",
          tests="FullyQualifiedName~H264ConcealmentTests", repeat=3),
 
     # ---- H.264

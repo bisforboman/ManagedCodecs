@@ -5,7 +5,7 @@ applies (the code changed: update its find text), no longer compiles, or its fil
 
     tools/mutation/mutate.py [--shard I --shards N] [--only TEXT] [--repeat N]
 
---shard/--shards: only every N-th mutation from the I-th (0-based), for CI's parallel jobs. --only: the mutations
+--shard/--shards: only every N-th mutation from the I-th (0-based), to split the list across jobs. --only: the mutations
 whose file or find text contains TEXT. --repeat: every mutation's test runs up to N times (default: the entry's
 own repeat, else 1) until one fails, for guards whose breaking shows only now and then (the threading waits, under
 the tests' random delays). Each mutation is undone with 'git checkout', so the mutated files must have no uncommitted
@@ -18,6 +18,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+sys.dont_write_bytecode = True  # no __pycache__ next to the list
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from mutations import MUTATIONS  # noqa: E402
 

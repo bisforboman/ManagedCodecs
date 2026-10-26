@@ -2,7 +2,8 @@ name: Mutation checks
 
 # Breaks each guard listed in tools/mutation/mutations.py (the frame threading waits, and code that reproduces what
 # FFmpeg does) and checks that a test fails: a guard no test covers shows as SURVIVED. On pull requests that change
-# code, and on demand.
+# more than docs, and on demand. (Should it become a required check, docs-only pull requests would wait for it
+# forever: replace paths-ignore by a job that skips the steps instead, as ShotDetector's mutation.yml does.)
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]   # drafts run nothing until marked ready
@@ -18,16 +19,11 @@ permissions:
   contents: read
 
 jobs:
-  # Every third mutation in each job: a build and a test run each, the threading ones up to three runs.
-  mutate:
+  # A build and a test run a mutation, the threading ones up to three runs: about 6 minutes for the list in all.
+  mutation:
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
-    name: mutate (${{ matrix.shard }}/3)
     runs-on: ubuntu-24.04
     timeout-minutes: 60
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [0, 1, 2]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
@@ -38,18 +34,4 @@ jobs:
       - uses: ./.github/actions/samples
 
       - name: Mutate and test
-        run: tools/mutation/mutate.py --shard ${{ matrix.shard }} --shards 3
-
-  # One check to require (branch protection can name "mutation"): every shard passed.
-  mutation:
-    needs: mutate
-    if: always()
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    steps:
-      - name: Every shard passed
-        env:
-          RESULT: ${{ needs.mutate.result }}
-        run: |
-          echo "mutate: $RESULT"
-          [ "$RESULT" = success ] || [ "$RESULT" = skipped ]
+        run: tools/mutation/mutate.py

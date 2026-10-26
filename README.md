@@ -90,7 +90,7 @@ and code that reproduces FFmpeg's reading where it differs from the spec), and n
 
 ## Getting started
 
-The packages (once the first preview is out, [CHANGELOG.md](CHANGELOG.md)): `ManagedCodecs` for everything, or one of
+The packages, on nuget.org ([CHANGELOG.md](CHANGELOG.md) lists the versions): `ManagedCodecs` for everything, or one of
 `ManagedCodecs.Containers`, `.Mjpeg`, `.H264` and `.Aac` (each with `ManagedCodecs.Core`). They share internals, so
 keep them at one version. Until the API is frozen they are previews, `0.1.0-preview.N`, and any of them can change the
 public API.
@@ -119,6 +119,11 @@ hold frames back while later packets can still be shown before them (H.264 frame
 zero or more frames and `Flush` returns the rest:
 
 ```csharp
+using ManagedCodecs;            // IVideoDecoder, CodecIds, packets and frames
+using ManagedCodecs.Containers; // Demuxer (Mp4Demuxer and the others are in .Mp4, .Avi, .Adts)
+using ManagedCodecs.H264;
+using ManagedCodecs.Mjpeg;
+
 using var demuxer = Demuxer.Open("video.mp4");
 var video = demuxer.Video!;
 IVideoDecoder decoder = video.Codec == CodecIds.H264 ? new H264Decoder(video) : new MjpegDecoder(video);

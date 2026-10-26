@@ -9,6 +9,8 @@ share internals, so use one version of them all.
 
 ## Unreleased
 
+## 0.1.0-preview.2 – 2026-10-26
+
 The public API before it freezes ([docs/decisions/2026-10-26-api-before-0.1.0.md](docs/decisions/2026-10-26-api-before-0.1.0.md)).
 
 ### Breaking changes

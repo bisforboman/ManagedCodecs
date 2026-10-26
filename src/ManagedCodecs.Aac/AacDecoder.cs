@@ -59,6 +59,9 @@ public sealed class AacDecoder : IAudioDecoder
     private ParallelOptions? _parallel;
     private readonly int _threads = 1;
 
+    // The packets' time base, for frames' timestamps: the stream's, or without one the output's sample rate.
+    private readonly Rational? _timeBase;
+
     // Samples still to drop at the start of the next packets, from a Packet.SkipSamples larger than its packet's output.
     private int _pendingSkip;
 
@@ -81,6 +84,7 @@ public sealed class AacDecoder : IAudioDecoder
     public AacDecoder(AudioStreamInfo stream)
         : this(stream.CodecPrivate.Span)
     {
+        _timeBase = stream.TimeBase;
     }
 
     /// <summary>The output's sample rate: with SBR twice the core's (or the rate the config gives it), known for SBR signalled only by its data once the first access unit is decoded.</summary>
@@ -127,17 +131,37 @@ public sealed class AacDecoder : IAudioDecoder
     {
         _faacSignature = false;
         var frame = Decode(packet.Data.Span);
+        int dropped;
         if (packet.Discard)
         {
-            return frame.DropStart(frame.SampleCount);
+            dropped = frame.SampleCount;
+        }
+        else
+        {
+            // An access unit that names FAAC as its encoder starts FAAC's delay, as FFmpeg reads it, unless the
+            // container says what to skip (an edit list's priming).
+            int skip = _pendingSkip + (packet.SkipSamples > 0 ? packet.SkipSamples : _faacSignature ? FaacDelay : 0);
+            dropped = Math.Min(skip, frame.SampleCount);
+            _pendingSkip = skip - dropped;
         }
 
-        // An access unit that names FAAC as its encoder starts FAAC's delay, as FFmpeg reads it, unless the container
-        // says what to skip (an edit list's priming).
-        int skip = _pendingSkip + (packet.SkipSamples > 0 ? packet.SkipSamples : _faacSignature ? FaacDelay : 0);
-        int dropped = Math.Min(skip, frame.SampleCount);
-        _pendingSkip = skip - dropped;
-        return frame.DropStart(dropped);
+        var output = frame.DropStart(dropped);
+        output.Pts = packet.Pts + SamplesToTime(dropped);
+        return output;
+    }
+
+    // Output samples as a duration in the packets' time base, rounded to nearest (halves away from zero).
+    private long SamplesToTime(int samples)
+    {
+        if (samples == 0)
+        {
+            return 0;
+        }
+
+        var timeBase = _timeBase ?? new Rational(1, SampleRate);
+        long numerator = (long)samples * timeBase.Denominator;
+        long denominator = (long)SampleRate * timeBase.Numerator;
+        return (numerator + (denominator / 2)) / denominator;
     }
 
     /// <summary>

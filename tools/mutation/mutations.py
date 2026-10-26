@@ -66,6 +66,13 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.Aac/AacDecoder.cs",
          find="private const int FaacDelay = 1024;", replace="private const int FaacDelay = 0;",
          tests="FullyQualifiedName~AacConformanceTests"),
+    # A frame's pts moves by the samples dropped from its start, counted at the output rate (with SBR twice the core's).
+    dict(file="src/ManagedCodecs.Aac/AacDecoder.cs",
+         find="long denominator = (long)SampleRate * timeBase.Numerator;", replace="long denominator = (long)_config.SampleRate * timeBase.Numerator;",
+         tests="FullyQualifiedName~FramePtsMatchFfmpeg"),
+    dict(file="src/ManagedCodecs.Aac/AacDecoder.cs",
+         find="output.Pts = packet.Pts + SamplesToTime(dropped);", replace="output.Pts = packet.Pts;",
+         tests="FullyQualifiedName~FramePtsMatchFfmpeg"),
     # Channel configuration 7 as FFmpeg's 7.1, not the spec's outside front pair.
     dict(file="src/ManagedCodecs.Aac/AacDecoder.cs",
          find="7 => [1, 2, 0, 7, 5, 6, 3, 4],", replace="7 => [1, 2, 0, 7, 3, 4, 5, 6],",

@@ -20,7 +20,7 @@ on several threads if asked, and every decoder has an async API.
 | `tools/make-samples.sh` | Generates the test samples and FFmpeg's references |
 | `tools/compare.sh` | Times mcdec and FFmpeg on the same file |
 | `tools/realworld.py` | Decodes real public films with mcdec and FFmpeg and compares them (nightly, `realworld.yml`) |
-| `tools/mutation/mutate.py` | Breaks each guard in `tools/mutation/mutations.py` and checks that a test fails (on pull requests, `mutation.yml`) |
+| `tools/mutation/mutate.py` | Breaks each guard in `tools/mutation/mutations.py` and checks that a test fails (every pull request, `mutation.yml`) |
 | `tools/upstream-issue.sh` | Files `upstream.yml`'s weekly issues: a new StyleBro, or a new release of an encoder the committed samples come from |
 | `tools/ManagedCodecs.Fuzz`, `tools/fuzz.sh` | Fuzzing targets for SharpFuzz and AFL++ (see Malformed input) |
 | `tools/ManagedCodecs.Wasm`, `tools/wasm-check.sh` | The decoders on WebAssembly, checked against the native build (see WebAssembly) |
@@ -34,7 +34,7 @@ writes a feature, unit tests and hand-built or rewritten streams cover it. [docs
 says feature by feature which encoder made the samples (libx264, OpenH264, JM) and what is not checked. Every night
 the [real-world check](https://github.com/bisforboman/ManagedCodecs/actions/workflows/realworld.yml)
 (`tools/realworld.py`) decodes three of Blender's open movies, real H.264 and AAC from real encoders, against FFmpeg:
-every frame identical, the audio within 2^-17. On pull requests that change code the
+every frame identical, the audio within 2^-17. On every pull request (docs-only ones skip its steps) the
 [mutation check](https://github.com/bisforboman/ManagedCodecs/actions/workflows/mutation.yml)
 (`tools/mutation/mutate.py`) breaks, one at a time, the guards a passing test could miss (the frame threading waits,
 and code that reproduces FFmpeg's reading where it differs from the spec), and needs a test to fail for each.

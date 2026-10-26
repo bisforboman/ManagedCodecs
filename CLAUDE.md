@@ -202,7 +202,7 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
   are final one row after they are deblocked (the next row's top edge filters
   their bottom). A race passes the threaded conformance tests by luck unless the random delays (`RowDelay`: before
   each picture and after each row; `MatchesFfmpegWithDelayedThreads`) make pictures overtake: check a new wait by
-  breaking it and seeing that test fail (the co-located motion wait is the exception, covered in practice by the motion
+  breaking it and seeing that test fail, and list it in `tools/mutation/mutations.py` (the co-located motion wait is the exception, covered in practice by the motion
   compensation waits before it). A frame's second field runs on a decoder of its own alongside its first: it waits for
   the first's `Begin` (which resets both fields' slots), and its frame is copied out only once the first is done.
 - Measuring frame threading: perf samples only threads that run, so blocked time is invisible to it; time the waits

@@ -20,9 +20,11 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.H264/PictureDecoder.Deblock.cs",
          find="Math.Max(0, _deblockedRows - 1)", replace="_deblockedRows",
          tests=DELAYED_THREADS, repeat=3),
-    # Motion compensation waits for the lowest reference row it reads, the 6-tap filter's three rows below included.
+    # Motion compensation waits for the lowest reference row it reads. (Its + 3, for the 6-tap filter's rows below, is
+    # not mutated: a row is reported final only once the macroblock row below it is deblocked, by which time the three
+    # rows below are final too, so dropping it changes no frame.)
     dict(file="src/ManagedCodecs.H264/PictureDecoder.Inter.cs",
-         find="reference.WaitForRow(lumaY + (mvY >> 2) + h + 3);", replace="reference.WaitForRow(lumaY + (mvY >> 2) + h - 1);",
+         find="reference.WaitForRow(lumaY + (mvY >> 2) + h + 3);", replace="reference.WaitForRow(lumaY + (mvY >> 2));",
          tests=DELAYED_THREADS, repeat=3),
     # A field reading a frame coded as a frame: its row y is the frame's row 2y + parity.
     dict(file="src/ManagedCodecs.H264/Picture.cs",
@@ -72,8 +74,8 @@ MUTATIONS = [
          tests="FullyQualifiedName~AacConformanceTests"),
 
     # ---- MJPEG
-    # FFmpeg takes an image of less than 3/4 of the stream's height as a field.
+    # FFmpeg takes an image of less than 3/4 of the stream's height (integer division) as a field.
     dict(file="src/ManagedCodecs.Mjpeg/MjpegDecoder.cs",
-         find="height < _streamHeight * 3 / 4", replace="height <= _streamHeight / 2",
+         find="height < _streamHeight * 3 / 4", replace="height <= _streamHeight * 3 / 4",
          tests="FullyQualifiedName~Mjpeg"),
 ]

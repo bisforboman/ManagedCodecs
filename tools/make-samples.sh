@@ -104,6 +104,20 @@ ff "${FRAG[@]}" -movflags frag_keyframe+empty_moov+negative_cts_offsets samples/
 # The same offsets in the moov's own 'ctts' (version 1, -512 for the B frames), unfragmented: there FFmpeg moves every dts
 # back by the most negative one, where fragments move every pts forward (and its edit list is in the pts' times).
 ff -f lavfi -i "testsrc2=size=320x240:rate=25" -t 2 -c:v libx264 -bf 2 -movflags negative_cts_offsets samples/h264-negative-ctts.mp4
+# Its last entry made more negative than the shift (which leaves the last two entries out): that sample's pts comes
+# before its dts, which FFmpeg reports as invalid and keeps for H.264 (it fills a dts in from the pts only for codecs
+# without reordering).
+cp samples/h264-negative-ctts.mp4 samples/h264-negative-ctts-last.mp4
+python3 -I - samples/h264-negative-ctts-last.mp4 <<'PY'
+import struct, sys
+data = bytearray(open(sys.argv[1], 'rb').read())
+at = data.find(b'ctts')
+assert at > 0 and data[at + 4] == 1  # version 1: signed offsets
+entries = struct.unpack_from('>I', data, at + 8)[0]
+lowest = min(struct.unpack_from('>i', data, at + 16 + 8 * e)[0] for e in range(entries))
+struct.pack_into('>i', data, at + 16 + 8 * (entries - 1), lowest - 2048)
+open(sys.argv[1], 'wb').write(data)
+PY
 
 # ---- H.264 Constrained Baseline ----
 # Intra only without the deblocking filter (at several QPs), intra with the filter and with filter offsets, P frames
@@ -514,6 +528,9 @@ for f in samples/*.avi samples/*.mp4; do ff -idct simple -i "$f" -f framemd5 "${
 # Monochrome H.264 (by the name): FFmpeg decodes it to 4:2:0 with flat chroma, so the references take its Y plane
 # alone, as it is (extractplanes; -pix_fmt gray would rescale a limited-range stream's samples to full range).
 for f in samples/*gray*.mp4; do ff -i "$f" -vf extractplanes=y -f framemd5 "${f%.*}.framemd5"; done
+# h264-negative-ctts-last is for the demuxer alone: FFmpeg drops the frame whose pts goes back, which the decoder,
+# outputting by picture order, keeps.
+rm samples/h264-negative-ctts-last.framemd5
 for f in samples/*.mp4; do
   ff -copyts -i "$f" -c copy -f framemd5 "${f%.mp4}.packets.framemd5"
   ffprobe -v error -show_packets -show_data_hash MD5 -show_entries packet=stream_index,pts,dts,duration,size,flags,data_hash \

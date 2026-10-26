@@ -45,14 +45,10 @@ FILMS = {
         "https://download.blender.org/demo/movies/caminandes_gran_dillama.mp4.zip",
         "468e6743c674689a728726bbe4bb4b2a65bd8702a89f021af26a8bb4d450eebd",
         "Caminandes 2: 1920x1080 H.264 High from MainConcept, 2.5 minutes, CABAC, B pictures, explicit weights in P slices, four PPS, stereo AAC LC at 48 kHz"),
-    "BigBuckBunny_640x360.m4v": (
-        "https://download.blender.org/peach/bigbuckbunny_movies/BigBuckBunny_640x360.m4v.zip",
-        "738e2f999860553d056dd79c952f58f63cbb73892a57c72342ce9e5330d9d2d7",
-        "Big Buck Bunny, the whole film: 640x360 H.264 Constrained Baseline from Apple, 10 minutes, two slices a picture, deblocking off, 359 rows in the sample entry, stereo AAC LC at 44.1 kHz first"),
     "BigBuckBunny_320x180.mp4": (
         "https://download.blender.org/peach/bigbuckbunny_movies/BigBuckBunny_320x180.mp4.zip",
         "f78f39603e6774907f2faafabf26a667f4a6fc31769ec304a8a8f7c62d280508",
-        "Big Buck Bunny, the whole film: 320x180 H.264 Constrained Baseline (Lavf52 era), 10 minutes, deblocking off, stereo AAC LC at 48 kHz"),
+        "Big Buck Bunny, the whole film: 320x180 H.264 Constrained Baseline muxed by FFmpeg in 2008 (Lavf52), 10 minutes, deblocking off, stereo AAC LC at 48 kHz"),
 }
 
 

@@ -23,8 +23,13 @@ and the audio as floats (`-f f32le`, within 2^-17). The films, pinned by SHA-256
   and the AAC configuration in a QuickTime `wave` box (see MP4 demuxing).
 - Tears of Steel, the whole film: 1280x534 H.264 Main in a MOV, 12 minutes of live action; its MP3 audio is not
   decoded, so only the video is compared.
+- Caminandes 2: 1920x1080 H.264 High from MainConcept, 2.5 minutes, CABAC with B pictures and explicit weights in P
+  slices, four PPS, AAC LC at 48 kHz.
+- Big Buck Bunny, the whole film at 320x180: H.264 Constrained Baseline muxed by FFmpeg in 2008 (Lavf52), 10
+  minutes, deblocking off, AAC LC at 48 kHz.
 
-The first run found the three differences those sections describe; the H.264 video itself matched on all three.
+The first run found the three differences those sections describe; the H.264 video itself matched on all three. The
+two films added later matched at once.
 
 ## SIMD and ARM64
 

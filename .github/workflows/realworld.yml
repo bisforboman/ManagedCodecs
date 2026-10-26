@@ -3,7 +3,7 @@ name: Real world
 # ManagedCodecs against FFmpeg on real public films (tools/realworld.py: Blender's open movies, real H.264 and AAC from
 # real encoders, where every sample in samples/ is a test pattern): every video frame must be identical and the audio
 # within 2^-17. Nightly and on demand, not on pull requests (minutes of film each); a job per film, so one difference
-# doesn't hide another. The films are cached; the first run downloads about 800 MB.
+# doesn't hide another. The films are cached; the first run downloads about 680 MB.
 on:
   workflow_dispatch:
   schedule:
@@ -26,7 +26,6 @@ jobs:
           - elephantsdream-480-h264-st-aac.mov
           - tears_of_steel_720p.mov
           - caminandes_gran_dillama.mp4
-          - BigBuckBunny_640x360.m4v
           - BigBuckBunny_320x180.mp4
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7

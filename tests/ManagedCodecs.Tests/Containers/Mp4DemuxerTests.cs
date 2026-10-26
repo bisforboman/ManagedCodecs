@@ -41,6 +41,22 @@ public class Mp4DemuxerTests
     }
 
     [Fact]
+    public void NegativeCompositionOffsets_MoveTheDtsBackByTheLargestButTheLastTwoEntries()
+    {
+        // Raw dts 0, 3000, 6000 with offsets -1000, 3000, -2000, one sample each, and no edit list: as FFmpeg (ffprobe
+        // shows the same times), every dts moves back by 1000, the most negative offset of every entry but the last two,
+        // and the pts keep their times. The last dts, 5000, comes after its pts, which FFmpeg's generic demuxing then
+        // reports as invalid and replaces by the pts; that is not the rule tested here.
+        var ctts = FullBox("ctts", 1, U32(3), U32(1), U32(unchecked((uint)-1000)), U32(1), U32(3000), U32(1), U32(unchecked((uint)-2000)));
+        using var demuxer = new Mp4Demuxer(new MemoryStream(TinyMp4(ctts, editList: false)));
+
+        var packets = demuxer.ReadPackets().Where(p => p.StreamIndex == demuxer.Video!.StreamIndex).ToList();
+
+        Assert.Equal([-1000L, 2000], packets.Take(2).Select(p => p.Dts));
+        Assert.Equal([-1000L, 6000, 4000], packets.Select(p => p.Pts));
+    }
+
+    [Fact]
     public void ReadingTwiceGivesTheSamePackets()
     {
         using var demuxer = new Mp4Demuxer(new MemoryStream(TinyMp4()));
@@ -190,7 +206,7 @@ public class Mp4DemuxerTests
         Assert.Throws<InvalidDataException>(() => new Mp4Demuxer(new MemoryStream(Box("ftyp", Ascii("isom"), U32(0)))));
     }
 
-    private static byte[] TinyMp4()
+    private static byte[] TinyMp4(byte[]? ctts = null, bool editList = true)
     {
         var ftyp = Box("ftyp", Ascii("isom"), U32(512), Ascii("isom"));
 
@@ -204,14 +220,14 @@ public class Mp4DemuxerTests
         var stbl = Box("stbl",
             SampleDescription(),
             FullBox("stts", 0, U32(1), U32(3), U32(3000)),
-            FullBox("ctts", 0, U32(2), U32(2), U32(3000), U32(1), U32(0)),
+            ctts ?? FullBox("ctts", 0, U32(2), U32(2), U32(3000), U32(1), U32(0)),
             FullBox("stsc", 0, U32(2), U32(1), U32(2), U32(1), U32(2), U32(1), U32(1)),
             FullBox("stz2", 0, [0, 0, 0, 4], U32(3), [0x32, 0x40]), // 24 reserved bits, 4-bit sizes 3, 2, 4
             FullBox("co64", 0, U32(2), U64(chunk1), U64(chunk2)),
             FullBox("stss", 0, U32(2), U32(1), U32(3)));
 
         var video = Box("trak",
-            Box("edts", FullBox("elst", 0, U32(2), U32(500), U32(uint.MaxValue), U32(0x0001_0000), U32(3000), U32(200), U32(0x0001_0000))),
+            editList ? Box("edts", FullBox("elst", 0, U32(2), U32(500), U32(uint.MaxValue), U32(0x0001_0000), U32(3000), U32(200), U32(0x0001_0000))) : [],
             Box("mdia",
                 MediaHeader(version: 1),
                 Handler("vide"),

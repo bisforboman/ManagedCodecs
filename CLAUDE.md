@@ -57,6 +57,11 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
   the rest with unit tests and say so in the docs.
   `tests/ManagedCodecs.Tests/H264/ParameterSetRewriter.cs` rewrites a sample's SPS and PPS for such tests.
   `tests/ManagedCodecs.Tests/H264/CabacEncoder.cs` (a CABAC encoder and bit writer) builds such H.264 streams.
+- **Mutation checks**: `tools/mutation/mutate.py` (CI: `mutation.yml`) breaks each guard in
+  `tools/mutation/mutations.py` and needs a test to fail. A new guard of that kind (a frame threading wait, code that
+  reproduces FFmpeg rather than the spec, a rule only some streams reach) gets an entry; one that survives means a
+  missing test, not a mutation to drop. `--only <text>` runs some; it undoes each with `git checkout`, so run it in a
+  worktree with the mutated files committed.
 - **Code style**: StyleBro (analyzers on build; rules in `.editorconfig`, chosen by `stylebro-migrate init` from this
   code's own conventions). The pre-commit hook formats the staged .cs files (`git config core.hooksPath .githooks`
   once per clone); by hand: `dotnet tool run stylebro-migrate format ManagedCodecs.slnx`. CI checks it with
@@ -94,6 +99,11 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
 
 - A worktree has no generated samples: link them with `ln -s <main checkout>/samples/*.* samples/`, without `-f`
   (`ln -sf samples/*` once replaced the tracked `samples/README.md` with a link, and linked directories into themselves).
+  A worktree made before a sample was generated has no link to it: a new theory row then reads "no data".
+- The cloud sandbox reaches download.blender.org but not archive.org or test-videos.co.uk (CI reaches all three).
+- FFmpeg's generic demuxing replaces a dts that comes after its pts by the pts ("Invalid timestamps" at `-v debug`);
+  Mp4Demuxer doesn't, so a 'ctts' whose last two entries are more negative than the shift (docs/conformance.md, MP4)
+  gives those samples another dts than FFmpeg's.
 - Temporary instrumentation (coverage counters, traces): commit the real work first. `git checkout <file>` to
   remove the instrumentation otherwise also throws away the file's other uncommitted changes, and so does
   reversing a `git diff` taken against HEAD.
@@ -197,8 +207,9 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
   are final one row after they are deblocked (the next row's top edge filters
   their bottom). A race passes the threaded conformance tests by luck unless the random delays (`RowDelay`: before
   each picture and after each row; `MatchesFfmpegWithDelayedThreads`) make pictures overtake: check a new wait by
-  breaking it and seeing that test fail (the co-located motion wait is the exception, covered in practice by the motion
-  compensation waits before it). A frame's second field runs on a decoder of its own alongside its first: it waits for
+  breaking it and seeing that test fail, and list it in `tools/mutation/mutations.py` (two waits are exceptions,
+  covered in practice by the motion compensation waits: the co-located motion wait and ListsDamaged's; that file says
+  why). A frame's second field runs on a decoder of its own alongside its first: it waits for
   the first's `Begin` (which resets both fields' slots), and its frame is copied out only once the first is done.
 - Measuring frame threading: perf samples only threads that run, so blocked time is invisible to it; time the waits
   (a Stopwatch around `Picture.Wait`, logging waiter, reference, row and duration, in a scratch copy) and the front

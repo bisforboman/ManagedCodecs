@@ -27,6 +27,12 @@ public sealed class AudioFrame
     /// <summary>Samples[channel][index].</summary>
     public float[][] Samples { get; }
 
+    /// <summary>
+    /// Presentation timestamp of the first sample, in the stream's time base: the packet's, moved by the samples the
+    /// decoder dropped from its start (priming, as the container says); 0 for frames decoded without a packet.
+    /// </summary>
+    public long Pts { get; set; }
+
     /// <summary>This frame without its first <paramref name="count"/> samples (all of them if it has fewer).</summary>
     internal AudioFrame DropStart(int count)
     {

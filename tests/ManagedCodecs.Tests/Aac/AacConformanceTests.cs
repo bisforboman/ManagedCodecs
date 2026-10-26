@@ -1,3 +1,4 @@
+using System.Globalization;
 using ManagedCodecs.Aac;
 using ManagedCodecs.Containers;
 
@@ -21,6 +22,45 @@ public class AacConformanceTests
     public static TheoryData<string> TrimmedSamples() => new(TestSamples.WithReference(".trim.f32"));
 
     public static TheoryData<string> DelaySamples() => new(TestSamples.WithReference(".delay.f32"));
+
+    public static TheoryData<string> FrameSamples() => new(TestSamples.WithReference(".audioframes.csv"));
+
+    /// <summary>
+    /// The frames FFmpeg gives by default (name.audioframes.csv: ffprobe's time base for the stream, then each decoded
+    /// frame's pts and sample count): every non-empty frame starts at the same time, <see cref="AudioFrame.Pts"/> being
+    /// the packet's moved by the samples dropped from its start (edit list priming, FAAC's delay; with SBR counted at
+    /// the output rate, twice the time base's), and has the same length. FFmpeg gives no frame for a packet dropped
+    /// whole. Times compare as rationals: the ADTS demuxer counts samples where FFmpeg's time base is 1/28224000.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(FrameSamples))]
+    public void FramePtsMatchFfmpeg(string sampleName)
+    {
+        var lines = File.ReadAllLines(TestSamples.ReferenceOf(sampleName, ".audioframes.csv"));
+        var timeBase = lines[0].Split('/').Select(n => int.Parse(n, CultureInfo.InvariantCulture)).ToArray();
+        var expected = lines.Skip(1)
+            .Select(line => line.Split(','))
+            .Select(f => (Pts: long.Parse(f[0], CultureInfo.InvariantCulture), Samples: int.Parse(f[1], CultureInfo.InvariantCulture)))
+            .ToList();
+        using var demuxer = Demuxer.Open(TestSamples.PathOf(sampleName));
+        var audio = demuxer.Audio!;
+        var decoder = new AacDecoder(audio);
+
+        var frames = demuxer.ReadPackets()
+            .Where(p => p.StreamIndex == audio.StreamIndex)
+            .Select(decoder.Decode)
+            .Where(f => f.SampleCount > 0)
+            .ToList();
+
+        Assert.Equal(expected.Count, frames.Count);
+        for (int i = 0; i < frames.Count; i++)
+        {
+            Assert.True(
+                FrameMd5.SameTime(expected[i].Pts, new Rational(timeBase[0], timeBase[1]), frames[i].Pts, audio.TimeBase),
+                $"Frame {i}: pts {frames[i].Pts} in {audio.TimeBase}, FFmpeg's {expected[i].Pts} in {lines[0]}.");
+            Assert.Equal(expected[i].Samples, frames[i].SampleCount);
+        }
+    }
 
     /// <summary>
     /// The audio FFmpeg gives by default (name.trim.f32), with the edit list applied: the priming

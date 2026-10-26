@@ -19,6 +19,11 @@ The public API before it freezes ([docs/decisions/2026-10-26-api-before-0.1.0.md
   `JpegMarker`, `JpegMarkerReader`, `JpegSegment`), `PixelFormatExtensions.Of`, `AudioFrame.DropStart`,
   `VideoFramePool`, and `VideoFrame.IsDamaged`'s setter (the decoder sets it).
 
+### New
+
+- `AudioFrame.Pts`: the frame's first sample's time, in the stream's time base (the packet's, moved by the samples
+  dropped from its start), as FFmpeg gives it.
+
 ## 0.1.0-preview.1 – 2026-10-26
 
 The first preview: what the README's Status section lists, as it stands.

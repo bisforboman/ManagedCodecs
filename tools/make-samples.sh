@@ -555,4 +555,13 @@ for f in samples/heaac-*.mp4 samples/heaacv2-*.mp4 samples/heaac-*.aac; do ff -i
 # A stream naming FAAC: name.delay.f32, decoded audio as FFmpeg gives it, without FAAC's encoder delay.
 for f in samples/*faac*.aac; do ff -i "$f" -f f32le "${f%.*}.delay.f32"; done
 
+# name.audioframes.csv: the decoded audio frames as ffprobe lists them, by default (the edit list applied): FFmpeg's
+# time base for the stream on the first line, then each frame's pts in it and its sample count; for AudioFrame.Pts.
+for f in samples/*.mp4 samples/*.aac; do
+  tb=$(ffprobe -v error -select_streams a:0 -show_entries stream=time_base -of csv=p=0 "$f")
+  if [ -n "$tb" ]; then
+    { echo "$tb"; ffprobe -v error -select_streams a:0 -show_entries frame=pts,nb_samples -of csv=p=0 "$f"; } > "${f%.*}.audioframes.csv"
+  fi
+done
+
 echo "Samples and references written to samples/."

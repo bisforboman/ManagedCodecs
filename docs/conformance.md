@@ -11,6 +11,21 @@ stream's height, so the decoder needs `new MjpegDecoder(video)`), woven with the
 order FFmpeg takes for AVI, which does not tell it (`FirstFieldOnTop` gives the other; the AVI1 segment's field
 byte is ignored, as by FFmpeg). Packets of one field are not decoded (FFmpeg decodes none either).
 
+## Real films
+
+Every sample above is a test pattern encoded to isolate a feature. `tools/realworld.py` (nightly, `realworld.yml`, a job
+per film) decodes real ones with `mcdec --dump` and with FFmpeg 6.1 and compares them: each frame's MD5 (`-f framemd5`)
+and the audio as floats (`-f f32le`, within 2^-17). The films, pinned by SHA-256, from download.blender.org:
+
+- Sintel's trailer: 1920x1080 H.264 High, 52 s, AAC LC from FAAC 1.26.1 (its encoder delay, signalled only by its
+  name, see AAC).
+- Elephants Dream, the whole film: 480x270 H.264 Main in an Apple MOV, 11 minutes, with negative composition offsets
+  and the AAC configuration in a QuickTime `wave` box (see MP4 demuxing).
+- Tears of Steel, the whole film: 1280x534 H.264 Main in a MOV, 12 minutes of live action; its MP3 audio is not
+  decoded, so only the video is compared.
+
+The first run found the three differences those sections describe; the H.264 video itself matched on all three.
+
 ## SIMD and ARM64
 
 MJPEG: AVX2 IDCT, DC-only blocks, single-lookup coefficient decoding, buffer reuse, and for machines

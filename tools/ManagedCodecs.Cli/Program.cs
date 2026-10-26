@@ -12,14 +12,27 @@ using ManagedCodecs.Mjpeg;
 //   ffmpeg -benchmark -threads 1 -stream_loop 9 -i samples/h264-bench-720p.mp4 -f null -
 if (args.Length == 0 || args.Contains("-h") || args.Contains("--help"))
 {
-    Console.WriteLine("usage: mcdec <file> [--loops N] [--threads N] [--borrow-frames] [--zero-copy] [--conceal] | mcdec --hash [--loops N] <file>...");
+    Console.WriteLine("usage: mcdec <file> [--loops N] [--threads N] [--borrow-frames] [--zero-copy] [--conceal] | mcdec --hash [--loops N] <file>... | mcdec --dump <file> <prefix>");
     Console.WriteLine("  Demuxes and decodes the file's video and audio N times (default 1), like ffmpeg -stream_loop N-1.");
     Console.WriteLine("  --threads N: decode up to N H.264 pictures, or HE-AAC channels, at once, each on a thread of its own (default 1).");
     Console.WriteLine("  --borrow-frames: H.264 frames point into the decoder's pictures instead of being copied out.");
     Console.WriteLine("  --zero-copy: MJPEG images are decoded straight into their frames' (MCU-padded) planes.");
     Console.WriteLine("  --conceal: H.264 conceals damaged and lost pictures (H264Decoder.ConcealErrors) instead of failing on them.");
     Console.WriteLine("  --hash: prints a SHA-256 of each file's decoded output instead (tools/wasm-check.sh compares them).");
+    Console.WriteLine("  --dump: writes <prefix>.video.md5 (each frame's MD5, as ffmpeg -f framemd5) and <prefix>.audio.f32 (as -f f32le); tools/realworld.py compares them.");
     return args.Length == 0 ? 1 : 0;
+}
+
+if (args[0] == "--dump")
+{
+    if (args.Length != 3)
+    {
+        Console.Error.WriteLine("--dump needs a file and an output prefix.");
+        return 1;
+    }
+
+    OutputDump.Write(args[1], args[2]);
+    return 0;
 }
 
 if (args[0] == "--hash")

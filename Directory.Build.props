@@ -12,6 +12,13 @@
     <PackageReference Include="StyleBro.Analyzers" PrivateAssets="all" />
   </ItemGroup>
 
+  <!-- The packages' public API, listed in each src/ project's PublicAPI.Shipped.txt (as of the last release) and
+       PublicAPI.Unshipped.txt (changed since): a public member added, changed or removed without its line there fails
+       the build (RS0016, RS0017), so every API change shows in the pull request. A release moves Unshipped into Shipped. -->
+  <ItemGroup Condition="$(MSBuildProjectDirectory.Replace('\', '/').Contains('/src/'))">
+    <PackageReference Include="Microsoft.CodeAnalysis.PublicApiAnalyzers" PrivateAssets="all" />
+  </ItemGroup>
+
   <!-- Shared package metadata for the src/ libraries. Every package has one version, the newest in CHANGELOG.md, given
        at pack time (release.yml: dotnet pack -p:Version=X); local builds are 0.0.0-dev. -->
   <PropertyGroup>

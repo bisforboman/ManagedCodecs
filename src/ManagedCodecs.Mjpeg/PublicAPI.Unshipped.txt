@@ -1,0 +1,80 @@
+#nullable enable
+*REMOVED*ManagedCodecs.Mjpeg.JpegComponent
+*REMOVED*ManagedCodecs.Mjpeg.JpegComponent.<Clone>$() -> ManagedCodecs.Mjpeg.JpegComponent!
+*REMOVED*ManagedCodecs.Mjpeg.JpegComponent.Deconstruct(out byte Id, out int HorizontalSampling, out int VerticalSampling, out int QuantizationTableId) -> void
+*REMOVED*ManagedCodecs.Mjpeg.JpegComponent.Equals(ManagedCodecs.Mjpeg.JpegComponent? other) -> bool
+*REMOVED*ManagedCodecs.Mjpeg.JpegComponent.HorizontalSampling.get -> int
+*REMOVED*ManagedCodecs.Mjpeg.JpegComponent.HorizontalSampling.init -> void
+*REMOVED*ManagedCodecs.Mjpeg.JpegComponent.Id.get -> byte
+*REMOVED*ManagedCodecs.Mjpeg.JpegComponent.Id.init -> void
+*REMOVED*ManagedCodecs.Mjpeg.JpegComponent.JpegComponent(byte Id, int HorizontalSampling, int VerticalSampling, int QuantizationTableId) -> void
+*REMOVED*ManagedCodecs.Mjpeg.JpegComponent.QuantizationTableId.get -> int
+*REMOVED*ManagedCodecs.Mjpeg.JpegComponent.QuantizationTableId.init -> void
+*REMOVED*ManagedCodecs.Mjpeg.JpegComponent.VerticalSampling.get -> int
+*REMOVED*ManagedCodecs.Mjpeg.JpegComponent.VerticalSampling.init -> void
+*REMOVED*ManagedCodecs.Mjpeg.JpegFrameHeader
+*REMOVED*ManagedCodecs.Mjpeg.JpegFrameHeader.<Clone>$() -> ManagedCodecs.Mjpeg.JpegFrameHeader!
+*REMOVED*ManagedCodecs.Mjpeg.JpegFrameHeader.Components.get -> System.Collections.Generic.IReadOnlyList<ManagedCodecs.Mjpeg.JpegComponent!>!
+*REMOVED*ManagedCodecs.Mjpeg.JpegFrameHeader.Components.init -> void
+*REMOVED*ManagedCodecs.Mjpeg.JpegFrameHeader.Deconstruct(out byte Marker, out int Precision, out int Width, out int Height, out System.Collections.Generic.IReadOnlyList<ManagedCodecs.Mjpeg.JpegComponent!>! Components) -> void
+*REMOVED*ManagedCodecs.Mjpeg.JpegFrameHeader.Equals(ManagedCodecs.Mjpeg.JpegFrameHeader? other) -> bool
+*REMOVED*ManagedCodecs.Mjpeg.JpegFrameHeader.Height.get -> int
+*REMOVED*ManagedCodecs.Mjpeg.JpegFrameHeader.Height.init -> void
+*REMOVED*ManagedCodecs.Mjpeg.JpegFrameHeader.JpegFrameHeader(byte Marker, int Precision, int Width, int Height, System.Collections.Generic.IReadOnlyList<ManagedCodecs.Mjpeg.JpegComponent!>! Components) -> void
+*REMOVED*ManagedCodecs.Mjpeg.JpegFrameHeader.Marker.get -> byte
+*REMOVED*ManagedCodecs.Mjpeg.JpegFrameHeader.Marker.init -> void
+*REMOVED*ManagedCodecs.Mjpeg.JpegFrameHeader.Precision.get -> int
+*REMOVED*ManagedCodecs.Mjpeg.JpegFrameHeader.Precision.init -> void
+*REMOVED*ManagedCodecs.Mjpeg.JpegFrameHeader.ToPixelFormat() -> ManagedCodecs.PixelFormat
+*REMOVED*ManagedCodecs.Mjpeg.JpegFrameHeader.Width.get -> int
+*REMOVED*ManagedCodecs.Mjpeg.JpegFrameHeader.Width.init -> void
+*REMOVED*ManagedCodecs.Mjpeg.JpegMarker
+*REMOVED*ManagedCodecs.Mjpeg.JpegMarkerReader
+*REMOVED*ManagedCodecs.Mjpeg.JpegSegment
+*REMOVED*ManagedCodecs.Mjpeg.JpegSegment.Deconstruct(out byte Marker, out int PayloadOffset, out int PayloadLength, out int EntropyDataOffset, out int EntropyDataLength) -> void
+*REMOVED*ManagedCodecs.Mjpeg.JpegSegment.EntropyDataLength.get -> int
+*REMOVED*ManagedCodecs.Mjpeg.JpegSegment.EntropyDataLength.init -> void
+*REMOVED*ManagedCodecs.Mjpeg.JpegSegment.EntropyDataOffset.get -> int
+*REMOVED*ManagedCodecs.Mjpeg.JpegSegment.EntropyDataOffset.init -> void
+*REMOVED*ManagedCodecs.Mjpeg.JpegSegment.Equals(ManagedCodecs.Mjpeg.JpegSegment other) -> bool
+*REMOVED*ManagedCodecs.Mjpeg.JpegSegment.JpegSegment() -> void
+*REMOVED*ManagedCodecs.Mjpeg.JpegSegment.JpegSegment(byte Marker, int PayloadOffset, int PayloadLength, int EntropyDataOffset = 0, int EntropyDataLength = 0) -> void
+*REMOVED*ManagedCodecs.Mjpeg.JpegSegment.Marker.get -> byte
+*REMOVED*ManagedCodecs.Mjpeg.JpegSegment.Marker.init -> void
+*REMOVED*ManagedCodecs.Mjpeg.JpegSegment.PayloadLength.get -> int
+*REMOVED*ManagedCodecs.Mjpeg.JpegSegment.PayloadLength.init -> void
+*REMOVED*ManagedCodecs.Mjpeg.JpegSegment.PayloadOffset.get -> int
+*REMOVED*ManagedCodecs.Mjpeg.JpegSegment.PayloadOffset.init -> void
+*REMOVED*const ManagedCodecs.Mjpeg.JpegMarker.Dac = 204 -> byte
+*REMOVED*const ManagedCodecs.Mjpeg.JpegMarker.Dht = 196 -> byte
+*REMOVED*const ManagedCodecs.Mjpeg.JpegMarker.Dqt = 219 -> byte
+*REMOVED*const ManagedCodecs.Mjpeg.JpegMarker.Dri = 221 -> byte
+*REMOVED*const ManagedCodecs.Mjpeg.JpegMarker.Eoi = 217 -> byte
+*REMOVED*const ManagedCodecs.Mjpeg.JpegMarker.Jpg = 200 -> byte
+*REMOVED*const ManagedCodecs.Mjpeg.JpegMarker.Rst0 = 208 -> byte
+*REMOVED*const ManagedCodecs.Mjpeg.JpegMarker.Rst7 = 215 -> byte
+*REMOVED*const ManagedCodecs.Mjpeg.JpegMarker.Sof0 = 192 -> byte
+*REMOVED*const ManagedCodecs.Mjpeg.JpegMarker.Sof1 = 193 -> byte
+*REMOVED*const ManagedCodecs.Mjpeg.JpegMarker.Sof2 = 194 -> byte
+*REMOVED*const ManagedCodecs.Mjpeg.JpegMarker.Soi = 216 -> byte
+*REMOVED*const ManagedCodecs.Mjpeg.JpegMarker.Sos = 218 -> byte
+*REMOVED*const ManagedCodecs.Mjpeg.JpegMarker.Tem = 1 -> byte
+*REMOVED*override ManagedCodecs.Mjpeg.JpegComponent.Equals(object? obj) -> bool
+*REMOVED*override ManagedCodecs.Mjpeg.JpegComponent.GetHashCode() -> int
+*REMOVED*override ManagedCodecs.Mjpeg.JpegComponent.ToString() -> string!
+*REMOVED*override ManagedCodecs.Mjpeg.JpegFrameHeader.Equals(object? obj) -> bool
+*REMOVED*override ManagedCodecs.Mjpeg.JpegFrameHeader.GetHashCode() -> int
+*REMOVED*override ManagedCodecs.Mjpeg.JpegFrameHeader.ToString() -> string!
+*REMOVED*override ManagedCodecs.Mjpeg.JpegSegment.GetHashCode() -> int
+*REMOVED*static ManagedCodecs.Mjpeg.JpegComponent.operator !=(ManagedCodecs.Mjpeg.JpegComponent? left, ManagedCodecs.Mjpeg.JpegComponent? right) -> bool
+*REMOVED*static ManagedCodecs.Mjpeg.JpegComponent.operator ==(ManagedCodecs.Mjpeg.JpegComponent? left, ManagedCodecs.Mjpeg.JpegComponent? right) -> bool
+*REMOVED*static ManagedCodecs.Mjpeg.JpegFrameHeader.Parse(byte marker, System.ReadOnlySpan<byte> payload) -> ManagedCodecs.Mjpeg.JpegFrameHeader!
+*REMOVED*static ManagedCodecs.Mjpeg.JpegFrameHeader.operator !=(ManagedCodecs.Mjpeg.JpegFrameHeader? left, ManagedCodecs.Mjpeg.JpegFrameHeader? right) -> bool
+*REMOVED*static ManagedCodecs.Mjpeg.JpegFrameHeader.operator ==(ManagedCodecs.Mjpeg.JpegFrameHeader? left, ManagedCodecs.Mjpeg.JpegFrameHeader? right) -> bool
+*REMOVED*static ManagedCodecs.Mjpeg.JpegMarker.IsStandalone(byte marker) -> bool
+*REMOVED*static ManagedCodecs.Mjpeg.JpegMarker.IsUnsupportedFrame(byte marker) -> bool
+*REMOVED*static ManagedCodecs.Mjpeg.JpegMarkerReader.ReadSegments(System.ReadOnlySpan<byte> data) -> System.Collections.Generic.List<ManagedCodecs.Mjpeg.JpegSegment>!
+*REMOVED*static ManagedCodecs.Mjpeg.JpegSegment.operator !=(ManagedCodecs.Mjpeg.JpegSegment left, ManagedCodecs.Mjpeg.JpegSegment right) -> bool
+*REMOVED*static ManagedCodecs.Mjpeg.JpegSegment.operator ==(ManagedCodecs.Mjpeg.JpegSegment left, ManagedCodecs.Mjpeg.JpegSegment right) -> bool
+*REMOVED*~override ManagedCodecs.Mjpeg.JpegSegment.Equals(object obj) -> bool
+*REMOVED*~override ManagedCodecs.Mjpeg.JpegSegment.ToString() -> string

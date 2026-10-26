@@ -3,9 +3,9 @@
 Versions are git tags (`vX.Y.Z`); each one publishes every package (ManagedCodecs.Core, .Containers, .Mjpeg, .H264,
 .Aac and the ManagedCodecs meta-package) to nuget.org at that version, and a GitHub release with this file's section
 as its notes. `release.yml` releases on the push to main that brings a version heading not yet tagged, so a release
-is a pull request that turns "Unreleased" into "## X.Y.Z – date". Until the API is frozen the versions are previews
-(`0.1.0-preview.N`), and any of them can change the public API; the packages share internals, so use one version of
-them all.
+is a pull request that turns "Unreleased" into "## X.Y.Z – date" and runs `tools/ship-public-api.py`. Until the API
+is frozen the versions are previews (`0.1.0-preview.N`), and any of them can change the public API; the packages
+share internals, so use one version of them all.
 
 ## Unreleased
 

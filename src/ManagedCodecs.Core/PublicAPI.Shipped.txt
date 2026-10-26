@@ -1,0 +1,166 @@
+#nullable enable
+ManagedCodecs.AudioFrame
+ManagedCodecs.AudioFrame.AudioFrame(int sampleRate, int channels, int sampleCount) -> void
+ManagedCodecs.AudioFrame.Channels.get -> int
+ManagedCodecs.AudioFrame.DropStart(int count) -> ManagedCodecs.AudioFrame!
+ManagedCodecs.AudioFrame.SampleCount.get -> int
+ManagedCodecs.AudioFrame.SampleRate.get -> int
+ManagedCodecs.AudioFrame.Samples.get -> float[]![]!
+ManagedCodecs.AudioStreamInfo
+ManagedCodecs.AudioStreamInfo.<Clone>$() -> ManagedCodecs.AudioStreamInfo!
+ManagedCodecs.AudioStreamInfo.AudioStreamInfo(string! Codec, int SampleRate, int Channels, long FrameCount, ManagedCodecs.Rational TimeBase, System.ReadOnlyMemory<byte> CodecPrivate, int StreamIndex) -> void
+ManagedCodecs.AudioStreamInfo.Channels.get -> int
+ManagedCodecs.AudioStreamInfo.Channels.init -> void
+ManagedCodecs.AudioStreamInfo.Codec.get -> string!
+ManagedCodecs.AudioStreamInfo.Codec.init -> void
+ManagedCodecs.AudioStreamInfo.CodecPrivate.get -> System.ReadOnlyMemory<byte>
+ManagedCodecs.AudioStreamInfo.CodecPrivate.init -> void
+ManagedCodecs.AudioStreamInfo.Deconstruct(out string! Codec, out int SampleRate, out int Channels, out long FrameCount, out ManagedCodecs.Rational TimeBase, out System.ReadOnlyMemory<byte> CodecPrivate, out int StreamIndex) -> void
+ManagedCodecs.AudioStreamInfo.Equals(ManagedCodecs.AudioStreamInfo? other) -> bool
+ManagedCodecs.AudioStreamInfo.FrameCount.get -> long
+ManagedCodecs.AudioStreamInfo.FrameCount.init -> void
+ManagedCodecs.AudioStreamInfo.SampleRate.get -> int
+ManagedCodecs.AudioStreamInfo.SampleRate.init -> void
+ManagedCodecs.AudioStreamInfo.StreamIndex.get -> int
+ManagedCodecs.AudioStreamInfo.StreamIndex.init -> void
+ManagedCodecs.AudioStreamInfo.TimeBase.get -> ManagedCodecs.Rational
+ManagedCodecs.AudioStreamInfo.TimeBase.init -> void
+ManagedCodecs.CodecIds
+ManagedCodecs.IAudioDecoder
+ManagedCodecs.IAudioDecoder.Decode(ManagedCodecs.Packet packet) -> ManagedCodecs.AudioFrame!
+ManagedCodecs.IAudioDecoder.Decode(System.ReadOnlySpan<byte> packet) -> ManagedCodecs.AudioFrame!
+ManagedCodecs.IDemuxer
+ManagedCodecs.IDemuxer.Audio.get -> ManagedCodecs.AudioStreamInfo?
+ManagedCodecs.IDemuxer.ReadPackets() -> System.Collections.Generic.IEnumerable<ManagedCodecs.Packet>!
+ManagedCodecs.IDemuxer.ReadPacketsAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerable<ManagedCodecs.Packet>!
+ManagedCodecs.IDemuxer.Video.get -> ManagedCodecs.VideoStreamInfo?
+ManagedCodecs.IVideoDecoder
+ManagedCodecs.IVideoDecoder.Decode(ManagedCodecs.Packet packet) -> System.Collections.Generic.IReadOnlyList<ManagedCodecs.VideoFrame!>!
+ManagedCodecs.IVideoDecoder.DecodeAsync(ManagedCodecs.Packet packet, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<System.Collections.Generic.IReadOnlyList<ManagedCodecs.VideoFrame!>!>
+ManagedCodecs.IVideoDecoder.Flush() -> System.Collections.Generic.IReadOnlyList<ManagedCodecs.VideoFrame!>!
+ManagedCodecs.IVideoDecoder.FlushAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<System.Collections.Generic.IReadOnlyList<ManagedCodecs.VideoFrame!>!>
+ManagedCodecs.Packet
+ManagedCodecs.Packet.Data.get -> System.ReadOnlyMemory<byte>
+ManagedCodecs.Packet.Data.init -> void
+ManagedCodecs.Packet.Deconstruct(out int StreamIndex, out long Sequence, out System.ReadOnlyMemory<byte> Data, out bool IsKeyframe, out long Dts, out long Pts, out long Duration, out int SkipSamples, out bool Discard) -> void
+ManagedCodecs.Packet.Discard.get -> bool
+ManagedCodecs.Packet.Discard.init -> void
+ManagedCodecs.Packet.Dts.get -> long
+ManagedCodecs.Packet.Dts.init -> void
+ManagedCodecs.Packet.Duration.get -> long
+ManagedCodecs.Packet.Duration.init -> void
+ManagedCodecs.Packet.Equals(ManagedCodecs.Packet other) -> bool
+ManagedCodecs.Packet.IsKeyframe.get -> bool
+ManagedCodecs.Packet.IsKeyframe.init -> void
+ManagedCodecs.Packet.Packet() -> void
+ManagedCodecs.Packet.Packet(int StreamIndex, long Sequence, System.ReadOnlyMemory<byte> Data, bool IsKeyframe, long Dts, long Pts, long Duration, int SkipSamples = 0, bool Discard = false) -> void
+ManagedCodecs.Packet.Pts.get -> long
+ManagedCodecs.Packet.Pts.init -> void
+ManagedCodecs.Packet.Sequence.get -> long
+ManagedCodecs.Packet.Sequence.init -> void
+ManagedCodecs.Packet.SkipSamples.get -> int
+ManagedCodecs.Packet.SkipSamples.init -> void
+ManagedCodecs.Packet.StreamIndex.get -> int
+ManagedCodecs.Packet.StreamIndex.init -> void
+ManagedCodecs.PixelFormat
+ManagedCodecs.PixelFormat.Gray10 = 7 -> ManagedCodecs.PixelFormat
+ManagedCodecs.PixelFormat.Gray12 = 12 -> ManagedCodecs.PixelFormat
+ManagedCodecs.PixelFormat.Gray14 = 16 -> ManagedCodecs.PixelFormat
+ManagedCodecs.PixelFormat.Gray8 = 0 -> ManagedCodecs.PixelFormat
+ManagedCodecs.PixelFormat.Gray9 = 8 -> ManagedCodecs.PixelFormat
+ManagedCodecs.PixelFormat.Yuv420P = 1 -> ManagedCodecs.PixelFormat
+ManagedCodecs.PixelFormat.Yuv420P10 = 4 -> ManagedCodecs.PixelFormat
+ManagedCodecs.PixelFormat.Yuv420P12 = 13 -> ManagedCodecs.PixelFormat
+ManagedCodecs.PixelFormat.Yuv420P14 = 17 -> ManagedCodecs.PixelFormat
+ManagedCodecs.PixelFormat.Yuv420P9 = 9 -> ManagedCodecs.PixelFormat
+ManagedCodecs.PixelFormat.Yuv422P = 2 -> ManagedCodecs.PixelFormat
+ManagedCodecs.PixelFormat.Yuv422P10 = 5 -> ManagedCodecs.PixelFormat
+ManagedCodecs.PixelFormat.Yuv422P12 = 14 -> ManagedCodecs.PixelFormat
+ManagedCodecs.PixelFormat.Yuv422P14 = 18 -> ManagedCodecs.PixelFormat
+ManagedCodecs.PixelFormat.Yuv422P9 = 10 -> ManagedCodecs.PixelFormat
+ManagedCodecs.PixelFormat.Yuv444P = 3 -> ManagedCodecs.PixelFormat
+ManagedCodecs.PixelFormat.Yuv444P10 = 6 -> ManagedCodecs.PixelFormat
+ManagedCodecs.PixelFormat.Yuv444P12 = 15 -> ManagedCodecs.PixelFormat
+ManagedCodecs.PixelFormat.Yuv444P14 = 19 -> ManagedCodecs.PixelFormat
+ManagedCodecs.PixelFormat.Yuv444P9 = 11 -> ManagedCodecs.PixelFormat
+ManagedCodecs.PixelFormatExtensions
+ManagedCodecs.Rational
+ManagedCodecs.Rational.Deconstruct(out int Numerator, out int Denominator) -> void
+ManagedCodecs.Rational.Denominator.get -> int
+ManagedCodecs.Rational.Denominator.init -> void
+ManagedCodecs.Rational.Equals(ManagedCodecs.Rational other) -> bool
+ManagedCodecs.Rational.Numerator.get -> int
+ManagedCodecs.Rational.Numerator.init -> void
+ManagedCodecs.Rational.Rational() -> void
+ManagedCodecs.Rational.Rational(int Numerator, int Denominator) -> void
+ManagedCodecs.Rational.ToDouble() -> double
+ManagedCodecs.VideoFrame
+ManagedCodecs.VideoFrame.Dispose() -> void
+ManagedCodecs.VideoFrame.Format.get -> ManagedCodecs.PixelFormat
+ManagedCodecs.VideoFrame.GetRow(int plane, int y) -> System.Span<byte>
+ManagedCodecs.VideoFrame.Height.get -> int
+ManagedCodecs.VideoFrame.IsDamaged.get -> bool
+ManagedCodecs.VideoFrame.IsDamaged.set -> void
+ManagedCodecs.VideoFrame.Offsets.get -> int[]!
+ManagedCodecs.VideoFrame.Planes.get -> byte[]![]!
+ManagedCodecs.VideoFrame.Pts.get -> long
+ManagedCodecs.VideoFrame.Pts.set -> void
+ManagedCodecs.VideoFrame.Strides.get -> int[]!
+ManagedCodecs.VideoFrame.VideoFrame(int width, int height, ManagedCodecs.PixelFormat format) -> void
+ManagedCodecs.VideoFrame.VideoFrame(int width, int height, ManagedCodecs.PixelFormat format, byte[]![]! planes, int[]! strides, int[]! offsets) -> void
+ManagedCodecs.VideoFrame.Width.get -> int
+ManagedCodecs.VideoFrame.WritePacked(System.IO.Stream! destination) -> void
+ManagedCodecs.VideoFramePool
+ManagedCodecs.VideoFramePool.Rent(int width, int height, ManagedCodecs.PixelFormat format) -> ManagedCodecs.VideoFrame!
+ManagedCodecs.VideoFramePool.VideoFramePool(int capacity = 8) -> void
+ManagedCodecs.VideoStreamInfo
+ManagedCodecs.VideoStreamInfo.<Clone>$() -> ManagedCodecs.VideoStreamInfo!
+ManagedCodecs.VideoStreamInfo.Codec.get -> string!
+ManagedCodecs.VideoStreamInfo.Codec.init -> void
+ManagedCodecs.VideoStreamInfo.CodecPrivate.get -> System.ReadOnlyMemory<byte>
+ManagedCodecs.VideoStreamInfo.CodecPrivate.init -> void
+ManagedCodecs.VideoStreamInfo.Deconstruct(out string! Codec, out int Width, out int Height, out double FramesPerSecond, out long FrameCount, out ManagedCodecs.Rational TimeBase, out System.ReadOnlyMemory<byte> CodecPrivate, out int StreamIndex) -> void
+ManagedCodecs.VideoStreamInfo.Equals(ManagedCodecs.VideoStreamInfo? other) -> bool
+ManagedCodecs.VideoStreamInfo.FrameCount.get -> long
+ManagedCodecs.VideoStreamInfo.FrameCount.init -> void
+ManagedCodecs.VideoStreamInfo.FramesPerSecond.get -> double
+ManagedCodecs.VideoStreamInfo.FramesPerSecond.init -> void
+ManagedCodecs.VideoStreamInfo.Height.get -> int
+ManagedCodecs.VideoStreamInfo.Height.init -> void
+ManagedCodecs.VideoStreamInfo.StreamIndex.get -> int
+ManagedCodecs.VideoStreamInfo.StreamIndex.init -> void
+ManagedCodecs.VideoStreamInfo.TimeBase.get -> ManagedCodecs.Rational
+ManagedCodecs.VideoStreamInfo.TimeBase.init -> void
+ManagedCodecs.VideoStreamInfo.VideoStreamInfo(string! Codec, int Width, int Height, double FramesPerSecond, long FrameCount, ManagedCodecs.Rational TimeBase, System.ReadOnlyMemory<byte> CodecPrivate, int StreamIndex) -> void
+ManagedCodecs.VideoStreamInfo.Width.get -> int
+ManagedCodecs.VideoStreamInfo.Width.init -> void
+const ManagedCodecs.CodecIds.Aac = "AAC" -> string!
+const ManagedCodecs.CodecIds.H264 = "H264" -> string!
+const ManagedCodecs.CodecIds.Mjpeg = "MJPG" -> string!
+const ManagedCodecs.CodecIds.Mpeg4Visual = "MP4V" -> string!
+override ManagedCodecs.AudioStreamInfo.Equals(object? obj) -> bool
+override ManagedCodecs.AudioStreamInfo.GetHashCode() -> int
+override ManagedCodecs.AudioStreamInfo.ToString() -> string!
+override ManagedCodecs.Packet.GetHashCode() -> int
+override ManagedCodecs.Rational.GetHashCode() -> int
+override ManagedCodecs.Rational.ToString() -> string!
+override ManagedCodecs.VideoStreamInfo.Equals(object? obj) -> bool
+override ManagedCodecs.VideoStreamInfo.GetHashCode() -> int
+override ManagedCodecs.VideoStreamInfo.ToString() -> string!
+static ManagedCodecs.AudioStreamInfo.operator !=(ManagedCodecs.AudioStreamInfo? left, ManagedCodecs.AudioStreamInfo? right) -> bool
+static ManagedCodecs.AudioStreamInfo.operator ==(ManagedCodecs.AudioStreamInfo? left, ManagedCodecs.AudioStreamInfo? right) -> bool
+static ManagedCodecs.Packet.operator !=(ManagedCodecs.Packet left, ManagedCodecs.Packet right) -> bool
+static ManagedCodecs.Packet.operator ==(ManagedCodecs.Packet left, ManagedCodecs.Packet right) -> bool
+static ManagedCodecs.PixelFormatExtensions.BitDepth(this ManagedCodecs.PixelFormat format) -> int
+static ManagedCodecs.PixelFormatExtensions.BytesPerSample(this ManagedCodecs.PixelFormat format) -> int
+static ManagedCodecs.PixelFormatExtensions.Of(int chroma, int bitDepth) -> ManagedCodecs.PixelFormat
+static ManagedCodecs.PixelFormatExtensions.PlaneCount(this ManagedCodecs.PixelFormat format) -> int
+static ManagedCodecs.PixelFormatExtensions.PlaneSize(this ManagedCodecs.PixelFormat format, int plane, int width, int height) -> (int Width, int Height)
+static ManagedCodecs.Rational.Reduce(long numerator, long denominator) -> ManagedCodecs.Rational
+static ManagedCodecs.Rational.operator !=(ManagedCodecs.Rational left, ManagedCodecs.Rational right) -> bool
+static ManagedCodecs.Rational.operator ==(ManagedCodecs.Rational left, ManagedCodecs.Rational right) -> bool
+static ManagedCodecs.VideoStreamInfo.operator !=(ManagedCodecs.VideoStreamInfo? left, ManagedCodecs.VideoStreamInfo? right) -> bool
+static ManagedCodecs.VideoStreamInfo.operator ==(ManagedCodecs.VideoStreamInfo? left, ManagedCodecs.VideoStreamInfo? right) -> bool
+~override ManagedCodecs.Packet.Equals(object obj) -> bool
+~override ManagedCodecs.Packet.ToString() -> string
+~override ManagedCodecs.Rational.Equals(object obj) -> bool

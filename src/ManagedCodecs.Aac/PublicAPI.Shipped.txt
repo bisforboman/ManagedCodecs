@@ -1,0 +1,11 @@
+#nullable enable
+ManagedCodecs.Aac.AacDecoder
+ManagedCodecs.Aac.AacDecoder.AacDecoder(ManagedCodecs.AudioStreamInfo! stream) -> void
+ManagedCodecs.Aac.AacDecoder.AacDecoder(System.ReadOnlySpan<byte> audioSpecificConfig) -> void
+ManagedCodecs.Aac.AacDecoder.Channels.get -> int
+ManagedCodecs.Aac.AacDecoder.Decode(ManagedCodecs.Packet packet) -> ManagedCodecs.AudioFrame!
+ManagedCodecs.Aac.AacDecoder.Decode(System.ReadOnlySpan<byte> packet) -> ManagedCodecs.AudioFrame!
+ManagedCodecs.Aac.AacDecoder.HasSbr.get -> bool
+ManagedCodecs.Aac.AacDecoder.SampleRate.get -> int
+ManagedCodecs.Aac.AacDecoder.Threads.get -> int
+ManagedCodecs.Aac.AacDecoder.Threads.init -> void

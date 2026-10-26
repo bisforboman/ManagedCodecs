@@ -1,0 +1,28 @@
+#nullable enable
+ManagedCodecs.Containers.Adts.AdtsDemuxer
+ManagedCodecs.Containers.Adts.AdtsDemuxer.AdtsDemuxer(System.IO.Stream! stream, bool leaveOpen = false) -> void
+ManagedCodecs.Containers.Adts.AdtsDemuxer.Audio.get -> ManagedCodecs.AudioStreamInfo!
+ManagedCodecs.Containers.Adts.AdtsDemuxer.Dispose() -> void
+ManagedCodecs.Containers.Adts.AdtsDemuxer.ReadPackets() -> System.Collections.Generic.IEnumerable<ManagedCodecs.Packet>!
+ManagedCodecs.Containers.Adts.AdtsDemuxer.ReadPacketsAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerable<ManagedCodecs.Packet>!
+ManagedCodecs.Containers.Adts.AdtsDemuxer.Video.get -> ManagedCodecs.VideoStreamInfo?
+ManagedCodecs.Containers.Avi.AviDemuxer
+ManagedCodecs.Containers.Avi.AviDemuxer.Audio.get -> ManagedCodecs.AudioStreamInfo?
+ManagedCodecs.Containers.Avi.AviDemuxer.AviDemuxer(System.IO.Stream! stream, bool leaveOpen = false) -> void
+ManagedCodecs.Containers.Avi.AviDemuxer.Dispose() -> void
+ManagedCodecs.Containers.Avi.AviDemuxer.ReadPackets() -> System.Collections.Generic.IEnumerable<ManagedCodecs.Packet>!
+ManagedCodecs.Containers.Avi.AviDemuxer.ReadPacketsAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerable<ManagedCodecs.Packet>!
+ManagedCodecs.Containers.Avi.AviDemuxer.Video.get -> ManagedCodecs.VideoStreamInfo!
+ManagedCodecs.Containers.Demuxer
+ManagedCodecs.Containers.Mp4.Mp4Demuxer
+ManagedCodecs.Containers.Mp4.Mp4Demuxer.Audio.get -> ManagedCodecs.AudioStreamInfo?
+ManagedCodecs.Containers.Mp4.Mp4Demuxer.Dispose() -> void
+ManagedCodecs.Containers.Mp4.Mp4Demuxer.Mp4Demuxer(System.IO.Stream! stream, bool leaveOpen = false) -> void
+ManagedCodecs.Containers.Mp4.Mp4Demuxer.ReadPackets() -> System.Collections.Generic.IEnumerable<ManagedCodecs.Packet>!
+ManagedCodecs.Containers.Mp4.Mp4Demuxer.ReadPacketsAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerable<ManagedCodecs.Packet>!
+ManagedCodecs.Containers.Mp4.Mp4Demuxer.Video.get -> ManagedCodecs.VideoStreamInfo?
+static ManagedCodecs.Containers.Adts.AdtsDemuxer.Open(string! path) -> ManagedCodecs.Containers.Adts.AdtsDemuxer!
+static ManagedCodecs.Containers.Avi.AviDemuxer.Open(string! path) -> ManagedCodecs.Containers.Avi.AviDemuxer!
+static ManagedCodecs.Containers.Demuxer.Open(System.IO.Stream! stream, bool leaveOpen = false) -> ManagedCodecs.IDemuxer!
+static ManagedCodecs.Containers.Demuxer.Open(string! path) -> ManagedCodecs.IDemuxer!
+static ManagedCodecs.Containers.Mp4.Mp4Demuxer.Open(string! path) -> ManagedCodecs.Containers.Mp4.Mp4Demuxer!

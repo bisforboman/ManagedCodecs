@@ -23,7 +23,14 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
 - **Releases**: CHANGELOG.md's "## Unreleased" section collects what is merged and not released (add a line there in a
   PR a consumer would notice); a release is a PR that renames it to "## X.Y.Z – date" (0.1.0-preview.N until the API
   freeze), and `release.yml` then tests, packs every package at that version, publishes to nuget.org (trusted
-  publishing) and tags it. Every package has the one version.
+  publishing) and tags it. Every package has the one version. The release PR also runs `tools/ship-public-api.py`
+  (each package's PublicAPI.Unshipped.txt into its Shipped).
+- **Public API**: Microsoft.CodeAnalysis.PublicApiAnalyzers lists every src/ package's public API in its
+  `PublicAPI.Shipped.txt` (the last release's) and `PublicAPI.Unshipped.txt` (changes since, a removal as
+  `*REMOVED*<line>`); a public member that isn't listed fails the build (RS0016, RS0017). Adding one:
+  `dotnet format analyzers src/<project> --diagnostics RS0016 --severity info` writes its lines into Unshipped. Every
+  public change is an API decision before the freeze (docs/decisions/2026-10-26-api-before-0.1.0.md): CHANGELOG
+  says it under "Unreleased".
 - **Files an open PR changes**: before editing a file, check the open PRs for one that changes it; if one does, wait
   for it to merge and branch from main after it, rather than editing the same lines in parallel.
 - **Worktrees**: `git worktree add .claude/worktrees/<name> -b <branch> origin/main` (ignored). Sessions working at

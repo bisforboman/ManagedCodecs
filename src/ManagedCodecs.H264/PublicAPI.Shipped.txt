@@ -1,0 +1,15 @@
+#nullable enable
+ManagedCodecs.H264.H264Decoder
+ManagedCodecs.H264.H264Decoder.BorrowFrames.get -> bool
+ManagedCodecs.H264.H264Decoder.BorrowFrames.init -> void
+ManagedCodecs.H264.H264Decoder.ConcealErrors.get -> bool
+ManagedCodecs.H264.H264Decoder.ConcealErrors.init -> void
+ManagedCodecs.H264.H264Decoder.Decode(ManagedCodecs.Packet packet) -> System.Collections.Generic.IReadOnlyList<ManagedCodecs.VideoFrame!>!
+ManagedCodecs.H264.H264Decoder.Decode(System.ReadOnlySpan<byte> data, long pts) -> System.Collections.Generic.IReadOnlyList<ManagedCodecs.VideoFrame!>!
+ManagedCodecs.H264.H264Decoder.DecodeAsync(ManagedCodecs.Packet packet, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<System.Collections.Generic.IReadOnlyList<ManagedCodecs.VideoFrame!>!>
+ManagedCodecs.H264.H264Decoder.Flush() -> System.Collections.Generic.IReadOnlyList<ManagedCodecs.VideoFrame!>!
+ManagedCodecs.H264.H264Decoder.FlushAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<System.Collections.Generic.IReadOnlyList<ManagedCodecs.VideoFrame!>!>
+ManagedCodecs.H264.H264Decoder.H264Decoder(ManagedCodecs.VideoStreamInfo! stream) -> void
+ManagedCodecs.H264.H264Decoder.H264Decoder(System.ReadOnlySpan<byte> codecPrivate) -> void
+ManagedCodecs.H264.H264Decoder.Threads.get -> int
+ManagedCodecs.H264.H264Decoder.Threads.init -> void

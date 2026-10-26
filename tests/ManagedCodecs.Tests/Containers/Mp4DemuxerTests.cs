@@ -41,6 +41,20 @@ public class Mp4DemuxerTests
     }
 
     [Fact]
+    public void NegativeCompositionOffsets_MoveTheDtsBackByTheLargestButTheLastTwoEntries()
+    {
+        // Offsets -1000, 3000, -2000, one sample each: as FFmpeg (ffprobe shows the same times), every dts moves back by
+        // 1000, the most negative offset of every entry but the last two, and the pts keep their times.
+        var ctts = FullBox("ctts", 1, U32(3), U32(1), U32(unchecked((uint)-1000)), U32(1), U32(3000), U32(1), U32(unchecked((uint)-2000)));
+        using var demuxer = new Mp4Demuxer(new MemoryStream(TinyMp4(ctts)));
+
+        var packets = demuxer.ReadPackets().Where(p => p.StreamIndex == demuxer.Video!.StreamIndex).ToList();
+
+        Assert.Equal([43_800L, 46_800, 49_800], packets.Select(p => p.Dts));
+        Assert.Equal([43_800L, 50_800, 48_800], packets.Select(p => p.Pts));
+    }
+
+    [Fact]
     public void ReadingTwiceGivesTheSamePackets()
     {
         using var demuxer = new Mp4Demuxer(new MemoryStream(TinyMp4()));
@@ -190,7 +204,7 @@ public class Mp4DemuxerTests
         Assert.Throws<InvalidDataException>(() => new Mp4Demuxer(new MemoryStream(Box("ftyp", Ascii("isom"), U32(0)))));
     }
 
-    private static byte[] TinyMp4()
+    private static byte[] TinyMp4(byte[]? ctts = null)
     {
         var ftyp = Box("ftyp", Ascii("isom"), U32(512), Ascii("isom"));
 
@@ -204,7 +218,7 @@ public class Mp4DemuxerTests
         var stbl = Box("stbl",
             SampleDescription(),
             FullBox("stts", 0, U32(1), U32(3), U32(3000)),
-            FullBox("ctts", 0, U32(2), U32(2), U32(3000), U32(1), U32(0)),
+            ctts ?? FullBox("ctts", 0, U32(2), U32(2), U32(3000), U32(1), U32(0)),
             FullBox("stsc", 0, U32(2), U32(1), U32(2), U32(1), U32(2), U32(1), U32(1)),
             FullBox("stz2", 0, [0, 0, 0, 4], U32(3), [0x32, 0x40]), // 24 reserved bits, 4-bit sizes 3, 2, 4
             FullBox("co64", 0, U32(2), U64(chunk1), U64(chunk2)),

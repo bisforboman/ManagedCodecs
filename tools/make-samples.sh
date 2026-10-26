@@ -101,6 +101,9 @@ ff "${FRAG[@]}" -movflags frag_keyframe+empty_moov+default_base_moof -frag_durat
 ff "${FRAG[@]}" -movflags frag_keyframe samples/fmp4-first-in-moov.mp4
 # Version 1 track runs with negative composition offsets (-512 for the B frames).
 ff "${FRAG[@]}" -movflags frag_keyframe+empty_moov+negative_cts_offsets samples/fmp4-negative-cts.mp4
+# The same offsets in the moov's own 'ctts' (version 1, -512 for the B frames), unfragmented: there FFmpeg moves every dts
+# back by the most negative one, where fragments move every pts forward (and its edit list is in the pts' times).
+ff -f lavfi -i "testsrc2=size=320x240:rate=25" -t 2 -c:v libx264 -bf 2 -movflags negative_cts_offsets samples/h264-negative-ctts.mp4
 
 # ---- H.264 Constrained Baseline ----
 # Intra only without the deblocking filter (at several QPs), intra with the filter and with filter offsets, P frames
@@ -415,6 +418,9 @@ rm -rf "$cqm"
 # Each aimed at one tool; the conformance test checks the tool really occurs. PNS is off except in the PNS samples.
 ff -f lavfi -i "sine=frequency=440:sample_rate=44100:duration=1" -c:a aac -b:a 96k -aac_pns 0 samples/aac-mono-44k.mp4
 ff -f lavfi -i "aevalsrc=0.4*sin(2*PI*440*t)+0.1*sin(2*PI*3000*t)|0.4*sin(2*PI*440*t+0.3)+0.08*sin(2*PI*5200*t):s=48000:d=2" -c:a aac -b:a 48k -aac_pns 0 samples/aac-stereo-48k.mp4
+# The same AAC in a QuickTime file (-f mov), whose sound description holds the 'esds' in a 'wave' box; named .mp4 so
+# the MP4 references and tests take it.
+ff -i samples/aac-stereo-48k.mp4 -c copy -f mov samples/aac-quicktime.mp4
 ff -f lavfi -i "aevalsrc=0.5*sin(2*PI*300*t)*sin(2*PI*2*t)+0.05*sin(2*PI*1700*t):s=8000:d=2" -c:a aac -b:a 16k -aac_pns 0 samples/aac-mono-8k.mp4
 ff -f lavfi -i "aevalsrc=0.5*sin(2*PI*600*t+4*sin(2*PI*3*t))|0.3*sin(2*PI*900*t):s=22050:d=2" -c:a aac -b:a 40k -aac_pns 0 samples/aac-stereo-22k.mp4
 ff -f lavfi -i "aevalsrc=0.6*sin(2*PI*440*t)*gt(mod(t\,0.1)\,0.05)+0.5*lt(mod(t\,0.25)\,0.0005):s=44100:d=2" -c:a aac -b:a 128k -aac_pns 0 samples/aac-transients.mp4

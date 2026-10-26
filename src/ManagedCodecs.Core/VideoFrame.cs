@@ -106,7 +106,7 @@ public sealed class VideoFrame : IDisposable
     /// Whether the decoder concealed errors in the frame, or in a frame it was predicted from (H.264 with
     /// <c>ConcealErrors</c>): parts of it are guesses.
     /// </summary>
-    public bool IsDamaged { get; set; }
+    public bool IsDamaged { get; internal set; }
 
     /// <summary>The visible samples of one row in one plane, as bytes (two a sample in the 10-bit formats).</summary>
     public Span<byte> GetRow(int plane, int y)

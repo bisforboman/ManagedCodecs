@@ -6,7 +6,7 @@ namespace ManagedCodecs;
 /// allocates new ones. Their old samples are not cleared, so whoever rents a frame writes every
 /// sample. Frames that are never disposed are collected as usual. Safe to use from several threads.
 /// </summary>
-public sealed class VideoFramePool
+internal sealed class VideoFramePool
 {
     private readonly int _capacity;
     private readonly List<byte[][]> _free = [];

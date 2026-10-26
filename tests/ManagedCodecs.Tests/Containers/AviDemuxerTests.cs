@@ -1,6 +1,6 @@
 using System.Buffers.Binary;
 using System.Text;
-using ManagedCodecs.Containers.Avi;
+using ManagedCodecs.Containers;
 
 namespace ManagedCodecs.Tests.Containers;
 

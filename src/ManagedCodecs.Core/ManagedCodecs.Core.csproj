@@ -12,6 +12,7 @@
     <InternalsVisibleTo Include="ManagedCodecs.Mjpeg" />
     <InternalsVisibleTo Include="ManagedCodecs.Containers" />
     <InternalsVisibleTo Include="ManagedCodecs.Aac" />
+    <InternalsVisibleTo Include="ManagedCodecs.Tests" />
   </ItemGroup>
 
 </Project>

@@ -1,5 +1,5 @@
 using System.Buffers.Binary;
-using ManagedCodecs.Containers.Mp4;
+using ManagedCodecs.Containers;
 using ManagedCodecs.H264;
 
 namespace ManagedCodecs.Tests.H264;

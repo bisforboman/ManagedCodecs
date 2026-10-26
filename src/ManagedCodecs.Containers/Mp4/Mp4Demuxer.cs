@@ -2,7 +2,7 @@ using System.Buffers.Binary;
 using System.Globalization;
 using System.Text;
 
-namespace ManagedCodecs.Containers.Mp4;
+namespace ManagedCodecs.Containers;
 
 /// <summary>
 /// MP4 / QuickTime (ISO/IEC 14496-12) demuxer: finds the first video and the first audio track

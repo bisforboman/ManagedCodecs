@@ -120,7 +120,7 @@ zero or more frames and `Flush` returns the rest:
 
 ```csharp
 using ManagedCodecs;            // IVideoDecoder, CodecIds, packets and frames
-using ManagedCodecs.Containers; // Demuxer (Mp4Demuxer and the others are in .Mp4, .Avi, .Adts)
+using ManagedCodecs.Containers; // Demuxer, Mp4Demuxer, AviDemuxer, AdtsDemuxer
 using ManagedCodecs.H264;
 using ManagedCodecs.Mjpeg;
 
@@ -168,7 +168,7 @@ foreach (var frame in await decoder.FlushAsync(cancellationToken))
 ```
 
 Each frame owns its samples. Frames are `IDisposable`: disposing one when done with it is optional, and gives an
-H.264 or MJPEG frame's planes back to the decoder for a later frame (a `VideoFramePool`), which saves allocating and
+H.264 or MJPEG frame's planes back to the decoder's pool for a later frame, which saves allocating and
 collecting about 1.4 MB a frame at 720p (MJPEG, `testsrc-420.avi`: 7.7 MB allocated a pass down to 2.0); a disposed
 frame's samples must not be used again. `new MjpegDecoder(video) { ZeroCopy = true }` decodes each image straight into
 its frame's planes, which are then whole MCUs wide and high (read rows through `GetRow`, or with `Strides`): 6% fewer

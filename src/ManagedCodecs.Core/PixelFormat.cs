@@ -51,7 +51,7 @@ public static class PixelFormatExtensions
     /// The format of <paramref name="chroma"/> sampling (0 gray, 1 4:2:0, 2 4:2:2, 3 4:4:4, as H.264's
     /// chroma_format_idc) and <paramref name="bitDepth"/>.
     /// </summary>
-    public static PixelFormat Of(int chroma, int bitDepth)
+    internal static PixelFormat Of(int chroma, int bitDepth)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(chroma);
         ArgumentOutOfRangeException.ThrowIfGreaterThan(chroma, 3);

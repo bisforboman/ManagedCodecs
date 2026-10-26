@@ -99,6 +99,11 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
 
 - A worktree has no generated samples: link them with `ln -s <main checkout>/samples/*.* samples/`, without `-f`
   (`ln -sf samples/*` once replaced the tracked `samples/README.md` with a link, and linked directories into themselves).
+  A worktree made before a sample was generated has no link to it: a new theory row then reads "no data".
+- The cloud sandbox reaches download.blender.org but not archive.org or test-videos.co.uk (CI reaches all three).
+- FFmpeg's generic demuxing replaces a dts that comes after its pts by the pts ("Invalid timestamps" at `-v debug`);
+  Mp4Demuxer doesn't, so a 'ctts' whose last two entries are more negative than the shift (docs/conformance.md, MP4)
+  gives those samples another dts than FFmpeg's.
 - Temporary instrumentation (coverage counters, traces): commit the real work first. `git checkout <file>` to
   remove the instrumentation otherwise also throws away the file's other uncommitted changes, and so does
   reversing a `git diff` taken against HEAD.
@@ -202,8 +207,9 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
   are final one row after they are deblocked (the next row's top edge filters
   their bottom). A race passes the threaded conformance tests by luck unless the random delays (`RowDelay`: before
   each picture and after each row; `MatchesFfmpegWithDelayedThreads`) make pictures overtake: check a new wait by
-  breaking it and seeing that test fail, and list it in `tools/mutation/mutations.py` (the co-located motion wait is the exception, covered in practice by the motion
-  compensation waits before it). A frame's second field runs on a decoder of its own alongside its first: it waits for
+  breaking it and seeing that test fail, and list it in `tools/mutation/mutations.py` (two waits are exceptions,
+  covered in practice by the motion compensation waits: the co-located motion wait and ListsDamaged's; that file says
+  why). A frame's second field runs on a decoder of its own alongside its first: it waits for
   the first's `Begin` (which resets both fields' slots), and its frame is copied out only once the first is done.
 - Measuring frame threading: perf samples only threads that run, so blocked time is invisible to it; time the waits
   (a Stopwatch around `Picture.Wait`, logging waiter, reference, row and duration, in a scratch copy) and the front

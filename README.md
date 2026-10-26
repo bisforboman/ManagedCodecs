@@ -33,7 +33,7 @@ writes a feature, unit tests and hand-built or rewritten streams cover it. [docs
 says feature by feature which encoder made the samples (libx264, OpenH264, JM) and what is not checked. Every night
 the [real-world check](https://github.com/bisforboman/ManagedCodecs/actions/workflows/realworld.yml)
 (`tools/realworld.py`) decodes three of Blender's open movies, real H.264 and AAC from real encoders, against FFmpeg:
-every frame identical, the audio within 2^-17. On every pull request the
+every frame identical, the audio within 2^-17. On pull requests that change code the
 [mutation check](https://github.com/bisforboman/ManagedCodecs/actions/workflows/mutation.yml)
 (`tools/mutation/mutate.py`) breaks, one at a time, the guards a passing test could miss (the frame threading waits,
 and code that reproduces FFmpeg's reading where it differs from the spec), and needs a test to fail for each.

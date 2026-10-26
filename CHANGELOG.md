@@ -9,6 +9,8 @@ them all.
 
 ## Unreleased
 
+## 0.1.0-preview.1 – 2026-10-26
+
 The first preview: what the README's Status section lists, as it stands.
 
 ### New

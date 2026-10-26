@@ -1,0 +1,120 @@
+name: Upstream releases
+
+# Weekly: an issue when something ManagedCodecs builds on or makes its samples with has moved past the version it uses:
+# StyleBro (prereleases, which Dependabot doesn't propose), and the encoders whose streams are committed in samples/
+# (OpenH264, the FDK AAC encoder, JM), which may write a tool or syntax their current streams don't. One issue per
+# release (none if one exists, open or closed; tools/upstream-issue.sh). On pull requests that change this workflow or
+# its script, a dry run: each job says what it would file.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '23 5 * * 1'
+  pull_request:
+    paths: ['.github/workflows/upstream.yml', 'tools/upstream-issue.sh']
+
+permissions:
+  contents: read
+  issues: write
+
+env:
+  DRY_RUN: ${{ github.event_name == 'pull_request' && '1' || '0' }}
+  GH_TOKEN: ${{ github.token }}
+
+jobs:
+  # StyleBro (the analyzers and the format tool, one version) is a prerelease: Dependabot's NuGet updater only moves a
+  # prerelease to prereleases of the same version or a stable one, so it never proposes 0.x.0-alpha.1 -> 0.y.0-alpha.1.
+  stylebro:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: A newer StyleBro on nuget.org?
+        run: |
+          ours=$(grep -oE 'Include="StyleBro.Analyzers" Version="[^"]+"' Directory.Packages.props | cut -d'"' -f4)
+          # NuGet's index lists listed versions in SemVer order, prereleases included.
+          latest=$(curl -fsSL --retry 3 https://api.nuget.org/v3-flatcontainer/stylebro.analyzers/index.json | jq -r '.versions[-1]')
+          echo "ManagedCodecs uses StyleBro $ours; nuget.org's newest is $latest."
+          [ -n "$ours" ] && [ -n "$latest" ] && [ "$latest" != "$ours" ] || exit 0
+          # Newer only (SemVer: a release sorts after its prereleases).
+          newer=$(python3 -c '
+          import sys
+          def key(s):
+              core, _, pre = s.partition("-")
+              ids = [(0, int(x), "") if x.isdigit() else (1, 0, x) for x in pre.split(".")] if pre else []
+              return (tuple(int(x) for x in core.split(".")), not pre, ids)
+          print(key(sys.argv[2]) > key(sys.argv[1]))' "$ours" "$latest" 2>/dev/null || echo False)
+          [ "$newer" = True ] || exit 0
+          tools/upstream-issue.sh "StyleBro $latest released" <<EOF
+          nuget.org has StyleBro $latest; ManagedCodecs uses $ours (found by the weekly upstream check: Dependabot doesn't propose a prerelease's next version).
+
+          Release notes: https://github.com/bisforboman/stylebro/blob/main/CHANGELOG.md (each version's "Upgrading from" section).
+
+          To move to it (one PR):
+          - [ ] The analyzers' version in \`Directory.Packages.props\` and the tool's in \`.config/dotnet-tools.json\` (they move together).
+          - [ ] \`dotnet tool restore\`, \`dotnet tool run stylebro-migrate format ManagedCodecs.slnx\`, then \`--verify-no-changes\` and a build with \`-warnaserror\`.
+          - [ ] Keep today's style where a new rule or setting would change it across the code (\`.editorconfig\`), and list the files the formatter changed in the PR.
+          EOF
+
+  # The encoders of the committed samples, at the version each script says it was made with ("made with ..."):
+  # OpenH264's newest release, the FDK AAC library's commits since ours (it tags rarely), JM's newest tag on the GitHub
+  # mirror the script clones.
+  encoders:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: A newer OpenH264 release?
+        run: |
+          ours=$(grep -oE 'made with v[0-9.]+' tools/make-openh264-samples.sh | grep -oE '[0-9.]+$')
+          latest=$(gh api repos/cisco/openh264/releases/latest --jq .tag_name | sed 's/^v//')
+          echo "samples/openh264 come from OpenH264 $ours; its newest release is ${latest:-unknown}."
+          newer=$(python3 -c 'import sys; v = lambda s: tuple(int(x) for x in s.split(".")); print(v(sys.argv[2]) > v(sys.argv[1]))' "$ours" "${latest:-0}" 2>/dev/null || echo False)
+          [ "$newer" = True ] || exit 0
+          tools/upstream-issue.sh "OpenH264 $latest released" <<EOF
+          OpenH264 $latest is out; the streams in \`samples/openh264/\` were made with $ours (found by the weekly upstream check).
+
+          Release notes: https://github.com/cisco/openh264/releases/tag/v$latest
+
+          - [ ] Read the notes for encoder changes that write something new (reference handling, MMCO, long-term references, SVC, frame_num gaps, CABAC).
+          - [ ] Build it (\`make USE_ASM=No h264enc\`), rerun \`tools/make-openh264-samples.sh\`, check the new streams with \`ffmpeg -bsf:v trace_headers\`, and run the tests.
+          - [ ] Commit the streams if they differ (and "made with" in the script); a stream that fails is a decoder bug.
+          EOF
+
+      - name: New FDK AAC commits?
+        run: |
+          ours=$(grep -oE 'made with commit [0-9a-f]+' tools/make-heaac-samples.sh | grep -oE '[0-9a-f]+$')
+          branch=$(gh api repos/mstorsjo/fdk-aac --jq .default_branch)
+          head=$(gh api "repos/mstorsjo/fdk-aac/commits/$branch" --jq .sha | cut -c1-7)
+          ahead=$(gh api "repos/mstorsjo/fdk-aac/compare/$ours...$head" --jq .ahead_by)
+          echo "samples/heaac come from fdk-aac $ours; $branch is $ahead commits ahead (at $head)."
+          [ "$ahead" -gt 0 ] || exit 0
+          tools/upstream-issue.sh "fdk-aac $head: $ahead commits since $ours" <<EOF
+          The FDK AAC library's default branch is $ahead commits past $ours, the commit \`samples/heaac/\` were made with (found by the weekly upstream check).
+
+          Changes: https://github.com/mstorsjo/fdk-aac/compare/$ours...$head
+
+          - [ ] Read the commits for encoder changes (SBR, PS, the SBR header, downsampled SBR) that would write something the current streams don't.
+          - [ ] If one does: rebuild, rerun \`tools/make-heaac-samples.sh\` (its patched copies too), run the tests, and commit the streams and the new "made with commit".
+          - [ ] Otherwise close this; the next commit opens a new one.
+          EOF
+
+      - name: A newer JM?
+        run: |
+          ours=$(grep -oE 'made with JM [0-9.]+' tools/make-jm-samples.sh | grep -oE '[0-9.]+$')
+          tags=$(gh api repos/shihuade/JM/tags --paginate --jq '.[].name')
+          latest=$(echo "$tags" | grep -oE '[0-9]+([.][0-9]+)+' | sort -V | tail -1 || true)
+          if [ -z "$latest" ]; then
+            echo "::warning::The JM mirror (shihuade/JM) has no version tags; nothing to compare JM $ours with."
+            exit 0
+          fi
+          echo "samples/jm come from JM $ours; the mirror's newest tag is $latest."
+          newer=$(python3 -c 'import sys; v = lambda s: tuple(int(x) for x in s.split(".")); print(v(sys.argv[2]) > v(sys.argv[1]))' "$ours" "$latest" 2>/dev/null || echo False)
+          [ "$newer" = True ] || exit 0
+          tools/upstream-issue.sh "JM $latest released" <<EOF
+          The JM mirror (https://github.com/shihuade/JM) has $latest; the streams in \`samples/jm/\` and \`samples/jm-ref/\` were made with JM $ours (found by the weekly upstream check).
+
+          - [ ] Read what changed in the encoder (field pictures, MBAFF, 4:2:2, 4:4:4, high bit depths, scaling lists, I_PCM).
+          - [ ] Rebuild (\`make -C lencod CFLAGS="-fcommon -O2"\`, and ldecod), rerun \`tools/make-jm-samples.sh\`, and run the tests; commit the streams if they differ, with the new version in the script.
+          EOF

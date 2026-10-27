@@ -173,6 +173,12 @@ internal sealed class ReferenceList
     /// <summary>8.2.4.3: moves the named pictures to the front, in order.</summary>
     private void Modify(List<Picture> list, int count, IReadOnlyList<RefPicListModification> modifications, SliceHeader header, int maxFrameNum)
     {
+        // 7.4.3.1: no more modifications than the list has entries (num_ref_idx_lX_active_minus1 + 1).
+        if (modifications.Count > count)
+        {
+            throw new InvalidDataException($"{modifications.Count} reference list modifications for a list of {count}.");
+        }
+
         // Field pictures number fields (8.2.4.1): CurrPicNum 2 * frame_num + 1, a field's PicNum
         // 2 * FrameNumWrap + 1 for the current parity and 2 * FrameNumWrap for the other; the
         // same for LongTermPicNum from LongTermFrameIdx.

@@ -56,7 +56,8 @@ internal static class SimpleIdct
         }
         else if (Ssse3.IsSupported || AdvSimd.Arm64.IsSupported)
         {
-            // The vector path's transposes need an accelerated byte shuffle (pshufb, tbl).
+            // The vector path's transposes are SSE2's unpacks on x64 (VectorZip) and need an accelerated byte
+            // shuffle (tbl) elsewhere; its other operations want more than SSE2, hence SSSE3 on x64.
             PutVector128(block, dest, stride);
         }
         else

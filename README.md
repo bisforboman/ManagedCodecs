@@ -77,7 +77,9 @@ and code that reproduces FFmpeg's reading where it differs from the spec), and n
 - H.264 speed: 1.85 to 3.29 times FFmpeg's time on one thread, interlaced video included (Benchmarking); at 720p
   every class sits at 2.2 to 2.8 times (CAVLC and CABAC, P and intra-only, High), so the gap is general rather than
   one class's (the CAVLC residual reader's compiled code is clean). MBAFF frames still look neighbours up through
-  Table 6-4 call by call (about 10% of their time), where progressive pictures read a table made once a picture.
+  Table 6-4 call by call (about 9% of their time, field pictures 7%), where progressive pictures read a table made
+  once a picture; a table of neighbouring pairs did not move it (the cost is the number of calls; docs/conformance.md,
+  Performance notes).
   With 4 threads a 720p P chain takes 0.52 of one thread's time over 50 frames and 0.41 over 250 (one IDR picture
   each, which decodes in 2.4 times a P picture's time with the P pictures trailing it: short GOPs gain less; medians
   of five interleaved runs), on 4 cores without SMT where four single-threaded decodes run side by side about 7%

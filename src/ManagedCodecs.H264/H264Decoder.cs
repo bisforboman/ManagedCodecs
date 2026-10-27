@@ -1067,8 +1067,17 @@ public sealed class H264Decoder : IVideoDecoder
         }
     }
 
+    // The largest frame any level allows (MaxFS of levels 6 to 6.2, Table A-1: 8192x4320 and a little more): beyond it
+    // only damaged or hostile streams, each of whose pictures would take time and memory without bound.
+    private const int MaxFrameMbs = 139264;
+
     private static void CheckSupported(SequenceParameterSet sps)
     {
+        if ((long)sps.WidthInMbs * sps.HeightInMbs > MaxFrameMbs)
+        {
+            throw new NotSupportedException($"Frames of {sps.WidthInMbs} x {sps.HeightInMbs} macroblocks are larger than any level allows ({MaxFrameMbs} macroblocks).");
+        }
+
         // 11 and 13 bits are left out: FFmpeg has no pixel format for them, so nothing to check them against.
         if (sps.BitDepthLuma is not (8 or 9 or 10 or 12 or 14) || (sps.ChromaFormatIdc != 0 && sps.BitDepthChroma != sps.BitDepthLuma))
         {

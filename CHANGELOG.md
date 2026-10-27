@@ -15,6 +15,13 @@ share internals, so use one version of them all.
   off the right and bottom within the last macroblock, as FFmpeg's decoder does: an Apple-encoded 640x360 MP4 that
   stores 640x359 now decodes to 640x359. The span constructor is unchanged.
 
+### Fixed
+
+- H.264: a field picture's packet that goes on with a slice of the other field or of a frame is refused (as a packet
+  holding more than one picture) rather than decoded into the field, where concealing errors could throw
+  `ArgumentOutOfRangeException`; and frames larger than any level allows (over 139,264 macroblocks) are refused with
+  `NotSupportedException` rather than decoded in time and memory without bound. Both from fuzzing.
+
 ## 0.1.0-preview.2 – 2026-10-26
 
 The public API before it freezes ([docs/decisions/2026-10-26-api-before-0.1.0.md](docs/decisions/2026-10-26-api-before-0.1.0.md)).

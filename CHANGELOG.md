@@ -9,7 +9,7 @@ share internals, so use one version of them all.
 
 ## Unreleased
 
-### Changed
+### Breaking changes
 
 - `H264Decoder(VideoStreamInfo)` crops frames to the container's picture size where it takes only columns and rows
   off the right and bottom within the last macroblock, as FFmpeg's decoder does: an Apple-encoded 640x360 MP4 that

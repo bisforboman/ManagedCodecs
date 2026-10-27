@@ -8,7 +8,7 @@ namespace ManagedCodecs.H264;
 /// picture repeat the nearest edge sample (coordinates are clamped, equations 8-228/8-229).
 /// </summary>
 /// <remarks>
-/// <see cref="PredictLuma"/> and <see cref="PredictChroma"/> copy the reference window once
+/// <c>PredictLuma</c> and <c>PredictChroma</c> copy the reference window once
 /// and filter whole rows; the <c>*Reference</c> versions compute every sample directly from the
 /// equations and are kept as the specification for tests.
 /// </remarks>

@@ -31,6 +31,11 @@ public sealed class AdtsDemuxer : IDemuxer
     private readonly List<(long Position, int Length, int Blocks)> _frames = [];
     private readonly long _truncatedFrame = -1;
 
+    /// <summary>Reads the file's headers (and finds every frame); packets are read from the stream later, by <see cref="ReadPackets"/>.</summary>
+    /// <param name="stream">A seekable stream holding the file.</param>
+    /// <param name="leaveOpen">Whether <see cref="Dispose"/> leaves <paramref name="stream"/> open.</param>
+    /// <exception cref="ArgumentException">The stream is not seekable.</exception>
+    /// <exception cref="InvalidDataException">The file is not ADTS, or is malformed.</exception>
     public AdtsDemuxer(Stream stream, bool leaveOpen = false)
     {
         ArgumentNullException.ThrowIfNull(stream);
@@ -89,11 +94,13 @@ public sealed class AdtsDemuxer : IDemuxer
     /// <summary>Always null: an ADTS file is audio only.</summary>
     public VideoStreamInfo? Video => null;
 
+    /// <summary>The AAC stream; its AudioSpecificConfig is made from the first frame's header.</summary>
     public AudioStreamInfo Audio { get; }
 
     // Table 1.18's samplingFrequencyIndex.
     private static ReadOnlySpan<int> SampleRates => [96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000, 7350];
 
+    /// <summary>Opens the file at <paramref name="path"/>, which the demuxer disposes with itself.</summary>
     public static AdtsDemuxer Open(string path) => new(File.OpenRead(path));
 
     /// <inheritdoc cref="AdtsDemuxer"/>
@@ -102,6 +109,7 @@ public sealed class AdtsDemuxer : IDemuxer
     /// <inheritdoc cref="AviDemuxer.ReadPacketsAsync"/>
     public IAsyncEnumerable<Packet> ReadPacketsAsync(CancellationToken cancellationToken = default) => ReadSteps.RunAsync(_stream, Steps(), "ADTS", cancellationToken);
 
+    /// <summary>Disposes the stream, unless the demuxer was made to leave it open.</summary>
     public void Dispose()
     {
         if (!_leaveOpen)

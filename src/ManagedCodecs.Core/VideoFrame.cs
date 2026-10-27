@@ -6,10 +6,10 @@ namespace ManagedCodecs;
 /// with the size alone owns tight planes: stride equals plane width and offsets are 0. A frame
 /// that wraps a decoder's buffers (H.264's borrowed frames) has wider strides and nonzero
 /// offsets, so read rows through <see cref="GetRow"/> or with <see cref="Offsets"/> and
-/// <see cref="Strides"/>. Strides and offsets count bytes, which for the 10-bit formats are two a
-/// sample (<see cref="PixelFormatExtensions.BytesPerSample"/>).
+/// <see cref="Strides"/>. Strides and offsets count bytes, which for the formats deeper than 8 bits are
+/// two a sample (<see cref="PixelFormatExtensions.BytesPerSample"/>).
 /// <para>
-/// Disposing a frame is optional. A frame from a <see cref="VideoFramePool"/> (the H.264
+/// Disposing a frame is optional. A frame a decoder made on planes of its own pool (the H.264
 /// decoder's copied frames) then gives its planes back for the next frame, which saves
 /// allocating and collecting them; a disposed frame's samples must not be used again, and
 /// <see cref="Planes"/>, <see cref="GetRow"/> and <see cref="WritePacked"/> throw.
@@ -21,6 +21,8 @@ public sealed class VideoFrame : IDisposable
     private readonly VideoFramePool? _pool;
     private bool _disposed;
 
+    /// <summary>A frame that owns new, zeroed, tight planes: each stride the plane's width in bytes, each offset 0.</summary>
+    /// <exception cref="ArgumentOutOfRangeException">The width or height is not positive.</exception>
     public VideoFrame(int width, int height, PixelFormat format)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(width);
@@ -83,14 +85,20 @@ public sealed class VideoFrame : IDisposable
         Offsets = offsets;
     }
 
+    /// <summary>Visible width in luma samples.</summary>
     public int Width { get; }
 
+    /// <summary>Visible height in luma samples.</summary>
     public int Height { get; }
 
+    /// <summary>The planes' layout and sample depth.</summary>
     public PixelFormat Format { get; }
 
+    /// <summary>The planes (Y, or Y, Cb and Cr), each a byte array laid out by <see cref="Strides"/> and <see cref="Offsets"/>.</summary>
+    /// <exception cref="ObjectDisposedException">The frame was disposed.</exception>
     public byte[][] Planes => _disposed ? throw new ObjectDisposedException(nameof(VideoFrame)) : _planes;
 
+    /// <summary>Bytes from one row of each plane to the next.</summary>
     public int[] Strides { get; }
 
     /// <summary>Index of each plane's first visible sample in <see cref="Planes"/>.</summary>
@@ -108,7 +116,7 @@ public sealed class VideoFrame : IDisposable
     /// </summary>
     public bool IsDamaged { get; internal set; }
 
-    /// <summary>The visible samples of one row in one plane, as bytes (two a sample in the 10-bit formats).</summary>
+    /// <summary>The visible samples of one row in one plane, as bytes (two a sample in the formats deeper than 8 bits).</summary>
     public Span<byte> GetRow(int plane, int y)
     {
         var (planeWidth, planeHeight) = Format.PlaneSize(plane, Width, Height);

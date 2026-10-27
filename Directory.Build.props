@@ -19,6 +19,14 @@
     <PackageReference Include="Microsoft.CodeAnalysis.PublicApiAnalyzers" PrivateAssets="all" />
   </ItemGroup>
 
+  <!-- The src/ libraries' XML documentation ships in their packages (lib/net10.0/*.xml), for IntelliSense; a public
+       member without a doc comment fails the build (CS1591, with -warnaserror as CI builds). Comments may name some of
+       a method's parameters and not others (CS1573), as many internal ones do. -->
+  <PropertyGroup Condition="$(MSBuildProjectDirectory.Replace('\', '/').Contains('/src/'))">
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1573</NoWarn>
+  </PropertyGroup>
+
   <!-- Shared package metadata for the src/ libraries. Every package has one version, the newest in CHANGELOG.md, given
        at pack time (release.yml: dotnet pack -p:Version=X); local builds are 0.0.0-dev. -->
   <PropertyGroup>

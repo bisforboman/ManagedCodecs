@@ -21,6 +21,11 @@ public sealed class AviDemuxer : IDemuxer
     private readonly long _moviEnd;
     private readonly int _videoStreamIndex;
 
+    /// <summary>Reads the file's headers; packets are read from the stream later, by <see cref="ReadPackets"/>.</summary>
+    /// <param name="stream">A seekable stream holding the file.</param>
+    /// <param name="leaveOpen">Whether <see cref="Dispose"/> leaves <paramref name="stream"/> open.</param>
+    /// <exception cref="ArgumentException">The stream is not seekable.</exception>
+    /// <exception cref="InvalidDataException">The file is not an AVI file with a video stream, or is malformed.</exception>
     public AviDemuxer(Stream stream, bool leaveOpen = false)
     {
         ArgumentNullException.ThrowIfNull(stream);
@@ -100,11 +105,13 @@ public sealed class AviDemuxer : IDemuxer
         }
     }
 
+    /// <summary>The first video stream (an AVI file without one is refused).</summary>
     public VideoStreamInfo Video { get; }
 
     /// <summary>Always null: audio in AVI is not exposed.</summary>
     public AudioStreamInfo? Audio => null;
 
+    /// <summary>Opens the file at <paramref name="path"/>, which the demuxer disposes with itself.</summary>
     public static AviDemuxer Open(string path) => new(File.OpenRead(path));
 
     /// <remarks>
@@ -170,6 +177,7 @@ public sealed class AviDemuxer : IDemuxer
         }
     }
 
+    /// <summary>Disposes the stream, unless the demuxer was made to leave it open.</summary>
     public void Dispose()
     {
         if (!_leaveOpen)

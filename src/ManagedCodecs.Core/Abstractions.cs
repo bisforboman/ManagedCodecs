@@ -3,6 +3,7 @@ namespace ManagedCodecs;
 /// <summary>A rational number, used for time bases (e.g. 1/25 or 1/12800 seconds per tick).</summary>
 public readonly record struct Rational(int Numerator, int Denominator)
 {
+    /// <summary>The value as a double; 0 when <see cref="Denominator"/> is 0.</summary>
     public double ToDouble() => Denominator == 0 ? 0 : (double)Numerator / Denominator;
 
     /// <summary>Divides out the greatest common divisor, e.g. 40000/1000000 becomes 1/25.</summary>
@@ -18,13 +19,17 @@ public readonly record struct Rational(int Numerator, int Denominator)
         return a == 0 ? new Rational(0, 1) : new Rational(checked((int)(numerator / a)), checked((int)(denominator / a)));
     }
 
+    /// <summary>The fraction as written, e.g. "1/25".</summary>
     public override string ToString() => $"{Numerator}/{Denominator}";
 }
 
 /// <summary>Normalized codec identifiers used in <see cref="VideoStreamInfo.Codec"/>.</summary>
 public static class CodecIds
 {
+    /// <summary>Motion JPEG: each packet one JPEG image (or, interlaced, two fields).</summary>
     public const string Mjpeg = "MJPG";
+
+    /// <summary>H.264 / AVC, packets of length-prefixed NAL units as MP4 stores them.</summary>
     public const string H264 = "H264";
 
     /// <summary>MPEG-4 Part 2 Visual.</summary>

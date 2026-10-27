@@ -19,26 +19,33 @@ internal sealed class SeparatePlanesDecoder : IPictureDecoder
         _planes = planes;
     }
 
+    /// <inheritdoc/>
     public SequenceParameterSet Sps => _planes[0].Sps;
 
+    /// <inheritdoc/>
     public Picture Picture { get; private set; } = null!;
 
+    /// <inheritdoc/>
     public bool IsComplete => _planes.All(p => p.IsComplete);
 
+    /// <inheritdoc/>
     public int RowDelay
     {
         get => _planes[0].RowDelay;
         set => Array.ForEach(_planes, p => p.RowDelay = value);
     }
 
+    /// <inheritdoc/>
     public bool ConcealErrors
     {
         get => _planes[0].ConcealErrors;
         set => Array.ForEach(_planes, p => p.ConcealErrors = value);
     }
 
+    /// <inheritdoc/>
     public int ConcealedMbCount => _planes.Sum(p => p.ConcealedMbCount);
 
+    /// <inheritdoc/>
     public void Begin(Picture picture, SequenceParameterSet sps, int fieldParity = -1, bool secondField = false)
     {
         Picture = picture;
@@ -48,14 +55,17 @@ internal sealed class SeparatePlanesDecoder : IPictureDecoder
         }
     }
 
+    /// <inheritdoc/>
     public void DecodeSlice(SliceHeader header, PictureParameterSet pps, BitReader r, IReadOnlyList<Picture> refList0, IReadOnlyList<Picture> refList1, MarkSnapshot marks)
     {
         int plane = header.ColourPlaneId;
         _planes[plane].DecodeSlice(header, pps, r, PlaneOf(refList0, plane), PlaneOf(refList1, plane), marks);
     }
 
+    /// <inheritdoc/>
     public void Deblock() => Array.ForEach(_planes, p => p.Deblock());
 
+    /// <inheritdoc/>
     public void Conceal(Picture? fallback)
     {
         for (int plane = 0; plane < 3; plane++)

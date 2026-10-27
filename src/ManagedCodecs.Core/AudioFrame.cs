@@ -4,6 +4,8 @@ namespace ManagedCodecs;
 /// <remarks>Samples are not clipped; values slightly outside [-1, 1] are kept as decoded.</remarks>
 public sealed class AudioFrame
 {
+    /// <summary>A frame of <paramref name="channels"/> channels of <paramref name="sampleCount"/> samples each, all 0.</summary>
+    /// <exception cref="ArgumentOutOfRangeException">The rate or channel count is not positive, or the sample count is negative.</exception>
     public AudioFrame(int sampleRate, int channels, int sampleCount)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(sampleRate);
@@ -18,10 +20,13 @@ public sealed class AudioFrame
         }
     }
 
+    /// <summary>Samples per second (per channel).</summary>
     public int SampleRate { get; }
 
+    /// <summary>Number of channels, in the order the decoder gives them (AAC: as FFmpeg orders them).</summary>
     public int Channels => Samples.Length;
 
+    /// <summary>Samples per channel in this frame.</summary>
     public int SampleCount => Samples[0].Length;
 
     /// <summary>Samples[channel][index].</summary>

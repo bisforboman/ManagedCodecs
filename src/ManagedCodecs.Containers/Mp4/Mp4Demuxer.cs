@@ -49,6 +49,11 @@ public sealed class Mp4Demuxer : IDemuxer
     private readonly SampleTable _video;
     private readonly SampleTable _audio;
 
+    /// <summary>Reads the file's headers ('moov' and, in fragmented files, every 'moof'); packets are read from the stream later, by <see cref="ReadPackets"/>.</summary>
+    /// <param name="stream">A seekable stream holding the file.</param>
+    /// <param name="leaveOpen">Whether <see cref="Dispose"/> leaves <paramref name="stream"/> open.</param>
+    /// <exception cref="ArgumentException">The stream is not seekable.</exception>
+    /// <exception cref="InvalidDataException">The file is not MP4 or QuickTime, or is malformed.</exception>
     public Mp4Demuxer(Stream stream, bool leaveOpen = false)
     {
         ArgumentNullException.ThrowIfNull(stream);
@@ -165,6 +170,7 @@ public sealed class Mp4Demuxer : IDemuxer
         }
     }
 
+    /// <inheritdoc/>
     public VideoStreamInfo? Video { get; }
 
     /// <summary>
@@ -202,10 +208,13 @@ public sealed class Mp4Demuxer : IDemuxer
         return 0;
     }
 
+    /// <inheritdoc/>
     public AudioStreamInfo? Audio { get; }
 
+    /// <summary>Opens the file at <paramref name="path"/>, which the demuxer disposes with itself.</summary>
     public static Mp4Demuxer Open(string path) => new(File.OpenRead(path));
 
+    /// <inheritdoc/>
     public IEnumerable<Packet> ReadPackets() => ReadSteps.Run(_stream, Steps(), "MP4");
 
     /// <inheritdoc cref="AviDemuxer.ReadPacketsAsync"/>
@@ -253,6 +262,7 @@ public sealed class Mp4Demuxer : IDemuxer
         }
     }
 
+    /// <summary>Disposes the stream, unless the demuxer was made to leave it open.</summary>
     public void Dispose()
     {
         if (!_leaveOpen)

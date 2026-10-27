@@ -9,6 +9,11 @@ share internals, so use one version of them all.
 
 ## Unreleased
 
+### Added
+
+- The packages carry their XML documentation (`lib/net10.0/*.xml`), so IntelliSense shows it; every public member has
+  a doc comment, and the build fails on one without (CS1591).
+
 ## 0.1.0-preview.3 – 2026-10-27
 
 ### Breaking changes

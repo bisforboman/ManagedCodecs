@@ -9,6 +9,12 @@ share internals, so use one version of them all.
 
 ## Unreleased
 
+### Changed
+
+- `H264Decoder(VideoStreamInfo)` crops frames to the container's picture size where it takes only columns and rows
+  off the right and bottom within the last macroblock, as FFmpeg's decoder does: an Apple-encoded 640x360 MP4 that
+  stores 640x359 now decodes to 640x359. The span constructor is unchanged.
+
 ## 0.1.0-preview.2 – 2026-10-26
 
 The public API before it freezes ([docs/decisions/2026-10-26-api-before-0.1.0.md](docs/decisions/2026-10-26-api-before-0.1.0.md)).

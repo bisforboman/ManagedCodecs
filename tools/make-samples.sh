@@ -452,6 +452,9 @@ ff -f lavfi -i "anoisesrc=color=pink:amplitude=0.3:sample_rate=44100:duration=2:
 ff -f lavfi -i "testsrc2=size=320x240:rate=25,scroll=h=0.01" -f lavfi -i "sine=frequency=330:sample_rate=48000:duration=1" -t 1 -c:v libx264 -profile:v baseline -pix_fmt yuv420p -refs 2 -c:a aac -ac 2 -aac_pns 0 samples/h264-with-audio.mp4
 # Raw AAC in ADTS frames (the ADTS demuxer): stereo at 44.1 kHz, and 5.1 behind an ID3v2 tag (which the demuxer skips).
 ff -f lavfi -i "aevalsrc=0.4*sin(2*PI*440*t)|0.3*sin(2*PI*660*t):s=44100:d=1" -c:a aac -b:a 96k -aac_pns 0 -f adts samples/aac-adts.aac
+# Pulse data, which no encoder at hand writes (FFmpeg's never does): a stream written by its syntax, every frame one
+# mono element of codebook 1 with one to four pulses, some on zero values (tools/make-aac-pulse.py).
+python3 -I tools/make-aac-pulse.py samples/aac-pulse.aac
 # The same, its encoder name (in the first frame's fill element) rewritten to read as FAAC's, where FFmpeg's decoder
 # looks for it: it then skips FAAC's encoder delay, 1024 samples, which FAAC signals nowhere else (Sintel's trailer).
 cp samples/aac-adts.aac samples/aac-faac-delay.aac && python3 -I tools/aac-encoder-name.py samples/aac-faac-delay.aac > /dev/null

@@ -84,6 +84,12 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.Aac/AacDecoder.cs",
          find="output.Pts = packet.Pts + SamplesToTime(dropped);", replace="output.Pts = packet.Pts;",
          tests="FullyQualifiedName~FramePtsMatchFfmpeg"),
+    # A pulse on a zero quantized value goes negative (4.6.3.3: x_quant > 0 adds the amplitude, else subtracts it); only
+    # the hand-built aac-pulse sample (tools/make-aac-pulse.py) has pulse data.
+    dict(file="src/ManagedCodecs.Aac/AacDecoder.cs",
+         find="q[k] += q[k] > 0 ? stream.PulseAmplitude[i] : -stream.PulseAmplitude[i];",
+         replace="q[k] += q[k] >= 0 ? stream.PulseAmplitude[i] : -stream.PulseAmplitude[i];",
+         tests="DisplayName~aac-pulse"),
     # Channel configuration 7 as FFmpeg's 7.1, not the spec's outside front pair.
     dict(file="src/ManagedCodecs.Aac/AacDecoder.cs",
          find="7 => [1, 2, 0, 7, 5, 6, 3, 4],", replace="7 => [1, 2, 0, 7, 3, 4, 5, 6],",

@@ -351,7 +351,8 @@ The default target leaves AAC and HE-AAC about a third slower (their 256-bit pat
 20% of the JIT either way, and perf profiles of the v3 and JIT builds of 720p H.264 have the same shape, no function's
 share more than a point apart (mcdec's JIT build has tiered compilation and so dynamic PGO off, so that is not the
 difference). `OptimizationPreference=Speed` changed nothing beyond the noise. Startup is AOT's own gain: in bench.py's
-whole-process times the short runs take less under AOT than under the JIT.
+whole-process times (taken before the shuffle fix) the short H.264 and AAC LC runs took less under AOT than under the
+JIT.
 
 Cloud VMs are noisy (single runs differed by up to a third), so compare before and after on one machine. For
 statistics on the decoder alone there is BenchmarkDotNet, `dotnet run -c Release --project

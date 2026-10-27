@@ -13,6 +13,7 @@ share internals, so use one version of them all.
 
 - The packages carry their XML documentation (`lib/net10.0/*.xml`), so IntelliSense shows it; every public member has
   a doc comment, and the build fails on one without (CS1591).
+- nuget.org shows a readme for every package (`PACKAGE.md`): what they decode, an example, links to the documentation.
 
 ## 0.1.0-preview.3 – 2026-10-27
 

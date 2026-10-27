@@ -579,8 +579,10 @@ public sealed class H264Decoder : IVideoDecoder
                     {
                         current = StartPicture(header, sps, pts, frames!);
                     }
-                    else if (header.FrameNum != current.State.Header.FrameNum || current.State.Sps != sps)
+                    else if (header.FrameNum != current.State.Header.FrameNum || current.State.Sps != sps
+                        || header.FieldPic != current.State.Header.FieldPic || header.BottomField != current.State.Header.BottomField)
                     {
+                        // A slice of another frame, or of the other field (7.4.1.2.4: the first slice of a new picture).
                         throw new NotSupportedException("A packet holding more than one picture is not supported.");
                     }
 

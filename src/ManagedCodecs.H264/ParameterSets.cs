@@ -150,7 +150,12 @@ internal sealed class SequenceParameterSet
             // Crop units (Table 6-1, equations 7-19 to 7-22): chroma samples, of 4:2:0 or 4:2:2.
             int unitX = chromaFormat is 1 or 2 ? 2 : 1;
             int unitY = (chromaFormat == 1 ? 2 : 1) * (frameMbsOnly ? 1 : 2);
-            crop = ((int)r.ReadUe() * unitX, (int)r.ReadUe() * unitX, (int)r.ReadUe() * unitY, (int)r.ReadUe() * unitY);
+
+            // Bounded by the largest picture (1024 macroblocks either way), so that no product overflows; the check below
+            // then sees whether anything is left.
+            const int maxCrop = 1024 * 16;
+            crop = (r.ReadUe(maxCrop, "frame_crop_left_offset") * unitX, r.ReadUe(maxCrop, "frame_crop_right_offset") * unitX,
+                r.ReadUe(maxCrop, "frame_crop_top_offset") * unitY, r.ReadUe(maxCrop, "frame_crop_bottom_offset") * unitY);
         }
 
         // Of the VUI, only the bitstream restriction matters: it says how far output is reordered.

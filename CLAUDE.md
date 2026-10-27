@@ -54,7 +54,7 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
   before relying on it. Encoders often never emit a tool (libx264: no ref list modification, I_PCM, B partitions
   below 8x8, MMCO other than 1 (which needs b-pyramid), explicit weights in B slices, cabac_init_idc other
   than 0, a second_chroma_qp_index_offset other than the first, scaling lists in the SPS or a Cr list of its own;
-  FFmpeg's AAC: no pulse data, no SBR or PS: HE-AAC comes from the FDK encoder, `tools/make-heaac-samples.sh`, its
+  FFmpeg's AAC: no pulse data (`tools/make-aac-pulse.py` writes a stream with it), no SBR or PS: HE-AAC comes from the FDK encoder, `tools/make-heaac-samples.sh`, its
   streams committed in `samples/heaac/`). A second encoder covers some: OpenH264 (`tools/make-openh264-samples.sh`, its
   streams committed in `samples/openh264/`) writes long-term references, MMCO 4 and 6, POC type 2, SVC, and
   frame_num gaps once temporal layers are dropped. A third, JM (`tools/make-jm-samples.sh`, committed in

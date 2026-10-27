@@ -192,6 +192,11 @@ public class AacConformanceTests
             Assert.True(stats.NoiseBands > 0, "No noise substitution in the sample.");
         }
 
+        if (sampleName.Contains("pulse", StringComparison.Ordinal))
+        {
+            Assert.True(stats.PulseFrames == frame, "Not every frame of the sample has pulse data.");
+        }
+
         if (sampleName.Contains("pns-ms", StringComparison.Ordinal))
         {
             Assert.True(stats.CorrelatedNoiseBands > 0, "No M/S in bands both channels fill with noise in the sample.");

@@ -353,8 +353,12 @@ to 2% each. In MBAFF frames and field pictures Table 6-4's lookup (`AffNeighbor`
 7.1% (`jm-paff-b`) by perf. A table of each pair's neighbouring pairs, made with the decoder, took its division and
 position arithmetic out and moved that by about a point, within the noise, and the wall clock not at all (both
 against an A/A run, reverted): the cost is the number of calls, not each one. Caching each pair's neighbours'
-availability instead would have to be redone when concealment fills a macroblock that pairs below it saw as missing;
-the next attempt is per-macroblock arrays of the 4x4 blocks' neighbours, filled once, for the callers.
+availability instead would have to be redone when concealment fills a macroblock that pairs below it saw as missing.
+Counted, the lookups are about 33 a macroblock in `h264-mbaff-default` (fewer than 8 for each luma A and B location,
+the left column's and the top row's, the rest inside the macroblock or chroma, C, D and the deblocking filter's): a
+cache of the current macroblock's luma A and B locations, filled on first use and keyed on its address, field flag and
+slice, saved about 8 of them but cost more than it saved (the lookups' share rose from 9.6 to 11.6%, and from 7.0 to
+8.4% in `jm-paff-b`; reverted). Left: the lookups' callers each asking for what they need in fewer calls.
 
 A profile of a
 720p libx264 default stream (2026-10-22) is flat: CABAC residual decoding takes 14%, deblocking 21%

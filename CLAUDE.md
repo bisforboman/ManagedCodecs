@@ -45,7 +45,8 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
 - **Asking the user**: whenever you need input from the user (a choice, an approval, whether to go on), ask with
   the multiple-choice prompt (AskUserQuestion), not with a question at the end of a reply. That includes what to do
   next: once a PR merges (or whenever a reply would end waiting for "what's next"), prompt the next choice at once,
-  with the advisor's recommendation first, rather than inviting the user to ask.
+  with the advisor's recommendation first, rather than inviting the user to ask; a stop the user chose ends with that
+  prompt too, never with a list of what is left.
 - **Before pushing**: `tools/make-samples.sh` (once; needs ffmpeg with libx264 and ImageMagick) and
   `dotnet test ManagedCodecs.slnx`; for SIMD changes also with `DOTNET_EnableHWIntrinsic=0` (CI runs both).
 - **New feature, new sample**: add it to tools/make-samples.sh with a comment saying what it isolates, and check

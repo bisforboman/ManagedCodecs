@@ -72,7 +72,8 @@ def frames(output):
 
 def mcdec(dll, path, loops, threads=1):
     """Wall time per decoded frame in microseconds, and the frames per loop."""
-    command = ["dotnet", dll, path, "--loops", str(loops)]
+    # A .dll runs on the runtime; anything else is a native executable (a Native AOT publish of mcdec).
+    command = (["dotnet", dll] if dll.endswith(".dll") else [dll]) + [path, "--loops", str(loops)]
     if threads != 1:
         command += ["--threads", str(threads)]
     output = run(command)

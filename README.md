@@ -297,7 +297,7 @@ line shows the steady speed without them). mcdec disposes each frame once it has
 would, so H.264 frames reuse the planes of earlier ones.
 
 `tools/bench.py` times the samples below that way, each against FFmpeg (or one build of mcdec against another, with
-`--base <mcdec.dll>`), five runs a side interleaved with the order alternating, and takes the medians; one more row
+`--base <mcdec.dll>`, or a Native AOT publish of mcdec: `--base` takes the native executable too), five runs a side interleaved with the order alternating, and takes the medians; one more row
 times the 720p sample with 4 threads against 1. The [weekly benchmark](https://github.com/bisforboman/ManagedCodecs/actions/workflows/benchmark.yml)
 (`.github/workflows/benchmark.yml`, also on demand) runs it on GitHub's x64 and ARM64 runners with Ubuntu's FFmpeg 6.1
 and puts the tables in each run's summary; each run's record goes to the `benchmarks` branch, whose
@@ -316,6 +316,40 @@ the 8-bit ratio. The short MJPEG and AAC runs are mostly .NET's startup and JIT:
 `aac-5.1.mp4` takes about 90 µs a frame, `heaac-5.1.mp4` about 410, `heaacv2-stereo.mp4` about 140. A VM's speed
 moves from hour to hour, and FFmpeg's and ours do not move together (unchanged code's ratios once moved by -14 to +16%
 between two snapshots of a day): only comparisons made on one machine at one time count.
+
+### Native AOT
+
+On x64, a Native AOT publish compiles for the instruction set it is given, not the machine it runs on. Under its
+default, `Avx2.IsSupported` and `Vector256.IsHardwareAccelerated` read false, so the MJPEG IDCT's AVX2 path and AAC's
+256-bit ones are left out; and though `Ssse3.IsSupported` reads true there as it does with `x86-64-v2`, the default
+build ran the IDCT's 128-bit path at about half the speed the `x86-64-v2` one did (700 against 375 µs a frame on
+`testsrc-420.avi`; not traced further). Set the instruction set in the publishing project:
+
+```xml
+<IlcInstructionSet>x86-64-v3</IlcInstructionSet>   <!-- AVX2: Intel since 2013 (Haswell), AMD since 2015 -->
+```
+
+(`x86-64-v2` for older CPUs; `native` for the build machine's own). A v3 binary refuses to start on a CPU without AVX2.
+ARM64 needs nothing: its vector instructions are part of the baseline. `mcdec` published both ways (2026-10-27, 4-core
+cloud VM, `last loop` per frame, medians of 5 interleaved runs, against the JIT build of the same code):
+
+| Sample | JIT (µs) | AOT, default | AOT, `x86-64-v3` |
+| --- | ---: | ---: | ---: |
+| `testsrc-420.avi` (MJPEG) | 393 | 1.89x | 1.04x |
+| `noise-q1.avi` (MJPEG) | 1401 | 1.64x | 0.97x |
+| `h264-p-refs.mp4` | 560 | 1.13x | 1.04x |
+| `h264-bench-720p.mp4` | 10634 | 1.17x | 1.13x |
+| `h264-high-b.mp4` | 1322 | 1.11x | 1.07x |
+| `h264-10bit-b.mp4` | 1938 | 1.00x | 0.96x |
+| `h264-mbaff-default.mp4` | 1710 | 1.11x | 1.00x |
+| `aac-5.1.mp4` | 128 | 1.13x | 1.08x |
+| `heaac/heaac-5.1.mp4` | 655 | 1.26x | 0.95x |
+
+With v3, MJPEG and HE-AAC run as fast as under the JIT, and H.264 within about 10% (not profiled further; mcdec's JIT
+build has tiered compilation and so dynamic PGO off, so that is not the difference); `x86-64-v2` brings MJPEG to
+about 1.1 times the JIT's time. `OptimizationPreference=Speed` changed nothing beyond the noise. Startup is AOT's own
+gain: in bench.py's whole-process times the short H.264 and AAC LC runs took less under default AOT than under the JIT
+(MJPEG's did not: its IDCT outweighs the startup).
 
 Cloud VMs are noisy (single runs differed by up to a third), so compare before and after on one machine. For
 statistics on the decoder alone there is BenchmarkDotNet, `dotnet run -c Release --project

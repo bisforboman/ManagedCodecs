@@ -13,6 +13,11 @@ run time.
 
 ## Unreleased
 
+### Documentation
+
+- Native AOT on x64: set `IlcInstructionSet` (x86-64-v3) in the app, or the AVX2 and 256-bit paths are left out (MJPEG
+  takes about twice as long, HE-AAC a quarter longer); README's Native AOT section has the timings.
+
 ## 0.1.0 – 2026-10-27
 
 The first stable version: the public API of 0.1.0-preview.3, documented, and from here on changed only in a new minor

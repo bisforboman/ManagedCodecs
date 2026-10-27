@@ -349,7 +349,12 @@ macroblock lookup (6%, two divisions a call; now a table made with the decoder),
 uniform motion of direct macroblocks (4.6%, now 3%), and the deblocking filter's tC0 vector built for every edge (1%,
 now a table). What is left there: CABAC residual decoding (about 11%, its engine already in locals), motion
 compensation's full-sample copies (2 to 4%, one vector load and store a row: their reference reads) and pieces of 1
-to 2% each.
+to 2% each. In MBAFF frames and field pictures Table 6-4's lookup (`AffNeighbor`) is 9.3% (`h264-mbaff-default`) and
+7.1% (`jm-paff-b`) by perf. A table of each pair's neighbouring pairs, made with the decoder, took its division and
+position arithmetic out and moved that by about a point, within the noise, and the wall clock not at all (both
+against an A/A run, reverted): the cost is the number of calls, not each one. Caching each pair's neighbours'
+availability instead would have to be redone when concealment fills a macroblock that pairs below it saw as missing;
+the next attempt is per-macroblock arrays of the 4x4 blocks' neighbours, filled once, for the callers.
 
 A profile of a
 720p libx264 default stream (2026-10-22) is flat: CABAC residual decoding takes 14%, deblocking 21%

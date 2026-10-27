@@ -9,6 +9,8 @@ share internals, so use one version of them all.
 
 ## Unreleased
 
+## 0.1.0-preview.3 – 2026-10-27
+
 ### Breaking changes
 
 - `H264Decoder(VideoStreamInfo)` crops frames to the container's picture size where it takes only columns and rows

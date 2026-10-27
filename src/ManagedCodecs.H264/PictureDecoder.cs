@@ -350,7 +350,7 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
 
     private int CheckAddress(int mbAddr)
     {
-        if (mbAddr >= _mbCount)
+        if ((uint)mbAddr >= (uint)_mbCount)
         {
             throw new InvalidDataException("Slice runs past the end of the picture.");
         }

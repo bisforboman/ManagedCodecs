@@ -21,6 +21,9 @@ share internals, so use one version of them all.
   holding more than one picture) rather than decoded into the field, where concealing errors could throw
   `ArgumentOutOfRangeException`; and frames larger than any level allows (over 139,264 macroblocks) are refused with
   `NotSupportedException` rather than decoded in time and memory without bound. Both from fuzzing.
+- H.264, from a longer fuzzing round: a slice with more reference list modifications than its list has entries, SPS
+  crop offsets that overflow when scaled, and a first_mb_in_slice of 2^31 or more are `InvalidDataException`s
+  rather than `ArgumentOutOfRangeException`, `OverflowException` and `IndexOutOfRangeException`.
 
 ## 0.1.0-preview.2 – 2026-10-26
 

@@ -240,7 +240,8 @@ and decodes every track; the others feed one decoder its configuration and packe
 The sweep and the first 20-minute runs of each target found sample sizes and durations over `int`, AVI chunks past
 the end of the file, a zero image width or channel count, an `mb_type` code over `int` and huge MJPEG images, all
 fixed; a later round (after 0.1.0-preview.2) a field picture's packet going on with a frame's slice, and an H.264
-frame of 16384x14336 whose concealment took 30 s a picture.
+frame of 16384x14336 whose concealment took 30 s a picture; a longer one concealing errors (two hours of `h264` and
+`file`) too many reference list modifications, SPS crop offsets and a first_mb_in_slice that overflowed `int`.
 
 ### WebAssembly
 

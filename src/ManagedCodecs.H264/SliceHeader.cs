@@ -102,7 +102,9 @@ internal sealed class SliceHeader
         out SequenceParameterSet sps,
         out PictureParameterSet pps)
     {
-        int firstMb = (int)r.ReadUe();
+        // Bounded by the largest picture (1024 x 1024 macroblocks), so that FirstMbAddr's doubling cannot overflow; the
+        // picture decoder checks it against the picture's own size.
+        int firstMb = r.ReadUe((1024 * 1024) - 1, "first_mb_in_slice");
         int sliceTypeRaw = r.ReadUe(9, "slice_type");
         var type = (SliceType)(sliceTypeRaw % 5);
         int ppsId = r.ReadUe(255, "pic_parameter_set_id");

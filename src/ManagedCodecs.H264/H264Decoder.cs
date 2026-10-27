@@ -95,7 +95,7 @@ public sealed class H264Decoder : IVideoDecoder
     /// <summary>
     /// Return frames that point into the decoder's own pictures instead of copies, which saves a
     /// copy of every frame (about 5% of the decoding time at 720p). A borrowed frame is valid only
-    /// until the next call to <see cref="Decode"/> or <see cref="Flush"/>, which may decode a new
+    /// until the next call to <see cref="Decode(Packet)"/> or <see cref="Flush"/>, which may decode a new
     /// picture into the same memory; copy what has to be kept longer. Its planes are the
     /// decoder's macroblock-aligned buffers (read rows through <see cref="VideoFrame.GetRow"/>, or
     /// with its offsets and strides), and they must not be written: later pictures predict from them.
@@ -108,7 +108,7 @@ public sealed class H264Decoder : IVideoDecoder
     /// How many pictures to decode at once, each on a thread of its own (frame threading): a picture is decoded while
     /// the ones before it are still being decoded, waiting only for the rows of theirs its motion vectors reach, so
     /// more threads decode faster on more cores, and give the same frames. 1, the default, decodes on the calling
-    /// thread, as WebAssembly in a browser needs (it has no threads there). With more, <see cref="Decode"/> returns
+    /// thread, as WebAssembly in a browser needs (it has no threads there). With more, <see cref="Decode(Packet)"/> returns
     /// frames up to that many packets later (<see cref="Flush"/> returns the rest), and <see cref="BorrowFrames"/> is
     /// not supported. A thread waiting for a reference's rows leaves its core idle, so a few more threads than cores can
     /// help: on a 4-core VM, 6 decoded a 720p P chain up to 16% faster than 4.

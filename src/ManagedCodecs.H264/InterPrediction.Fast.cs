@@ -9,7 +9,7 @@ internal static partial class InterPrediction
     // The largest luma block is 16x16; its 6-tap filters need 2 samples before and 3 after.
     private const int WindowStride = 16 + 5;
 
-    /// <summary>Same output as <see cref="PredictLumaReference"/>.</summary>
+    /// <summary>Same output as <see cref="PredictLumaReference{TPixel}(Picture, TPixel[], int, int, int, int, int, int, int)"/>.</summary>
     public static void PredictLuma(Picture reference, byte[] dest, int stride, int x, int y, int width, int height, int mvX, int mvY) =>
         PredictLuma(reference, x, y, width, height, mvX, mvY, dest.AsSpan((y * stride) + x), stride);
 
@@ -144,7 +144,7 @@ internal static partial class InterPrediction
         }
     }
 
-    /// <summary>Same output as <see cref="PredictChromaReference"/>.</summary>
+    /// <summary>Same output as <see cref="PredictChromaReference{TPixel}(Picture, int, TPixel[], int, int, int, int, int, int, int)"/>.</summary>
     public static void PredictChroma(Picture reference, int component, byte[] dest, int stride, int x, int y, int width, int height, int mvX, int mvY) =>
         PredictChroma(reference, component, x, y, width, height, mvX, mvY, dest.AsSpan((y * stride) + x), stride);
 

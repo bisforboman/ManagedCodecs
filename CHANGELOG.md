@@ -5,7 +5,8 @@ Versions are git tags (`vX.Y.Z`); each one publishes every package (ManagedCodec
 as its notes. `release.yml` releases on the push to main that brings a version heading not yet tagged, so a release
 is a pull request that turns "Unreleased" into "## X.Y.Z – date" and runs `tools/ship-public-api.py`. From 0.1.0 on, the
 public API changes only in a new minor version (0.2.0, 0.3.0, ...), with a "Breaking changes" entry; a patch version
-(0.1.1) only fixes. 1.0 is a later decision. The packages
+(0.1.1) only fixes. Package validation enforces it: every pull request packs the packages and compares them with
+the last baseline release on nuget.org (Directory.Build.props). 1.0 is a later decision. The packages
 share internals, so each depends on the others at exactly its own version (`[X]`; Directory.Build.targets): NuGet
 then reports a mix of versions (NU1107, or NU1608 for a newer one referenced directly) rather than letting it fail at
 run time.

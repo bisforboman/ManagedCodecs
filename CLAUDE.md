@@ -30,7 +30,9 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
   `*REMOVED*<line>`); a public member that isn't listed fails the build (RS0016, RS0017). Adding one:
   `dotnet format analyzers src/<project> --diagnostics RS0016 --severity info` writes its lines into Unshipped. Every
   public change is an API decision, and from 0.1.0 a breaking one waits for the next minor version: CHANGELOG says it
-  under "Unreleased".
+  under "Unreleased". Package validation (Directory.Build.props, the `Pack` step in ci.yml) compares each package with
+  `PackageValidationBaselineVersion` on nuget.org and fails on a break (CP0002 and others); the PR that starts a new
+  minor version's breaking changes moves the baseline to the last release.
 - **Files an open PR changes**: before editing a file, check the open PRs for one that changes it; if one does, wait
   for it to merge and branch from main after it, rather than editing the same lines in parallel.
 - **Worktrees**: `git worktree add .claude/worktrees/<name> -b <branch> origin/main` (ignored). Sessions working at

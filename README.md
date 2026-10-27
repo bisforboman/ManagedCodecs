@@ -94,7 +94,7 @@ and code that reproduces FFmpeg's reading where it differs from the spec), and n
 
 The packages, on nuget.org ([CHANGELOG.md](CHANGELOG.md) lists the versions): `ManagedCodecs` for everything, or one of
 `ManagedCodecs.Containers`, `.Mjpeg`, `.H264` and `.Aac` (each with `ManagedCodecs.Core`). They share internals, so
-keep them at one version. Until the API is frozen they are previews, `0.1.0-preview.N`, and any of them can change the
+each depends on the others at exactly its own version, and NuGet reports a mix (NU1107 or NU1608). Until the API is frozen they are previews, `0.1.0-preview.N`, and any of them can change the
 public API.
 
 ```

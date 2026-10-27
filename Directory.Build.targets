@@ -1,0 +1,11 @@
+<Project>
+  <!-- The packages depend on each other at exactly their own version ([X] in the nuspec, not NuGet's default of X or
+       later): the codec packages use Core's internals (InternalsVisibleTo), which can change in any release, so a
+       newer Core under an older H.264 package could fail at run time. Pack makes each ProjectReference's dependency
+       from _ProjectReferencesWithVersions; this wraps its version in brackets. -->
+  <Target Name="ExactProjectReferenceVersions" AfterTargets="_GetProjectReferenceVersions">
+    <ItemGroup>
+      <_ProjectReferencesWithVersions Update="@(_ProjectReferencesWithVersions)" ProjectVersion="[%(_ProjectReferencesWithVersions.ProjectVersion)]" />
+    </ItemGroup>
+  </Target>
+</Project>

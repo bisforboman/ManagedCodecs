@@ -12,8 +12,8 @@ is checked against FFmpeg sample by sample.
   FFmpeg's demuxers give them.
 
 The packages: `ManagedCodecs` for everything, or one of `ManagedCodecs.Containers`, `ManagedCodecs.Mjpeg`,
-`ManagedCodecs.H264` and `ManagedCodecs.Aac`, each with `ManagedCodecs.Core`. They share internals, so keep them at
-one version.
+`ManagedCodecs.H264` and `ManagedCodecs.Aac`, each with `ManagedCodecs.Core`. They share internals, so each depends
+on the others at exactly its own version.
 
 ## Decoding a file
 

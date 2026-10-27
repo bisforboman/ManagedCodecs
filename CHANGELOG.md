@@ -4,8 +4,10 @@ Versions are git tags (`vX.Y.Z`); each one publishes every package (ManagedCodec
 .Aac and the ManagedCodecs meta-package) to nuget.org at that version, and a GitHub release with this file's section
 as its notes. `release.yml` releases on the push to main that brings a version heading not yet tagged, so a release
 is a pull request that turns "Unreleased" into "## X.Y.Z – date" and runs `tools/ship-public-api.py`. Until the API
-is frozen the versions are previews (`0.1.0-preview.N`), and any of them can change the public API; the packages
-share internals, so use one version of them all.
+is frozen the versions are previews (`0.1.0-preview.N`), and any of them can change the public API. The packages
+share internals, so each depends on the others at exactly its own version (`[X]`; Directory.Build.targets): NuGet
+then reports a mix of versions (NU1107, or NU1608 for a newer one referenced directly) rather than letting it fail at
+run time.
 
 ## Unreleased
 
@@ -14,6 +16,11 @@ share internals, so use one version of them all.
 - The packages carry their XML documentation (`lib/net10.0/*.xml`), so IntelliSense shows it; every public member has
   a doc comment, and the build fails on one without (CS1591).
 - nuget.org shows a readme for every package (`PACKAGE.md`): what they decode, an example, links to the documentation.
+
+### Changed
+
+- The packages depend on each other at exactly one version (`[0.1.0]`, not `0.1.0` or later): they share internals,
+  so a mix of versions could fail at run time, and NuGet now reports one instead (NU1107 or NU1608).
 
 ## 0.1.0-preview.3 – 2026-10-27
 

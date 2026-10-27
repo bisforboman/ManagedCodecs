@@ -216,8 +216,9 @@ returns nothing for it, no frame or an empty `AudioFrame`, so playing every pack
 
 Damaged, truncated or hostile files make the demuxers and decoders throw `InvalidDataException` (or
 `NotSupportedException` for a valid stream using something not implemented), never another exception, and they
-neither hang nor allocate without bound: an MJPEG image over 2^26 samples is refused, and an AVI chunk running past
-the end of the file is an error rather than an allocation. A truncated file throws where the data runs
+neither hang nor allocate without bound: an MJPEG image over 2^26 samples is refused, so is an H.264 frame larger
+than any level allows (139,264 macroblocks, Table A-1), and an AVI chunk running past the end of the file is an error
+rather than an allocation. A truncated file throws where the data runs
 out (FFmpeg stops quietly instead); packets already returned stay valid. A damaged H.264 picture fails its `Decode`
 call, and so does every later picture predicted from it (none comes out predicted from other pictures in its place),
 until an IDR picture; frames other pictures finished meanwhile still come out, from the next call. So does every
@@ -238,7 +239,8 @@ and decodes every track; the others feed one decoder its configuration and packe
 `MalformedInputTests` replays them, along with a fixed-seed sweep of truncations and byte flips over a few samples.
 The sweep and the first 20-minute runs of each target found sample sizes and durations over `int`, AVI chunks past
 the end of the file, a zero image width or channel count, an `mb_type` code over `int` and huge MJPEG images, all
-fixed.
+fixed; a later round (after 0.1.0-preview.2) a field picture's packet going on with a frame's slice, and an H.264
+frame of 16384x14336 whose concealment took 30 s a picture.
 
 ### WebAssembly
 

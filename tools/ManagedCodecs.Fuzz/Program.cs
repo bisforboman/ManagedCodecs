@@ -25,6 +25,12 @@ if (args.Length > 1)
     foreach (var file in args.Skip(1))
     {
         Console.WriteLine($"{file}: {(Targets.Run(target, File.ReadAllBytes(file)) ? "accepted" : "rejected")}");
+
+        // As the fuzzing below runs it: H.264 a second time, concealing errors.
+        if (target is "h264" or "file")
+        {
+            Console.WriteLine($"{file}, concealing errors: {(Targets.Run(target, File.ReadAllBytes(file), conceal: true) ? "accepted" : "rejected")}");
+        }
     }
 
     return 0;

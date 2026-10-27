@@ -46,6 +46,17 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.H264/PictureDecoder.Direct.cs",
          find="VerticalScale.FrameToField => col.MvY / 2,", replace="VerticalScale.FrameToField => col.MvY >> 1,",
          tests="FullyQualifiedName~H264ConformanceTests.MatchesFfmpeg&DisplayName~mbaff"),
+    # The container's picture size as more cropping, as FFmpeg's decoder takes it (init_dimensions): applied; not where
+    # the SPS crops the top; not where it rounds up to another multiple of 16.
+    dict(file="src/ManagedCodecs.H264/H264Decoder.cs",
+         find="            return (_containerWidth, _containerHeight);", replace="            return (sps.Width, sps.Height);",
+         tests="DisplayName~h264-container-crop"),
+    dict(file="src/ManagedCodecs.H264/H264Decoder.cs",
+         find="&& sps.Crop.Top == 0 && sps.Crop.Left == 0", replace="&& sps.Crop.Left == 0",
+         tests="DisplayName~h264-container-crop"),
+    dict(file="src/ManagedCodecs.H264/H264Decoder.cs",
+         find="&& RoundUp16(_containerHeight) == RoundUp16(sps.Height)", replace="",
+         tests="DisplayName~h264-container-crop"),
 
     # ---- MP4 (as FFmpeg reads it)
     # Negative composition offsets in 'ctts': FFmpeg leaves the last two entries out of the shift.

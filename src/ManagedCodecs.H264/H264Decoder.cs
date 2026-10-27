@@ -58,6 +58,11 @@ public sealed class H264Decoder : IVideoDecoder
     // Whether the packet being parsed is to be decoded and not shown (Packet.Discard).
     private bool _discard;
 
+    // The container's picture size (VideoStreamInfo), cropping the frames further as FFmpeg does (OutputSize); 0 when
+    // there is none, or once a picture's SPS did not allow it.
+    private int _containerWidth;
+    private int _containerHeight;
+
     /// <param name="codecPrivate">The AVCDecoderConfigurationRecord ('avcC') from the container.</param>
     public H264Decoder(ReadOnlySpan<byte> codecPrivate)
     {
@@ -74,9 +79,17 @@ public sealed class H264Decoder : IVideoDecoder
         }
     }
 
+    /// <summary>
+    /// A decoder for a demuxed stream. Its frames take the container's picture size (MP4's sample entry) where that
+    /// crops the stream's visible area only at the right and bottom, within its last macroblock column and row, as
+    /// FFmpeg's decoder does (an Apple-encoded 640x360 film stores 640x359): with no SPS cropping at the top or left,
+    /// a size no larger than the SPS's and the same once each is rounded up to a multiple of 16.
+    /// </summary>
     public H264Decoder(VideoStreamInfo stream)
         : this(stream.CodecPrivate.Span)
     {
+        _containerWidth = stream.Width;
+        _containerHeight = stream.Height;
     }
 
     /// <summary>
@@ -437,7 +450,7 @@ public sealed class H264Decoder : IVideoDecoder
         {
             // A second field can be done before its first (which it need not predict from): the frame is both.
             job.FirstField?.Wait();
-            job.Frame = Crop(state.Picture, state.Sps);
+            job.Frame = Crop(state.Picture, state.Sps, state.Size);
         }
     }
 
@@ -459,7 +472,7 @@ public sealed class H264Decoder : IVideoDecoder
         }
 
         bool borrow = BorrowFrames && picture.BitDepth == 8;
-        var frame = job.Frame ?? (borrow ? Borrow(picture, state.Sps) : Crop(picture, state.Sps));
+        var frame = job.Frame ?? (borrow ? Borrow(picture, state.Sps, state.Size) : Crop(picture, state.Sps, state.Size));
         frame.Pts = job.Pts;
         frame.IsDamaged = picture.Damaged;
         frames.AddRange(_output.Add(frame, picture.Poc, job.Restart, ReorderDepth(state.Sps), borrow ? picture : null));
@@ -673,7 +686,7 @@ public sealed class H264Decoder : IVideoDecoder
         }
 
         // A second field's frame is the first one's: its timestamp, and whether it starts a new sequence.
-        var state = new PictureState(header, sps, decoder, picture, poc, secondField);
+        var state = new PictureState(header, sps, decoder, picture, poc, OutputSize(sps), secondField);
         var job = secondField
             ? new PictureJob(state, _firstField!.Pts, _firstField.Restart, _firstField.Discard) { FirstField = _firstField }
             : new PictureJob(state, pts, header.IsIdr || header.MemoryManagement.Any(op => op.Op == 5), _discard);
@@ -888,19 +901,41 @@ public sealed class H264Decoder : IVideoDecoder
         return picture;
     }
 
-    /// <summary>Copies the visible area (frame cropping, 7.4.2.1.1) into a new frame.</summary>
-    private VideoFrame Crop(Picture picture, SequenceParameterSet sps)
+    /// <summary>
+    /// The size of a picture's frame: the SPS's visible area (frame cropping, 7.4.2.1.1), or the container's where it
+    /// crops that further as FFmpeg's decoder takes it (h264_slice.c, init_dimensions): no SPS cropping at the top or
+    /// left, no larger, and the same rounded up to a multiple of 16. As there, a picture whose SPS does not allow it
+    /// turns it off for the rest of the stream.
+    /// </summary>
+    private (int Width, int Height) OutputSize(SequenceParameterSet sps)
+    {
+        if (_containerWidth > 0 && _containerHeight > 0 && sps.Crop.Top == 0 && sps.Crop.Left == 0
+            && RoundUp16(_containerWidth) == RoundUp16(sps.Width) && RoundUp16(_containerHeight) == RoundUp16(sps.Height)
+            && _containerWidth <= sps.Width && _containerHeight <= sps.Height)
+        {
+            return (_containerWidth, _containerHeight);
+        }
+
+        _containerWidth = 0;
+        _containerHeight = 0;
+        return (sps.Width, sps.Height);
+
+        static int RoundUp16(int n) => (n + 15) & ~15;
+    }
+
+    /// <summary>Copies the visible area (<paramref name="size"/> from the top left of the SPS's, see OutputSize) into a new frame.</summary>
+    private VideoFrame Crop(Picture picture, SequenceParameterSet sps, (int Width, int Height) size)
     {
         // Every sample is written below, so pooled planes need no clearing.
         var format = FormatOf(picture);
-        var frame = _framePool.Rent(sps.Width, sps.Height, format);
+        var frame = _framePool.Rent(size.Width, size.Height, format);
         var (left, _, top, _) = sps.Crop;
         for (int plane = 0; plane < format.PlaneCount(); plane++)
         {
             int shiftX = plane == 0 || picture.MbWidthC == 16 ? 0 : 1;
             int shiftY = plane == 0 || picture.MbHeightC == 16 ? 0 : 1;
             int stride = plane == 0 ? picture.LumaStride : picture.ChromaStride;
-            var (width, height) = format.PlaneSize(plane, sps.Width, sps.Height);
+            var (width, height) = format.PlaneSize(plane, size.Width, size.Height);
             for (int y = 0; y < height; y++)
             {
                 int start = (((top >> shiftY) + y) * stride) + (left >> shiftX);
@@ -920,20 +955,20 @@ public sealed class H264Decoder : IVideoDecoder
     }
 
     /// <summary>A frame of the cropped area of <paramref name="picture"/>, in its planes: no copy (<see cref="BorrowFrames"/>).</summary>
-    private static VideoFrame Borrow(Picture picture, SequenceParameterSet sps)
+    private static VideoFrame Borrow(Picture picture, SequenceParameterSet sps, (int Width, int Height) size)
     {
         var (left, _, top, _) = sps.Crop;
         int lumaOffset = (top * picture.LumaStride) + left;
         var format = FormatOf(picture);
         if (format.PlaneCount() == 1)
         {
-            return new VideoFrame(sps.Width, sps.Height, format, [picture.Y], [picture.LumaStride], [lumaOffset]);
+            return new VideoFrame(size.Width, size.Height, format, [picture.Y], [picture.LumaStride], [lumaOffset]);
         }
 
         int chromaOffset = ((picture.MbHeightC == 16 ? top : top >> 1) * picture.ChromaStride) + (picture.MbWidthC == 16 ? left : left >> 1);
         return new VideoFrame(
-            sps.Width,
-            sps.Height,
+            size.Width,
+            size.Height,
             format,
             [picture.Y, picture.Cb, picture.Cr],
             [picture.LumaStride, picture.ChromaStride, picture.ChromaStride],
@@ -943,8 +978,8 @@ public sealed class H264Decoder : IVideoDecoder
     private static PixelFormat FormatOf(Picture picture) =>
         PixelFormatExtensions.Of(picture.MbWidthC == 16 ? 3 : picture.MbHeightC switch { 0 => 0, 16 => 2, _ => 1 }, picture.BitDepth);
 
-    /// <summary>The picture being decoded: its first slice header, its SPS, its decoder, its frame and its order count.</summary>
-    private sealed record PictureState(SliceHeader Header, SequenceParameterSet Sps, IPictureDecoder Decoder, Picture Picture, int Poc, bool SecondField = false);
+    /// <summary>The picture being decoded: its first slice header, its SPS, its decoder, its frame, its order count and its output frame's size.</summary>
+    private sealed record PictureState(SliceHeader Header, SequenceParameterSet Sps, IPictureDecoder Decoder, Picture Picture, int Poc, (int Width, int Height) Size, bool SecondField = false);
 
     /// <summary>A slice to decode, with its reference lists and their marking when they were built.</summary>
     // Lost: its reference lists could not be built (ConcealErrors), so it is not decoded and its macroblocks are concealed.

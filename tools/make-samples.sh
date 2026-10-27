@@ -492,6 +492,17 @@ python3 -I tools/mp4-edit-list.py samples/h264-edit-end.mp4 0 1000:1024
 ff -f lavfi -i "testsrc2=size=320x240:rate=25" -f lavfi -i "sine=frequency=330:sample_rate=48000:duration=2" -t 2 -c:v libx264 -bf 2 -g 12 -c:a aac -ac 2 -aac_pns 0 samples/h264-audio-edits.mp4
 python3 -I tools/mp4-edit-list.py samples/h264-audio-edits.mp4 0 400:1024,400:15360
 python3 -I tools/mp4-edit-list.py samples/h264-audio-edits.mp4 1 400:1024,400:48500
+# The container's picture size smaller than the stream's (an Apple-encoded film stores 640x359 for 640x360), which
+# FFmpeg's decoder takes as more cropping (init_dimensions): 317x233 from 320x240 (odd, so chroma rounds up), and in
+# 4:2:2 at 10 bits; not taken where it rounds up to another multiple of 16 (320x224), nor where the SPS crops the top.
+ff -f lavfi -i "testsrc2=size=320x240:rate=25,scroll=v=0.02" -t 1 "${H[@]}" -bf 2 samples/h264-container-crop.mp4
+python3 -I tools/mp4-video-size.py samples/h264-container-crop.mp4 317 233
+ff -f lavfi -i "testsrc2=size=320x240:rate=25,scroll=v=0.02" -t 1 -c:v libx264 -profile:v high422 -pix_fmt yuv422p10le -bf 2 samples/h264-container-crop-422-10bit.mp4
+python3 -I tools/mp4-video-size.py samples/h264-container-crop-422-10bit.mp4 319 239
+ff -f lavfi -i "testsrc2=size=320x240:rate=25,scroll=v=0.02" -t 1 "${H[@]}" -bf 2 samples/h264-container-crop-misaligned.mp4
+python3 -I tools/mp4-video-size.py samples/h264-container-crop-misaligned.mp4 320 224
+ff -f lavfi -i "testsrc2=size=320x240:rate=25,scroll=v=0.02" -t 1 "${H[@]}" -bf 2 -bsf:v h264_metadata=crop_top=2 samples/h264-container-crop-sps-top.mp4
+python3 -I tools/mp4-video-size.py samples/h264-container-crop-sps-top.mp4 320 237
 
 # ---- H.264 from OpenH264 ----
 # Committed in samples/openh264/ (CI has no OpenH264): long-term references and the list modification and memory

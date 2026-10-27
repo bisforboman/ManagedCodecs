@@ -27,9 +27,13 @@ and the audio as floats (`-f f32le`, within 2^-17). The films, pinned by SHA-256
   slices, four PPS, AAC LC at 48 kHz.
 - Big Buck Bunny, the whole film at 320x180: H.264 Constrained Baseline muxed by FFmpeg in 2008 (Lavf52), 10
   minutes, deblocking off, AAC LC at 48 kHz.
+- Big Buck Bunny, the whole film at 640x360: H.264 Constrained Baseline from Apple's encoder, 10 minutes, two slices a
+  picture, deblocking off, and 640x359 in its sample entry (see H.264, The container's picture size); AAC LC at
+  44.1 kHz.
 
-The first run found the three differences those sections describe; the H.264 video itself matched on all three. The
-two films added later matched at once.
+The first run found the three differences those sections describe; the H.264 video itself matched on all three. Of
+the three films added later, two matched at once; the third's frames were FFmpeg's but for its last row, which FFmpeg
+crops by the container's size.
 
 ## SIMD and ARM64
 
@@ -91,6 +95,20 @@ pictures as references (with memory management operation 1); explicit and implic
 prediction, so libx264's default Main profile output decodes; and High profile's 8x8 transform
 with Intra 8x8 prediction, so libx264's default output decodes too, and scaling matrices (the
 default ones and custom lists). Frames come out in display order.
+
+### The container's picture size
+
+FFmpeg's decoder crops a frame further to the size the container gives (MP4's sample entry), where that only takes
+columns and rows off the right and bottom inside the last macroblock: `init_dimensions` in h264_slice.c takes it with
+no SPS cropping at the top or left, a size no larger than the SPS's visible area, and the same once each is rounded up
+to a multiple of 16, and otherwise ignores it for the rest of the stream. Apple's encoder writes such files (Big Buck
+Bunny at 640x360 stores 640x359; Real films). `H264Decoder(VideoStreamInfo)` does the same (the span constructor has
+no container size). `tools/mp4-video-size.py` rewrites a sample entry's size: h264-container-crop (317x233 from
+320x240, odd, so 4:2:0 chroma rounds up) and h264-container-crop-422-10bit (319x239) are cropped,
+h264-container-crop-misaligned (320x224, another multiple of 16) and h264-container-crop-sps-top (the SPS crops the
+top, `h264_metadata=crop_top=2`) are not. Probed beforehand on patched copies: 320x225 is taken, 320x224, 304x240 and
+anything larger are not. Not tested: a stream whose SPS changes from one that takes it to one that doesn't, after
+which neither does again.
 
 ### Interlaced video
 

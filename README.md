@@ -94,11 +94,11 @@ and code that reproduces FFmpeg's reading where it differs from the spec), and n
 
 The packages, on nuget.org ([CHANGELOG.md](CHANGELOG.md) lists the versions): `ManagedCodecs` for everything, or one of
 `ManagedCodecs.Containers`, `.Mjpeg`, `.H264` and `.Aac` (each with `ManagedCodecs.Core`). They share internals, so
-each depends on the others at exactly its own version, and NuGet reports a mix (NU1107 or NU1608). Until the API is frozen they are previews, `0.1.0-preview.N`, and any of them can change the
-public API.
+each depends on the others at exactly its own version, and NuGet reports a mix (NU1107 or NU1608). From 0.1.0 on, the public API changes only in a new minor version
+(0.2.0), with a "Breaking changes" entry in the changelog; a patch version only fixes.
 
 ```
-dotnet add package ManagedCodecs --prerelease
+dotnet add package ManagedCodecs
 ```
 
 Building from source requires the .NET 10 SDK. The tests also need samples made with FFmpeg (with libx264) and ImageMagick:

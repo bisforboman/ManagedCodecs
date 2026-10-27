@@ -6,11 +6,20 @@ name: Release
 # version's section. Pushing a v* tag by hand releases that version. Publishing uses nuget.org's trusted publishing
 # (OIDC: no stored API key), set up once by the owner (the repository variable NUGET_USER, and a trusted publishing
 # policy on nuget.org for this workflow); prereleases (a '-' in the version) use the 'prerelease' environment, others
-# 'release', which can be set to wait for approval.
+# 'release', which can be set to wait for approval. Run by hand (workflow_dispatch), it only logs in to nuget.org from
+# the chosen environment and publishes nothing: a check that the trusted publishing policy accepts it, before a release
+# depends on it.
 on:
   push:
     branches: [main]
     tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Environment whose nuget.org login to check (nothing is published)
+        type: choice
+        options: [release, prerelease]
+        default: release
 
 # One release at a time, never cancelled half way.
 concurrency:
@@ -24,6 +33,7 @@ permissions:
 jobs:
   # The version, and whether it still needs releasing (most pushes to main: no, and nothing else runs).
   version:
+    if: github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
@@ -45,6 +55,23 @@ jobs:
           env=release; [[ "$v" == *-* ]] && env=prerelease
           if [ "$due" = true ]; then echo "Releasing $v" >> "$GITHUB_STEP_SUMMARY"; else echo "Nothing to release (newest: ${v:-none})" >> "$GITHUB_STEP_SUMMARY"; fi
           { echo "version=$v"; echo "due=$due"; echo "environment=$env"; } >> "$GITHUB_OUTPUT"
+
+  # Run by hand: NuGet/login from the chosen environment, as the release job does it, and nothing after it. The key it
+  # gets is never used, and expires within the hour.
+  login-check:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment: ${{ inputs.environment }}
+    permissions:
+      id-token: write
+    steps:
+      - name: NuGet login
+        uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1
+        with:
+          user: ${{ vars.NUGET_USER }}
+
+      - run: echo "nuget.org accepted the '${{ inputs.environment }}' environment's login." >> "$GITHUB_STEP_SUMMARY"
 
   # The tests, against FFmpeg's references, in a job of their own with read-only permissions: FFmpeg and ImageMagick
   # (Ubuntu's) run here, not where the publishing token is.

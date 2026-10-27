@@ -286,6 +286,7 @@ public sealed class H264Decoder : IVideoDecoder
         }
     }
 
+    /// <inheritdoc/>
     public IReadOnlyList<VideoFrame> Flush()
     {
         var frames = TakeHeld();

@@ -1272,39 +1272,55 @@ internal sealed partial class PictureDecoder<TPixel>
 
     internal readonly struct Sse2Zip : IZip
     {
+        /// <inheritdoc/>
         public static Vector128<byte> Low(Vector128<byte> a, Vector128<byte> b) => Sse2.UnpackLow(a, b);
 
+        /// <inheritdoc/>
         public static Vector128<byte> High(Vector128<byte> a, Vector128<byte> b) => Sse2.UnpackHigh(a, b);
 
+        /// <inheritdoc/>
         public static Vector128<ushort> Low(Vector128<ushort> a, Vector128<ushort> b) => Sse2.UnpackLow(a, b);
 
+        /// <inheritdoc/>
         public static Vector128<ushort> High(Vector128<ushort> a, Vector128<ushort> b) => Sse2.UnpackHigh(a, b);
 
+        /// <inheritdoc/>
         public static Vector128<uint> Low(Vector128<uint> a, Vector128<uint> b) => Sse2.UnpackLow(a, b);
 
+        /// <inheritdoc/>
         public static Vector128<uint> High(Vector128<uint> a, Vector128<uint> b) => Sse2.UnpackHigh(a, b);
 
+        /// <inheritdoc/>
         public static Vector128<ulong> Low(Vector128<ulong> a, Vector128<ulong> b) => Sse2.UnpackLow(a, b);
 
+        /// <inheritdoc/>
         public static Vector128<ulong> High(Vector128<ulong> a, Vector128<ulong> b) => Sse2.UnpackHigh(a, b);
     }
 
     internal readonly struct PortableZip : IZip
     {
+        /// <inheritdoc/>
         public static Vector128<byte> Low(Vector128<byte> a, Vector128<byte> b) => VectorZip.Low(a, b);
 
+        /// <inheritdoc/>
         public static Vector128<byte> High(Vector128<byte> a, Vector128<byte> b) => VectorZip.High(a, b);
 
+        /// <inheritdoc/>
         public static Vector128<ushort> Low(Vector128<ushort> a, Vector128<ushort> b) => VectorZip.Low(a, b);
 
+        /// <inheritdoc/>
         public static Vector128<ushort> High(Vector128<ushort> a, Vector128<ushort> b) => VectorZip.High(a, b);
 
+        /// <inheritdoc/>
         public static Vector128<uint> Low(Vector128<uint> a, Vector128<uint> b) => VectorZip.Low(a, b);
 
+        /// <inheritdoc/>
         public static Vector128<uint> High(Vector128<uint> a, Vector128<uint> b) => VectorZip.High(a, b);
 
+        /// <inheritdoc/>
         public static Vector128<ulong> Low(Vector128<ulong> a, Vector128<ulong> b) => VectorZip.Low(a, b);
 
+        /// <inheritdoc/>
         public static Vector128<ulong> High(Vector128<ulong> a, Vector128<ulong> b) => VectorZip.High(a, b);
     }
 

@@ -70,6 +70,9 @@ public sealed class AacDecoder : IAudioDecoder
     private const int FaacDelay = 1024;
     private bool _faacSignature;
 
+    /// <summary>A decoder for the stream <paramref name="audioSpecificConfig"/> describes (ISO/IEC 14496-3 1.6.2.1, as MP4's 'esds' holds it); packet timestamps are then taken as they come.</summary>
+    /// <exception cref="InvalidDataException">The config is malformed.</exception>
+    /// <exception cref="NotSupportedException">The config names an object type or layout the decoder does not decode.</exception>
     public AacDecoder(ReadOnlySpan<byte> audioSpecificConfig)
     {
         _config = AudioSpecificConfig.Parse(audioSpecificConfig);
@@ -81,6 +84,8 @@ public sealed class AacDecoder : IAudioDecoder
         _channelInElement = new int[channels];
     }
 
+    /// <summary>A decoder for a demuxer's audio stream: its <see cref="AudioStreamInfo.CodecPrivate"/> is the AudioSpecificConfig, and its time base converts the samples dropped at the start into timestamps.</summary>
+    /// <inheritdoc cref="AacDecoder(ReadOnlySpan{byte})" path="/exception"/>
     public AacDecoder(AudioStreamInfo stream)
         : this(stream.CodecPrivate.Span)
     {

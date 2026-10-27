@@ -30,6 +30,7 @@ public sealed class MjpegDecoder : IVideoDecoder
     // The stream's height, from the container; 0 when unknown (no field detection).
     private readonly int _streamHeight;
 
+    /// <summary>A decoder that knows nothing of the stream's height, so it takes every image as a whole frame, never as a field.</summary>
     public MjpegDecoder()
     {
         _dcTables[0] = new HuffmanTable(JpegTables.DcLuminanceBits, JpegTables.DcLuminanceValues);

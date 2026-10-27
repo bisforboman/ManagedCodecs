@@ -156,6 +156,7 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
     /// <summary>The current picture's SPS; another one of the same size may follow, so <see cref="Begin"/> sets it.</summary>
     public SequenceParameterSet Sps { get; private set; }
 
+    /// <inheritdoc/>
     public Picture Picture { get; private set; } = null!;
 
     // The current picture's planes as samples of TPixel.
@@ -167,6 +168,7 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
 
     public int DecodedMbCount { get; private set; }
 
+    /// <inheritdoc/>
     public int RowDelay { get; set; }
 
     /// <summary>

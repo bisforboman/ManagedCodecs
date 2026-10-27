@@ -7,30 +7,71 @@ namespace ManagedCodecs;
 /// </remarks>
 public enum PixelFormat
 {
+    /// <summary>8-bit luma only (monochrome); a byte a sample.</summary>
     Gray8,
+
+    /// <summary>8-bit Y, Cb, Cr planes; chroma half wide and half high; a byte a sample.</summary>
     Yuv420P,
+
+    /// <summary>8-bit Y, Cb, Cr planes; chroma half wide, full height; a byte a sample.</summary>
     Yuv422P,
+
+    /// <summary>8-bit Y, Cb, Cr planes, all full size; a byte a sample.</summary>
     Yuv444P,
+
+    /// <summary>10-bit Y, Cb, Cr planes; chroma half wide and half high; a little-endian 16-bit word a sample.</summary>
     Yuv420P10,
+
+    /// <summary>10-bit Y, Cb, Cr planes; chroma half wide, full height; a little-endian 16-bit word a sample.</summary>
     Yuv422P10,
+
+    /// <summary>10-bit Y, Cb, Cr planes, all full size; a little-endian 16-bit word a sample.</summary>
     Yuv444P10,
+
+    /// <summary>10-bit luma only (monochrome); a little-endian 16-bit word a sample.</summary>
     Gray10,
+
+    /// <summary>9-bit luma only (monochrome); a little-endian 16-bit word a sample.</summary>
     Gray9,
+
+    /// <summary>9-bit Y, Cb, Cr planes; chroma half wide and half high; a little-endian 16-bit word a sample.</summary>
     Yuv420P9,
+
+    /// <summary>9-bit Y, Cb, Cr planes; chroma half wide, full height; a little-endian 16-bit word a sample.</summary>
     Yuv422P9,
+
+    /// <summary>9-bit Y, Cb, Cr planes, all full size; a little-endian 16-bit word a sample.</summary>
     Yuv444P9,
+
+    /// <summary>12-bit luma only (monochrome); a little-endian 16-bit word a sample.</summary>
     Gray12,
+
+    /// <summary>12-bit Y, Cb, Cr planes; chroma half wide and half high; a little-endian 16-bit word a sample.</summary>
     Yuv420P12,
+
+    /// <summary>12-bit Y, Cb, Cr planes; chroma half wide, full height; a little-endian 16-bit word a sample.</summary>
     Yuv422P12,
+
+    /// <summary>12-bit Y, Cb, Cr planes, all full size; a little-endian 16-bit word a sample.</summary>
     Yuv444P12,
+
+    /// <summary>14-bit luma only (monochrome); a little-endian 16-bit word a sample.</summary>
     Gray14,
+
+    /// <summary>14-bit Y, Cb, Cr planes; chroma half wide and half high; a little-endian 16-bit word a sample.</summary>
     Yuv420P14,
+
+    /// <summary>14-bit Y, Cb, Cr planes; chroma half wide, full height; a little-endian 16-bit word a sample.</summary>
     Yuv422P14,
+
+    /// <summary>14-bit Y, Cb, Cr planes, all full size; a little-endian 16-bit word a sample.</summary>
     Yuv444P14,
 }
 
+/// <summary>Facts about a <see cref="PixelFormat"/>: planes, plane sizes and sample depth.</summary>
 public static class PixelFormatExtensions
 {
+    /// <summary>Planes a frame of the format has: 1 for gray, 3 (Y, Cb, Cr) for the others.</summary>
     public static int PlaneCount(this PixelFormat format) => format.Chroma() == 0 ? 1 : 3;
 
     /// <summary>Bits a sample holds: 8, 9, 10, 12 or 14.</summary>

@@ -1012,7 +1012,7 @@ internal sealed partial class PictureDecoder<TPixel>
 
     /// <summary>bS of each lane: the four <paramref name="strengths"/> spread by <paramref name="segments"/>.</summary>
     private static Vector128<byte> SegmentLanes(ReadOnlySpan<byte> strengths, Vector128<byte> segments) =>
-        Vector128.Shuffle(Vector128.CreateScalarUnsafe(MemoryMarshal.Read<uint>(strengths)).AsByte(), segments);
+        VectorZip.Shuffle(Vector128.CreateScalarUnsafe(MemoryMarshal.Read<uint>(strengths)).AsByte(), segments);
 
     /// <summary>
     /// A vertical edge of 16 8-bit rows, filtered in place: rows 0-7 from <paramref name="top"/> and
@@ -1115,8 +1115,8 @@ internal sealed partial class PictureDecoder<TPixel>
     private static bool FilterBytes(ref EdgeBytes taps, Vector128<byte> bs, in EdgeParameters low, in EdgeParameters high, bool chroma)
     {
         var maxV = Vector128.Create((short)255);
-        var tcLow = Vector128.Shuffle(low.Tc0Row, bs);
-        var tcHigh = Vector128.Shuffle(high.Tc0Row, bs);
+        var tcLow = VectorZip.Shuffle(low.Tc0Row, bs);
+        var tcHigh = VectorZip.Shuffle(high.Tc0Row, bs);
 
         EdgeLanes lo;
         lo.P3 = Lower(taps.P3);
@@ -1300,22 +1300,22 @@ internal sealed partial class PictureDecoder<TPixel>
     internal readonly struct PortableZip : IZip
     {
         /// <inheritdoc/>
-        public static Vector128<byte> Low(Vector128<byte> a, Vector128<byte> b) => VectorZip.Low(a, b);
+        public static Vector128<byte> Low(Vector128<byte> a, Vector128<byte> b) => VectorZip.PortableLow(a, b);
 
         /// <inheritdoc/>
-        public static Vector128<byte> High(Vector128<byte> a, Vector128<byte> b) => VectorZip.High(a, b);
+        public static Vector128<byte> High(Vector128<byte> a, Vector128<byte> b) => VectorZip.PortableHigh(a, b);
 
         /// <inheritdoc/>
-        public static Vector128<ushort> Low(Vector128<ushort> a, Vector128<ushort> b) => VectorZip.Low(a, b);
+        public static Vector128<ushort> Low(Vector128<ushort> a, Vector128<ushort> b) => VectorZip.PortableLow(a, b);
 
         /// <inheritdoc/>
-        public static Vector128<ushort> High(Vector128<ushort> a, Vector128<ushort> b) => VectorZip.High(a, b);
+        public static Vector128<ushort> High(Vector128<ushort> a, Vector128<ushort> b) => VectorZip.PortableHigh(a, b);
 
         /// <inheritdoc/>
-        public static Vector128<uint> Low(Vector128<uint> a, Vector128<uint> b) => VectorZip.Low(a, b);
+        public static Vector128<uint> Low(Vector128<uint> a, Vector128<uint> b) => VectorZip.PortableLow(a, b);
 
         /// <inheritdoc/>
-        public static Vector128<uint> High(Vector128<uint> a, Vector128<uint> b) => VectorZip.High(a, b);
+        public static Vector128<uint> High(Vector128<uint> a, Vector128<uint> b) => VectorZip.PortableHigh(a, b);
 
         /// <inheritdoc/>
         public static Vector128<ulong> Low(Vector128<ulong> a, Vector128<ulong> b) => VectorZip.Low(a, b);

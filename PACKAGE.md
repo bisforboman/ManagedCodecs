@@ -44,8 +44,8 @@ foreach (var frame in decoder.Flush())
 }
 ```
 
-Publishing with Native AOT on x64: set `<IlcInstructionSet>x86-64-v3</IlcInstructionSet>` (AVX2) in the app, or the AVX2
-and 256-bit paths are left out and MJPEG takes about twice as long ([README, Native AOT](https://github.com/bisforboman/ManagedCodecs#native-aot)).
+Publishing with Native AOT on x64: set `<IlcInstructionSet>x86-64-v3</IlcInstructionSet>` (AVX2) in the app, or the
+256-bit paths are left out and AAC and HE-AAC take about a third longer ([README, Native AOT](https://github.com/bisforboman/ManagedCodecs#native-aot)).
 
 Audio goes the same way: `new AacDecoder(demuxer.Audio!)` returns an `AudioFrame` of float samples per packet. Every
 decoder and demuxer also has an async API (`ReadPacketsAsync`, `DecodeAsync`, `FlushAsync`).

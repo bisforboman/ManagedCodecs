@@ -15,8 +15,13 @@ run time.
 
 ### Documentation
 
-- Native AOT on x64: set `IlcInstructionSet` (x86-64-v3) in the app, or the AVX2 and 256-bit paths are left out (MJPEG
-  takes about twice as long, HE-AAC a quarter longer); README's Native AOT section has the timings.
+- Native AOT on x64: set `IlcInstructionSet` (x86-64-v3) in the app, or the AVX2 and 256-bit paths are left out (AAC
+  and HE-AAC take about a third longer); README's Native AOT section has the timings.
+
+### Fixed
+
+- Native AOT for the default x64 target: MJPEG decoded at half speed and H.264 6% slower, the portable byte shuffle
+  being a software call there; x64 now uses SSE2's unpacks and SSSE3's pshufb directly.
 
 ## 0.1.0 – 2026-10-27
 

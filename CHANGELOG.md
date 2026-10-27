@@ -3,13 +3,19 @@
 Versions are git tags (`vX.Y.Z`); each one publishes every package (ManagedCodecs.Core, .Containers, .Mjpeg, .H264,
 .Aac and the ManagedCodecs meta-package) to nuget.org at that version, and a GitHub release with this file's section
 as its notes. `release.yml` releases on the push to main that brings a version heading not yet tagged, so a release
-is a pull request that turns "Unreleased" into "## X.Y.Z – date" and runs `tools/ship-public-api.py`. Until the API
-is frozen the versions are previews (`0.1.0-preview.N`), and any of them can change the public API. The packages
+is a pull request that turns "Unreleased" into "## X.Y.Z – date" and runs `tools/ship-public-api.py`. From 0.1.0 on, the
+public API changes only in a new minor version (0.2.0, 0.3.0, ...), with a "Breaking changes" entry; a patch version
+(0.1.1) only fixes. 1.0 is a later decision. The packages
 share internals, so each depends on the others at exactly its own version (`[X]`; Directory.Build.targets): NuGet
 then reports a mix of versions (NU1107, or NU1608 for a newer one referenced directly) rather than letting it fail at
 run time.
 
 ## Unreleased
+
+## 0.1.0 – 2026-10-27
+
+The first stable version: the public API of 0.1.0-preview.3, documented, and from here on changed only in a new minor
+version (see the top of this file).
 
 ### Added
 

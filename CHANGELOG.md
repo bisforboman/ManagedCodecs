@@ -15,8 +15,8 @@ run time.
 
 ### Documentation
 
-- Native AOT on x64: set `IlcInstructionSet` (x86-64-v3) in the app, or the vector paths are compiled out (MJPEG takes
-  about twice as long, HE-AAC a quarter longer); README's Native AOT section has the timings.
+- Native AOT on x64: set `IlcInstructionSet` (x86-64-v3) in the app, or the AVX2 and 256-bit paths are left out (MJPEG
+  takes about twice as long, HE-AAC a quarter longer); README's Native AOT section has the timings.
 
 ## 0.1.0 – 2026-10-27
 

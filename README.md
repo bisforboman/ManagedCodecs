@@ -319,9 +319,11 @@ between two snapshots of a day): only comparisons made on one machine at one tim
 
 ### Native AOT
 
-On x64, a Native AOT publish compiles for the instruction set it is given, not the machine it runs on, and its default
-leaves out what the vector paths test for: the MJPEG IDCT's AVX2 and SSSE3 paths and AAC's 256-bit ones are compiled
-away, and the scalar code runs instead. Set it in the publishing project:
+On x64, a Native AOT publish compiles for the instruction set it is given, not the machine it runs on. Under its
+default, `Avx2.IsSupported` and `Vector256.IsHardwareAccelerated` read false, so the MJPEG IDCT's AVX2 path and AAC's
+256-bit ones are left out; and though `Ssse3.IsSupported` reads true there as it does with `x86-64-v2`, the default
+build ran the IDCT's 128-bit path at about half the speed the `x86-64-v2` one did (700 against 375 µs a frame on
+`testsrc-420.avi`; not traced further). Set the instruction set in the publishing project:
 
 ```xml
 <IlcInstructionSet>x86-64-v3</IlcInstructionSet>   <!-- AVX2: Intel since 2013 (Haswell), AMD since 2015 -->
@@ -344,8 +346,10 @@ cloud VM, `last loop` per frame, medians of 5 interleaved runs, against the JIT 
 | `heaac/heaac-5.1.mp4` | 655 | 1.26x | 0.95x |
 
 With v3, MJPEG and HE-AAC run as fast as under the JIT, and H.264 within about 10% (not profiled further; mcdec's JIT
-build has tiered compilation and so dynamic PGO off, so that is not the difference); `x86-64-v2` brings MJPEG to about 1.1 times the JIT's time. `OptimizationPreference=Speed` changed nothing
-beyond the noise. Startup is AOT's own gain: the whole-process times of the short runs (bench.py's) are AOT's lower.
+build has tiered compilation and so dynamic PGO off, so that is not the difference); `x86-64-v2` brings MJPEG to
+about 1.1 times the JIT's time. `OptimizationPreference=Speed` changed nothing beyond the noise. Startup is AOT's own
+gain: in bench.py's whole-process times the short H.264 and AAC LC runs took less under default AOT than under the JIT
+(MJPEG's did not: its IDCT outweighs the startup).
 
 Cloud VMs are noisy (single runs differed by up to a third), so compare before and after on one machine. For
 statistics on the decoder alone there is BenchmarkDotNet, `dotnet run -c Release --project

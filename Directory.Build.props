@@ -27,11 +27,13 @@
     <NoWarn>$(NoWarn);CS1573</NoWarn>
   </PropertyGroup>
 
-  <!-- Package validation: packing compares each src/ package with its 0.1.0 on nuget.org, and fails on a public API
-       change that breaks it (CP0002 for a removed member, CP0005 and others), so a breaking change can only go out as
-       a new minor version with a new baseline (CHANGELOG.md's promise). A deliberate break in such a version moves
-       PackageValidationBaselineVersion to the last release. CI packs on every pull request (ci.yml). The meta-package
-       has no assemblies to compare. -->
+  <!-- Package validation: packing compares each src/ package with its baseline version on nuget.org, and fails on a
+       public API change that breaks it (CP0002 for a removed member, CP0005 and others). The baseline is the last
+       release: each release PR sets it to the version before its own (its own is not on nuget.org yet), so a member
+       added in one patch and removed in the next fails too. A deliberate break, in a new minor version only
+       (CHANGELOG.md's promise), is accepted by packing with -p:ApiCompatGenerateSuppressionFile=true, which writes
+       the project's CompatibilitySuppressions.xml; those files go once the baseline is past the breaking release.
+       CI packs on every pull request (ci.yml). The meta-package has no assemblies to compare. -->
   <PropertyGroup Condition="$(MSBuildProjectDirectory.Replace('\', '/').Contains('/src/')) And '$(MSBuildProjectName)' != 'ManagedCodecs'">
     <EnablePackageValidation>true</EnablePackageValidation>
     <PackageValidationBaselineVersion>0.1.0</PackageValidationBaselineVersion>

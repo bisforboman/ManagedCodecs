@@ -24,15 +24,18 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
   PR a consumer would notice); a release is a PR that renames it to "## X.Y.Z – date" (from 0.1.0: a public API change
   only in a new minor version, a patch only fixes), and `release.yml` then tests, packs every package at that version, publishes to nuget.org (trusted
   publishing) and tags it. Every package has the one version. The release PR also runs `tools/ship-public-api.py`
-  (each package's PublicAPI.Unshipped.txt into its Shipped).
+  (each package's PublicAPI.Unshipped.txt into its Shipped) and sets `PackageValidationBaselineVersion`
+  (Directory.Build.props) to the last version on nuget.org, deleting any `CompatibilitySuppressions.xml` that only
+  covered breaks up to it.
 - **Public API**: Microsoft.CodeAnalysis.PublicApiAnalyzers lists every src/ package's public API in its
   `PublicAPI.Shipped.txt` (the last release's) and `PublicAPI.Unshipped.txt` (changes since, a removal as
   `*REMOVED*<line>`); a public member that isn't listed fails the build (RS0016, RS0017). Adding one:
   `dotnet format analyzers src/<project> --diagnostics RS0016 --severity info` writes its lines into Unshipped. Every
   public change is an API decision, and from 0.1.0 a breaking one waits for the next minor version: CHANGELOG says it
   under "Unreleased". Package validation (Directory.Build.props, the `Pack` step in ci.yml) compares each package with
-  `PackageValidationBaselineVersion` on nuget.org and fails on a break (CP0002 and others); the PR that starts a new
-  minor version's breaking changes moves the baseline to the last release.
+  `PackageValidationBaselineVersion` on nuget.org (the last release) and fails on a break (CP0002 and others); a
+  deliberate one, for a new minor version only, is accepted with `dotnet pack -p:ApiCompatGenerateSuppressionFile=true`,
+  which writes the project's `CompatibilitySuppressions.xml` into that PR.
 - **Files an open PR changes**: before editing a file, check the open PRs for one that changes it; if one does, wait
   for it to merge and branch from main after it, rather than editing the same lines in parallel.
 - **Worktrees**: `git worktree add .claude/worktrees/<name> -b <branch> origin/main` (ignored). Sessions working at

@@ -321,6 +321,83 @@ public class QmfTests
         }
     }
 
+    /// <summary>The analysis bank's output turn in vectors gives the scalar loop's bits.</summary>
+    [Fact]
+    public void VectorAnalysisOutput_MatchesScalarExactly()
+    {
+        var random = new Random(7);
+        var re = Enumerable.Range(0, 32).Select(_ => (random.NextDouble() - 0.5) * 1e6).ToArray();
+        var im = Enumerable.Range(0, 32).Select(_ => (random.NextDouble() - 0.5) * 1e6).ToArray();
+        var (vectorRe, vectorIm, scalarRe, scalarIm) = (new double[32], new double[32], new double[32], new double[32]);
+        QmfAnalysis.Output(re, im, vectorRe, vectorIm);
+        QmfAnalysis.Output(re, im, scalarRe, scalarIm, scalar: true);
+        Assert.Equal(scalarRe, vectorRe);
+        Assert.Equal(scalarIm, vectorIm);
+    }
+
+    /// <summary>
+    /// The analysis bank, which takes a complex FFT of 32 for its real input, against the DFT of 64 it replaced (rebuilt
+    /// here) over 30 slots, to within rounding.
+    /// </summary>
+    [Fact]
+    public void Analysis_MatchesTheDftRoute()
+    {
+        var random = new Random(6);
+        var fft = new QmfFft(64);
+        var input = new double[32];
+        var real = new double[32];
+        var imaginary = new double[32];
+        var analysis = new QmfAnalysis();
+
+        // The reference bank: x, newest first, under every other window coefficient.
+        var x = new double[320];
+        for (int slot = 0; slot < 30; slot++)
+        {
+            for (int n = 0; n < 32; n++)
+            {
+                input[n] = (random.NextDouble() - 0.5) * 65536;
+            }
+
+            Array.Copy(x, 0, x, 32, 288);
+            for (int n = 0; n < 32; n++)
+            {
+                x[31 - n] = input[n];
+            }
+
+            var re = new double[64];
+            var im = new double[64];
+            for (int n = 0; n < 64; n++)
+            {
+                double u = 0;
+                for (int j = 0; j < 5; j++)
+                {
+                    u += x[n + (64 * j)] * QmfWindow.Coefficients[2 * (n + (64 * j))];
+                }
+
+                re[n] = u * QmfTrig.CosPi256(4 * n);
+                im[n] = u * QmfTrig.SinPi256(4 * n);
+            }
+
+            fft.Transform(re, im, scalar: true);
+            analysis.Process(input, real, imaginary);
+            double peak = 1;
+            var reference = new (double Re, double Im)[32];
+            for (int k = 0; k < 32; k++)
+            {
+                double c = 2 * QmfTrig.CosPi256(-((2 * k) + 1));
+                double s = 2 * QmfTrig.SinPi256(-((2 * k) + 1));
+                reference[k] = ((re[k] * c) - (im[k] * s), (re[k] * s) + (im[k] * c));
+                peak = Math.Max(peak, Math.Max(Math.Abs(reference[k].Re), Math.Abs(reference[k].Im)));
+            }
+
+            for (int k = 0; k < 32; k++)
+            {
+                Assert.True(Math.Abs(reference[k].Re - real[k]) <= 1e-12 * peak, $"slot {slot}, k {k}: {real[k]} for {reference[k].Re}");
+                Assert.True(Math.Abs(reference[k].Im - imaginary[k]) <= 1e-12 * peak, $"slot {slot}, k {k}: {imaginary[k]} for {reference[k].Im}");
+            }
+        }
+    }
+
     private static double[] RoundTrip(Func<double, double> signal, bool downsampled = false)
     {
         var analysis = new QmfAnalysis();

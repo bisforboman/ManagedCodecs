@@ -502,7 +502,8 @@ FFmpeg's output by 2e-2 on average, 14 to 17% of the signal at 3 to 6 kHz, below
 in single precision moves this decoder's output (log correlation 0.91); with a third as much, 4e-3 at most on x64 and
 1e-2 against FFmpeg's ARM64 build, past the bound.
 
-Parametric stereo (HE-AAC v2, `PsProcessor`) follows the spec's baseline decoder: the hybrid analysis filters on the
+Parametric stereo (HE-AAC v2, `PsProcessor`) follows the spec's baseline decoder, and FFmpeg's for the phase
+parameters: the hybrid analysis filters on the
 three lowest QMF bands (six slots of look-ahead from the SBR low band), decorrelation by a fractional delay and three
 all-pass links (plain delays above QMF band 23), transient ducking, mixing procedure Ra or Rb with the matrices ramped
 linearly over each envelope, and the hybrid synthesis; the right channel gets a QMF synthesis bank of its own. A mono
@@ -516,17 +517,28 @@ of 0.347 7e-4, no transient ducking 2e-4 (and 8e-2 at most). The cos and sin of 
 two-part reduction by pi/2 and a series, checked against Math on random input) and the scale factors and ICC angles
 (literals, matching libxaac's float tables to 6e-8) keep the output the same on WebAssembly; the phase factors are
 checked against libxaac's. 10-band parameters map to the 20 bins as band b / 2 (no sample sends 10 bands); 34 bands
-throw NotSupportedException, and the phase parameters (IPD, OPD) are ignored, as the baseline decoder does. Mixing
+throw NotSupportedException. Mixing
 procedure Rb (icc_mode 3 to 5) comes from a patched FDK encoder that writes its own parameters with icc_mode + 3
 (`heaacv2-rb`, tools/make-heaac-samples.sh; every frame mixed by Rb, `PsRbFrames`), and matches FFmpeg as the Ra sample
 does once rho is taken as at least 0.05, as FFmpeg takes it (without, up to 0.3 off; whether the spec says so is not
-checked here, its text being out of reach). Its data is read (`PsData`): every
+checked here, its text being out of reach). The phase parameters (IPD and OPD, ps_extension 0) come from another
+patched FDK encoder (`heaacv2-ipd`): its writer for them, never enabled, sends phases of its own (non-decreasing over
+the bands, moving from frame to frame), once three of its bugs are fixed (it writes the IID's 10 or 20 bands where the
+phases have 5 or 11, leaves the enable bit out of the extension's size, and writes the extension only under a PS
+header). They are applied as FFmpeg applies them (the spec's text out of reach): each of the lowest 11 bands' OPD and
+IPD smoothed over the last three envelopes (unit vectors weighted 1/4, 1/2 and 1, normalized), h11 and h21 turned by
+the OPD and h12 and h22 by the OPD less the IPD, the imaginary parts ramped as the real ones, from the previous
+envelope's negated in the two sub-subbands of negative frequency (FFmpeg negates the start, not the end), and the band
+count kept from the last header that enabled IID (FFmpeg's; the encoder's first phases come under a header without
+IID, where FFmpeg reads none, `PsTests`). The sample agrees to 5e-4, 7e-6 on average; ignoring the phases, it is off
+by its whole peak (0.6), and each of those rules moves it (`tools/mutation/mutations.py`). The codebooks are the FDK
+encoder's code tables, which give FFmpeg's code lengths in canonical order. Its data is read (`PsData`): every
 frame of the v2 sample to the end of its extension, less than a byte of padding left (the FDK encoder sends 20 bands,
 fine IID quantization, ICC in 20 bands, no IPD or OPD; reading the envelopes' IID and ICC interleaved instead of IID
 first fails it on the third frame). Its codebooks are enumerated from PacketVideo's decoding trees and checked to be
 complete prefix codes. Time deltas across a change between 10 and 20 bands take the previous values at the other
-resolution as PacketVideo does (no sample changes resolution); 34 bands are refused, and the extension (IPD, OPD) is
-skipped, as the spec's baseline decoder skips it.
+resolution as PacketVideo does (no sample changes resolution; the phases the same between 5 and 11 bands, the 11th
+from 0); 34 bands are refused, and extensions other than 0 are skipped.
 ## ADTS (raw AAC)
 
 Raw AAC files (ADTS, `AdtsDemuxer`) demux packet by packet as FFmpeg's

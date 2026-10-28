@@ -16,6 +16,8 @@ run time.
 ### Added
 
 - HE-AAC v2: parametric stereo with mixing procedure Rb (icc_mode 3 to 5), which threw `NotSupportedException`.
+- HE-AAC v2: parametric stereo's phase parameters (IPD and OPD), which were ignored: a stream that sends them decoded
+  without error but up to its whole peak off FFmpeg's output.
 
 ### Documentation
 

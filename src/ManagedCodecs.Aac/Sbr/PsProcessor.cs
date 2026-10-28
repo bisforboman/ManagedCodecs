@@ -12,8 +12,15 @@ namespace ManagedCodecs.Aac.Sbr;
 /// one (8.6.4.5): through a fractional delay and three all-pass links up to QMF band 22 (fading above band 3), by plain
 /// delays of 14 and 1 slots above, ducked where a transient's peak runs above its smoothed energy. Each of 22 groups
 /// of (sub-)subbands takes the mixing matrix of its parameter band (8.6.4.6), from the IID's scale factors and the
-/// ICC's angle (Ra) or from the IID and the ICC's rho (Rb), interpolated over each envelope from the previous one's. The phase parameters (IPD, OPD) are not
-/// applied, as in the spec's baseline decoder.
+/// ICC's angle (Ra) or from the IID and the ICC's rho (Rb), interpolated over each envelope from the previous one's.
+/// </para>
+/// <para>
+/// The phase parameters, when a frame sends them, turn the lowest 11 parameter bands' matrices complex as FFmpeg does
+/// (the spec's text was out of reach): each band's OPD and IPD are smoothed over the envelopes (the last three, weighted
+/// 1/4, 1/2 and 1, as unit vectors summed and normalized), h11 and h21 turn by the OPD and h12 and h22 by the OPD less
+/// the IPD, the imaginary parts are interpolated as the real ones, from the previous envelope's negated in the two
+/// sub-subbands of negative frequency, and the left and right become complex products of the mono and decorrelated
+/// signals.
 /// </para>
 /// <para>
 /// Every cos and sin on data-dependent angles goes through <see cref="PsMath"/>, so the output is the same bits on
@@ -39,6 +46,7 @@ internal sealed class PsProcessor
     private const double PeakDecay = 0.765928338364649;
     private const double EnergySmoothing = 0.25;
     private const double TransientImpact = 1.5;
+    private const int PhaseBins = 11;
 
     // 8.6.4.3: the prototype filters of the 8-band (complex) and 2-band (real) hybrid filters.
     private static readonly double[] Prototype8 =
@@ -102,6 +110,10 @@ internal sealed class PsProcessor
     // The ICC's dequantized rho for index 0 to 7 (8.6.4.6.2), for mixing procedure Rb.
     private static readonly double[] Rhos = [1, 0.937, 0.84118, 0.60092, 0.36764, 0, -0.589, -1];
 
+    // The OPD or IPD smoothed over three envelopes (8 x 8 x 8, by the oldest index, the previous and this envelope's): the
+    // unit vectors of their angles (k pi / 4) weighted 1/4, 1/2 and 1, summed and normalized.
+    private static readonly (double[] Re, double[] Im) SmoothedPhases = SmoothPhases();
+
     private static readonly double[] Alphas =
     [
         0.0, 0.1784276371622683, 0.2856673302030948, 0.4630723606909662, 0.597163152138217, 0.7853981633974483,
@@ -114,6 +126,8 @@ internal sealed class PsProcessor
     // factors per slot and parameter band.
     private readonly int[][] _iid = [.. Enumerable.Range(0, PsData.MaxEnvelopes + 1).Select(_ => new int[Bins])];
     private readonly int[][] _icc = [.. Enumerable.Range(0, PsData.MaxEnvelopes + 1).Select(_ => new int[Bins])];
+    private readonly int[][] _ipd = [.. Enumerable.Range(0, PsData.MaxEnvelopes + 1).Select(_ => new int[PhaseBins])];
+    private readonly int[][] _opd = [.. Enumerable.Range(0, PsData.MaxEnvelopes + 1).Select(_ => new int[PhaseBins])];
     private readonly double[][] _ratio = Buffers(Slots, Bins);
 
     private readonly double[][] _bandRe = Buffers(3, Slots + 12);
@@ -152,6 +166,15 @@ internal sealed class PsProcessor
     private readonly int[] _lastIcc = new int[Bins];
     private bool _lastFineIid;
 
+    // The imaginary parts of the matrix the last envelope with phase parameters ended on, its IPD and OPD indices, and
+    // the two envelopes' indices before the next one (8 times the older plus the newer), which the smoothing takes.
+    private readonly double[][] _previousHIm = [new double[Bins], new double[Bins], new double[Bins], new double[Bins]];
+    private readonly int[] _lastIpd = new int[PhaseBins];
+    private readonly int[] _lastOpd = new int[PhaseBins];
+    private readonly int[] _ipdHistory = new int[PhaseBins];
+    private readonly int[] _opdHistory = new int[PhaseBins];
+    private bool _lastIpdOpd;
+
     // Mixing procedure Rb (icc_mode 3 to 5), from the last frame whose header enabled ICC.
     private bool _lastRb;
 
@@ -174,6 +197,7 @@ internal sealed class PsProcessor
         int envelopes = Envelopes(data, hasData, starts, iid, icc);
         bool fine = hasData && data.EnableIid ? data.FineIid : _lastFineIid;
         bool rb = hasData && data.EnableIcc ? data.IccMode >= 3 : _lastRb;
+        bool phases = hasData ? data.EnableIpdOpd : _lastIpdOpd;
         if (rb)
         {
             statistics.PsRbFrames++;
@@ -186,13 +210,16 @@ internal sealed class PsProcessor
 
         HybridAnalysis(re, im);
         Decorrelate(re, im, rightRe, rightIm, statistics);
-        Mix(envelopes, starts, iid, icc, fine, rb, re, im, rightRe, rightIm);
+        Mix(envelopes, starts, iid, icc, fine, rb, phases, re, im, rightRe, rightIm);
         HybridSynthesis(_leftRe, _leftIm, re, im);
         HybridSynthesis(_rightRe, _rightIm, rightRe, rightIm);
         iid[envelopes - 1].CopyTo(_lastIid, 0);
         icc[envelopes - 1].CopyTo(_lastIcc, 0);
         _lastFineIid = fine;
         _lastRb = rb;
+        _ipd[envelopes - 1].CopyTo(_lastIpd, 0);
+        _opd[envelopes - 1].CopyTo(_lastOpd, 0);
+        _lastIpdOpd = phases;
         statistics.PsAppliedFrames++;
     }
 
@@ -206,6 +233,8 @@ internal sealed class PsProcessor
         {
             _lastIid.CopyTo(iid[0], 0);
             _lastIcc.CopyTo(icc[0], 0);
+            _lastIpd.CopyTo(_ipd[0], 0);
+            _lastOpd.CopyTo(_opd[0], 0);
             starts[0] = 0;
             starts[1] = Slots;
             return 1;
@@ -217,6 +246,14 @@ internal sealed class PsProcessor
             {
                 iid[e][b] = data.EnableIid ? data.Iid[e][data.IidBands == 10 ? b / 2 : b] : 0;
                 icc[e][b] = data.EnableIcc ? data.Icc[e][data.IccBands == 10 ? b / 2 : b] : 0;
+            }
+
+            // 5 bands cover the lowest 10 of 20; the 11th takes 0.
+            for (int b = 0; b < PhaseBins; b++)
+            {
+                bool coarse = data.PhaseBands == 5;
+                _ipd[e][b] = coarse ? (b < 10 ? data.Ipd[e][b / 2] : 0) : data.Ipd[e][b];
+                _opd[e][b] = coarse ? (b < 10 ? data.Opd[e][b / 2] : 0) : data.Opd[e][b];
             }
         }
 
@@ -240,6 +277,8 @@ internal sealed class PsProcessor
         {
             iid[count - 1].CopyTo(iid[count], 0);
             icc[count - 1].CopyTo(icc[count], 0);
+            _ipd[count - 1].CopyTo(_ipd[count], 0);
+            _opd[count - 1].CopyTo(_opd[count], 0);
             count++;
             starts[count] = Slots;
         }
@@ -527,11 +566,12 @@ internal sealed class PsProcessor
     // 8.6.4.6: per envelope, each parameter band's matrix (Ra, or Rb with <paramref name="rb"/>); per group, the matrix stepped linearly from the previous
     // envelope's to it over the envelope, applied to the mono and the decorrelated signal: left = h11 M + h21 D,
     // right = h12 M + h22 D.
-    private void Mix(int envelopes, ReadOnlySpan<int> starts, int[][] iid, int[][] icc, bool fine, bool rb, double[][] re, double[][] im, double[][] rightRe, double[][] rightIm)
+    private void Mix(int envelopes, ReadOnlySpan<int> starts, int[][] iid, int[][] icc, bool fine, bool rb, bool phases, double[][] re, double[][] im, double[][] rightRe, double[][] rightIm)
     {
         var scale = fine ? FineScaleFactors : ScaleFactors;
         int steps = fine ? 15 : 7;
         Span<double> h = stackalloc double[4 * Bins];
+        Span<double> hIm = stackalloc double[4 * Bins];
         for (int e = 0; e < envelopes; e++)
         {
             for (int bin = 0; bin < Bins; bin++)
@@ -540,16 +580,43 @@ internal sealed class PsProcessor
                 if (rb)
                 {
                     MatrixRb(right, Rhos[icc[e][bin]], out h[bin], out h[Bins + bin], out h[(2 * Bins) + bin], out h[(3 * Bins) + bin]);
-                    continue;
+                }
+                else
+                {
+                    double left = scale[steps - iid[e][bin]];
+                    double alpha = Alphas[icc[e][bin]];
+                    double beta = alpha * (right - left) / Math.Sqrt(2);
+                    h[bin] = left * PsMath.Cos(beta + alpha);
+                    h[Bins + bin] = right * PsMath.Cos(beta - alpha);
+                    h[(2 * Bins) + bin] = left * PsMath.Sin(beta + alpha);
+                    h[(3 * Bins) + bin] = right * PsMath.Sin(beta - alpha);
                 }
 
-                double left = scale[steps - iid[e][bin]];
-                double alpha = Alphas[icc[e][bin]];
-                double beta = alpha * (right - left) / Math.Sqrt(2);
-                h[bin] = left * PsMath.Cos(beta + alpha);
-                h[Bins + bin] = right * PsMath.Cos(beta - alpha);
-                h[(2 * Bins) + bin] = left * PsMath.Sin(beta + alpha);
-                h[(3 * Bins) + bin] = right * PsMath.Sin(beta - alpha);
+                if (phases && bin < PhaseBins)
+                {
+                    // h11 and h21 turned by the smoothed OPD, h12 and h22 by the OPD less the IPD.
+                    int opd = (_opdHistory[bin] * 8) + _opd[e][bin];
+                    int ipd = (_ipdHistory[bin] * 8) + _ipd[e][bin];
+                    _opdHistory[bin] = opd & 63;
+                    _ipdHistory[bin] = ipd & 63;
+                    double opdRe = SmoothedPhases.Re[opd];
+                    double opdIm = SmoothedPhases.Im[opd];
+                    double ipdRe = SmoothedPhases.Re[ipd];
+                    double ipdIm = SmoothedPhases.Im[ipd];
+                    double turnRe = (opdRe * ipdRe) + (opdIm * ipdIm);
+                    double turnIm = (opdIm * ipdRe) - (opdRe * ipdIm);
+                    for (int m = 0; m < 4; m++)
+                    {
+                        int i = (m * Bins) + bin;
+                        (double cos, double sin) = m == 0 || m == 2 ? (opdRe, opdIm) : (turnRe, turnIm);
+                        hIm[i] = h[i] * sin;
+                        h[i] *= cos;
+                    }
+                }
+                else
+                {
+                    hIm[bin] = hIm[Bins + bin] = hIm[(2 * Bins) + bin] = hIm[(3 * Bins) + bin] = 0;
+                }
             }
 
             int length = starts[e + 1] - starts[e];
@@ -567,32 +634,99 @@ internal sealed class PsProcessor
                 double d12 = (h[Bins + bin] - h12) / length;
                 double d21 = (h[(2 * Bins) + bin] - h21) / length;
                 double d22 = (h[(3 * Bins) + bin] - h22) / length;
+                if (!phases)
+                {
+                    for (int i = starts[e]; i < starts[e + 1]; i++)
+                    {
+                        h11 += d11;
+                        h12 += d12;
+                        h21 += d21;
+                        h22 += d22;
+                        var mRe = hybrid ? _leftRe[i] : re[i];
+                        var mIm = hybrid ? _leftIm[i] : im[i];
+                        var dRe = hybrid ? _rightRe[i] : rightRe[i];
+                        var dIm = hybrid ? _rightIm[i] : rightIm[i];
+                        for (int sb = first; sb < last; sb++)
+                        {
+                            (mRe[sb], dRe[sb]) = ((h11 * mRe[sb]) + (h21 * dRe[sb]), (h12 * mRe[sb]) + (h22 * dRe[sb]));
+                            (mIm[sb], dIm[sb]) = ((h11 * mIm[sb]) + (h21 * dIm[sb]), (h12 * mIm[sb]) + (h22 * dIm[sb]));
+                        }
+                    }
+
+                    continue;
+                }
+
+                // The imaginary parts start from the previous envelope's, negated in the sub-subbands of negative
+                // frequency (groups 0 and 1), as FFmpeg starts them (it doesn't negate the end).
+                double sign = gr <= 1 ? -1 : 1;
+                double g11 = sign * _previousHIm[0][bin];
+                double g12 = sign * _previousHIm[1][bin];
+                double g21 = sign * _previousHIm[2][bin];
+                double g22 = sign * _previousHIm[3][bin];
+                double e11 = (hIm[bin] - g11) / length;
+                double e12 = (hIm[Bins + bin] - g12) / length;
+                double e21 = (hIm[(2 * Bins) + bin] - g21) / length;
+                double e22 = (hIm[(3 * Bins) + bin] - g22) / length;
                 for (int i = starts[e]; i < starts[e + 1]; i++)
                 {
                     h11 += d11;
                     h12 += d12;
                     h21 += d21;
                     h22 += d22;
+                    g11 += e11;
+                    g12 += e12;
+                    g21 += e21;
+                    g22 += e22;
                     var mRe = hybrid ? _leftRe[i] : re[i];
                     var mIm = hybrid ? _leftIm[i] : im[i];
                     var dRe = hybrid ? _rightRe[i] : rightRe[i];
                     var dIm = hybrid ? _rightIm[i] : rightIm[i];
                     for (int sb = first; sb < last; sb++)
                     {
-                        (mRe[sb], dRe[sb]) = ((h11 * mRe[sb]) + (h21 * dRe[sb]), (h12 * mRe[sb]) + (h22 * dRe[sb]));
-                        (mIm[sb], dIm[sb]) = ((h11 * mIm[sb]) + (h21 * dIm[sb]), (h12 * mIm[sb]) + (h22 * dIm[sb]));
+                        double mr = mRe[sb];
+                        double mi = mIm[sb];
+                        double dr = dRe[sb];
+                        double di = dIm[sb];
+                        mRe[sb] = (h11 * mr) + (h21 * dr) - (g11 * mi) - (g21 * di);
+                        mIm[sb] = (h11 * mi) + (h21 * di) + (g11 * mr) + (g21 * dr);
+                        dRe[sb] = (h12 * mr) + (h22 * dr) - (g12 * mi) - (g22 * di);
+                        dIm[sb] = (h12 * mi) + (h22 * di) + (g12 * mr) + (g22 * dr);
                     }
                 }
             }
 
             for (int bin = 0; bin < Bins; bin++)
             {
-                _previousH[0][bin] = h[bin];
-                _previousH[1][bin] = h[Bins + bin];
-                _previousH[2][bin] = h[(2 * Bins) + bin];
-                _previousH[3][bin] = h[(3 * Bins) + bin];
+                for (int m = 0; m < 4; m++)
+                {
+                    _previousH[m][bin] = h[(m * Bins) + bin];
+                    if (phases)
+                    {
+                        _previousHIm[m][bin] = hIm[(m * Bins) + bin];
+                    }
+                }
             }
         }
+    }
+
+    private static (double[] Re, double[] Im) SmoothPhases()
+    {
+        double half = Math.Sqrt(0.5);
+        double[] cos = [1, half, 0, -half, -1, -half, 0, half];
+        double[] sin = [0, half, 1, half, 0, -half, -1, -half];
+        var re = new double[512];
+        var im = new double[512];
+        for (int i = 0; i < 512; i++)
+        {
+            (int oldest, int previous, int current) = (i >> 6, (i >> 3) & 7, i & 7);
+            double x = (0.25 * cos[oldest]) + (0.5 * cos[previous]) + cos[current];
+            double y = (0.25 * sin[oldest]) + (0.5 * sin[previous]) + sin[current];
+            double length = Math.Sqrt((x * x) + (y * y));
+            re[i] = x / length;
+            im[i] = y / length;
+        }
+
+        return (re, im);
     }
 
     /// <summary>

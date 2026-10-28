@@ -142,4 +142,36 @@ if wanted heaacv2-rb; then
   LD_LIBRARY_PATH=$work/fdk5/build fdkaac --silent -p 29 -b 32000 -o "$out/heaacv2-rb.mp4" "$work/in.wav"
 fi
 
+# Parametric stereo with IPD and OPD (inter-channel and overall phase differences, the ps_extension): the encoder has
+# a writer for them but never enables it. A copy of the tree enables it with phases of its own (they are not measured
+# from the signal): non-decreasing over the bands, as the writer's delta coding without wrap-around needs, moving from
+# frame to frame so the decoder's smoothing over envelopes shows; and the writer's band count fixed to the spec's
+# (it writes the IID's 10 or 20 bands where IPD and OPD have 5 or 11, which FFmpeg reads), its size counting the
+# enable_ipdopd bit (it leaves it out, and the SBR writer then asserts), and the extension written in every frame, not
+# only in those with a PS header (a header's enable_ext holds until the next one).
+if wanted heaacv2-ipd; then
+  git -C "$fdk/.." archive HEAD | (mkdir "$work/fdk6" && tar -x -C "$work/fdk6")
+  enc=$(find "$work/fdk6" -path '*libSBRenc/src/ps_encode.cpp')
+  bitenc=$(find "$work/fdk6" -path '*libSBRenc/src/ps_bitenc.cpp')
+  grep -q 'hPsOut->enableIpdOpd = 0;' "$enc" || { echo "the encoder's enableIpdOpd line moved" >&2; exit 1; }
+  perl -0pi -e 's/hPsOut->enableIpdOpd = 0;/hPsOut->enableIpdOpd = 1;/;
+    s/(FDKmemclear\(hPsOut->opdLast, PS_MAX_BANDS \* sizeof\(INT\)\);)/$1
+    { static INT frame; frame++;
+      for (env = 0; env < nEnvelopes; env++)
+        for (band = 0; band < PS_MAX_BANDS; band++) {
+          hPsOut->ipd[env][band] = fMin(7, (band + frame + env) \/ 3);
+          hPsOut->opd[env][band] = fMin(7, (band + 2 * frame) \/ 4 % 8);
+        } }/' "$enc"
+  perl -0pi -e 's/(psOut->ipd\[env\], ipdLast,\s*)getNoBands\(psOut->iidMode\)/$1(getNoBands(psOut->iidMode) == PS_BANDS_COARSE ? 5 : 11)/;
+    s/(psOut->opd\[env\], opdLast,\s*)getNoBands\(psOut->iidMode\)/$1(getNoBands(psOut->iidMode) == PS_BANDS_COARSE ? 5 : 11)/' "$bitenc"
+  perl -0pi -e 's/^  FDKsbrEnc_WriteBits_ps\(hBitBuf, psOut->enableIpdOpd, 1\);/  bitCnt += FDKsbrEnc_WriteBits_ps(hBitBuf, psOut->enableIpdOpd, 1);/m;
+    s/INT psExtEnable = 0;/INT psExtEnable = psOut != NULL && psOut->enableIpdOpd;/' "$bitenc"
+  grep -q 'bitCnt += FDKsbrEnc_WriteBits_ps(hBitBuf, psOut->enableIpdOpd, 1);' "$bitenc" &&
+    grep -q 'INT psExtEnable = psOut != NULL' "$bitenc" || { echo "the IPD writer's bit count did not patch" >&2; exit 1; }
+  grep -q 'PS_BANDS_COARSE ? 5 : 11' "$bitenc" || { echo "the IPD writer's band count did not patch" >&2; exit 1; }
+  cmake -S "$work/fdk6" -B "$work/fdk6/build" > /dev/null && cmake --build "$work/fdk6/build" -j4 > /dev/null
+  ff -f lavfi -i "aevalsrc=$music|$music2:s=44100:d=3" -c:a pcm_s16le "$work/in.wav"
+  LD_LIBRARY_PATH=$work/fdk6/build fdkaac --silent -p 29 -b 32000 -o "$out/heaacv2-ipd.mp4" "$work/in.wav"
+fi
+
 ls -l "$out"

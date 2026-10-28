@@ -3,7 +3,9 @@ namespace ManagedCodecs.Aac.Sbr;
 /// <summary>
 /// The Huffman codebooks of parametric stereo (ISO/IEC 14496-3 Annex 8.B): inter-channel intensity differences (IID,
 /// coarse and fine) and inter-channel coherences (ICC), each coded as deltas in time or in frequency. The codes of the
-/// deltas from -LAV to LAV, in that order, enumerated from the PacketVideo decoder's decoding trees (Apache-2.0).
+/// deltas from -LAV to LAV, in that order, enumerated from the PacketVideo decoder's decoding trees (Apache-2.0). The
+/// phase differences (IPD and OPD), which that decoder doesn't read, have deltas 0 to 7 (modulo 8), from the FDK
+/// encoder's code and length tables, which give the same codes as FFmpeg's lengths in canonical order.
 /// </summary>
 internal static class PsTables
 {
@@ -69,4 +71,16 @@ internal static class PsTables
         "11111111111111", "11111111111110", "111111111110", "1111111110", "1111110", "11110", "110", "0", "10",
         "1110", "111110", "11111110", "111111110", "11111111110", "1111111111110",
     ];
+
+    /// <summary>IPD deltas in frequency, 0 to 7.</summary>
+    public static readonly string[] IpdFrequency = ["1", "000", "0110", "0100", "0010", "0011", "0101", "0111"];
+
+    /// <summary>IPD deltas in time, 0 to 7.</summary>
+    public static readonly string[] IpdTime = ["1", "010", "0010", "00011", "00010", "0000", "0011", "011"];
+
+    /// <summary>OPD deltas in frequency, 0 to 7.</summary>
+    public static readonly string[] OpdFrequency = ["1", "001", "0110", "0100", "01111", "01110", "0101", "000"];
+
+    /// <summary>OPD deltas in time, 0 to 7.</summary>
+    public static readonly string[] OpdTime = ["1", "010", "0001", "00111", "00110", "0000", "0010", "011"];
 }

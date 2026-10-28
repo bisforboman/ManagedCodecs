@@ -12,56 +12,134 @@ namespace ManagedCodecs.Aac.Sbr;
 /// <remarks>
 /// The spec's sum X(k) = the sum over n in 0..63 of u(n) 2 exp(i pi/64 (k + 0.5)(2n - 0.5)) is a 64-point DFT: the
 /// exponent splits into 2 pi k n / 64 + pi n / 64 - pi (2k + 1) / 256, so X(k) = 2 exp(-i pi (2k + 1) / 256) times the
-/// DFT of u(n) exp(i pi n / 64) at k. Tests compare it with the sums on random input.
+/// DFT of u(n) exp(i pi n / 64) at k. u is real, so that DFT takes a complex FFT of 32 (<see cref="Process"/>): with
+/// z(m) = (u(2m) + i u(2m + 1)) exp(i pi m / 32) and Z its FFT, the even samples' DFT (turned) is E(k) = (Z(k) +
+/// conj Z(31 - k)) / 2, the odd ones' O(k) = -i (Z(k) - conj Z(31 - k)) / 2, and the DFT at k is E(k) + exp(i pi (2k + 1)
+/// / 64) O(k). With the output turn, X(k) = exp(-i pi (2k + 1) / 256) P(k) + exp(i pi (6k - 125) / 256) M(k), where P
+/// and M are Z(k) plus and minus conj Z(31 - k). Tests compare it with the sums on random input, and with the DFT of 64
+/// it replaced.
 /// </remarks>
 internal sealed class QmfAnalysis
 {
     public const int Bands = 32;
 
-    private static readonly QmfFft Fft = new(64);
+    private static readonly QmfFft Fft = new(32);
 
-    // exp(i pi n / 64) for the input, and 2 exp(-i pi (2k + 1) / 256) for the output.
-    private static readonly double[] InCos = [.. Enumerable.Range(0, 64).Select(n => QmfTrig.CosPi256(4 * n))];
-    private static readonly double[] InSin = [.. Enumerable.Range(0, 64).Select(n => QmfTrig.SinPi256(4 * n))];
-    private static readonly double[] OutCos = [.. Enumerable.Range(0, Bands).Select(k => 2 * QmfTrig.CosPi256(-((2 * k) + 1)))];
-    private static readonly double[] OutSin = [.. Enumerable.Range(0, Bands).Select(k => 2 * QmfTrig.SinPi256(-((2 * k) + 1)))];
+    // exp(i pi m / 32) for the packed input; exp(-i pi (2k + 1) / 256) and exp(i pi (6k - 125) / 256) for the output.
+    private static readonly double[] InCos = [.. Enumerable.Range(0, 32).Select(m => QmfTrig.CosPi256(8 * m))];
+    private static readonly double[] InSin = [.. Enumerable.Range(0, 32).Select(m => QmfTrig.SinPi256(8 * m))];
+    private static readonly double[] PlusCos = [.. Enumerable.Range(0, Bands).Select(k => QmfTrig.CosPi256(-((2 * k) + 1)))];
+    private static readonly double[] PlusSin = [.. Enumerable.Range(0, Bands).Select(k => QmfTrig.SinPi256(-((2 * k) + 1)))];
+    private static readonly double[] MinusCos = [.. Enumerable.Range(0, Bands).Select(k => QmfTrig.CosPi256((6 * k) - 125))];
+    private static readonly double[] MinusSin = [.. Enumerable.Range(0, Bands).Select(k => QmfTrig.SinPi256((6 * k) - 125))];
 
-    // c(2n), the window's coefficients this bank takes, in order.
-    private static readonly double[] Window = [.. Enumerable.Range(0, 320).Select(n => QmfWindow.Coefficients[2 * n])];
+    // c(2n), the window's coefficients this bank takes, at even n and at odd n, in order.
+    private static readonly double[] EvenWindow = [.. Enumerable.Range(0, 160).Select(m => QmfWindow.Coefficients[4 * m])];
+    private static readonly double[] OddWindow = [.. Enumerable.Range(0, 160).Select(m => QmfWindow.Coefficients[(4 * m) + 2])];
 
-    // x, the last 320 samples with the newest first, at _x[_start..]: each slot moves the start back by 32 rather than
-    // the samples forward, and copies them to the end only when the start reaches 0.
-    private readonly double[] _x = new double[320 + (32 * 15)];
-    private int _start = 32 * 15;
+    // x, the last 320 samples with the newest first, kept as its values at even n and at odd n (a slot moves n by 32,
+    // which keeps its parity), each from _start: each slot moves the start back by 16 rather than the samples forward,
+    // and copies them to the end only when the start reaches 0.
+    private readonly double[] _even = new double[160 + (16 * 15)];
+    private readonly double[] _odd = new double[160 + (16 * 15)];
+    private int _start = 16 * 15;
 
     /// <summary>One time slot: 32 new samples (oldest first) in, 32 complex subband samples out.</summary>
     [SkipLocalsInit]
     public void Process(ReadOnlySpan<double> input, Span<double> real, Span<double> imaginary)
     {
-        _start = QmfState.Step(_x, _start, 320, 32);
-        var x = _x.AsSpan(_start, 320);
-        for (int n = 0; n < 32; n++)
+        if (input.Length < 32)
         {
-            x[31 - n] = input[n];
+            throw new ArgumentException("A slot takes 32 samples.");
         }
 
-        // z(n) = x(n) c(2n), u(n) = the sum of z(n + 64 j) over j in 0..4, turned by exp(i pi n / 64).
-        Span<double> u = stackalloc double[64];
-        Span<double> re = stackalloc double[64];
-        Span<double> im = stackalloc double[64];
-        u.Clear();
+        QmfState.Step(_odd, _start, 160, 16);
+        _start = QmfState.Step(_even, _start, 160, 16);
+        var even = _even.AsSpan(_start, 160);
+        var odd = _odd.AsSpan(_start, 160);
+
+        // x(31 - n) = input(n): x(2m) is input(31 - 2m), x(2m + 1) input(30 - 2m).
+        for (int m = 0; m < 16; m++)
+        {
+            even[m] = input[31 - (2 * m)];
+            odd[m] = input[30 - (2 * m)];
+        }
+
+        // u(n) = the sum of x(n + 64 j) c(2(n + 64 j)) over j in 0..4, at even and at odd n.
+        Span<double> uEven = stackalloc double[32];
+        Span<double> uOdd = stackalloc double[32];
+        uEven.Clear();
+        uOdd.Clear();
         for (int j = 0; j < 5; j++)
         {
-            Vectors.MultiplyAdd(u, x.Slice(64 * j, 64), Window.AsSpan(64 * j, 64));
+            Vectors.MultiplyAdd(uEven, even.Slice(32 * j, 32), EvenWindow.AsSpan(32 * j, 32));
+            Vectors.MultiplyAdd(uOdd, odd.Slice(32 * j, 32), OddWindow.AsSpan(32 * j, 32));
         }
 
-        // In vectors: u(n) cos and u(n) sin (products commute to the bit), then the output turn as QmfState.Rotate does it.
-        u.CopyTo(re);
-        Vectors.Multiply(re, InCos);
-        u.CopyTo(im);
-        Vectors.Multiply(im, InSin);
+        Span<double> re = stackalloc double[32];
+        Span<double> im = stackalloc double[32];
+        QmfState.Rotate(uEven, uOdd, InCos, InSin, re, im);
         Fft.Transform(re, im);
-        QmfState.Rotate(re[..Bands], im[..Bands], OutCos, OutSin, real, imaginary);
+        Output(re, im, real, imaginary);
+    }
+
+    /// <summary>X(k) from Z, the FFT (<paramref name="re"/>, <paramref name="im"/>), at k in 0..31.</summary>
+    public static void Output(ReadOnlySpan<double> re, ReadOnlySpan<double> im, Span<double> real, Span<double> imaginary, bool scalar = false)
+    {
+        if (re.Length < Bands || im.Length < Bands || real.Length < Bands || imaginary.Length < Bands)
+        {
+            throw new ArgumentException("The output takes and gives 32 complex values.");
+        }
+
+        ref double r = ref MemoryMarshal.GetReference(re);
+        ref double i = ref MemoryMarshal.GetReference(im);
+        ref double outRe = ref MemoryMarshal.GetReference(real);
+        ref double outIm = ref MemoryMarshal.GetReference(imaginary);
+        ref double plusCos = ref MemoryMarshal.GetArrayDataReference(PlusCos);
+        ref double plusSin = ref MemoryMarshal.GetArrayDataReference(PlusSin);
+        ref double minusCos = ref MemoryMarshal.GetArrayDataReference(MinusCos);
+        ref double minusSin = ref MemoryMarshal.GetArrayDataReference(MinusSin);
+        int k = 0;
+        if (Vector128.IsHardwareAccelerated && !scalar)
+        {
+            for (; k < Bands; k += 2)
+            {
+                // Z(31 - k) for k and k + 1: the two values below 32 - k, swapped.
+                var ar = Vector128.LoadUnsafe(ref r, (nuint)k);
+                var ai = Vector128.LoadUnsafe(ref i, (nuint)k);
+                var br = Vector128.Shuffle(Vector128.LoadUnsafe(ref r, (nuint)(30 - k)), Vector128.Create(1L, 0L));
+                var bi = Vector128.Shuffle(Vector128.LoadUnsafe(ref i, (nuint)(30 - k)), Vector128.Create(1L, 0L));
+                var pr = ar + br;
+                var pi = ai - bi;
+                var mr = ar - br;
+                var mi = ai + bi;
+                var c = Vector128.LoadUnsafe(ref plusCos, (nuint)k);
+                var s = Vector128.LoadUnsafe(ref plusSin, (nuint)k);
+                var d = Vector128.LoadUnsafe(ref minusCos, (nuint)k);
+                var t = Vector128.LoadUnsafe(ref minusSin, (nuint)k);
+                ((pr * c) - (pi * s) + ((mr * d) - (mi * t))).StoreUnsafe(ref outRe, (nuint)k);
+                ((pr * s) + (pi * c) + ((mr * t) + (mi * d))).StoreUnsafe(ref outIm, (nuint)k);
+            }
+        }
+
+        for (; k < Bands; k++)
+        {
+            // P(k) = Z(k) + conj Z(31 - k), M(k) = Z(k) - conj Z(31 - k).
+            double ar = Unsafe.Add(ref r, k);
+            double ai = Unsafe.Add(ref i, k);
+            double br = Unsafe.Add(ref r, 31 - k);
+            double bi = Unsafe.Add(ref i, 31 - k);
+            double pr = ar + br;
+            double pi = ai - bi;
+            double mr = ar - br;
+            double mi = ai + bi;
+            double c = Unsafe.Add(ref plusCos, k);
+            double s = Unsafe.Add(ref plusSin, k);
+            double d = Unsafe.Add(ref minusCos, k);
+            double t = Unsafe.Add(ref minusSin, k);
+            Unsafe.Add(ref outRe, k) = (pr * c) - (pi * s) + ((mr * d) - (mi * t));
+            Unsafe.Add(ref outIm, k) = (pr * s) + (pi * c) + ((mr * t) + (mi * d));
+        }
     }
 }
 

@@ -190,6 +190,123 @@ public class DeblockingTests
         Assert.True(filtered > 5_000, $"Only {filtered} cases changed any sample; the test data is too rough.");
     }
 
+    /// <summary>
+    /// A whole 8-bit 4:2:0 macroblock filtered at once (its parameters worked out once, the vector filters called
+    /// directly) must match its edges filtered one by one with the sample-by-sample filter, in the same order: on
+    /// random blocky planes, strengths (with and without the 8x8 transform's internal edges), QPs and offsets.
+    /// </summary>
+    [Fact]
+    public void Macroblock420_MatchesEdgeByEdge()
+    {
+        const int LumaStride = 48;
+        const int ChromaStride = 24;
+        var random = new Random(29);
+        var vertical = new byte[16];
+        var horizontal = new byte[16];
+        int filtered = 0;
+
+        for (int n = 0; n < 5_000; n++)
+        {
+            var y = Blocks(random, LumaStride, 4);
+            var cb = Blocks(random, ChromaStride, 2);
+            var cr = Blocks(random, ChromaStride, 2);
+            bool transform8x8 = random.Next(3) == 0;
+            bool intra = random.Next(4) == 0;
+            for (int i = 0; i < 16; i++)
+            {
+                int strength = i < 4 ? random.Next(0, 5) : intra ? 3 : random.Next(0, 3);
+                vertical[i] = (byte)(random.Next(4) == 0 ? 0 : strength);
+                horizontal[i] = (byte)(random.Next(4) == 0 ? 0 : (i < 4 ? random.Next(0, 5) : intra ? 3 : random.Next(0, 3)));
+            }
+
+            if (transform8x8)
+            {
+                vertical.AsSpan(4, 4).Clear();
+                vertical.AsSpan(12, 4).Clear();
+                horizontal.AsSpan(4, 4).Clear();
+                horizontal.AsSpan(12, 4).Clear();
+            }
+
+            int qp = random.Next(0, 52);
+            int qpLeft = random.Next(2) == 0 ? qp : random.Next(0, 52);
+            int qpAbove = random.Next(2) == 0 ? qp : random.Next(0, 52);
+            var slice = new SliceInfo(0, random.Next(-6, 7) * 2, random.Next(-6, 7) * 2, random.Next(-12, 13), random.Next(4) == 0 ? random.Next(-12, 13) : 0);
+            const int LumaOrigin = (16 * LumaStride) + 16;
+            const int ChromaOrigin = (8 * ChromaStride) + 8;
+
+            var expectedY = (byte[])y.Clone();
+            var expectedCb = (byte[])cb.Clone();
+            var expectedCr = (byte[])cr.Clone();
+            for (int edge = 0; edge < 4; edge++)
+            {
+                PictureDecoder<byte>.FilterEdge(expectedY, LumaOrigin + (edge * 4), 1, LumaStride, 16, vertical.AsSpan(edge * 4, 4), edge == 0 ? qpLeft : qp, qp, slice.AlphaOffset, slice.BetaOffset, chroma: false, vectorized: false);
+            }
+
+            for (int edge = 0; edge < 4; edge++)
+            {
+                PictureDecoder<byte>.FilterEdge(expectedY, LumaOrigin + (edge * 4 * LumaStride), LumaStride, 1, 16, horizontal.AsSpan(edge * 4, 4), edge == 0 ? qpAbove : qp, qp, slice.AlphaOffset, slice.BetaOffset, chroma: false, vectorized: false);
+            }
+
+            foreach (var (plane, offset) in new[] { (expectedCb, slice.CbQpOffset), (expectedCr, slice.CrQpOffset) })
+            {
+                int qpC = PictureDecoder<byte>.ChromaQp(qp, offset);
+                for (int edge = 0; edge < 2; edge++)
+                {
+                    PictureDecoder<byte>.FilterEdge(plane, ChromaOrigin + (edge * 4), 1, ChromaStride, 8, vertical.AsSpan(edge * 8, 4), PictureDecoder<byte>.ChromaQp(edge == 0 ? qpLeft : qp, offset), qpC, slice.AlphaOffset, slice.BetaOffset, chroma: true, vectorized: false);
+                }
+
+                for (int edge = 0; edge < 2; edge++)
+                {
+                    PictureDecoder<byte>.FilterEdge(plane, ChromaOrigin + (edge * 4 * ChromaStride), ChromaStride, 1, 8, horizontal.AsSpan(edge * 8, 4), PictureDecoder<byte>.ChromaQp(edge == 0 ? qpAbove : qp, offset), qpC, slice.AlphaOffset, slice.BetaOffset, chroma: true, vectorized: false);
+                }
+            }
+
+            var actualY = (byte[])y.Clone();
+            var actualCb = (byte[])cb.Clone();
+            var actualCr = (byte[])cr.Clone();
+            PictureDecoder<byte>.FilterMacroblock420(actualY, actualCb, actualCr, LumaOrigin, LumaStride, ChromaOrigin, ChromaStride, vertical, horizontal, qpLeft, qpAbove, qp, slice);
+
+            if (!expectedY.AsSpan().SequenceEqual(y) && !expectedCb.AsSpan().SequenceEqual(cb))
+            {
+                filtered++;
+            }
+
+            string context = $"Case {n}: bS [{string.Join(",", vertical)}] / [{string.Join(",", horizontal)}], qp {qpLeft}/{qpAbove}/{qp}";
+            Assert.True(expectedY.AsSpan().SequenceEqual(actualY), "Y. " + context);
+            Assert.True(expectedCb.AsSpan().SequenceEqual(actualCb), "Cb. " + context);
+            Assert.True(expectedCr.AsSpan().SequenceEqual(actualCr), "Cr. " + context);
+        }
+
+        Assert.True(filtered > 2_000, $"Only {filtered} cases changed both luma and chroma; the test data is too rough.");
+    }
+
+    /// <summary>A plane of flat blocks (<paramref name="block"/> samples a side) a few levels apart, with small noise.</summary>
+    private static byte[] Blocks(Random random, int stride, int block)
+    {
+        var plane = new byte[stride * stride];
+        int baseValue = random.Next(4) switch { 0 => 3, 1 => 252, _ => random.Next(256) };
+        int spread = random.Next(1, 16);
+        int noise = random.Next(0, 4);
+        var levels = new int[stride / block, stride / block];
+        for (int by = 0; by < stride / block; by++)
+        {
+            for (int bx = 0; bx < stride / block; bx++)
+            {
+                levels[by, bx] = baseValue + random.Next(-spread, spread + 1);
+            }
+        }
+
+        for (int y = 0; y < stride; y++)
+        {
+            for (int x = 0; x < stride; x++)
+            {
+                plane[(y * stride) + x] = (byte)Math.Clamp(levels[y / block, x / block] + random.Next(-noise, noise + 1), 0, 255);
+            }
+        }
+
+        return plane;
+    }
+
     /// <summary>A ramp with a step across the edge at 16 and small noise, as in <see cref="VectorFilter_MatchesScalar"/>.</summary>
     private static byte[] Plane(Random random, int stride, bool vertical)
     {

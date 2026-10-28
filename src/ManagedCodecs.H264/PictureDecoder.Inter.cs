@@ -604,6 +604,7 @@ internal sealed partial class PictureDecoder<TPixel>
         // As in PredictComponent: the lowest row the 6-tap filter reads, and one more for chroma's.
         int lowestRow = lumaY + (mvY >> 2) + h + 3;
         reference.WaitForRow(lowestRow);
+        CheckRowsFinal(reference, lumaY + (mvY >> 2) + h + 3);
         var picture = Picture;
         int lumaStride = picture.LumaStride;
         var luma = picture.Y.AsSpan((lumaY * lumaStride) + lumaX);
@@ -666,6 +667,8 @@ internal sealed partial class PictureDecoder<TPixel>
         var prediction0 = (byte[])(object)_predictionL0;
         var prediction1 = (byte[])(object)_predictionL1;
         int lumaStride = picture.LumaStride;
+        CheckRowsFinal(ref0, lumaY + (mvY0 >> 2) + h + 3);
+        CheckRowsFinal(ref1, lumaY + (mvY1 >> 2) + h + 3);
         InterPrediction.PredictLuma(ref0, lumaX, lumaY, w, h, mvX0, mvY0, prediction0, 16);
         InterPrediction.PredictLuma(ref1, lumaX, lumaY, w, h, mvX1, mvY1, prediction1, 16);
         Combine(picture.Y.AsSpan((lumaY * lumaStride) + lumaX), lumaStride, w, h, 0);
@@ -699,6 +702,22 @@ internal sealed partial class PictureDecoder<TPixel>
     }
 
     /// <summary>
+    /// With the tests' random delays (<see cref="RowDelay"/>), throws if the reference's rows down to
+    /// <paramref name="lowestRow"/>, the lowest a partition's prediction reads, are not all final: a wait too short shows
+    /// whenever a picture catches up with its reference, not only when the rows it read early happen to change later.
+    /// Callers compute the row again rather than pass the wait's variable, so a wait broken on purpose
+    /// (tools/mutation/mutations.py) is not checked against itself. Correct waits never fail it: it asks the predicate
+    /// <see cref="Picture.WaitForRow"/> waited on, for the same row, and a picture's final rows only grow.
+    /// </summary>
+    private void CheckRowsFinal(Picture reference, int lowestRow)
+    {
+        if (RowDelay > 0 && !reference.IsRowFinal(lowestRow))
+        {
+            throw new InvalidOperationException($"Read reference row {lowestRow} before it was final.");
+        }
+    }
+
+    /// <summary>
     /// Motion compensation of one component of a w x h luma partition at reference position
     /// (lumaX, lumaY): luma, and in 4:4:4 Cb and Cr, with the luma filter (8.4.2.2.1); 4:2:0 and
     /// 4:2:2 chroma with the chroma one, at its position and size (8.4.2.2.2).
@@ -710,6 +729,7 @@ internal sealed partial class PictureDecoder<TPixel>
         if (c == 0)
         {
             reference.WaitForRow(lumaY + (mvY >> 2) + h + 3);
+            CheckRowsFinal(reference, lumaY + (mvY >> 2) + h + 3);
         }
 
         if (c == 0 || _chroma444)

@@ -457,6 +457,12 @@ internal sealed class Picture
         }
     }
 
+    /// <summary>
+    /// Whether luma row <paramref name="row"/> (and every row above it) is final now, as <see cref="WaitForRow"/> waits
+    /// for: tests check with it that motion compensation reads no row before then.
+    /// </summary>
+    public bool IsRowFinal(int row) => RowReady(Math.Clamp(row, 0, (Parity < 0 ? HeightInMbs * 16 : HeightInMbs * 8) - 1));
+
     // A field's row y is the frame's row 2y + parity; a frame's row y, of a frame coded as fields, row y / 2 of both.
     private bool RowReady(int row)
     {

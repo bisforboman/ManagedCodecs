@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 
 namespace ManagedCodecs.H264;
 
@@ -454,8 +455,25 @@ internal sealed partial class PictureDecoder<TPixel>
         var vertical = lists[1].AsSpan(mbAddr * 16, 16);
         for (int by = y / 4; by < (y + h) / 4; by++)
         {
-            horizontal.Slice((by * 4) + (x / 4), w / 4).Fill(absX);
-            vertical.Slice((by * 4) + (x / 4), w / 4).Fill(absY);
+            Fill(horizontal[((by * 4) + (x / 4))..], absX, w);
+            Fill(vertical[((by * 4) + (x / 4))..], absY, w);
+        }
+
+        // A row of a partition: 1, 2 or 4 blocks, in one store.
+        static void Fill(Span<byte> row, byte value, int w)
+        {
+            switch (w)
+            {
+                case 16:
+                    MemoryMarshal.Write(row, value * 0x01010101u);
+                    break;
+                case 8:
+                    MemoryMarshal.Write(row, (ushort)(value * 0x0101));
+                    break;
+                default:
+                    row[0] = value;
+                    break;
+            }
         }
     }
 
@@ -545,6 +563,11 @@ internal sealed partial class PictureDecoder<TPixel>
             int y = (b8 >> 1) * 8;
             int LumaCond(int nx, int ny)
             {
+                if (nx >= 0 && ny >= 0)
+                {
+                    return ((luma >> (((ny >> 3) * 2) + (nx >> 3))) & 1) != 0 ? 0 : 1; // inside the macroblock
+                }
+
                 var (n, xW, yW) = Neighbor(mbAddr, nx, ny);
                 if (n < 0 || _kind[n] == MbKind.IPcm)
                 {
@@ -596,48 +619,46 @@ internal sealed partial class PictureDecoder<TPixel>
     private int CodedBlockFlagInc(int mbAddr, BlockCategory category, int x, int y, int component)
     {
         // A 4x4 luma block's neighbours inside the macroblock: their own counts (the macroblock is not I_PCM).
-        if (category is BlockCategory.LumaAc or BlockCategory.Luma4x4 && x > 0 && y > 0)
+        if (category is BlockCategory.LumaAc or BlockCategory.Luma4x4)
         {
-            var own = _totalCoeff[component].AsSpan((mbAddr * 16) + (y * 4) + x - 4);
-            return (own[3] != 0 ? 1 : 0) + (own[0] != 0 ? 2 : 0);
+            var counts4x4 = _totalCoeff[component];
+            int at = (mbAddr * 16) + (y * 4) + x;
+            int left = x > 0 ? (counts4x4[at - 1] != 0 ? 1 : 0) : CodedBlockFlagCond(mbAddr, category, component, -1, y * 4);
+            int above = y > 0 ? (counts4x4[at - 4] != 0 ? 1 : 0) : CodedBlockFlagCond(mbAddr, category, component, x * 4, -1);
+            return left + (2 * above);
         }
 
+        return CodedBlockFlagCond(mbAddr, category, component, (x * 4) - 1, y * 4) + (2 * CodedBlockFlagCond(mbAddr, category, component, x * 4, (y * 4) - 1));
+    }
+
+    /// <summary>condTermFlagN of <see cref="CodedBlockFlagInc"/> for the block holding sample (<paramref name="px"/>, <paramref name="py"/>) of the macroblock.</summary>
+    private int CodedBlockFlagCond(int mbAddr, BlockCategory category, int component, int px, int py)
+    {
         bool chroma = category is BlockCategory.ChromaDc or BlockCategory.ChromaAc;
-        byte[] counts = chroma ? _totalCoeffChroma : _totalCoeff[component];
-        int maxH = chroma ? _mbHeightC : 16;
-        int maxW = chroma ? 8 : 16;
-        bool currentIntra = !IsInter(mbAddr);
-
-        int Cond(int px, int py)
+        var (n, xW, yW) = Neighbor(mbAddr, px, py, chroma ? 8 : 16, chroma ? _mbHeightC : 16);
+        if (n < 0)
         {
-            var (n, xW, yW) = Neighbor(mbAddr, px, py, maxW, maxH);
-            if (n < 0)
-            {
-                return currentIntra ? 1 : 0;
-            }
-
-            if (_kind[n] == MbKind.IPcm)
-            {
-                return 1;
-            }
-
-            int bx = xW >> 2;
-            int by = yW >> 2;
-            return category switch
-            {
-                BlockCategory.LumaDc => _kind[n] == MbKind.Intra16x16 ? (_dcCoded[n] >> component) & 1 : 0,
-                BlockCategory.ChromaDc => _kind[n] != MbKind.PSkip && (_cbp[n] >> 4) != 0 ? (_dcCoded[n] >> (1 + component)) & 1 : 0,
-                BlockCategory.ChromaAc => counts[(n * 16) + (component * 8) + (by * 2) + bx] != 0 ? 1 : 0,
-
-                // An 8x8 block (4:4:4 only) counts its neighbour only if that is an 8x8 block too (9.3.3.1.1.9).
-                BlockCategory.Luma8x8 => _transform8x8[n] && counts[(n * 16) + (by * 4) + bx] != 0 ? 1 : 0,
-                _ => counts[(n * 16) + (by * 4) + bx] != 0 ? 1 : 0,
-            };
+            return IsInter(mbAddr) ? 0 : 1;
         }
 
-        int px = x * 4;
-        int py = y * 4;
-        return Cond(px - 1, py) + (2 * Cond(px, py - 1));
+        if (_kind[n] == MbKind.IPcm)
+        {
+            return 1;
+        }
+
+        byte[] counts = chroma ? _totalCoeffChroma : _totalCoeff[component];
+        int bx = xW >> 2;
+        int by = yW >> 2;
+        return category switch
+        {
+            BlockCategory.LumaDc => _kind[n] == MbKind.Intra16x16 ? (_dcCoded[n] >> component) & 1 : 0,
+            BlockCategory.ChromaDc => _kind[n] != MbKind.PSkip && (_cbp[n] >> 4) != 0 ? (_dcCoded[n] >> (1 + component)) & 1 : 0,
+            BlockCategory.ChromaAc => counts[(n * 16) + (component * 8) + (by * 2) + bx] != 0 ? 1 : 0,
+
+            // An 8x8 block (4:4:4 only) counts its neighbour only if that is an 8x8 block too (9.3.3.1.1.9).
+            BlockCategory.Luma8x8 => _transform8x8[n] && counts[(n * 16) + (by * 4) + bx] != 0 ? 1 : 0,
+            _ => counts[(n * 16) + (by * 4) + bx] != 0 ? 1 : 0,
+        };
     }
 
     /// <summary>

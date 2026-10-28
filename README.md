@@ -54,8 +54,8 @@ and code that reproduces FFmpeg's reading where it differs from the spec), and n
   or by an iTunSMPB tag without one.
 - **HE-AAC** (spectral band replication, at twice the core's rate, or downsampled at the core's own): signalled in the
   config or only by its data, mono to 5.1, coupled pairs; within 1e-6 of FFmpeg's float output where its single precision is not the limit (see
-  docs/conformance.md). Parametric stereo (HE-AAC v2): 10 and 20 bands, mixing procedures Ra and Rb, the
-  phase parameters (IPD and OPD), a mono stream decoded to stereo; within 5e-4 of FFmpeg's output, 7e-6 on average. A frame's channels
+  docs/conformance.md). Parametric stereo (HE-AAC v2): 10, 20 and 34 bands, mixing procedures Ra and Rb,
+  the phase parameters (IPD and OPD), a mono stream decoded to stereo; within 5e-4 of FFmpeg's output, 7e-6 on average. A frame's channels
   through SBR on several threads (`Threads`).
 - **Containers**: AVI (video), MP4 (video and audio tracks, fragmented files too, edit lists of several edits)
   and raw AAC (ADTS), with packets and timestamps as FFmpeg's demuxers give them.
@@ -64,8 +64,7 @@ and code that reproduces FFmpeg's reading where it differs from the spec), and n
 
 ### Open
 
-- AAC: parametric stereo with 34 bands (no encoder at hand sends them, nor downsampled SBR with
-  parametric stereo, which decodes but is untested); SBR's speed (5.1 HE-AAC at about 0.41 ms a frame, 100 times
+- AAC: downsampled SBR with parametric stereo (no encoder at hand sends it; it decodes but is untested); SBR's speed (5.1 HE-AAC at about 0.41 ms a frame, 100 times
   real time, 2.2 times FFmpeg's time on one thread; Benchmarking).
 - MJPEG: files from real cameras (the samples are all FFmpeg's), and packets holding one field (FFmpeg decodes none).
 - H.264: long-term marking of field pictures, and memory management operations other than 1 in them (rejected:
@@ -381,7 +380,8 @@ block category; all of them were compared, with the residual contexts below 460,
 reference software (3740 values, all four initialization tables).
 The AAC Huffman codebooks were cross-checked the same way against the PacketVideo AAC decoder
 from Android (Apache-2.0). Parametric stereo's phase codebooks (IPD, OPD), which that decoder doesn't read, are the FDK encoder's code tables,
-equal to FFmpeg's code lengths. For spectral band replication (HE-AAC), whose specification text (ISO/IEC 14496-3 4.6.18,
+equal to FFmpeg's code lengths; its 34-band tables (the hybrid filters' prototypes, the groups and their parameter
+bands, the sub-subbands' centre frequencies) are libxaac's (Apache-2.0), which equal FFmpeg's. For spectral band replication (HE-AAC), whose specification text (ISO/IEC 14496-3 4.6.18,
 and 3GPP TS 26.404) is out of the sandbox's reach, the same decoder's SBR sources stand in for it as JM did for MBAFF:
 read for the syntax and the clauses its comments cite, its Huffman codebooks enumerated from its decoding trees, its
 precomputed band tables used to check the spec's formulas; the arithmetic is written from the formulas, in double

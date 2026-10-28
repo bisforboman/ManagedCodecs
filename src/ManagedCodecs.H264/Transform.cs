@@ -1,5 +1,7 @@
 using System.Numerics;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+using System.Runtime.Intrinsics;
 
 namespace ManagedCodecs.H264;
 
@@ -308,6 +310,64 @@ internal static class Transform
     public static void InverseTransformAdd<TPixel>(Span<int> d, Span<TPixel> dest, int stride, int bitDepth)
         where TPixel : unmanaged, IBinaryInteger<TPixel>
     {
+        if (typeof(TPixel) == typeof(byte))
+        {
+            InverseTransformAdd(d, MemoryMarshal.Cast<TPixel, byte>(dest), stride);
+            return;
+        }
+
+        InverseTransformAddScalar(d, dest, stride, bitDepth);
+    }
+
+    /// <summary>
+    /// <see cref="InverseTransformAdd{TPixel}"/> for 8-bit samples: the rows' transform as in the scalar one, then the
+    /// columns' for all four columns at once, each output row a vector, added to its four samples and clipped in 32-bit
+    /// lanes (the same integer arithmetic, so the same result for every input; <see cref="InverseTransformAddScalar"/>
+    /// is the reference a test compares it with).
+    /// </summary>
+    [SkipLocalsInit]
+    private static void InverseTransformAdd(Span<int> d, Span<byte> dest, int stride)
+    {
+        _ = d[15];
+        _ = dest[(3 * stride) + 3];
+        Span<int> f = stackalloc int[16];
+        for (int i = 0; i < 4; i++)
+        {
+            int d0 = d[i * 4];
+            int d1 = d[(i * 4) + 1];
+            int d2 = d[(i * 4) + 2];
+            int d3 = d[(i * 4) + 3];
+            int e0 = d0 + d2;
+            int e1 = d0 - d2;
+            int e2 = (d1 >> 1) - d3;
+            int e3 = d1 + (d3 >> 1);
+            f[i * 4] = e0 + e3;
+            f[(i * 4) + 1] = e1 + e2;
+            f[(i * 4) + 2] = e1 - e2;
+            f[(i * 4) + 3] = e0 - e3;
+        }
+
+        ref int rows = ref MemoryMarshal.GetReference(f);
+        var f0 = Vector128.LoadUnsafe(ref rows);
+        var f1 = Vector128.LoadUnsafe(ref rows, 4);
+        var f2 = Vector128.LoadUnsafe(ref rows, 8);
+        var f3 = Vector128.LoadUnsafe(ref rows, 12);
+        var g0 = f0 + f2;
+        var g1 = f0 - f2;
+        var g2 = (f1 >> 1) - f3;
+        var g3 = f1 + (f3 >> 1);
+        var round = Vector128.Create(32);
+        ref byte target = ref MemoryMarshal.GetReference(dest);
+        AddRow(ref target, (g0 + g3 + round) >> 6);
+        AddRow(ref Unsafe.Add(ref target, stride), (g1 + g2 + round) >> 6);
+        AddRow(ref Unsafe.Add(ref target, 2 * stride), (g1 - g2 + round) >> 6);
+        AddRow(ref Unsafe.Add(ref target, 3 * stride), (g0 - g3 + round) >> 6);
+    }
+
+    /// <summary>The scalar <see cref="InverseTransformAdd{TPixel}"/>: for deeper samples, and the 8-bit one's reference.</summary>
+    internal static void InverseTransformAddScalar<TPixel>(Span<int> d, Span<TPixel> dest, int stride, int bitDepth)
+        where TPixel : unmanaged, IBinaryInteger<TPixel>
+    {
         int max = Samples.Max<TPixel>(bitDepth);
         Span<int> f = stackalloc int[16];
 
@@ -359,6 +419,27 @@ internal static class Transform
             return;
         }
 
+        if (typeof(TPixel) == typeof(byte))
+        {
+            var bytes = MemoryMarshal.Cast<TPixel, byte>(dest);
+            _ = bytes[(3 * stride) + 3];
+            ref byte target = ref MemoryMarshal.GetReference(bytes);
+            var r = Vector128.Create(residual);
+            AddRow(ref target, r);
+            AddRow(ref Unsafe.Add(ref target, stride), r);
+            AddRow(ref Unsafe.Add(ref target, 2 * stride), r);
+            AddRow(ref Unsafe.Add(ref target, 3 * stride), r);
+            return;
+        }
+
+        AddDcScalar(dc, dest, stride, bitDepth);
+    }
+
+    /// <summary>The scalar <see cref="AddDc{TPixel}"/>: for deeper samples, and the 8-bit one's reference.</summary>
+    internal static void AddDcScalar<TPixel>(int dc, Span<TPixel> dest, int stride, int bitDepth)
+        where TPixel : unmanaged, IBinaryInteger<TPixel>
+    {
+        int residual = (dc + 32) >> 6;
         int max = Samples.Max<TPixel>(bitDepth);
         for (int y = 0; y < 4; y++)
         {
@@ -405,6 +486,15 @@ internal static class Transform
                 AddClipped(dest, (y * stride) + x, r[(y * width) + x], max);
             }
         }
+    }
+
+    /// <summary>Adds four residuals to the four 8-bit samples at <paramref name="dest"/> and clips them to 0 .. 255, unchecked.</summary>
+    private static void AddRow(ref byte dest, Vector128<int> residual)
+    {
+        var samples = Vector128.WidenLower(Vector128.WidenLower(Vector128.CreateScalarUnsafe(Unsafe.ReadUnaligned<uint>(ref dest)).AsByte()));
+        var sum = Vector128.Min(Vector128.Max(samples.AsInt32() + residual, Vector128<int>.Zero), Vector128.Create(255));
+        var words = Vector128.Narrow(sum, sum).AsUInt16();
+        Unsafe.WriteUnaligned(ref dest, Vector128.Narrow(words, words).AsUInt32().ToScalar());
     }
 
     private static void AddClipped<TPixel>(Span<TPixel> dest, int index, int residual, int max)

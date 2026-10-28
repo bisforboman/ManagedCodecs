@@ -460,6 +460,7 @@ internal sealed partial class PictureDecoder<TPixel>
         }
 
         // A row of a partition: 1, 2 or 4 blocks, in one store.
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         static void Fill(Span<byte> row, byte value, int w)
         {
             switch (w)
@@ -625,6 +626,15 @@ internal sealed partial class PictureDecoder<TPixel>
             int at = (mbAddr * 16) + (y * 4) + x;
             int left = x > 0 ? (counts4x4[at - 1] != 0 ? 1 : 0) : CodedBlockFlagCond(mbAddr, category, component, -1, y * 4);
             int above = y > 0 ? (counts4x4[at - 4] != 0 ? 1 : 0) : CodedBlockFlagCond(mbAddr, category, component, x * 4, -1);
+            return left + (2 * above);
+        }
+
+        // A chroma AC block's (two blocks a row).
+        if (category == BlockCategory.ChromaAc)
+        {
+            int at = (mbAddr * 16) + (component * 8) + (y * 2) + x;
+            int left = x > 0 ? (_totalCoeffChroma[at - 1] != 0 ? 1 : 0) : CodedBlockFlagCond(mbAddr, category, component, -1, y * 4);
+            int above = y > 0 ? (_totalCoeffChroma[at - 2] != 0 ? 1 : 0) : CodedBlockFlagCond(mbAddr, category, component, x * 4, -1);
             return left + (2 * above);
         }
 

@@ -48,7 +48,9 @@ public class H264ConformanceTests
     /// <summary>
     /// The same with four threads that sleep up to a millisecond, at random, after each macroblock row: pictures then
     /// overtake each other where they may, and a wait that is too short (a row read before it is final) shows as a
-    /// wrong frame where, without the delays, the threads would most often have been in time by luck.
+    /// wrong frame where, without the delays, the threads would most often have been in time by luck. With the delays,
+    /// motion compensation also throws on reading a reference row that is not final yet, even one whose value would
+    /// not change.
     /// </summary>
     [Theory]
     [MemberData(nameof(Samples))]

@@ -224,7 +224,9 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
   meanwhile; read `MarkSnapshot`). Rows (pair rows of MBAFF frames and field pictures, a field picture's per field)
   are final one row after they are deblocked (the next row's top edge filters
   their bottom). A race passes the threaded conformance tests by luck unless the random delays (`RowDelay`: before
-  each picture and after each row; `MatchesFfmpegWithDelayedThreads`) make pictures overtake: check a new wait by
+  each picture and after each row; `MatchesFfmpegWithDelayedThreads`) make pictures overtake, and with them motion
+  compensation checks that each reference row it read is final (`CheckRowsFinal`, "Read reference row N before it was
+  final"), not only that the frame came out right: check a new wait by
   breaking it and seeing that test fail, and list it in `tools/mutation/mutations.py` (two waits are exceptions,
   covered in practice by the motion compensation waits: the co-located motion wait and ListsDamaged's; that file says
   why). A frame's second field runs on a decoder of its own alongside its first: it waits for

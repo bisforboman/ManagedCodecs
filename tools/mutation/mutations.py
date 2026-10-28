@@ -22,7 +22,9 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.H264/PictureDecoder.Deblock.cs",
          find="Math.Max(0, _deblockedRows - 1)", replace="_deblockedRows",
          tests=DELAYED_THREADS, repeat=3),
-    # Motion compensation waits for the lowest reference row it reads. (Its + 3, for the 6-tap filter's rows below, is
+    # Motion compensation waits for the lowest reference row it reads; with the delays, a check after each wait
+    # (PictureDecoder.CheckRowsFinal) throws if that row is not final, so a short wait fails whenever a picture catches
+    # up with its reference, not only when the rows it read early change afterwards. (Its + 3, for the 6-tap filter's rows below, is
     # not mutated: a row is reported final only once the macroblock row below it is deblocked, by which time the three
     # rows below are final too, so dropping it changes no frame.)
     dict(file="src/ManagedCodecs.H264/PictureDecoder.Inter.cs",
@@ -33,14 +35,14 @@ MUTATIONS = [
          find="int lowestRow = lumaY + (mvY >> 2) + h + 3;", replace="int lowestRow = lumaY + (mvY >> 2);",
          tests=DELAYED_THREADS, repeat=3),
     # And in the path for bi-predicted partitions (PredictFromTwo), for each of the two references. Fewer pictures
-    # overtake their references there (B pictures' lists reach back further), so breaking these shows less often: the
-    # list-0 one survived 3 runs and failed the 4th once (2026-10-28).
+    # catch up with their list-0 reference there (B pictures' lists reach back further): before the check, breaking
+    # that wait survived 10 runs once, and now fails several samples on the first.
     dict(file="src/ManagedCodecs.H264/PictureDecoder.Inter.cs",
          find="int lowestRow0 = lumaY + (mvY0 >> 2) + h + 3;", replace="int lowestRow0 = lumaY + (mvY0 >> 2);",
-         tests=DELAYED_THREADS, repeat=10),
+         tests=DELAYED_THREADS, repeat=3),
     dict(file="src/ManagedCodecs.H264/PictureDecoder.Inter.cs",
          find="int lowestRow1 = lumaY + (mvY1 >> 2) + h + 3;", replace="int lowestRow1 = lumaY + (mvY1 >> 2);",
-         tests=DELAYED_THREADS, repeat=10),
+         tests=DELAYED_THREADS, repeat=3),
     # A field reading a frame coded as a frame: its row y is the frame's row 2y + parity.
     dict(file="src/ManagedCodecs.H264/Picture.cs",
          find=": frame._finalLumaRows > (2 * row) + Parity ||", replace=": frame._finalLumaRows > row ||",

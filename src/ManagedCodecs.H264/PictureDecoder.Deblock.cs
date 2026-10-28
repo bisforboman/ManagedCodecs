@@ -564,9 +564,11 @@ internal sealed partial class PictureDecoder<TPixel>
         ReadOnlySpan<byte> coefficients = per8x8;
         if (_transform8x8[mbAddr])
         {
-            for (int i = 0; i < 16; i++)
+            for (int b8 = 0; b8 < 4; b8++)
             {
-                per8x8[i] = (byte)(HasCoefficients(mbAddr, i) ? 1 : 0);
+                byte coded = (byte)(Has8x8Coefficients(mbAddr, b8) ? 1 : 0);
+                int i = ((b8 >> 1) * 8) + ((b8 & 1) * 2);
+                per8x8[i] = per8x8[i + 1] = per8x8[i + 4] = per8x8[i + 5] = coded;
             }
         }
         else

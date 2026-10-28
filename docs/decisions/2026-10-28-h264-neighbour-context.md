@@ -150,3 +150,23 @@ ctxIdxInc. What is left of the plan is MBAFF frames and field pictures, where ea
 (`AffNeighbor`, 10.2% of `h264-mbaff-default.mp4`'s time, about 33 calls a macroblock): resolve each macroblock's
 neighbouring rows once (the left pair's macroblock and row for each of its luma and chroma block rows, the upper
 pair's), not its values, and read the picture-wide arrays through that. Measured the same way before it is kept.
+
+## Outcome of the MBAFF and field picture pull request (2026-10-28)
+
+**Kept, smaller than planned: the pairs found once, not the rows.** Table 6-4 is two halves: finding the pairs around
+the macroblock (A to D, whether each is available in the slice and a field pair), the same for every lookup of a
+macroblock, and the case analysis on (xN, yN), which differs per lookup. `FindAffPairs` does the first half once a
+macroblock (cached by macroblock, field decoding and slice) and `AffNeighbor(in AffPairs, ...)` the second, a port of the
+table's tail; the static lookup stays as the reference, and `PairsFoundOnce_MatchTheLookup` compares the two on 300
+random pictures of 3x3 pairs, at every location, for luma and chroma sizes and both field parities. `Neighbor` answers
+the two cheap cases (inside the macroblock; right of or below it) itself and calls the rest out of line. Resolving each
+block row's neighbour row as well was not needed for the gain and would have added a second cache to keep in step.
+
+Measured against main, by instructions (callgrind on the AOT build): `h264-mbaff-default.mp4` 10.11 to 9.56 M a frame
+(-5.4%), `jm-paff-b.mp4` 9.24 to 8.68 M (-6.0%), `h264-bench-720p.mp4` 50.41 to 49.72 M (-1.4%: `Neighbor` now inlines
+into its callers in frames too). By time (perf, the order alternating, normalized by untouched functions): -2.9%, -4.0%
+and -0.1%. Short of the 6 to 8% estimated for MBAFF: the case analysis per lookup remains.
+
+What did not work: the cache's check inline in `Neighbor` cost frames 1.2 to 1.3% (the progressive path grew, and
+inlined less well into its callers) for 1% more on MBAFF. The `_pairSlots` branch therefore holds only the two
+comparisons above and a call.

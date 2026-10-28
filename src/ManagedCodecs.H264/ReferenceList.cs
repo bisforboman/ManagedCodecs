@@ -265,7 +265,7 @@ internal sealed class ReferenceList
     /// (8.2.5.3); otherwise the window counts frames. The adaptive operations work on fields
     /// (8.2.5.4): PicNum and LongTermPicNum count the current field's parity as 2n + 1 and the
     /// other as 2n, and a LongTermFrameIdx taken by another field frees it unless that field is the
-    /// other field of the same frame. Operation 5 is rejected before (<see cref="PictureOrder"/>).
+    /// other field of the same frame. Operation 5 unmarks every reference, as in frames.
     /// </summary>
     public void MarkField(SliceHeader header, Picture frame, SequenceParameterSet sps, bool secondField)
     {
@@ -320,6 +320,17 @@ internal sealed class ReferenceList
                             UnmarkLongTermFields(p);
                         }
 
+                        break;
+                    case 5:
+                        foreach (var p in _pictures.ToList())
+                        {
+                            UnmarkLongTermFields(p);
+                            UnmarkField(p.Field(0));
+                            UnmarkField(p.Field(1));
+                        }
+
+                        _maxLongTermFrameIdx = -1;
+                        frame.FrameNum = 0; // the frame counts as frame_num 0 from now on (8.2.1)
                         break;
                     case 6:
                         FreeLongTermFrameIdx(op.LongTermFrameIdx, frame);

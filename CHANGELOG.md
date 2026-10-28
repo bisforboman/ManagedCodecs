@@ -11,6 +11,12 @@ share internals, so each depends on the others at exactly its own version (`[X]`
 then reports a mix of versions (NU1107, or NU1608 for a newer one referenced directly) rather than letting it fail at
 run time.
 
+## Unreleased
+
+### Added
+
+- H.264: memory management operation 5 in field pictures, which threw `NotSupportedException`.
+
 ## 0.2.0 – 2026-10-28
 
 Parametric stereo complete (mixing procedure Rb, phase parameters, 34 bands), long-term references in H.264 field

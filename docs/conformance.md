@@ -142,8 +142,15 @@ field order counts are checked too. Not reached by JM's streams: a B frame after
 its co-located field pair in display order (so the bottom field is the nearer one), and a B
 frame over a field pair partitioned below 16x16. Field marking that JM's streams never reach
 (the second field of a frame not sliding the window, memory management operation 1 by field
-PicNum) and the field B lists' list 1 swap have unit tests; memory management operation 5 in a
-field picture and a field without its pair throw NotSupportedException. Long-term references
+PicNum) and the field B lists' list 1 swap have unit tests; a field without its pair throws
+NotSupportedException. Memory management operation 5 in a field picture, which no encoder at hand
+writes: `tools/h264-add-mmco5.py` puts it into the first field of a JM stream's first non-IDR I
+frame and rebases the frame_num and pic_order_cnt_lsb of the slices after it. With P fields and
+one reference frame the lists after that frame hold its fields alone, as the encoder had them, so
+JM's decoder gives exactly the encoder's reconstruction and FFmpeg the same: `jm-paff-mmco5`
+(CABAC) and `jm-paff-mmco5-cavlc` fail when the second field is not paired with frame_num 0, or
+operation 5 does not unmark the references or reset the frame's frame_num. The field's own order
+count, rebased to 0 (which changes no output order in these P-only streams), has a unit test. Long-term references
 used by field pictures: `jm-paff-b-adaptive-temporal-ltr` codes its IDR picture as a frame marked
 long-term and later pictures as fields, so the P and B field lists carry its fields after the
 short-term ones (parity alternating) and temporal direct asks whether they are long-term; the

@@ -85,6 +85,14 @@ MUTATIONS = [
          find="else if (!(secondField && frame.Field(1 - header.Parity).IsReference))",
          replace="else if (!(secondField && frame.Field(1 - header.Parity).IsShortTermReference))",
          tests="FullyQualifiedName~ReferenceListTests"),
+    # Memory management operation 5 in a field picture: the field's order count rebased to 0 (a unit test), and its
+    # second field paired with frame_num 0.
+    dict(file="src/ManagedCodecs.H264/PictureOrder.cs",
+         find="int field = mmco5 ? 0 : header.BottomField ? bottom : top;", replace="int field = header.BottomField ? bottom : top;",
+         tests="FullyQualifiedName~PictureOrderTests"),
+    dict(file="src/ManagedCodecs.H264/H264Decoder.cs",
+         find="&& FrameNumAfter(first.Header) == header.FrameNum", replace="&& first.Header.FrameNum == header.FrameNum",
+         tests="DisplayName~paff-mmco5"),
 
     # ---- MP4 (as FFmpeg reads it)
     # Negative composition offsets in 'ctts': FFmpeg leaves the last two entries out of the shift.

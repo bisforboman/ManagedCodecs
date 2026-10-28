@@ -92,8 +92,36 @@ public class PictureOrderTests
         Assert.Equal(2, order.Next(Header(lsb: 2), type0));
     }
 
-    private static SliceHeader Header(bool idr = false, int frameNum = 0, int lsb = 0, bool reference = true, int deltaBottom = 0, int delta0 = 0, bool mmco5 = false) => new()
+    [Fact]
+    public void MemoryManagementOperation5_InAFieldStartsTheCountOverAtThatField()
     {
+        // Type 0: the top field with operation 5 counts 0 whatever its lsb, and its bottom field and the fields after it
+        // count on from 0 (the rebased lsbs a stream then sends).
+        var type0 = new SequenceParameterSet { PicOrderCntType = 0, Log2MaxPicOrderCntLsb = 4, Log2MaxFrameNum = 4, FrameMbsOnly = false };
+        var order = new PictureOrder();
+        order.Next(Header(idr: true, lsb: 0, field: Top), type0);
+        order.Next(Header(lsb: 1, field: Bottom), type0);
+        Assert.Equal(0, order.Next(Header(frameNum: 1, lsb: 6, mmco5: true, field: Top), type0));
+        Assert.Equal(1, order.Next(Header(lsb: 1, field: Bottom), type0));
+        Assert.Equal(2, order.Next(Header(frameNum: 1, lsb: 2, field: Top), type0));
+
+        // Type 2, with operation 5 in a bottom field: 0 there, and frame_num counting from 0 after it.
+        var type2 = new SequenceParameterSet { PicOrderCntType = 2, Log2MaxFrameNum = 4, FrameMbsOnly = false };
+        order = new PictureOrder();
+        order.Next(Header(idr: true, field: Top), type2);
+        order.Next(Header(frameNum: 1, field: Bottom), type2);
+        Assert.Equal(0, order.Next(Header(frameNum: 2, mmco5: true, field: Bottom), type2));
+        Assert.Equal(2, order.Next(Header(frameNum: 1, field: Top), type2));
+    }
+
+    private const bool Top = false;
+
+    private const bool Bottom = true;
+
+    private static SliceHeader Header(bool idr = false, int frameNum = 0, int lsb = 0, bool reference = true, int deltaBottom = 0, int delta0 = 0, bool mmco5 = false, bool? field = null) => new()
+    {
+        FieldPic = field is not null,
+        BottomField = field == true,
         IsIdr = idr,
         FrameNum = frameNum,
         PicOrderCntLsb = lsb,

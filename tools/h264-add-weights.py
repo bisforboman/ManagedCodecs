@@ -311,4 +311,5 @@ def main():
     print(f'{target}: {weighted} slice headers given a pred_weight_table', file=sys.stderr)
 
 
-main()
+if __name__ == "__main__":
+    main()

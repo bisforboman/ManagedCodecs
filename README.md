@@ -67,7 +67,7 @@ and code that reproduces FFmpeg's reading where it differs from the spec), and n
 - AAC: SBR's speed (5.1 HE-AAC at about 0.41 ms a frame, 100 times
   real time, 2.2 times FFmpeg's time on one thread; Benchmarking).
 - MJPEG: files from real cameras (the samples are all FFmpeg's), and packets holding one field (FFmpeg decodes none).
-- H.264: memory management operation 5 in field pictures (rejected: no encoder at hand writes it); luma and chroma bit depths that differ are rejected on purpose (no mainstream
+- H.264: luma and chroma bit depths that differ are rejected on purpose (no mainstream
   encoder or decoder, FFmpeg included, handles them, and they would need a bit depth for each plane in the frame
   API); guessing motion for concealed macroblocks (they copy their place in a reference); without concealment, a
   lost reference fails pictures up to the next IDR picture, not an MMCO 5 one (by design: the MMCO 5 picture itself

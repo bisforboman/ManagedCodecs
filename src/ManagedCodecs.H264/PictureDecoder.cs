@@ -60,6 +60,11 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
     private readonly int _widthInMbs;
     private readonly int _mbCount;
 
+    // Each macroblock address's column and row (of a pair address in MBAFF frames and field pictures), so that
+    // placing a macroblock takes no division.
+    private readonly int[] _mbColumn;
+    private readonly int[] _mbRow;
+
     // MbWidthC and MbHeightC (8 or 16) and the chroma 4x4 blocks of a component (4 or 8). In
     // 4:4:4 (ChromaArrayType 3) Cb and Cr are coded and reconstructed as luma is, each with its
     // own coefficients, QP and scaling lists, so the per-component state below has three entries.
@@ -130,9 +135,13 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
         _sliceOfMb = new int[_mbCount];
         Array.Fill(_sliceOfMb, -1);
         _neighborMbs = new int[_mbCount * 4];
+        _mbColumn = new int[_mbCount];
+        _mbRow = new int[_mbCount];
         for (int mb = 0; mb < _mbCount; mb++)
         {
             int mbX = mb % _widthInMbs;
+            _mbColumn[mb] = mbX;
+            _mbRow[mb] = mb / _widthInMbs;
             bool above = mb >= _widthInMbs;
             _neighborMbs[(mb * 4) + 0] = mbX > 0 ? mb - 1 : -1;
             _neighborMbs[(mb * 4) + 1] = above ? mb - _widthInMbs : -1;

@@ -177,6 +177,34 @@ public class InterPredictionTests
     /// against the definition, on random samples, weights and offsets over their whole ranges (explicit weights -128 to
     /// 127, implicit -64 to 128, denominators 0 to 7), every block width, and the extremes.
     /// </summary>
+    /// <summary>
+    /// The window copy by rows (inside copied, outside its edge sample repeated) against clamping each sample, for
+    /// windows left of, across and right of the picture, and wider than it.
+    /// </summary>
+    [Fact]
+    public void FetchWindow_MatchesReference()
+    {
+        var random = new Random(7);
+        for (int n = 0; n < 4000; n++)
+        {
+            int widthInMbs = random.Next(1, 4);
+            int stride = widthInMbs * 16;
+            int maxX = stride - 1;
+            int maxY = random.Next(15, 40);
+            var plane = new byte[stride * (maxY + 1)];
+            random.NextBytes(plane);
+            int width = random.Next(1, 22);
+            int height = random.Next(1, 22);
+            int x = random.Next(-60, stride + 40);
+            int y = random.Next(-60, maxY + 40);
+            var expected = new byte[21 * 21];
+            var actual = new byte[21 * 21];
+            InterPrediction.FetchWindowReference(plane, stride, maxX, maxY, x, y, width, height, expected, 21);
+            InterPrediction.FetchWindow(plane, stride, maxX, maxY, x, y, width, height, actual, 21);
+            Assert.True(expected.AsSpan().SequenceEqual(actual), $"{width}x{height} at ({x},{y}) in {stride}x{maxY + 1}");
+        }
+    }
+
     [Fact]
     public void VectorWeights_MatchReference()
     {

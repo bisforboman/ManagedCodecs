@@ -76,15 +76,15 @@ internal sealed partial class PictureDecoder<TPixel>
         int stride = Picture.LumaStride;
         if (!_pairSlots)
         {
-            return (((mbAddr / _widthInMbs) * 16 * stride) + ((mbAddr % _widthInMbs) * 16), stride);
+            return ((_mbRow[mbAddr] * 16 * stride) + (_mbColumn[mbAddr] * 16), stride);
         }
 
         int pair = mbAddr >> 1;
-        int row = (pair / _widthInMbs) * 32;
+        int row = _mbRow[pair] * 32;
         int bottom = mbAddr & 1;
         return _fieldMb[mbAddr]
-            ? (((row + bottom) * stride) + ((pair % _widthInMbs) * 16), stride * 2)
-            : (((row + (bottom * 16)) * stride) + ((pair % _widthInMbs) * 16), stride);
+            ? (((row + bottom) * stride) + (_mbColumn[pair] * 16), stride * 2)
+            : (((row + (bottom * 16)) * stride) + (_mbColumn[pair] * 16), stride);
     }
 
     /// <summary>The macroblock's top-left chroma sample and the row stride of its samples.</summary>
@@ -93,15 +93,15 @@ internal sealed partial class PictureDecoder<TPixel>
         int stride = Picture.ChromaStride;
         if (!_pairSlots)
         {
-            return (((mbAddr / _widthInMbs) * _mbHeightC * stride) + ((mbAddr % _widthInMbs) * _mbWidthC), stride);
+            return ((_mbRow[mbAddr] * _mbHeightC * stride) + (_mbColumn[mbAddr] * _mbWidthC), stride);
         }
 
         int pair = mbAddr >> 1;
-        int row = (pair / _widthInMbs) * 2 * _mbHeightC;
+        int row = _mbRow[pair] * 2 * _mbHeightC;
         int bottom = mbAddr & 1;
         return _fieldMb[mbAddr]
-            ? (((row + bottom) * stride) + ((pair % _widthInMbs) * _mbWidthC), stride * 2)
-            : (((row + (bottom * _mbHeightC)) * stride) + ((pair % _widthInMbs) * _mbWidthC), stride);
+            ? (((row + bottom) * stride) + (_mbColumn[pair] * _mbWidthC), stride * 2)
+            : (((row + (bottom * _mbHeightC)) * stride) + (_mbColumn[pair] * _mbWidthC), stride);
     }
 
     private MbTarget PictureTarget(int mbAddr)

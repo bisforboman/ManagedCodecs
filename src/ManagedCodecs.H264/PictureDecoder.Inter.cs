@@ -512,6 +512,11 @@ internal sealed partial class PictureDecoder<TPixel>
         int block = (mbAddr * 16) + ((y >> 2) * 4) + (x >> 2);
         var ref0 = _refPic[0][part];
         var ref1 = _refPic[1][part];
+        if (typeof(TPixel) == typeof(byte) && _mbWidthC == 8 && _mbHeightC == 8 && !_pairSlots && (ref0 is null) != (ref1 is null) && slice.Header.Weights is null)
+        {
+            PredictFromOne(ref0 ?? ref1!, ref0 is null ? 1 : 0, mbAddr, block, x, y, w, h);
+            return;
+        }
 
         // Where the partition is, in the coordinates of the references (a field macroblock's are
         // its field's), and where its samples go in the picture.
@@ -559,6 +564,31 @@ internal sealed partial class PictureDecoder<TPixel>
     }
 
     /// <summary>
+    /// <see cref="PredictPartition"/> for the most common partition, straight to the 8-bit kernels: one reference, no
+    /// weights (implicit weights apply to two), a frame macroblock of a frame (so a frame reference, and no chroma
+    /// field offset), 4:2:0.
+    /// </summary>
+    private void PredictFromOne(Picture reference, int list, int mbAddr, int block, int x, int y, int w, int h)
+    {
+        int mvX = _mvX[list][block];
+        int mvY = _mvY[list][block];
+        int lumaX = (_mbColumn[mbAddr] * 16) + x;
+        int lumaY = (_mbRow[mbAddr] * 16) + y;
+
+        // As in PredictComponent: the lowest row the 6-tap filter reads, and one more for chroma's.
+        reference.WaitForRow(lumaY + (mvY >> 2) + h + 3);
+        var picture = Picture;
+        int lumaStride = picture.LumaStride;
+        InterPrediction.PredictLuma(reference, lumaX, lumaY, w, h, mvX, mvY, picture.Y.AsSpan((lumaY * lumaStride) + lumaX), lumaStride);
+        int chromaX = lumaX >> 1;
+        int chromaY = lumaY >> 1;
+        int chromaStride = picture.ChromaStride;
+        int chromaOut = (chromaY * chromaStride) + chromaX;
+        InterPrediction.PredictChroma(reference, 1, chromaX, chromaY, w >> 1, h >> 1, mvX, mvY, picture.Cb.AsSpan(chromaOut), chromaStride);
+        InterPrediction.PredictChroma(reference, 2, chromaX, chromaY, w >> 1, h >> 1, mvX, mvY, picture.Cr.AsSpan(chromaOut), chromaStride);
+    }
+
+    /// <summary>
     /// Motion compensation of one component of a w x h luma partition at reference position
     /// (lumaX, lumaY): luma, and in 4:4:4 Cb and Cr, with the luma filter (8.4.2.2.1); 4:2:0 and
     /// 4:2:2 chroma with the chroma one, at its position and size (8.4.2.2.2).
@@ -596,12 +626,12 @@ internal sealed partial class PictureDecoder<TPixel>
         int chromaOut = chroma + ((_mbHeightC == 16 ? y : y / 2) * chromaStride) + (_mbWidthC == 16 ? x : x / 2);
         if (!_pairSlots)
         {
-            return (((mbAddr % _widthInMbs) * 16) + x, ((mbAddr / _widthInMbs) * 16) + y, lumaOut, lumaStride, chromaOut, chromaStride);
+            return ((_mbColumn[mbAddr] * 16) + x, (_mbRow[mbAddr] * 16) + y, lumaOut, lumaStride, chromaOut, chromaStride);
         }
 
         int pair = mbAddr >> 1;
-        int lumaX = ((pair % _widthInMbs) * 16) + x;
-        int lumaY = _fieldMb[mbAddr] ? ((pair / _widthInMbs) * 16) + y : ((pair / _widthInMbs) * 32) + ((mbAddr & 1) * 16) + y;
+        int lumaX = (_mbColumn[pair] * 16) + x;
+        int lumaY = _fieldMb[mbAddr] ? (_mbRow[pair] * 16) + y : (_mbRow[pair] * 32) + ((mbAddr & 1) * 16) + y;
         return (lumaX, lumaY, lumaOut, lumaStride, chromaOut, chromaStride);
     }
 

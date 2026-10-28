@@ -515,7 +515,9 @@ the tones (sidebands 43 Hz apart around each, as FDK's own decoder hears them to
 32-band synthesis agrees with FFmpeg to 4.2e-7 at most, 4e-8 on average. The 32-band synthesis bank is the full one's kernel at every
 other n, exp(i pi/128 (k + 0.5)(4n - 255)), with every other window coefficient: after the analysis bank it gives the
 signal back with a whole-sample delay of 289 and a gain of 1 within 6e-3 (`QmfTests`, which also check it against its
-sums). Reading the kernel as exp(i pi/64 (k + 0.5)(2n - 127)) instead delays it a quarter of a sample more, and misses
+sums). Its kernel, a quarter of a sample off the full bank's, is no DCT-IV, so it keeps its DFT of 64 points where
+the full bank now takes two DCT-IVs of 64 (each an FFT of 32; `QmfTests` compare that with the DFT of 128 it replaced,
+to 1e-12 of the peak). Reading the kernel as exp(i pi/64 (k + 0.5)(2n - 127)) instead delays it a quarter of a sample more, and misses
 FFmpeg's output by 2e-2 on average, 14 to 17% of the signal at 3 to 6 kHz, below the high band. The sample agrees with FFmpeg to 3e-4 at most,
 6e-6 on average, with noise under its tones, as FFmpeg's single precision in the HF generator needs: without noise, the
 11 kHz tone that fills much of this narrower band left 7e-5 on average, in the frames where computing the prediction

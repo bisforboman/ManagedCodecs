@@ -224,6 +224,103 @@ public class QmfTests
         }
     }
 
+    /// <summary>The DCT-IV by a complex FFT of 32 gives its definition's sums to within rounding, plain and alternated.</summary>
+    [Fact]
+    public void DctIV_MatchesTheSums()
+    {
+        var random = new Random(3);
+        var x = new double[64];
+        var output = new double[64];
+        for (int trial = 0; trial < 20; trial++)
+        {
+            for (int k = 0; k < 64; k++)
+            {
+                x[k] = (random.NextDouble() - 0.5) * 65536;
+            }
+
+            foreach (bool alternate in (bool[])[false, true])
+            {
+                new QmfDctIV().Transform(x, alternate, output);
+                for (int n = 0; n < 64; n++)
+                {
+                    double sum = 0;
+                    for (int k = 0; k < 64; k++)
+                    {
+                        sum += (alternate && k % 2 == 1 ? -x[k] : x[k]) * Math.Cos(Math.PI / 64 * (k + 0.5) * (n + 0.5));
+                    }
+
+                    Assert.Equal(sum, output[n], 1e-8);
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// The full synthesis bank's v(n) by two DCT-IVs equals the 128-point DFT it replaced (the input turned by
+    /// exp(-i 510 pi k / 256), transformed, the real part of the output turned by exp(i pi (2n - 255) / 256) / 64), to
+    /// within rounding: any slip of an index or a sign would show far above it.
+    /// </summary>
+    [Fact]
+    public void FullSynthesis_MatchesTheDftRoute()
+    {
+        var random = new Random(5);
+        var fft = new QmfFft(128);
+        var real = new double[64];
+        var imaginary = new double[64];
+        var output = new double[64];
+        var reference = new double[64];
+        var synthesis = new QmfSynthesis();
+
+        // The reference bank: the same window over the DFT route's v, newest first.
+        var history = new double[1280];
+        var window = Enumerable.Range(0, 640).Select(n => QmfWindow.Coefficients[n]).ToArray();
+        for (int slot = 0; slot < 30; slot++)
+        {
+            for (int k = 0; k < 64; k++)
+            {
+                real[k] = (random.NextDouble() - 0.5) * 65536;
+                imaginary[k] = (random.NextDouble() - 0.5) * 65536;
+            }
+
+            var re = new double[128];
+            var im = new double[128];
+            for (int k = 0; k < 64; k++)
+            {
+                double c = QmfTrig.CosPi256(-510 * k);
+                double s = QmfTrig.SinPi256(-510 * k);
+                re[k] = (real[k] * c) - (imaginary[k] * s);
+                im[k] = (real[k] * s) + (imaginary[k] * c);
+            }
+
+            fft.Transform(re, im, scalar: true);
+            Array.Copy(history, 0, history, 128, 1152);
+            for (int n = 0; n < 128; n++)
+            {
+                history[n] = ((re[n] * QmfTrig.CosPi256((2 * n) - 255)) - (im[n] * QmfTrig.SinPi256((2 * n) - 255))) / 64;
+            }
+
+            double peak = 0;
+            for (int n = 0; n < 64; n++)
+            {
+                double sum = 0;
+                for (int i = 0; i < 5; i++)
+                {
+                    sum += history[(256 * i) + n] * window[(128 * i) + n];
+                    sum += history[(256 * i) + 192 + n] * window[(128 * i) + 64 + n];
+                }
+
+                reference[n] = sum;
+                peak = Math.Max(peak, Math.Abs(sum));
+            }
+
+            synthesis.Process(real, imaginary, output);
+            for (int n = 0; n < 64; n++)
+            {
+                Assert.True(Math.Abs(reference[n] - output[n]) <= 1e-12 * Math.Max(peak, 1), $"slot {slot}, n {n}: {output[n]} for {reference[n]}");
+            }
+        }
+    }
+
     private static double[] RoundTrip(Func<double, double> signal, bool downsampled = false)
     {
         var analysis = new QmfAnalysis();

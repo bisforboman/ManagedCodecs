@@ -78,7 +78,9 @@ internal sealed class QmfAnalysis
 /// a sample and miss FFmpeg's output by up to 14% at 3 to 6 kHz). With B bands that is a DFT of 2B points: in units of
 /// pi/256 the exponent (2k + 1)((128/B) n - 255) splits into 2 pi k n / 2B, (128/B) n - 255 and -510 k, so v(n) is the
 /// real part of exp(i pi ((128/B) n - 255) / 256) times the DFT of X(k) exp(-i 510 pi k / 256) (zero for k from B) at n,
-/// over 64. Tests compare it with the sums on random input.
+/// over 64. The full bank takes a shorter route (<see cref="FullTransform"/>): two DCT-IVs of 64 points, each by an FFT
+/// of 32, where the DFT took one of 128; the downsampled bank's kernel, a quarter of a sample off, is no DCT-IV, and it
+/// keeps the DFT of 64. Tests compare both with the sums on random input, and the full bank with the DFT route.
 /// </remarks>
 internal sealed class QmfSynthesis
 {
@@ -111,14 +113,20 @@ internal sealed class QmfSynthesis
         _start = QmfState.Step(_v, _start, 20 * bands, 2 * bands);
         var v = _v.AsSpan(_start, 20 * bands);
 
-        Span<double> re = stackalloc double[2 * bands];
-        Span<double> im = stackalloc double[2 * bands];
-        QmfState.Rotate(real[..bands], imaginary[..bands], t.InCos, t.InSin, re, im);
-
-        re[bands..].Clear();
-        im[bands..].Clear();
-        t.Fft.Transform(re, im);
-        QmfState.RealOfRotation(re, im, t.OutCos, t.OutSin, v[..(2 * bands)]);
+        if (bands == 64)
+        {
+            FullTransform(real, imaginary, v[..128]);
+        }
+        else
+        {
+            Span<double> re = stackalloc double[2 * bands];
+            Span<double> im = stackalloc double[2 * bands];
+            QmfState.Rotate(real[..bands], imaginary[..bands], t.InCos, t.InSin, re, im);
+            re[bands..].Clear();
+            im[bands..].Clear();
+            t.Fft.Transform(re, im);
+            QmfState.RealOfRotation(re, im, t.OutCos, t.OutSin, v[..(2 * bands)]);
+        }
 
         // g takes, of each 4B values of v, the first and the last B; w(n) = g(n) c(n (64 / B)); each output sample sums
         // ten of w, in the order of n.
@@ -131,6 +139,43 @@ internal sealed class QmfSynthesis
             Vectors.MultiplyAdd(output, v.Slice((4 * bands * i) + (3 * bands), bands), window.Slice((2 * bands * i) + bands, bands));
         }
     }
+
+    /// <summary>
+    /// The full bank's v(n), n in 0..127, as two DCT-IVs of 64 points (<see cref="QmfDctIV"/>): with n' = 127 - n the
+    /// kernel's real part is X_r(k) cos(t) + X_i(k) sin(t), t = pi/64 (k + 0.5)(n' + 0.5). For n' from 64 the cos kernel
+    /// turns into -(-1)^k sin and the sin kernel into (-1)^k cos of n' - 64, and a sin kernel at n equals (-1)^k times the
+    /// cos kernel at 63 - n; so with A the DCT-IV of X_r and B that of (-1)^k X_i, v(n) = (-A(n) + B(63 - n)) / 64 below
+    /// 64 and (A(127 - n) + B(n - 64)) / 64 from 64. The outputs of A and B at 2p and 63 - 2p come from their FFTs' values
+    /// at p, which give v at 2p, 63 - 2p, 64 + 2p and 127 - 2p together.
+    /// </summary>
+    [SkipLocalsInit]
+    private static void FullTransform(ReadOnlySpan<double> real, ReadOnlySpan<double> imaginary, Span<double> v)
+    {
+        if (v.Length < 128)
+        {
+            throw new ArgumentException("The full bank gives 128 values of v.");
+        }
+
+        Span<double> aRe = stackalloc double[32];
+        Span<double> aIm = stackalloc double[32];
+        Span<double> bRe = stackalloc double[32];
+        Span<double> bIm = stackalloc double[32];
+        QmfDctIV.Pretransform(real, alternate: false, aRe, aIm);
+        QmfDctIV.Pretransform(imaginary, alternate: true, bRe, bIm);
+        ref double w = ref MemoryMarshal.GetReference(v);
+        for (int p = 0; p < 32; p++)
+        {
+            (double a, double aOdd) = Dct.Output(aRe[p], aIm[p], p);
+            (double b, double bOdd) = Dct.Output(bRe[p], bIm[p], p);
+            Unsafe.Add(ref w, 2 * p) = bOdd - a; // v(n) = B(63 - n) - A(n), n = 2p
+            Unsafe.Add(ref w, 63 - (2 * p)) = b - aOdd; // n = 63 - 2p
+            Unsafe.Add(ref w, 64 + (2 * p)) = aOdd + b; // v(64 + n) = A(63 - n) + B(n), n = 2p
+            Unsafe.Add(ref w, 127 - (2 * p)) = a + bOdd; // n = 63 - 2p
+        }
+    }
+
+    // The DCT-IVs with the 1/64 of v(n).
+    private static readonly QmfDctIV Dct = new(1.0 / 64);
 
     // exp(-i 510 pi k / 256) for the input, and exp(i pi ((128/B) n - 255) / 256) / 64 for the output.
     private sealed class Tables(int bands)
@@ -149,6 +194,89 @@ internal sealed class QmfSynthesis
         public double[] OutCos { get; } = [.. Enumerable.Range(0, 2 * bands).Select(n => QmfTrig.CosPi256(((128 / bands) * n) - 255) / 64)];
 
         public double[] OutSin { get; } = [.. Enumerable.Range(0, 2 * bands).Select(n => QmfTrig.SinPi256(((128 / bands) * n) - 255) / 64)];
+    }
+}
+
+/// <summary>
+/// The DCT-IV of 64 points, C(n) = the sum over k in 0..63 of x(k) cos(pi/64 (k + 0.5)(n + 0.5)), by a complex FFT of 32:
+/// taking x's even values and its odd ones in reverse as one complex sequence v(m) = x(2m) + i x(63 - 2m), the sum at an
+/// even n = 2p is the real part of Z(p) = the sum over m of v(m) exp(-i pi/64 (2m + 0.5)(2p + 0.5)), and C(63 - 2p) its
+/// negated imaginary part (cos(pi (2m + 0.5) - t) = sin t and the other way round). The exponent splits into
+/// 2 pi m p / 32 + pi m / 64 + pi (4p + 1) / 256, so conj Z(p) = exp(i pi (4p + 1) / 256) times the (positive-exponent)
+/// FFT of conj v(m) exp(i pi m / 64) at p. All factors are multiples of pi/256 (<see cref="QmfTrig"/>).
+/// </summary>
+internal sealed class QmfDctIV(double scale = 1)
+{
+    private static readonly QmfFft Fft = new(32);
+
+    private static readonly double[] PreCos = [.. Enumerable.Range(0, 32).Select(m => QmfTrig.CosPi256(4 * m))];
+    private static readonly double[] PreSin = [.. Enumerable.Range(0, 32).Select(m => QmfTrig.SinPi256(4 * m))];
+
+    // With the scale the outputs take (a power of 2, so the same bits as scaling them after).
+    private readonly double[] _postCos = [.. Enumerable.Range(0, 32).Select(p => QmfTrig.CosPi256((4 * p) + 1) * scale)];
+    private readonly double[] _postSin = [.. Enumerable.Range(0, 32).Select(p => QmfTrig.SinPi256((4 * p) + 1) * scale)];
+
+    /// <summary>The DCT-IV of <paramref name="x"/> (64 values), or of (-1)^k x(k) if <paramref name="alternate"/>, into <paramref name="output"/>, times the scale.</summary>
+    [SkipLocalsInit]
+    public void Transform(ReadOnlySpan<double> x, bool alternate, Span<double> output)
+    {
+        if (output.Length < 64)
+        {
+            throw new ArgumentException("The DCT-IV gives 64 values.");
+        }
+
+        Span<double> re = stackalloc double[32];
+        Span<double> im = stackalloc double[32];
+        Pretransform(x, alternate, re, im);
+        ref double r = ref MemoryMarshal.GetReference(re);
+        ref double i = ref MemoryMarshal.GetReference(im);
+        ref double o = ref MemoryMarshal.GetReference(output);
+        for (int p = 0; p < 32; p++)
+        {
+            (double even, double odd) = Output(Unsafe.Add(ref r, p), Unsafe.Add(ref i, p), p);
+            Unsafe.Add(ref o, 2 * p) = even;
+            Unsafe.Add(ref o, 63 - (2 * p)) = odd;
+        }
+    }
+
+    /// <summary>
+    /// The FFT of 32 of <paramref name="x"/>'s values packed and turned (<paramref name="re"/>, <paramref name="im"/>, 32
+    /// each), whose value at p <see cref="Output"/> turns into the outputs at 2p and 63 - 2p.
+    /// </summary>
+    public static void Pretransform(ReadOnlySpan<double> x, bool alternate, Span<double> re, Span<double> im)
+    {
+        if (x.Length < 64 || re.Length < 32 || im.Length < 32)
+        {
+            throw new ArgumentException("The DCT-IV takes 64 values, through 32 complex ones.");
+        }
+
+        double odd = alternate ? -1 : 1;
+        ref double input = ref MemoryMarshal.GetReference(x);
+        ref double r = ref MemoryMarshal.GetReference(re);
+        ref double i = ref MemoryMarshal.GetReference(im);
+        ref double preCos = ref MemoryMarshal.GetArrayDataReference(PreCos);
+        ref double preSin = ref MemoryMarshal.GetArrayDataReference(PreSin);
+        for (int m = 0; m < 32; m++)
+        {
+            // (a - i b)(cos + i sin), a = x(2m), b = x(63 - 2m) (an odd k, so negated if alternate).
+            double a = Unsafe.Add(ref input, 2 * m);
+            double b = odd * Unsafe.Add(ref input, 63 - (2 * m));
+            double c = Unsafe.Add(ref preCos, m);
+            double s = Unsafe.Add(ref preSin, m);
+            Unsafe.Add(ref r, m) = (a * c) + (b * s);
+            Unsafe.Add(ref i, m) = (a * s) - (b * c);
+        }
+
+        Fft.Transform(re, im);
+    }
+
+    /// <summary>The outputs at 2p and 63 - 2p (times the scale) from the FFT's value at p, (yr, yi).</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public (double Even, double Odd) Output(double yr, double yi, int p)
+    {
+        double c = Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(_postCos), p);
+        double s = Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(_postSin), p);
+        return ((yr * c) - (yi * s), (yr * s) + (yi * c));
     }
 }
 

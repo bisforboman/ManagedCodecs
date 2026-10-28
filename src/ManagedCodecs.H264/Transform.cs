@@ -162,8 +162,94 @@ internal static class Transform
     /// 8x8 inverse transform (8.5.13.2) of scaled coefficients, added to the prediction already
     /// in <paramref name="dest"/> and clipped to <paramref name="bitDepth"/> bits (8.5.14).
     /// </summary>
-    [SkipLocalsInit]
     public static void InverseTransform8x8Add<TPixel>(Span<int> d, Span<TPixel> dest, int stride, int bitDepth)
+        where TPixel : unmanaged, IBinaryInteger<TPixel>
+    {
+        if (typeof(TPixel) == typeof(byte))
+        {
+            InverseTransform8x8Add(d, MemoryMarshal.Cast<TPixel, byte>(dest), stride);
+            return;
+        }
+
+        InverseTransform8x8AddScalar(d, dest, stride, bitDepth);
+    }
+
+    /// <summary>
+    /// <see cref="InverseTransform8x8Add{TPixel}"/> for 8-bit samples: the rows' transform as in the scalar one, then the
+    /// columns' four columns at a time (<see cref="Columns8"/>), each output row added to its eight samples and clipped
+    /// in 32-bit lanes. The same integer arithmetic as <see cref="InverseTransform8x8AddScalar"/>, its reference.
+    /// </summary>
+    [SkipLocalsInit]
+    private static void InverseTransform8x8Add(Span<int> d, Span<byte> dest, int stride)
+    {
+        _ = d[63];
+        _ = dest[(7 * stride) + 7];
+        Span<int> g = stackalloc int[64];
+        for (int i = 0; i < 8; i++)
+        {
+            Transform8(d, i * 8, 1, g, i * 8);
+        }
+
+        Span<Vector128<int>> left = stackalloc Vector128<int>[8];
+        Span<Vector128<int>> right = stackalloc Vector128<int>[8];
+        ref int rows = ref MemoryMarshal.GetReference(g);
+        Columns8(ref rows, left);
+        Columns8(ref Unsafe.Add(ref rows, 4), right);
+        var round = Vector128.Create(32);
+        ref byte target = ref MemoryMarshal.GetReference(dest);
+        for (int i = 0; i < 8; i++)
+        {
+            AddRow(ref Unsafe.Add(ref target, i * stride), (left[i] + round) >> 6);
+            AddRow(ref Unsafe.Add(ref target, (i * stride) + 4), (right[i] + round) >> 6);
+        }
+    }
+
+    /// <summary>
+    /// <see cref="Transform8"/> down four columns at once: <paramref name="g"/> is the first of them in row 0 of a
+    /// row-major 8x8 block; output row k of the four columns goes to <paramref name="o"/>[k].
+    /// </summary>
+    private static void Columns8(ref int g, Span<Vector128<int>> o)
+    {
+        var d0 = Vector128.LoadUnsafe(ref g);
+        var d1 = Vector128.LoadUnsafe(ref g, 8);
+        var d2 = Vector128.LoadUnsafe(ref g, 16);
+        var d3 = Vector128.LoadUnsafe(ref g, 24);
+        var d4 = Vector128.LoadUnsafe(ref g, 32);
+        var d5 = Vector128.LoadUnsafe(ref g, 40);
+        var d6 = Vector128.LoadUnsafe(ref g, 48);
+        var d7 = Vector128.LoadUnsafe(ref g, 56);
+
+        var e0 = d0 + d4;
+        var e1 = d5 - d3 - d7 - (d7 >> 1);
+        var e2 = d0 - d4;
+        var e3 = d1 + d7 - d3 - (d3 >> 1);
+        var e4 = (d2 >> 1) - d6;
+        var e5 = d7 - d1 + d5 + (d5 >> 1);
+        var e6 = d2 + (d6 >> 1);
+        var e7 = d3 + d5 + d1 + (d1 >> 1);
+
+        var f0 = e0 + e6;
+        var f1 = e1 + (e7 >> 2);
+        var f2 = e2 + e4;
+        var f3 = e3 + (e5 >> 2);
+        var f4 = e2 - e4;
+        var f5 = (e3 >> 2) - e5;
+        var f6 = e0 - e6;
+        var f7 = e7 - (e1 >> 2);
+
+        o[0] = f0 + f7;
+        o[1] = f2 + f5;
+        o[2] = f4 + f3;
+        o[3] = f6 + f1;
+        o[4] = f6 - f1;
+        o[5] = f4 - f3;
+        o[6] = f2 - f5;
+        o[7] = f0 - f7;
+    }
+
+    /// <summary>The scalar <see cref="InverseTransform8x8Add{TPixel}"/>: for deeper samples, and the 8-bit one's reference.</summary>
+    [SkipLocalsInit]
+    internal static void InverseTransform8x8AddScalar<TPixel>(Span<int> d, Span<TPixel> dest, int stride, int bitDepth)
         where TPixel : unmanaged, IBinaryInteger<TPixel>
     {
         int max = Samples.Max<TPixel>(bitDepth);

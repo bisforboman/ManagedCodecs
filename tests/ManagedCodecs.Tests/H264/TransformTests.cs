@@ -64,4 +64,29 @@ public class TransformTests
             Assert.True(expected.AsSpan().SequenceEqual(actual), $"DC {dc} differs.");
         }
     }
+
+    /// <summary>The 8-bit 8x8 vector add against the scalar transform, on random coefficients and samples.</summary>
+    [Fact]
+    public void InverseTransform8x8Add_MatchesScalar()
+    {
+        const int Stride = 13;
+        var random = new Random(29);
+        for (int n = 0; n < 10_000; n++)
+        {
+            int range = random.Next(3) switch { 0 => 64, 1 => 4096, _ => 1 << 20 };
+            var coefficients = new int[64];
+            for (int i = 0; i < 64; i++)
+            {
+                coefficients[i] = random.Next(3) == 0 ? 0 : random.Next(-range, range + 1);
+            }
+
+            var prediction = new byte[(7 * Stride) + 8];
+            random.NextBytes(prediction);
+            var expected = (byte[])prediction.Clone();
+            Transform.InverseTransform8x8AddScalar((int[])coefficients.Clone(), expected.AsSpan(), Stride, bitDepth: 8);
+            var actual = (byte[])prediction.Clone();
+            Transform.InverseTransform8x8Add((int[])coefficients.Clone(), actual.AsSpan(), Stride, bitDepth: 8);
+            Assert.True(expected.AsSpan().SequenceEqual(actual), $"Block {n} differs.");
+        }
+    }
 }

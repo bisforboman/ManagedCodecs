@@ -243,7 +243,8 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
   last bit at 7 of AAC's 8192 dequantization values, which only a stream reaching one shows (an unseeded noise sample
   made `wasm` fail now and then); `FourThirdsPower` and `QuarterPowerOfTwo` replace it. The FDK encoder
   writes the SBR header's second part only with non-default settings (a patched copy, `make-heaac-samples.sh`), and
-  downsampled SBR only for ELD (another patched copy; with PS it stays dual-rate). The downsampled synthesis kernel is
+  downsampled SBR only for ELD (another patched copy; with PS also `sbrEncoder_IsSingleRatePossible`, and a build
+  without assertions, `-DCMAKE_BUILD_TYPE=Release`: its PS analysis asserts at one rate). The downsampled synthesis kernel is
   the full one at even n, (4n - 255): read as (2n - 127) it lags a quarter of a sample and misses FFmpeg by 14 to 17% at
   3 to 6 kHz, which looks like a core bug. FFmpeg's parametric stereo (the oracle where the spec's text is out of reach): the phases' band count follows
   the last header that enabled IID (none before one), a frame is in 34 bands when either IID or ICC is, and its

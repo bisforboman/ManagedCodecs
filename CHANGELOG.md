@@ -31,6 +31,8 @@ run time.
 
 - Native AOT on x64: set `IlcInstructionSet` (x86-64-v3) in the app, or the AVX2 and 256-bit paths are left out (AAC
   and HE-AAC take about a third longer); README's Native AOT section has the timings.
+- HE-AAC v2 with downsampled SBR (parametric stereo at the core's rate) is checked against FFmpeg now, a sample from a
+  patched FDK encoder; it was untested.
 
 ### Fixed
 

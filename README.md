@@ -64,7 +64,7 @@ and code that reproduces FFmpeg's reading where it differs from the spec), and n
 
 ### Open
 
-- AAC: downsampled SBR with parametric stereo (no encoder at hand sends it; it decodes but is untested); SBR's speed (5.1 HE-AAC at about 0.41 ms a frame, 100 times
+- AAC: SBR's speed (5.1 HE-AAC at about 0.41 ms a frame, 100 times
   real time, 2.2 times FFmpeg's time on one thread; Benchmarking).
 - MJPEG: files from real cameras (the samples are all FFmpeg's), and packets holding one field (FFmpeg decodes none).
 - H.264: long-term marking of field pictures, and memory management operations other than 1 in them (rejected:

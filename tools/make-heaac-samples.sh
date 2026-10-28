@@ -77,8 +77,8 @@ fi
 
 # Downsampled SBR: the config gives SBR the core's own rate (44.1 kHz, sync extension), so the decoder runs SBR as for
 # 88.2 kHz but synthesizes only the lower 32 subbands, at the core's rate. The FDK encoder chooses it only for AAC ELD;
-# a copy of the tree with its HE-AAC default changed (sbrRatio 1 instead of 2) writes it. With parametric stereo the
-# encoder stays dual-rate, so no sample has both.
+# a copy of the tree with its HE-AAC default changed (sbrRatio 1 instead of 2) writes it. With parametric stereo it
+# stays dual-rate: heaacv2-downsampled below.
 if wanted heaac-downsampled; then
   git -C "$fdk/.." archive HEAD | (mkdir "$work/fdk3" && tar -x -C "$work/fdk3")
   file=$(find "$work/fdk3" -path '*libAACenc/src/aacenc_lib.cpp')
@@ -96,6 +96,24 @@ PY
   # high band to the 11 kHz tone. A third as much noise still left 4e-3 on x64 and 1e-2 under FFmpeg's ARM64 build.
   ff -f lavfi -i "aevalsrc=$music+0.01*(random(2)-0.5)|$music2+0.01*(random(3)-0.5):s=44100:d=3" -c:a pcm_s16le "$work/in.wav"
   LD_LIBRARY_PATH=$work/fdk3/build fdkaac --silent -p 5 -b 48000 -o "$out/heaac-downsampled.mp4" "$work/in.wav"
+fi
+
+# Downsampled SBR with parametric stereo: the encoder refuses single-rate SBR for PS (sbrEncoder_IsSingleRatePossible),
+# so a copy of the tree with both its HE-AAC default and that check changed writes it, built without assertions (its PS
+# analysis fails one in schur_div at one rate, on this input too). That analysis isn't made for one rate and moves the
+# tones (FDK's own decoder hears the same), but the stream is valid and exercises the decoder's PS on the 32-band
+# synthesis.
+if wanted heaacv2-downsampled; then
+  git -C "$fdk/.." archive HEAD | (mkdir "$work/fdk10" && tar -x -C "$work/fdk10")
+  file=$(find "$work/fdk10" -path '*libAACenc/src/aacenc_lib.cpp')
+  sbr=$(find "$work/fdk10" -path '*libSBRenc/src/sbr_encoder.cpp')
+  grep -q '      hAacConfig->sbrRatio = 2;' "$file" && grep -q 'UINT isPossible = (AOT_PS == aot) ? 0 : 1;' "$sbr" ||
+    { echo "the encoder's SBR ratio lines moved" >&2; exit 1; }
+  perl -0pi -e 's/    \} else \{\n      hAacConfig->sbrRatio = 2;\n    \}/    } else {\n      hAacConfig->sbrRatio = 1;\n    }/' "$file"
+  sed -i 's/UINT isPossible = (AOT_PS == aot) ? 0 : 1;/UINT isPossible = 1;/' "$sbr"
+  cmake -S "$work/fdk10" -B "$work/fdk10/build" -DCMAKE_BUILD_TYPE=Release > /dev/null && cmake --build "$work/fdk10/build" -j4 > /dev/null
+  ff -f lavfi -i "aevalsrc=0.3*sin(2*PI*440*t)+0.01*(random(2)-0.5)|0.3*sin(2*PI*660*t)+0.01*(random(3)-0.5):s=44100:d=3" -c:a pcm_s16le "$work/in.wav"
+  LD_LIBRARY_PATH=$work/fdk10/build fdkaac --silent -p 29 -b 32000 -o "$out/heaacv2-downsampled.mp4" "$work/in.wav"
 fi
 
 # AAC LC stereo at 64 kbit/s: the FDK encoder sets M/S in bands both channels fill with noise (the spec's correlated

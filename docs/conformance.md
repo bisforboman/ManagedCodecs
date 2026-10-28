@@ -438,7 +438,7 @@ and the ones no encoder at hand writes, which keep the listed order.
 
 Samples from the Fraunhofer FDK encoder, committed in `samples/heaac/` (`tools/make-heaac-samples.sh`): stereo at
 44.1 kHz, mono at 48 kHz, a coupled low-bitrate pair at 32 kHz, 5.1, ADTS (SBR signalled only by its data), HE-AAC v2
-(parametric stereo), downsampled SBR, and a stream with the header's second part (the encoder writes it only with settings other than
+(parametric stereo), downsampled SBR, both together, and a stream with the header's second part (the encoder writes it only with settings other than
 its defaults, so a patched copy makes it: 3 limiter bands an octave, -3 dB limiter gains, no frequency interpolation,
 gains smoothed over time; without it, the other samples use 2 bands, 0 dB, interpolation and no smoothing). The config's signalling, both
 backward-compatible (a sync extension after the core's config) and hierarchical (object type 5 first, a unit test),
@@ -491,8 +491,11 @@ in the header sample smoothing, no interpolation and its limiter settings.
 Downsampled SBR (the config gives SBR the core's own rate, 44.1 kHz in the sample's sync extension) runs as for twice
 that rate, its frequency tables too (the sample's band runs from QMF band 9 to 23 of the 88.2 kHz grid), and
 synthesizes only the lower 32 subbands, at the core's rate: 1024 samples a frame. The FDK encoder chooses it only for
-AAC ELD; a copy of the tree with its HE-AAC default changed writes it, and with parametric stereo it stays dual-rate, so
-no sample has both (the code path is the same; untested). The 32-band synthesis bank is the full one's kernel at every
+AAC ELD; a copy of the tree with its HE-AAC default changed writes it. With parametric stereo the encoder also refuses
+one rate (`sbrEncoder_IsSingleRatePossible`); a copy with that check changed too writes `heaacv2-downsampled`, built
+without assertions (its PS analysis fails one in `schur_div` at one rate). That analysis isn't made for it and moves
+the tones (sidebands 43 Hz apart around each, as FDK's own decoder hears them too), but the stream is valid: PS on the
+32-band synthesis agrees with FFmpeg to 4.2e-7 at most, 4e-8 on average. The 32-band synthesis bank is the full one's kernel at every
 other n, exp(i pi/128 (k + 0.5)(4n - 255)), with every other window coefficient: after the analysis bank it gives the
 signal back with a whole-sample delay of 289 and a gain of 1 within 6e-3 (`QmfTests`, which also check it against its
 sums). Reading the kernel as exp(i pi/64 (k + 0.5)(2n - 127)) instead delays it a quarter of a sample more, and misses

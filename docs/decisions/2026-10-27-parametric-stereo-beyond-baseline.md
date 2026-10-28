@@ -55,9 +55,11 @@ paths). None changes the public API: they are patch-version work.
 
 ## For the owner to decide
 
-- **Which pieces, and in what order.** Proposed: Rb, then IPD/OPD, then 34 bands (smallest first; the second also
+Asked with the multiple-choice prompt; the owner took the proposals.
+
+- **Which pieces, and in what order. Decided:** all three. Proposed: Rb, then IPD/OPD, then 34 bands (smallest first; the second also
   fixes a silent disagreement).
-- **The test source.** Proposed: patch the FDK encoder; hand-built streams only where a patch fails.
-- **Whether IPD/OPD should first be refused** rather than ignored, until piece 2 lands, so a stream that sends them
+- **The test source. Decided:** the patched FDK encoder. Proposed: patch the FDK encoder; hand-built streams only where a patch fails.
+- **Whether IPD/OPD should first be refused** (not asked; the proposal stands) rather than ignored, until piece 2 lands, so a stream that sends them
   fails loudly instead of decoding slightly wrong. Proposed: no; piece 2 is near, and refusing would stop such streams
   from playing at all, where ignoring the phases still gives usable stereo.

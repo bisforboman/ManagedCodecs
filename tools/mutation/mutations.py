@@ -28,6 +28,10 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.H264/PictureDecoder.Inter.cs",
          find="reference.WaitForRow(lumaY + (mvY >> 2) + h + 3);", replace="reference.WaitForRow(lumaY + (mvY >> 2));",
          tests=DELAYED_THREADS, repeat=3),
+    # The same wait in the path for one-reference partitions (PredictFromOne).
+    dict(file="src/ManagedCodecs.H264/PictureDecoder.Inter.cs",
+         find="int lowestRow = lumaY + (mvY >> 2) + h + 3;", replace="int lowestRow = lumaY + (mvY >> 2);",
+         tests=DELAYED_THREADS, repeat=3),
     # A field reading a frame coded as a frame: its row y is the frame's row 2y + parity.
     dict(file="src/ManagedCodecs.H264/Picture.cs",
          find=": frame._finalLumaRows > (2 * row) + Parity ||", replace=": frame._finalLumaRows > row ||",

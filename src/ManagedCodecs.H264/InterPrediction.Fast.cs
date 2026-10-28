@@ -279,22 +279,38 @@ internal static partial class InterPrediction
     /// Copies a <paramref name="width"/> x <paramref name="height"/> area at (<paramref name="x"/>,
     /// <paramref name="y"/>) into the window, clamping coordinates into the picture.
     /// </summary>
-    private static void FetchWindow(ReadOnlySpan<byte> plane, int stride, int maxX, int maxY, int x, int y, int width, int height, Span<byte> window, int windowStride = WindowStride)
+    /// <remarks>
+    /// Each row is the samples left of the picture (its first sample repeated), those inside it (copied), then those
+    /// right of it (its last sample repeated); <see cref="FetchWindowReference"/> clamps sample by sample.
+    /// </remarks>
+    internal static void FetchWindow(ReadOnlySpan<byte> plane, int stride, int maxX, int maxY, int x, int y, int width, int height, Span<byte> window, int windowStride = WindowStride)
     {
-        bool inside = x >= 0 && y >= 0 && x + width - 1 <= maxX && y + height - 1 <= maxY;
+        int left = Math.Clamp(-x, 0, width);
+        int right = Math.Clamp(x + width - 1 - maxX, 0, width);
+        int inside = width - left - right;
         for (int j = 0; j < height; j++)
         {
             var row = window.Slice(j * windowStride, width);
             int sy = Math.Clamp(y + j, 0, maxY) * stride;
-            if (inside)
+            row[..left].Fill(plane[sy]);
+            if (inside > 0)
             {
-                plane.Slice(sy + x, width).CopyTo(row);
-                continue;
+                plane.Slice(sy + x + left, inside).CopyTo(row[left..]);
             }
 
+            row[(left + inside)..].Fill(plane[sy + maxX]);
+        }
+    }
+
+    /// <summary><see cref="FetchWindow"/> by the definition: every sample's coordinates clamped into the picture.</summary>
+    internal static void FetchWindowReference(ReadOnlySpan<byte> plane, int stride, int maxX, int maxY, int x, int y, int width, int height, Span<byte> window, int windowStride)
+    {
+        for (int j = 0; j < height; j++)
+        {
+            int sy = Math.Clamp(y + j, 0, maxY) * stride;
             for (int i = 0; i < width; i++)
             {
-                row[i] = plane[sy + Math.Clamp(x + i, 0, maxX)];
+                window[(j * windowStride) + i] = plane[sy + Math.Clamp(x + i, 0, maxX)];
             }
         }
     }

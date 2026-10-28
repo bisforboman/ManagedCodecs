@@ -516,8 +516,7 @@ held to 2e-5: a decay slope of 0.06 instead of 0.05 gives 1e-4 (within the SBR b
 of 0.347 7e-4, no transient ducking 2e-4 (and 8e-2 at most). The cos and sin of data-dependent angles (`PsMath`, a
 two-part reduction by pi/2 and a series, checked against Math on random input) and the scale factors and ICC angles
 (literals, matching libxaac's float tables to 6e-8) keep the output the same on WebAssembly; the phase factors are
-checked against libxaac's. 10-band parameters map to the 20 bins as band b / 2 (no sample sends 10 bands); 34 bands
-throw NotSupportedException. Mixing
+checked against libxaac's. 10-band parameters map to the 20 bins as band b / 2 (no sample sends 10 bands). Mixing
 procedure Rb (icc_mode 3 to 5) comes from a patched FDK encoder that writes its own parameters with icc_mode + 3
 (`heaacv2-rb`, tools/make-heaac-samples.sh; every frame mixed by Rb, `PsRbFrames`), and matches FFmpeg as the Ra sample
 does once rho is taken as at least 0.05, as FFmpeg takes it (without, up to 0.3 off; whether the spec says so is not
@@ -532,13 +531,32 @@ envelope's negated in the two sub-subbands of negative frequency (FFmpeg negates
 count kept from the last header that enabled IID (FFmpeg's; the encoder's first phases come under a header without
 IID, where FFmpeg reads none, `PsTests`). The sample agrees to 5e-4, 7e-6 on average; ignoring the phases, it is off
 by its whole peak (0.6), and each of those rules moves it (`tools/mutation/mutations.py`). The codebooks are the FDK
-encoder's code tables, which give FFmpeg's code lengths in canonical order. Its data is read (`PsData`): every
+encoder's code tables, which give FFmpeg's code lengths in canonical order.
+
+34 bands (iid_mode or icc_mode 2 or 5) come from a third patched FDK encoder (`heaacv2-34`): it analyses 20 bands and
+turns modes 2 and 5 into 10, so a copy widens its band arrays, writes 34 bands for those modes and maps each envelope's
+20 values up by the decoder's 20-to-34 map, its header cycling every 8 frames through IID and ICC in (20, 20), (34, 34),
+(34, 20) and (20, 34) bands; `heaacv2-34-ipd` adds the phases (17 bands in 34, 11 mapped to 17 where only ICC is in 34).
+They are processed as FFmpeg processes them: a frame in 34 bands when either parameter is in 34 (the other mapped up:
+10 to 34 by repeating, 20 to 34 by repeating with two bands averaged, rounded towards zero, `PsTests`), the five lowest
+QMF bands split by a 12-band, an 8-band (a prototype of its own) and three 4-band complex filters, 50 groups over 34
+parameter bands, the all-pass decay from QMF band 5; and a switch between 20 and 34 clearing the decorrelator (its
+transient detector and every delay line), moving the last matrices to the new bands (20 to 34 repeated and averaged, 34
+to 20 averaged) and clearing the phases' history. Two FFmpeg behaviours only the phases show: in 34 bands the phases'
+imaginary parts start negated in groups 9 to 13 (libxaac negates 9 to 11, 5e-3 off on average), and above the phase
+bands FFmpeg interpolates towards whatever its per-envelope slot last held (in 20 bands after 34, bands 11 to 16's
+34-band values; zeroing them was up to 0.2 off); FFmpeg starts each frame from the slot the last frame ended on, which
+equals the last envelope here unless a frame without phases changes the envelope count (no sample does). Both samples
+agree to 3e-4, 5e-6 on average, with FFmpeg's 48 frames in 34 bands and 4 switches (`Ps34Frames`,
+`PsLayoutSwitches`). The 34-band prototypes, groups, parameter bands and the phase factors of the centre frequencies
+equal libxaac's tables (Apache-2.0). Its data is read (`PsData`): every
 frame of the v2 sample to the end of its extension, less than a byte of padding left (the FDK encoder sends 20 bands,
 fine IID quantization, ICC in 20 bands, no IPD or OPD; reading the envelopes' IID and ICC interleaved instead of IID
 first fails it on the third frame). Its codebooks are enumerated from PacketVideo's decoding trees and checked to be
 complete prefix codes. Time deltas across a change between 10 and 20 bands take the previous values at the other
 resolution as PacketVideo does (no sample changes resolution; the phases the same between 5 and 11 bands, the 11th
-from 0); 34 bands are refused, and extensions other than 0 are skipped.
+from 0), and to or from 34 bands take band b as it was, as FFmpeg does (the 34-band samples send frequency deltas across
+a change); extensions other than 0 are skipped.
 ## ADTS (raw AAC)
 
 Raw AAC files (ADTS, `AdtsDemuxer`) demux packet by packet as FFmpeg's

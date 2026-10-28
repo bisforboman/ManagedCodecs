@@ -149,10 +149,9 @@ fi
 # (it writes the IID's 10 or 20 bands where IPD and OPD have 5 or 11, which FFmpeg reads), its size counting the
 # enable_ipdopd bit (it leaves it out, and the SBR writer then asserts), and the extension written in every frame, not
 # only in those with a PS header (a header's enable_ext holds until the next one).
-if wanted heaacv2-ipd; then
-  git -C "$fdk/.." archive HEAD | (mkdir "$work/fdk6" && tar -x -C "$work/fdk6")
-  enc=$(find "$work/fdk6" -path '*libSBRenc/src/ps_encode.cpp')
-  bitenc=$(find "$work/fdk6" -path '*libSBRenc/src/ps_bitenc.cpp')
+patch_ipd() {
+  enc=$(find "$1" -path '*libSBRenc/src/ps_encode.cpp')
+  bitenc=$(find "$1" -path '*libSBRenc/src/ps_bitenc.cpp')
   grep -q 'hPsOut->enableIpdOpd = 0;' "$enc" || { echo "the encoder's enableIpdOpd line moved" >&2; exit 1; }
   perl -0pi -e 's/hPsOut->enableIpdOpd = 0;/hPsOut->enableIpdOpd = 1;/;
     s/(FDKmemclear\(hPsOut->opdLast, PS_MAX_BANDS \* sizeof\(INT\)\);)/$1
@@ -162,16 +161,86 @@ if wanted heaacv2-ipd; then
           hPsOut->ipd[env][band] = fMin(7, (band + frame + env) \/ 3);
           hPsOut->opd[env][band] = fMin(7, (band + 2 * frame) \/ 4 % 8);
         } }/' "$enc"
-  perl -0pi -e 's/(psOut->ipd\[env\], ipdLast,\s*)getNoBands\(psOut->iidMode\)/$1(getNoBands(psOut->iidMode) == PS_BANDS_COARSE ? 5 : 11)/;
-    s/(psOut->opd\[env\], opdLast,\s*)getNoBands\(psOut->iidMode\)/$1(getNoBands(psOut->iidMode) == PS_BANDS_COARSE ? 5 : 11)/' "$bitenc"
+  perl -0pi -e 's/(psOut->ipd\[env\], ipdLast,\s*)getNoBands\(psOut->iidMode\)/$1(getNoBands(psOut->iidMode) == PS_BANDS_COARSE ? 5 : getNoBands(psOut->iidMode) == PS_BANDS_MID ? 11 : 17)/;
+    s/(psOut->opd\[env\], opdLast,\s*)getNoBands\(psOut->iidMode\)/$1(getNoBands(psOut->iidMode) == PS_BANDS_COARSE ? 5 : getNoBands(psOut->iidMode) == PS_BANDS_MID ? 11 : 17)/' "$bitenc"
   perl -0pi -e 's/^  FDKsbrEnc_WriteBits_ps\(hBitBuf, psOut->enableIpdOpd, 1\);/  bitCnt += FDKsbrEnc_WriteBits_ps(hBitBuf, psOut->enableIpdOpd, 1);/m;
     s/INT psExtEnable = 0;/INT psExtEnable = psOut != NULL && psOut->enableIpdOpd;/' "$bitenc"
   grep -q 'bitCnt += FDKsbrEnc_WriteBits_ps(hBitBuf, psOut->enableIpdOpd, 1);' "$bitenc" &&
     grep -q 'INT psExtEnable = psOut != NULL' "$bitenc" || { echo "the IPD writer's bit count did not patch" >&2; exit 1; }
-  grep -q 'PS_BANDS_COARSE ? 5 : 11' "$bitenc" || { echo "the IPD writer's band count did not patch" >&2; exit 1; }
+  grep -q 'PS_BANDS_MID ? 11 : 17' "$bitenc" || { echo "the IPD writer's band count did not patch" >&2; exit 1; }
+}
+
+if wanted heaacv2-ipd; then
+  git -C "$fdk/.." archive HEAD | (mkdir "$work/fdk6" && tar -x -C "$work/fdk6")
+  patch_ipd "$work/fdk6"
   cmake -S "$work/fdk6" -B "$work/fdk6/build" > /dev/null && cmake --build "$work/fdk6/build" -j4 > /dev/null
   ff -f lavfi -i "aevalsrc=$music|$music2:s=44100:d=3" -c:a pcm_s16le "$work/in.wav"
   LD_LIBRARY_PATH=$work/fdk6/build fdkaac --silent -p 29 -b 32000 -o "$out/heaacv2-ipd.mp4" "$work/in.wav"
+fi
+
+# Parametric stereo in 34 bands (iid_mode or icc_mode 2 or 5): the encoder analyses 20 bands and its writer turns
+# modes 2 and 5 into 10 bands. A copy of the tree widens its band arrays to 34, writes them for modes 2 and 5, and maps
+# each envelope's 20 values to 34 by the decoder's 20-to-34 map, so the 34 parameters vary as a real signal's do. Every
+# 8 frames with envelopes the header turns to the next of (20, 20), (34, 34), (34, 20) and (20, 34) bands of IID and
+# ICC, so a frame is processed in 34 bands with either parameter mapped up, and the decoder switches between 20 and
+# 34 (a header in every such frame); time deltas stay only where the previous envelope had the same band count.
+patch_34() {
+  enc=$(find "$1" -path '*libSBRenc/src/ps_encode.cpp')
+  bitenc=$(find "$1" -path '*libSBRenc/src/ps_bitenc.cpp')
+  const=$(find "$1" -path '*libSBRenc/src/ps_const.h')
+  grep -q 'PS_MAX_BANDS = PS_BANDS_MID' "$const" || { echo "the encoder's PS_MAX_BANDS moved" >&2; exit 1; }
+  sed -i 's/PS_MAX_BANDS = PS_BANDS_MID/PS_MAX_BANDS = 34/' "$const"
+  perl -0pi -e 's/(    case 2:\n    case 5:  \/\* fine not supported \*\/\n)/$1      noBands = 34;\n      break;\n/' "$bitenc"
+  grep -q 'noBands = 34;' "$bitenc" || { echo "the writer's band count did not patch" >&2; exit 1; }
+  perl -0pi -e 's/(      hPsOut->iccLast\[band\] = hPsData->iccIdxLast\[band\];\n    \}\n)/$1
+    { static const INT from[34][2] = {{0, 0}, {0, 1}, {1, 1}, {2, 2}, {2, 3}, {3, 3}, {4, 4}, {4, 4}, {5, 5}, {5, 5},
+        {6, 6}, {7, 7}, {8, 8}, {8, 8}, {9, 9}, {9, 9}, {10, 10}, {11, 11}, {12, 12}, {13, 13}, {14, 14}, {14, 14},
+        {15, 15}, {15, 15}, {16, 16}, {16, 16}, {17, 17}, {17, 17}, {18, 18}, {18, 18}, {18, 18}, {18, 18}, {19, 19},
+        {19, 19}};
+      static INT frame, lastBands[2] = {-1, -1}, lastValues[2][34];
+      INT state = frame++ \/ 8 % 4, p, e, b;
+      INT want34[2] = {state == 1 || state == 2, state == 1 || state == 3};
+      INT *mode[2] = {&hPsOut->iidMode, &hPsOut->iccMode};
+      INT enable[2] = {hPsOut->enableIID, hPsOut->enableICC};
+      PS_DELTA *delta[2] = {hPsOut->deltaIID, hPsOut->deltaICC};
+      INT (*values[2])[PS_MAX_BANDS] = {hPsOut->iid, hPsOut->icc};
+      INT *last[2] = {hPsOut->iidLast, hPsOut->iccLast};
+      hPsOut->enablePSHeader = 1;
+      for (p = 0; p < 2; p++) {
+        INT bands = want34[p] && psBands == 20 ? 34 : psBands;
+        if (bands == 34) *mode[p] += 1;
+        if (!enable[p]) { lastBands[p] = -1; continue; }
+        for (e = 0; bands == 34 && e < nEnvelopes; e++) {
+          INT source[20];
+          for (b = 0; b < 20; b++) source[b] = values[p][e][b];
+          for (b = 0; b < 34; b++) values[p][e][b] = (source[from[b][0]] + source[from[b][1]]) \/ 2;
+        }
+        if (lastBands[p] != bands) delta[p][0] = PS_DELTA_FREQ;
+        for (b = 0; b < bands; b++) last[p][b] = lastValues[p][b];
+        for (b = 0; b < bands; b++) lastValues[p][b] = values[p][nEnvelopes - 1][b];
+        lastBands[p] = bands;
+      } }
+/' "$enc"
+  grep -q 'INT want34\[2\]' "$enc" || { echo "the encoder's 34-band mapping did not patch" >&2; exit 1; }
+}
+
+if wanted heaacv2-34; then
+  git -C "$fdk/.." archive HEAD | (mkdir "$work/fdk7" && tar -x -C "$work/fdk7")
+  patch_34 "$work/fdk7"
+  cmake -S "$work/fdk7" -B "$work/fdk7/build" > /dev/null && cmake --build "$work/fdk7/build" -j4 > /dev/null
+  ff -f lavfi -i "aevalsrc=$music|$music2:s=44100:d=3" -c:a pcm_s16le "$work/in.wav"
+  LD_LIBRARY_PATH=$work/fdk7/build fdkaac --silent -p 29 -b 32000 -o "$out/heaacv2-34.mp4" "$work/in.wav"
+fi
+
+# Both: phases in 34 bands (17 of them), in 20 bands, and mapped from 11 to 17 where ICC alone is in 34; the history of
+# the phases' smoothing starting over at each switch.
+if wanted heaacv2-34-ipd; then
+  git -C "$fdk/.." archive HEAD | (mkdir "$work/fdk8" && tar -x -C "$work/fdk8")
+  patch_34 "$work/fdk8"
+  patch_ipd "$work/fdk8"
+  cmake -S "$work/fdk8" -B "$work/fdk8/build" > /dev/null && cmake --build "$work/fdk8/build" -j4 > /dev/null
+  ff -f lavfi -i "aevalsrc=$music|$music2:s=44100:d=3" -c:a pcm_s16le "$work/in.wav"
+  LD_LIBRARY_PATH=$work/fdk8/build fdkaac --silent -p 29 -b 32000 -o "$out/heaacv2-34-ipd.mp4" "$work/in.wav"
 fi
 
 ls -l "$out"

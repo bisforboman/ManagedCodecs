@@ -2,7 +2,7 @@
 
 Pure managed C# media decoders: no native binaries, Native AOT friendly. MJPEG (bit-exact with FFmpeg), H.264
 Constrained Baseline, Main and High (CAVLC and CABAC, I/P/B, weighted prediction, 8x8 transform, scaling matrices,
-MBAFF, field pictures, monochrome, 4:2:2, 4:4:4 (also separate colour planes), 9 to 14 bits, lossless, bit-exact), AAC LC (within 2^-17 of FFmpeg's float output, measured 3e-7), HE-AAC (SBR and parametric stereo; FFmpeg's single precision limits the match, docs/conformance.md), AVI, MP4
+MBAFF, field pictures, monochrome, 4:2:2, 4:4:4 (also separate colour planes), 9 to 14 bits, lossless, bit-exact), AAC LC (within 2^-17 of FFmpeg's float output, measured 3e-7), HE-AAC (SBR and parametric stereo, 10 to 34 bands; FFmpeg's single precision limits the match, docs/conformance.md), AVI, MP4
 and ADTS demuxing. README.md has the layout, the status and what is still open;
 docs/conformance.md what each feature is checked against.
 
@@ -245,4 +245,8 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
   writes the SBR header's second part only with non-default settings (a patched copy, `make-heaac-samples.sh`), and
   downsampled SBR only for ELD (another patched copy; with PS it stays dual-rate). The downsampled synthesis kernel is
   the full one at even n, (4n - 255): read as (2n - 127) it lags a quarter of a sample and misses FFmpeg by 14 to 17% at
-  3 to 6 kHz, which looks like a core bug.
+  3 to 6 kHz, which looks like a core bug. FFmpeg's parametric stereo (the oracle where the spec's text is out of reach): the phases' band count follows
+  the last header that enabled IID (none before one), a frame is in 34 bands when either IID or ICC is, and its
+  per-envelope slots keep imaginary parts above the phase bands that later frames interpolate towards. A one-line
+  `fprintf` in a scratch FFmpeg build (`git clone -b n6.1.1` from GitHub, `./configure --disable-everything
+  --enable-decoder=aac --enable-demuxer=mov ...`, a few minutes) settles such questions faster than reading.

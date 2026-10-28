@@ -20,6 +20,13 @@ run time.
 - HE-AAC v2: parametric stereo's phase parameters (IPD and OPD), which were ignored: a stream that sends them decoded
   without error but up to its whole peak off FFmpeg's output.
 
+### Changed
+
+- H.264 decodes faster: motion compensation's common partitions (one reference, bi-predicted, weighted) take direct
+  paths to the kernels, which copy by rows at fixed widths. On GitHub's runners, timed in one run against the code
+  before these changes: 4% (x64) to 5% (ARM64) faster on the 720p sample, about 3.5% on P-frame streams, 1 to 3% with
+  B frames, unchanged at 10 bits; the output is the same.
+
 ### Documentation
 
 - Native AOT on x64: set `IlcInstructionSet` (x86-64-v3) in the app, or the AVX2 and 256-bit paths are left out (AAC

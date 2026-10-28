@@ -308,11 +308,16 @@ The samples: MJPEG `testsrc-420.avi`, `testsrc-444.avi` and `noise-q1.avi`; H.26
 `h264-bench-720p.mp4`, `h264-main-p-refs.mp4` (CABAC), `h264-b-pyramid.mp4`, `h264-wp-default.mp4` and
 `h264-high-default.mp4` (libx264's Main and High defaults), `h264-high-b.mp4`, `h264-10bit-b.mp4`,
 `h264-high-motion.mp4`, `h264-10bit-motion.mp4`, `h264-mbaff-default.mp4` and `jm/jm-paff-b.mp4` (field pictures);
-AAC `aac-stereo-48k.mp4` and `aac-5.1.mp4`, HE-AAC `heaac/heaac-5.1.mp4` and `heaac/heaacv2-stereo.mp4`. On a 4-core
-cloud VM (2026-10-25, FFmpeg 6.1.1), MJPEG took 0.8 to 1.0 times FFmpeg's time, AAC 0.75 (stereo) to 1.5 (5.1), HE-AAC
-1.6 to 2.3 and H.264 1.85 to 3.3: less on noisier content, whose residual decoding weighs more, and at 10 bits about
-the 8-bit ratio. The short MJPEG and AAC runs are mostly .NET's startup and JIT: without them (`last loop`),
-`aac-5.1.mp4` takes about 90 µs a frame, `heaac-5.1.mp4` about 410, `heaacv2-stereo.mp4` about 140. A VM's speed
+AAC `aac-stereo-48k.mp4` and `aac-5.1.mp4`, HE-AAC `heaac/heaac-5.1.mp4` and `heaac/heaacv2-stereo.mp4`. On GitHub's
+4-core runners (the weekly benchmark's 2026-10-28 run, FFmpeg 6.1.1), MJPEG took 0.9 to 1.05 times FFmpeg's time on x64
+and 1.07 to 1.4 on ARM64, AAC 0.9 (stereo) to 1.8 (5.1), HE-AAC 2.0 to 2.4, and H.264 1.85 to 3.5 on x64 and 1.5 to
+3.3 on ARM64: less on noisier content, whose residual decoding weighs more, and at 10 bits about the 8-bit ratio (on
+ARM64 a little less). Four threads take the 720p sample to 0.51 of one thread's time on x64 and 0.36 on ARM64. The
+short MJPEG and AAC runs are mostly .NET's startup and JIT: without them (`last loop`, on a 4-core cloud VM),
+`aac-5.1.mp4` takes about 90 µs a frame, `heaac-5.1.mp4` about 410, `heaacv2-stereo.mp4` about 140. The runners'
+CPUs differ from run to run (an EPYC 7763 on 2026-10-25, a 9V74 on 2026-10-28, which moved the x64 AAC ratios by up
+to a third with the code unchanged): a ratio is a snapshot, and only builds timed against each other in one run
+(`compare.yml`) show a change. A VM's speed
 moves from hour to hour, and FFmpeg's and ours do not move together (unchanged code's ratios once moved by -14 to +16%
 between two snapshots of a day): only comparisons made on one machine at one time count.
 

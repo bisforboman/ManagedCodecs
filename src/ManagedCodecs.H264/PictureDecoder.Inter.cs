@@ -514,11 +514,18 @@ internal sealed partial class PictureDecoder<TPixel>
         int block = (mbAddr * 16) + ((y >> 2) * 4) + (x >> 2);
         var ref0 = _refPic[0][part];
         var ref1 = _refPic[1][part];
-        if (typeof(TPixel) == typeof(byte) && _mbWidthC == 8 && _mbHeightC == 8 && !_pairSlots && slice.Header.Weights is null)
+        if (typeof(TPixel) == typeof(byte) && _mbWidthC == 8 && _mbHeightC == 8 && !_pairSlots)
         {
             if ((ref0 is null) != (ref1 is null))
             {
-                PredictFromOne(ref0 ?? ref1!, ref0 is null ? 1 : 0, mbAddr, block, x, y, w, h);
+                if (slice.Header.Weights is null)
+                {
+                    PredictFromOne(ref0 ?? ref1!, ref0 is null ? 1 : 0, mbAddr, block, x, y, w, h, DefaultWeights);
+                    return;
+                }
+
+                var weights = Weighting(slice, _refIdx[0][part], _refIdx[1][part], bi: false, mbAddr, ref0, ref1);
+                PredictFromOne(ref0 ?? ref1!, ref0 is null ? 1 : 0, mbAddr, block, x, y, w, h, weights);
                 return;
             }
 
@@ -582,11 +589,12 @@ internal sealed partial class PictureDecoder<TPixel>
     }
 
     /// <summary>
-    /// <see cref="PredictPartition"/> for the most common partition, straight to the 8-bit kernels: one reference, no
-    /// weights (implicit weights apply to two), a frame macroblock of a frame (so a frame reference, and no chroma
-    /// field offset), 4:2:0.
+    /// <see cref="PredictPartition"/> for the most common partition, straight to the 8-bit kernels: one reference, a
+    /// frame macroblock of a frame (so a frame reference, and no chroma field offset), 4:2:0. With explicit weights
+    /// (<paramref name="weights"/> not the default; implicit ones apply to two references) each component goes through
+    /// the scratch block and <see cref="WeightOne"/>.
     /// </summary>
-    private void PredictFromOne(Picture reference, int list, int mbAddr, int block, int x, int y, int w, int h)
+    private void PredictFromOne(Picture reference, int list, int mbAddr, int block, int x, int y, int w, int h, in PartitionWeights weights)
     {
         int mvX = _mvX[list][block];
         int mvY = _mvY[list][block];
@@ -598,23 +606,44 @@ internal sealed partial class PictureDecoder<TPixel>
         reference.WaitForRow(lowestRow);
         var picture = Picture;
         int lumaStride = picture.LumaStride;
-        InterPrediction.PredictLuma(reference, lumaX, lumaY, w, h, mvX, mvY, picture.Y.AsSpan((lumaY * lumaStride) + lumaX), lumaStride);
+        var luma = picture.Y.AsSpan((lumaY * lumaStride) + lumaX);
+        int chromaX = lumaX >> 1;
+        int chromaY = lumaY >> 1;
+        int chromaStride = picture.ChromaStride;
+        int chromaOut = (chromaY * chromaStride) + chromaX;
+        if (weights.IsDefault)
+        {
+            InterPrediction.PredictLuma(reference, lumaX, lumaY, w, h, mvX, mvY, luma, lumaStride);
+        }
+        else
+        {
+            // Explicit weights (8.4.2.3.2): each component predicted into the scratch block, then weighted into the picture.
+            var prediction = (byte[])(object)_predictionL0;
+            InterPrediction.PredictLuma(reference, lumaX, lumaY, w, h, mvX, mvY, prediction, 16);
+            WeightOne(_predictionL0, 16, w, h, MemoryMarshal.Cast<byte, TPixel>(luma), lumaStride, weights, list, 0);
+            for (int c = 1; c <= 2; c++)
+            {
+                InterPrediction.PredictChroma(reference, c, chromaX, chromaY, w >> 1, h >> 1, mvX, mvY, prediction, 16);
+                WeightOne(_predictionL0, 16, w >> 1, h >> 1, MemoryMarshal.Cast<byte, TPixel>((c == 1 ? picture.Cb : picture.Cr).AsSpan(chromaOut)), chromaStride, weights, list, c);
+            }
+        }
+
         if ((x | y) == 0)
         {
             InterPrediction.PrefetchAhead(reference, lumaX + (mvX >> 2), lumaY + (mvY >> 2), _mbColumn[mbAddr] & 3);
         }
 
-        int chromaX = lumaX >> 1;
-        int chromaY = lumaY >> 1;
-        int chromaStride = picture.ChromaStride;
-        int chromaOut = (chromaY * chromaStride) + chromaX;
-        InterPrediction.PredictChroma(reference, 1, chromaX, chromaY, w >> 1, h >> 1, mvX, mvY, picture.Cb.AsSpan(chromaOut), chromaStride);
-        InterPrediction.PredictChroma(reference, 2, chromaX, chromaY, w >> 1, h >> 1, mvX, mvY, picture.Cr.AsSpan(chromaOut), chromaStride);
+        if (weights.IsDefault)
+        {
+            InterPrediction.PredictChroma(reference, 1, chromaX, chromaY, w >> 1, h >> 1, mvX, mvY, picture.Cb.AsSpan(chromaOut), chromaStride);
+            InterPrediction.PredictChroma(reference, 2, chromaX, chromaY, w >> 1, h >> 1, mvX, mvY, picture.Cr.AsSpan(chromaOut), chromaStride);
+        }
     }
 
     /// <summary>
     /// <see cref="PredictPartition"/> for a bi-predicted partition under the same conditions as <see cref="PredictFromOne"/>:
-    /// both predictions into the scratch blocks, then their rounded average, or implicit weights where they differ from it.
+    /// both predictions into the scratch blocks, then their rounded average, or the explicit or implicit weights where they
+    /// differ from it.
     /// </summary>
     private void PredictFromTwo(SliceState slice, Picture ref0, Picture ref1, int mbAddr, int part, int block, int x, int y, int w, int h)
     {
@@ -624,7 +653,7 @@ internal sealed partial class PictureDecoder<TPixel>
         int mvY1 = _mvY[1][block];
         int lumaX = (_mbColumn[mbAddr] * 16) + x;
         int lumaY = (_mbRow[mbAddr] * 16) + y;
-        var weighting = slice.Pps.WeightedBipredIdc == 2
+        var weighting = slice.Header.Weights is not null || slice.Pps.WeightedBipredIdc == 2
             ? Weighting(slice, _refIdx[0][part], _refIdx[1][part], bi: true, mbAddr, ref0, ref1)
             : DefaultWeights;
 

@@ -585,7 +585,8 @@ internal sealed partial class PictureDecoder<TPixel>
         int lumaY = (_mbRow[mbAddr] * 16) + y;
 
         // As in PredictComponent: the lowest row the 6-tap filter reads, and one more for chroma's.
-        reference.WaitForRow(lumaY + (mvY >> 2) + h + 3);
+        int lowestRow = lumaY + (mvY >> 2) + h + 3;
+        reference.WaitForRow(lowestRow);
         var picture = Picture;
         int lumaStride = picture.LumaStride;
         InterPrediction.PredictLuma(reference, lumaX, lumaY, w, h, mvX, mvY, picture.Y.AsSpan((lumaY * lumaStride) + lumaX), lumaStride);

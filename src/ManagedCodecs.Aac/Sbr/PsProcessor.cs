@@ -60,6 +60,33 @@ internal sealed class PsProcessor
         0.01899487526049, 0,
     ];
 
+    // 34 bands' prototypes (8.6.4.3): of the 12-band filter on QMF band 0, the 8-band one on band 1 and the 4-band one
+    // on bands 2 to 4; equal to libxaac's (Apache-2.0) and FFmpeg's.
+    private static readonly double[] Prototype12 =
+    [
+        0.04081179924692, 0.03812810994926, 0.05144908135699, 0.06399831151592, 0.07428313801106, 0.08100347892914,
+        0.08333333333333, 0.08100347892914, 0.07428313801106, 0.06399831151592, 0.05144908135699, 0.03812810994926,
+        0.04081179924692,
+    ];
+
+    private static readonly double[] Prototype8Fine =
+    [
+        0.01565675600122, 0.03752716391991, 0.05417891378782, 0.08417044116767, 0.10307344158036, 0.12222452249753, 0.125,
+        0.12222452249753, 0.10307344158036, 0.08417044116767, 0.05417891378782, 0.03752716391991, 0.01565675600122,
+    ];
+
+    private static readonly double[] Prototype4 =
+    [
+        -0.05908211155639, -0.04871498374946, 0, 0.07778723915851, 0.16486303567403, 0.23279856662996, 0.25,
+        0.23279856662996, 0.16486303567403, 0.07778723915851, 0, -0.04871498374946, -0.05908211155639,
+    ];
+
+    // The 34-band filters: each prototype modulated by exp(-i 2 pi / N (q + 0.5)(n - 6)), by sub-subband q and tap n,
+    // through PsMath (the angles are multiples of pi / 12, which QmfTrig's pi / 256 steps don't hold).
+    private static readonly (double[] Re, double[] Im) Filter12 = Filters(Prototype12, 12);
+    private static readonly (double[] Re, double[] Im) Filter8 = Filters(Prototype8Fine, 8);
+    private static readonly (double[] Re, double[] Im) Filter4 = Filters(Prototype4, 4);
+
     // The 8-band filter's modulation, exp(-i 2 pi / 8 (q + 0.5)(n - 6)) by sub-subband q and tap n: of pi/256 times
     // -32 (2q + 1)(n - 6).
     private static readonly double[] ModulationCos = [.. Enumerable.Range(0, 8 * 13).Select(i => QmfTrig.CosPi256(-32 * ((2 * (i / 13)) + 1) * ((i % 13) - 6)))];
@@ -94,6 +121,40 @@ internal sealed class PsProcessor
         decayCutoff: 3,
         phaseBins: 11,
         negated: (0, 1));
+
+    /// <summary>
+    /// The 34-band layout: the first 32 groups single hybrid sub-subbands (band 0's 12, band 1's 8, bands 2 to 4's 4
+    /// each, in the filters' order), the other 18 ranges of QMF bands from 5; each group's parameter band; the
+    /// sub-subbands' centre frequencies (FFmpeg's, in 24ths of a QMF band, whose phase factors equal libxaac's 34-band
+    /// tables, Apache-2.0); the decay's cutoff (QMF band 5); and the groups whose phases start negated (9 to 13, as
+    /// FFmpeg negates them; libxaac negates 9 to 11; no sample sends phases in 34 bands).
+    /// </summary>
+    internal static readonly Layout Layout34 = new(
+        bins: 34,
+        hybridBands: 32,
+        qmfStart: 5,
+        subQmfGroups: 32,
+        groupBorders:
+        [
+            0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29,
+            30, 31, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 21, 24, 27, 30, 33, 37, 41, 64,
+        ],
+        groupBins:
+        [
+            0, 1, 2, 3, 4, 5, 6, 6, 7, 2, 1, 0, 10, 10, 4, 5, 6, 7, 8, 9, 10, 11, 12, 9, 14, 11, 12, 13, 14, 15, 16, 13, 16,
+            17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33,
+        ],
+        centres:
+        [
+            .. new[]
+            {
+                2, 6, 10, 14, 18, 22, 26, 30, 34, -10, -6, -2, 51, 57, 15, 21, 27, 33, 39, 45, 54, 66, 78, 42, 102, 66, 78,
+                90, 102, 114, 126, 90,
+            }.Select(c => c / 24.0),
+        ],
+        decayCutoff: 5,
+        phaseBins: 17,
+        negated: (9, 13));
 
     // The IID's scale factors (8.6.4.6.2), sqrt(2 / (1 + c^2)) with c = 10^(IID / 20) for IID index -7 to 7 (coarse)
     // or -15 to 15 (fine), and the ICC's angle alpha = acos(rho) / 2 for index 0 to 7; computed from the spec's IID and
@@ -136,8 +197,11 @@ internal sealed class PsProcessor
     private readonly int[][] _opd = [.. Enumerable.Range(0, PsData.MaxEnvelopes + 1).Select(_ => new int[MaxPhaseBins])];
     private readonly double[][] _ratio = Buffers(Slots, MaxBins);
 
-    // The layout the frame is processed in.
+    // The layout the frame is processed in: 34 bands when the last frame with data sent IID or ICC in 34 (FFmpeg's rule:
+    // either makes the whole frame 34 bands), and the one before it, whose difference switches the layout.
     private Layout _layout = Layout20;
+    private bool _is34;
+    private bool _was34;
 
     // The five lowest QMF bands (whichever layout splits them) from 6 slots before the frame to 6 after (44 slots, the
     // first 12 the previous frame's last), real and imaginary.
@@ -203,6 +267,23 @@ internal sealed class PsProcessor
     /// </summary>
     public void Apply(PsData data, bool hasData, double[][] re, double[][] im, double[][] rightRe, double[][] rightIm, int top, AacStatistics statistics)
     {
+        if (hasData)
+        {
+            _was34 = _is34;
+            if (data.EnableIid || data.EnableIcc)
+            {
+                _is34 = (data.EnableIid && data.IidBands == 34) || (data.EnableIcc && data.IccBands == 34);
+            }
+        }
+
+        if (_is34 != _was34)
+        {
+            SwitchLayout(_is34);
+            statistics.PsLayoutSwitches++;
+        }
+
+        _layout = _is34 ? Layout34 : Layout20;
+        statistics.Ps34Frames += _is34 ? 1 : 0;
         Span<int> starts = stackalloc int[PsData.MaxEnvelopes + 2];
         var (iid, icc) = (_iid, _icc);
         int envelopes = Envelopes(data, hasData, starts, iid, icc);
@@ -222,8 +303,8 @@ internal sealed class PsProcessor
         HybridAnalysis(re, im);
         Decorrelate(re, im, rightRe, rightIm, statistics);
         Mix(envelopes, starts, iid, icc, fine, rb, phases, re, im, rightRe, rightIm);
-        HybridSynthesis(_leftRe, _leftIm, re, im);
-        HybridSynthesis(_rightRe, _rightIm, rightRe, rightIm);
+        HybridSynthesis(_layout, _leftRe, _leftIm, re, im);
+        HybridSynthesis(_layout, _rightRe, _rightIm, rightRe, rightIm);
         iid[envelopes - 1].CopyTo(_lastIid, 0);
         icc[envelopes - 1].CopyTo(_lastIcc, 0);
         _lastFineIid = fine;
@@ -254,19 +335,10 @@ internal sealed class PsProcessor
 
         for (int e = 0; e < count; e++)
         {
-            for (int b = 0; b < layout.Bins; b++)
-            {
-                iid[e][b] = data.EnableIid ? data.Iid[e][data.IidBands == 10 ? b / 2 : b] : 0;
-                icc[e][b] = data.EnableIcc ? data.Icc[e][data.IccBands == 10 ? b / 2 : b] : 0;
-            }
-
-            // 5 bands cover the lowest 10 of 20; the 11th takes 0.
-            for (int b = 0; b < layout.PhaseBins; b++)
-            {
-                bool coarse = data.PhaseBands == 5;
-                _ipd[e][b] = coarse ? (b < 10 ? data.Ipd[e][b / 2] : 0) : data.Ipd[e][b];
-                _opd[e][b] = coarse ? (b < 10 ? data.Opd[e][b / 2] : 0) : data.Opd[e][b];
-            }
+            Map(data.EnableIid ? data.Iid[e] : null, data.IidBands, iid[e], layout.Bins);
+            Map(data.EnableIcc ? data.Icc[e] : null, data.IccBands, icc[e], layout.Bins);
+            Map(data.Ipd[e], data.PhaseBands, _ipd[e], layout.PhaseBins);
+            Map(data.Opd[e], data.PhaseBands, _opd[e], layout.PhaseBins);
         }
 
         starts[0] = 0;
@@ -318,6 +390,21 @@ internal sealed class PsProcessor
                 bandRe[12 + n] = re[n + LookAhead][band];
                 bandIm[12 + n] = im[n + LookAhead][band];
             }
+        }
+
+        if (_layout == Layout34)
+        {
+            for (int i = 0; i < Slots; i++)
+            {
+                Filter(_bandRe[0], _bandIm[0], i, Filter12, 12, _leftRe[i], _leftIm[i], 0);
+                Filter(_bandRe[1], _bandIm[1], i, Filter8, 8, _leftRe[i], _leftIm[i], 12);
+                for (int band = 2; band < HybridQmfBands; band++)
+                {
+                    Filter(_bandRe[band], _bandIm[band], i, Filter4, 4, _leftRe[i], _leftIm[i], 20 + (4 * (band - 2)));
+                }
+            }
+
+            return;
         }
 
         Span<double> out8Re = stackalloc double[8];
@@ -798,9 +885,260 @@ internal sealed class PsProcessor
         h22 = Math.Sqrt(2) * cosAlpha * sinGamma;
     }
 
-    // The sub-subbands added back into their QMF bands.
-    private static void HybridSynthesis(double[][] hybridRe, double[][] hybridIm, double[][] re, double[][] im)
+    // One slot of a 34-band hybrid filter: the band's slots i to i + 12 through each of its N complex filters, into
+    // sub-subbands offset to offset + N - 1.
+    private static void Filter(double[] bandRe, double[] bandIm, int i, (double[] Re, double[] Im) filter, int count, double[] outRe, double[] outIm, int offset)
     {
+        for (int q = 0; q < count; q++)
+        {
+            double sumRe = 0;
+            double sumIm = 0;
+            for (int n = 0; n < 13; n++)
+            {
+                double xr = bandRe[i + n];
+                double xi = bandIm[i + n];
+                double c = filter.Re[(13 * q) + n];
+                double s = filter.Im[(13 * q) + n];
+                sumRe += (xr * c) - (xi * s);
+                sumIm += (xi * c) + (xr * s);
+            }
+
+            outRe[offset + q] = sumRe;
+            outIm[offset + q] = sumIm;
+        }
+    }
+
+    // A prototype times exp(-i 2 pi / bands (q + 0.5)(n - 6)), by sub-subband q and tap n.
+    private static (double[] Re, double[] Im) Filters(double[] prototype, int bands)
+    {
+        var re = new double[13 * bands];
+        var im = new double[13 * bands];
+        for (int q = 0; q < bands; q++)
+        {
+            for (int n = 0; n < 13; n++)
+            {
+                double theta = -2 * Math.PI * (q + 0.5) * (n - 6) / bands;
+                re[(13 * q) + n] = prototype[n] * PsMath.Cos(theta);
+                im[(13 * q) + n] = prototype[n] * PsMath.Sin(theta);
+            }
+        }
+
+        return (re, im);
+    }
+
+    /// <summary>
+    /// Parameters sent in <paramref name="from"/> bands as <paramref name="to"/> processing bands (20 or 34 for IID and
+    /// ICC, 11 or 17 for the phases), by the spec's index maps as FFmpeg applies them: 10 to 20 doubles each band, 10 or
+    /// 20 to 34 repeats or averages them (halves rounded towards zero), 34 to 20 averages them; the phases' 5, 11 and 17
+    /// take the same maps over their lower bands, the last of 11 or 17 from 0 where 5 bands don't reach it. No values (a
+    /// parameter not enabled) give zeros.
+    /// </summary>
+    internal static void Map(int[]? values, int from, int[] mapped, int to)
+    {
+        if (values is null || from == 0)
+        {
+            Array.Clear(mapped, 0, to);
+            return;
+        }
+
+        // The phases map their lower bands by the IID's maps: 5, 11 and 17 bands as 10, 20 and 34.
+        bool full = to is 20 or 34;
+        int fromBands = full ? from : from switch { 5 => 10, 11 => 20, _ => 34 };
+        int toBands = full ? to : (to == 11 ? 20 : 34);
+        if (fromBands == toBands)
+        {
+            Array.Copy(values, mapped, to);
+            return;
+        }
+
+        Span<int> m = stackalloc int[MaxBins];
+        m.Clear();
+        if (toBands == 20 && fromBands == 10)
+        {
+            for (int b = 0; b < (full ? 10 : 5); b++)
+            {
+                m[2 * b] = m[(2 * b) + 1] = values[b];
+            }
+        }
+        else if (toBands == 20)
+        {
+            MapIndex34To20(values, m, full);
+        }
+        else if (fromBands == 10)
+        {
+            MapIndex10To34(values, m, full);
+        }
+        else
+        {
+            MapIndex20To34(values, m, full);
+        }
+
+        m[..to].CopyTo(mapped);
+    }
+
+    private static void MapIndex34To20(int[] p, Span<int> m, bool full)
+    {
+        m[0] = ((2 * p[0]) + p[1]) / 3;
+        m[1] = (p[1] + (2 * p[2])) / 3;
+        m[2] = ((2 * p[3]) + p[4]) / 3;
+        m[3] = (p[4] + (2 * p[5])) / 3;
+        m[4] = (p[6] + p[7]) / 2;
+        m[5] = (p[8] + p[9]) / 2;
+        m[6] = p[10];
+        m[7] = p[11];
+        m[8] = (p[12] + p[13]) / 2;
+        m[9] = (p[14] + p[15]) / 2;
+        m[10] = p[16];
+        if (full)
+        {
+            m[11] = p[17];
+            m[12] = p[18];
+            m[13] = p[19];
+            m[14] = (p[20] + p[21]) / 2;
+            m[15] = (p[22] + p[23]) / 2;
+            m[16] = (p[24] + p[25]) / 2;
+            m[17] = (p[26] + p[27]) / 2;
+            m[18] = (p[28] + p[29] + p[30] + p[31]) / 4;
+            m[19] = (p[32] + p[33]) / 2;
+        }
+    }
+
+    // Band b of 34 from the 10 (or the phases' 5) bands' indices.
+    private static readonly int[] From10 = [0, 0, 0, 1, 1, 1, 2, 2, 2, 2, 3, 3, 4, 4, 4, 4, 5, 5, 6, 6, 7, 7, 7, 7, 8, 8, 8, 8, 9, 9, 9, 9, 9, 9];
+
+    private static void MapIndex10To34(int[] p, Span<int> m, bool full)
+    {
+        for (int b = 0; b < (full ? 34 : 16); b++)
+        {
+            m[b] = p[From10[b]];
+        }
+    }
+
+    // Band b of 34 from the 20 (or the phases' 11) bands' indices: one band, or the half sum of two.
+    private static readonly int[] From20 = [0, 0, 1, 2, 2, 3, 4, 4, 5, 5, 6, 7, 8, 8, 9, 9, 10, 11, 12, 13, 14, 14, 15, 15, 16, 16, 17, 17, 18, 18, 18, 18, 19, 19];
+
+    private static void MapIndex20To34(int[] p, Span<int> m, bool full)
+    {
+        for (int b = 0; b < (full ? 34 : 17); b++)
+        {
+            m[b] = p[From20[b]];
+        }
+
+        m[1] = (p[0] + p[1]) / 2;
+        m[4] = (p[2] + p[3]) / 2;
+    }
+
+    // A switch between 20 and 34 bands, as FFmpeg makes it: the decorrelator starts over (its transient detector and
+    // every delay line cleared), the matrices the last envelope ended on and the phases' history move to the new bands
+    // (20 to 34 by repeating and averaging, 34 to 20 by averaging), and the last parameters move with them.
+    private void SwitchLayout(bool to34)
+    {
+        Array.Clear(_peakDecay);
+        Array.Clear(_peakDifference);
+        Array.Clear(_energy);
+        foreach (var rows in new[] { _hybridDelayRe, _hybridDelayIm, _qmfDelayRe, _qmfDelayIm })
+        {
+            foreach (var row in rows)
+            {
+                Array.Clear(row);
+            }
+        }
+
+        foreach (var links in new[] { _hybridLinkRe, _hybridLinkIm, _qmfLinkRe, _qmfLinkIm })
+        {
+            foreach (var rows in links)
+            {
+                foreach (var row in rows)
+                {
+                    Array.Clear(row);
+                }
+            }
+        }
+
+        for (int m = 0; m < 4; m++)
+        {
+            MapValues(_previousH[m], to34);
+            MapValues(_previousHIm[m], to34);
+        }
+
+        Array.Clear(_ipdHistory);
+        Array.Clear(_opdHistory);
+        int[] copy = new int[MaxBins];
+        foreach (var (last, bins) in new[] { (_lastIid, to34 ? 34 : 20), (_lastIcc, to34 ? 34 : 20), (_lastIpd, to34 ? 17 : 11), (_lastOpd, to34 ? 17 : 11) })
+        {
+            last.CopyTo(copy, 0);
+            Map(copy, bins == 34 ? 20 : bins == 20 ? 34 : bins == 17 ? 11 : 17, last, bins);
+        }
+    }
+
+    // A matrix entry's values per parameter band from 20 bands to 34 (repeated, two averaged) or from 34 to 20 (averaged).
+    private static void MapValues(double[] values, bool to34)
+    {
+        Span<double> p = stackalloc double[MaxBins];
+        values.CopyTo(p);
+        if (to34)
+        {
+            for (int b = 0; b < 34; b++)
+            {
+                values[b] = p[From20[b]];
+            }
+
+            values[1] = (p[0] + p[1]) / 2;
+            values[4] = (p[2] + p[3]) / 2;
+            return;
+        }
+
+        values[0] = ((2 * p[0]) + p[1]) / 3;
+        values[1] = (p[1] + (2 * p[2])) / 3;
+        values[2] = ((2 * p[3]) + p[4]) / 3;
+        values[3] = (p[4] + (2 * p[5])) / 3;
+        values[4] = (p[6] + p[7]) / 2;
+        values[5] = (p[8] + p[9]) / 2;
+        values[6] = p[10];
+        values[7] = p[11];
+        values[8] = (p[12] + p[13]) / 2;
+        values[9] = (p[14] + p[15]) / 2;
+        values[10] = p[16];
+        values[11] = p[17];
+        values[12] = p[18];
+        values[13] = p[19];
+        values[14] = (p[20] + p[21]) / 2;
+        values[15] = (p[22] + p[23]) / 2;
+        values[16] = (p[24] + p[25]) / 2;
+        values[17] = (p[26] + p[27]) / 2;
+        values[18] = (p[28] + p[29] + p[30] + p[31]) / 4;
+        values[19] = (p[32] + p[33]) / 2;
+    }
+
+    // The sub-subbands added back into their QMF bands.
+    private static void HybridSynthesis(Layout layout, double[][] hybridRe, double[][] hybridIm, double[][] re, double[][] im)
+    {
+        if (layout == Layout34)
+        {
+            for (int i = 0; i < Slots; i++)
+            {
+                var hr = hybridRe[i];
+                var hi = hybridIm[i];
+                int k = 0;
+                for (int band = 0; band < HybridQmfBands; band++)
+                {
+                    int count = band switch { 0 => 12, 1 => 8, _ => 4 };
+                    double sumRe = 0;
+                    double sumIm = 0;
+                    for (int q = 0; q < count; q++, k++)
+                    {
+                        sumRe += hr[k];
+                        sumIm += hi[k];
+                    }
+
+                    re[i][band] = sumRe;
+                    im[i][band] = sumIm;
+                }
+            }
+
+            return;
+        }
+
         for (int i = 0; i < Slots; i++)
         {
             var hr = hybridRe[i];

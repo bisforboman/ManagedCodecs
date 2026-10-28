@@ -7,9 +7,9 @@ namespace ManagedCodecs.Aac.Sbr;
 /// later frames.
 /// </summary>
 /// <remarks>
-/// The 10- and 20-band configurations are read; 34 bands are refused. The extension (ps_extension 0) brings the phase
-/// parameters, the inter-channel and overall phase differences (IPD and OPD), per envelope in 5 or 11 bands (by the IID's
-/// 10 or 20), as indices 0 to 7 (multiples of pi / 4) whose deltas are summed modulo 8; other extensions are skipped.
+/// The 10-, 20- and 34-band configurations are read. The extension (ps_extension 0) brings the phase
+/// parameters, the inter-channel and overall phase differences (IPD and OPD), per envelope in 5, 11 or 17 bands (by the
+/// IID's 10, 20 or 34), as indices 0 to 7 (multiples of pi / 4) whose deltas are summed modulo 8; other extensions are skipped.
 /// </remarks>
 internal sealed class PsData
 {
@@ -106,11 +106,6 @@ internal sealed class PsData
             }
 
             PhaseBands = EnableIid ? PhaseBandCounts[IidMode % 3] : PhaseBands;
-
-            if ((EnableIid && IidBands == 34) || (EnableIcc && IccBands == 34))
-            {
-                throw new NotSupportedException("Parametric stereo with 34 bands is not supported.");
-            }
 
             statistics.PsHeaders++;
             statistics.PsIidModes |= EnableIid ? 1 << IidMode : 0;
@@ -249,14 +244,14 @@ internal sealed class PsData
     }
 
     // As DecodeDeltas, modulo 8 (phases from 0 to 7 pi / 4), mapped between 5 and 11 bands as the IID's between 10 and
-    // 20; the 11th band, which 5 bands lack, from 0.
+    // 20 (the 11th band, which 5 bands lack, from 0), to or from 17 band b as it was.
     private static void DecodePhases(AacBitReader r, Vlc book, bool time, int[] values, int bands, int[] previous, int previousBands)
     {
         Array.Clear(values);
         for (int b = 0; b < bands; b++)
         {
             int start = !time ? (b == 0 ? 0 : values[b - 1])
-                : previousBands == bands ? previous[b]
+                : previousBands == bands || previousBands == 17 || bands == 17 ? previous[b]
                 : previousBands > bands ? previous[2 * b]
                 : b / 2 < previousBands ? previous[b / 2] : 0;
             values[b] = (start + r.Read(book)) & 7;
@@ -264,14 +259,15 @@ internal sealed class PsData
     }
 
     // 8.6.4.5: values from deltas in frequency (from 0) or in time (from the previous envelope's, mapped between 10 and
-    // 20 bands: band b of 10 is band 2b of 20, band b of 20 band b / 2 of 10), which must stay in range.
+    // 20 bands: band b of 10 is band 2b of 20, band b of 20 band b / 2 of 10; to or from 34, band b as it was, as FFmpeg
+    // reads them, no sample changing resolution there), which must stay in range.
     private static void DecodeDeltas(AacBitReader r, SbrHuffman book, bool time, int[] values, int bands, int[] previous, int previousBands, int min, int max, string name)
     {
         for (int b = 0; b < bands; b++)
         {
             int delta = book.Read(r);
             int start = !time ? (b == 0 ? 0 : values[b - 1])
-                : previousBands == bands ? previous[b]
+                : previousBands == bands || previousBands == 34 || bands == 34 ? previous[b]
                 : previousBands > bands ? previous[2 * b]
                 : previous[b / 2];
             int value = start + delta;

@@ -118,6 +118,12 @@ public class SbrConformanceTests
                 Assert.Equal(0, stats.PsRbFrames);
             }
 
+            // The 34-band sample: after its first 8 frames with envelopes in 20 bands (and the encoder's 2 before them), 8 of
+            // every 32 in 20, the rest in 34, switching 4 times; FFmpeg processes the same 48 frames in 34 bands.
+            bool is34 = sampleName.Contains("-34", StringComparison.Ordinal);
+            Assert.Equal(is34 ? 48 : 0, stats.Ps34Frames);
+            Assert.Equal(is34 ? 4 : 0, stats.PsLayoutSwitches);
+
             // Phase parameters in every frame of the IPD sample but its first (the encoder's, without envelopes or
             // extension), none elsewhere.
             Assert.Equal(sampleName.Contains("-ipd", StringComparison.Ordinal) ? stats.PsFrames - 1 : 0, stats.PsIpdOpdFrames);

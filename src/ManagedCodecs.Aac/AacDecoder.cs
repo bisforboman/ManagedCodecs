@@ -1319,6 +1319,11 @@ internal sealed class AacStatistics
     /// <summary>Of those, frames mixed by procedure Rb (icc_mode 3 to 5) rather than Ra.</summary>
     public int PsRbFrames { get; set; }
 
+    /// <summary>Of those, frames processed in 34 bands (IID or ICC sent in 34), and the switches between 20 and 34.</summary>
+    public int Ps34Frames { get; set; }
+
+    public int PsLayoutSwitches { get; set; }
+
     /// <summary>Time slots and bands whose decorrelated signal a transient attenuated.</summary>
     public int PsDuckedSlots { get; set; }
 }

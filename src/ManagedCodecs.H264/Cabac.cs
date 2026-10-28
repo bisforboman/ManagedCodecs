@@ -119,16 +119,28 @@ internal sealed class Cabac
             return 0;
         }
 
-        // Significance map: positions of the nonzero coefficients, in scan order.
+        // Significance map: positions of the nonzero coefficients, in scan order. The increments are checked against
+        // maxNumCoeff once, here, and read without checks in the loop (as are the contexts, whose bases come from the
+        // tables).
+        if ((uint)maxNumCoeff > 64 || significantInc.Length < maxNumCoeff - 1 || lastInc.Length < maxNumCoeff - 1)
+        {
+            throw new ArgumentOutOfRangeException(nameof(maxNumCoeff));
+        }
+
+        ref byte significant = ref Unsafe.Add(ref contexts, significantBase);
+        ref byte last = ref Unsafe.Add(ref contexts, lastBase);
+        ref byte significantIncs = ref MemoryMarshal.GetReference(significantInc);
+        ref byte lastIncs = ref MemoryMarshal.GetReference(lastInc);
         Span<byte> positions = stackalloc byte[64];
+        ref byte position = ref MemoryMarshal.GetReference(positions);
         int count = 0;
         int i = 0;
         for (; i < maxNumCoeff - 1; i++)
         {
-            if (Decide(ref Unsafe.Add(ref contexts, significantBase + significantInc[i]), ref range, ref value, ref bits) == 1)
+            if (Decide(ref Unsafe.Add(ref significant, Unsafe.Add(ref significantIncs, i)), ref range, ref value, ref bits) == 1)
             {
-                positions[count++] = (byte)i;
-                if (Decide(ref Unsafe.Add(ref contexts, lastBase + lastInc[i]), ref range, ref value, ref bits) == 1)
+                Unsafe.Add(ref position, count++) = (byte)i;
+                if (Decide(ref Unsafe.Add(ref last, Unsafe.Add(ref lastIncs, i)), ref range, ref value, ref bits) == 1)
                 {
                     break;
                 }
@@ -137,7 +149,7 @@ internal sealed class Cabac
 
         if (i == maxNumCoeff - 1)
         {
-            positions[count++] = (byte)i; // no last flag came: the last coefficient is nonzero
+            Unsafe.Add(ref position, count++) = (byte)i; // no last flag came: the last coefficient is nonzero
         }
 
         // Levels, from the last coefficient back: coeff_abs_level_minus1 as UEG0 with uCoff 14,
@@ -214,7 +226,7 @@ internal sealed class Cabac
     {
         int ctx = context;
         int state = ctx & 63;
-        int lps = CabacTables.RangeTabLps[(state << 2) + ((range >> 6) & 3)];
+        int lps = Unsafe.Add(ref MemoryMarshal.GetReference(CabacTables.RangeTabLps), (state << 2) + ((range >> 6) & 3)); // state < 64, so under 256
         range -= lps;
         ulong scaledRange = (ulong)range << bits;
         int bin = ctx >> 6;

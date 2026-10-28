@@ -117,6 +117,10 @@ public class SbrConformanceTests
             {
                 Assert.Equal(0, stats.PsRbFrames);
             }
+
+            // Phase parameters in every frame of the IPD sample but its first (the encoder's, without envelopes or
+            // extension), none elsewhere.
+            Assert.Equal(sampleName.Contains("-ipd", StringComparison.Ordinal) ? stats.PsFrames - 1 : 0, stats.PsIpdOpdFrames);
         }
 
         if (channels == 1)

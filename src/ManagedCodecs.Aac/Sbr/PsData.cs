@@ -7,8 +7,9 @@ namespace ManagedCodecs.Aac.Sbr;
 /// later frames.
 /// </summary>
 /// <remarks>
-/// The 10- and 20-band configurations are read; 34 bands are refused. The extension (IPD and OPD, the phase
-/// parameters) is skipped, as the spec's baseline decoder skips it.
+/// The 10- and 20-band configurations are read; 34 bands are refused. The extension (ps_extension 0) brings the phase
+/// parameters, the inter-channel and overall phase differences (IPD and OPD), per envelope in 5 or 11 bands (by the IID's
+/// 10 or 20), as indices 0 to 7 (multiples of pi / 4) whose deltas are summed modulo 8; other extensions are skipped.
 /// </remarks>
 internal sealed class PsData
 {
@@ -16,6 +17,7 @@ internal sealed class PsData
 
     private static readonly int[] FixedEnvelopes = [0, 1, 2, 4];
     private static readonly int[] ParameterBands = [10, 20, 34];
+    private static readonly int[] PhaseBandCounts = [5, 11, 17];
 
     private static readonly SbrHuffman IidTime = new(PsTables.IidTime);
     private static readonly SbrHuffman IidFrequency = new(PsTables.IidFrequency);
@@ -23,12 +25,19 @@ internal sealed class PsData
     private static readonly SbrHuffman IidFineFrequency = new(PsTables.IidFineFrequency);
     private static readonly SbrHuffman IccTime = new(PsTables.IccTime);
     private static readonly SbrHuffman IccFrequency = new(PsTables.IccFrequency);
+    private static readonly Vlc IpdTime = new(PsTables.IpdTime);
+    private static readonly Vlc IpdFrequency = new(PsTables.IpdFrequency);
+    private static readonly Vlc OpdTime = new(PsTables.OpdTime);
+    private static readonly Vlc OpdFrequency = new(PsTables.OpdFrequency);
 
     // The last envelope's values (at the band count they were sent in), which the next ones' time deltas add to.
     private readonly int[] _lastIid = new int[34];
     private readonly int[] _lastIcc = new int[34];
     private int _lastIidBands = 20;
     private int _lastIccBands = 20;
+    private readonly int[] _lastIpd = new int[17];
+    private readonly int[] _lastOpd = new int[17];
+    private int _lastPhaseBands = 11;
 
     /// <summary>Whether a header has come: until then the data can't be read.</summary>
     public bool HasHeader { get; private set; }
@@ -51,6 +60,12 @@ internal sealed class PsData
 
     public int IccBands => ParameterBands[IccMode % 3];
 
+    /// <summary>The IPD and OPD's bands: 5, 11 or 17, by the IID's.</summary>
+    public int PhaseBands => PhaseBandCounts[IidMode % 3];
+
+    /// <summary>enable_ipdopd: whether this frame's extension sent phase parameters.</summary>
+    public bool EnableIpdOpd { get; private set; }
+
     /// <summary>frame_class: fixed (false) or variable (true) envelope borders.</summary>
     public bool VariableBorders { get; private set; }
 
@@ -64,6 +79,11 @@ internal sealed class PsData
     public int[][] Iid { get; } = [.. Enumerable.Range(0, MaxEnvelopes).Select(_ => new int[34])];
 
     public int[][] Icc { get; } = [.. Enumerable.Range(0, MaxEnvelopes).Select(_ => new int[34])];
+
+    /// <summary>IPD and OPD indices (0 to 7) per envelope and band, 0 where not sent.</summary>
+    public int[][] Ipd { get; } = [.. Enumerable.Range(0, MaxEnvelopes).Select(_ => new int[17])];
+
+    public int[][] Opd { get; } = [.. Enumerable.Range(0, MaxEnvelopes).Select(_ => new int[17])];
 
     /// <summary>Reads ps_data from <paramref name="r"/>, at most <paramref name="bits"/> bits; false if it can't be read yet (no header).</summary>
     public bool Read(AacBitReader r, int bits, AacStatistics statistics)
@@ -144,17 +164,52 @@ internal sealed class PsData
             _lastIccBands = IccBands;
         }
 
+        EnableIpdOpd = false;
         if (EnableExtension)
         {
-            // ps_extension, of a counted number of bytes: IPD and OPD (extension 0), skipped.
+            // ps_extension, of a counted number of bytes: extensions while a byte's worth is left, each a 2-bit id and
+            // its data, then fill. Only extension 0 (IPD and OPD) is defined; any other takes the rest.
             int count = r.Read(4);
             if (count == 15)
             {
                 count += r.Read(8);
             }
 
-            r.Skip(8 * count);
+            int extensionEnd = r.Position + (8 * count);
+            while (extensionEnd - r.Position > 7)
+            {
+                int id = r.Read(2);
+                if (id != 0)
+                {
+                    break;
+                }
+
+                ReadPhases(r, statistics);
+            }
+
+            if (r.Position > extensionEnd)
+            {
+                throw new InvalidDataException($"Parametric stereo extension runs {r.Position - extensionEnd} bits past its size.");
+            }
+
+            r.Skip(extensionEnd - r.Position);
             statistics.PsExtensions++;
+        }
+
+        if (!EnableIpdOpd)
+        {
+            for (int e = 0; e < NumEnvelopes; e++)
+            {
+                Array.Clear(Ipd[e]);
+                Array.Clear(Opd[e]);
+            }
+        }
+
+        if (NumEnvelopes > 0)
+        {
+            Ipd[NumEnvelopes - 1].CopyTo(_lastIpd, 0);
+            Opd[NumEnvelopes - 1].CopyTo(_lastOpd, 0);
+            _lastPhaseBands = PhaseBands;
         }
 
         if (r.Position > end)
@@ -166,6 +221,40 @@ internal sealed class PsData
         statistics.PsEnvelopes += NumEnvelopes;
         statistics.PsVariableBorderFrames += VariableBorders ? 1 : 0;
         return true;
+    }
+
+    // Extension 0: enable_ipdopd, per envelope the IPD's and then the OPD's time flag and deltas, and reserved_ps.
+    private void ReadPhases(AacBitReader r, AacStatistics statistics)
+    {
+        EnableIpdOpd = r.ReadFlag();
+        if (EnableIpdOpd)
+        {
+            for (int e = 0; e < NumEnvelopes; e++)
+            {
+                bool time = r.ReadFlag();
+                DecodePhases(r, time ? IpdTime : IpdFrequency, time, Ipd[e], PhaseBands, e == 0 ? _lastIpd : Ipd[e - 1], e == 0 ? _lastPhaseBands : PhaseBands);
+                time = r.ReadFlag();
+                DecodePhases(r, time ? OpdTime : OpdFrequency, time, Opd[e], PhaseBands, e == 0 ? _lastOpd : Opd[e - 1], e == 0 ? _lastPhaseBands : PhaseBands);
+            }
+
+            statistics.PsIpdOpdFrames++;
+        }
+
+        r.Skip(1);
+    }
+
+    // As DecodeDeltas, modulo 8 (phases from 0 to 7 pi / 4), mapped between 5 and 11 bands as the IID's between 10 and
+    // 20; the 11th band, which 5 bands lack, from 0.
+    private static void DecodePhases(AacBitReader r, Vlc book, bool time, int[] values, int bands, int[] previous, int previousBands)
+    {
+        for (int b = 0; b < bands; b++)
+        {
+            int start = !time ? (b == 0 ? 0 : values[b - 1])
+                : previousBands == bands ? previous[b]
+                : previousBands > bands ? previous[2 * b]
+                : b / 2 < previousBands ? previous[b / 2] : 0;
+            values[b] = (start + r.Read(book)) & 7;
+        }
     }
 
     // 8.6.4.5: values from deltas in frequency (from 0) or in time (from the previous envelope's, mapped between 10 and

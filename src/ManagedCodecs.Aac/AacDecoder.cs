@@ -1291,7 +1291,7 @@ internal sealed class AacStatistics
     /// <summary>Gains the limiter cut, per subband and envelope.</summary>
     public int SbrLimitedGains { get; set; }
 
-    /// <summary>Parametric stereo: frames and headers read, the iid_mode and icc_mode values seen (as bits), envelopes, frames with variable borders, values coded in time, extensions skipped, and the most bits left after the data in an SBR extension (its padding).</summary>
+    /// <summary>Parametric stereo: frames and headers read, the iid_mode and icc_mode values seen (as bits), envelopes, frames with variable borders, values coded in time, extensions read, and the most bits left after the data in an SBR extension (its padding).</summary>
     public int PsFrames { get; set; }
 
     public int PsHeaders { get; set; }
@@ -1307,6 +1307,9 @@ internal sealed class AacStatistics
     public int PsTimeDeltas { get; set; }
 
     public int PsExtensions { get; set; }
+
+    /// <summary>Parametric stereo frames whose extension sent phase parameters (IPD and OPD).</summary>
+    public int PsIpdOpdFrames { get; set; }
 
     public int PsMostUnreadBits { get; set; }
 

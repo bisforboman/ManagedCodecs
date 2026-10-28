@@ -76,11 +76,8 @@ internal static partial class InterPrediction
 
         if (xFrac == 0 && yFrac == 0)
         {
-            for (int j = 0; j < height; j++)
-            {
-                StorePartial(Vector128.Create(window.Slice(g + (j * ws), 16)), output[(j * outputStride)..], width);
-            }
-
+            CheckRows(window, g, ws, height, output, outputStride, width);
+            CopyRows(ref Unsafe.Add(ref MemoryMarshal.GetReference(window), g), ws, width, height, ref MemoryMarshal.GetReference(output), outputStride);
             return;
         }
 
@@ -308,13 +305,7 @@ internal static partial class InterPrediction
             throw new ArgumentOutOfRangeException(nameof(output));
         }
 
-        ref byte source = ref MemoryMarshal.GetReference(plane);
-        ref byte dest = ref MemoryMarshal.GetReference(output);
-        for (int j = 0; j < height; j++)
-        {
-            StorePartial(Load(ref source, ((y + j) * stride) + x), ref Unsafe.Add(ref dest, j * outputStride), width);
-        }
-
+        CopyRows(ref Unsafe.Add(ref MemoryMarshal.GetReference(plane), (y * stride) + x), stride, width, height, ref MemoryMarshal.GetReference(output), outputStride);
         return true;
     }
 
@@ -489,30 +480,125 @@ internal static partial class InterPrediction
 
     private static Vector128<short> Upper(Vector128<byte> value) => Vector128.WidenUpper(value).AsInt16();
 
+    // The row copies and averages below check their bounds once a block (CheckRows: 16 readable bytes from each source
+    // row's start, the block's width in each output row) and pick the row store for the block's width once, through
+    // the type parameter, rather than in every row.
+
     private static void Store(ReadOnlySpan<byte> values, int width, int height, Span<byte> output, int stride)
     {
-        for (int j = 0; j < height; j++)
-        {
-            StorePartial(Vector128.Create(values.Slice(j * 16, 16)), output[(j * stride)..], width);
-        }
+        CheckRows(values, 0, 16, height, output, stride, width);
+        CopyRows(ref MemoryMarshal.GetReference(values), 16, width, height, ref MemoryMarshal.GetReference(output), stride);
     }
 
     private static void Average(ReadOnlySpan<byte> a, ReadOnlySpan<byte> b, int width, int height, Span<byte> output, int stride)
     {
-        for (int j = 0; j < height; j++)
-        {
-            var avg = RoundingAverage(Vector128.Create(a.Slice(j * 16, 16)), Vector128.Create(b.Slice(j * 16, 16)));
-            StorePartial(avg, output[(j * stride)..], width);
-        }
+        CheckRows(a, 0, 16, height, output, stride, width);
+        CheckRows(b, 0, 16, height, output, stride, width);
+        AverageRows(ref MemoryMarshal.GetReference(a), 16, ref MemoryMarshal.GetReference(b), 16, width, height, ref MemoryMarshal.GetReference(output), stride);
     }
 
     private static void AverageWithWindow(ReadOnlySpan<byte> a, ReadOnlySpan<byte> window, int ws, int origin, int width, int height, Span<byte> output, int stride)
     {
+        CheckRows(a, 0, 16, height, output, stride, width);
+        CheckRows(window, origin, ws, height, output, stride, width);
+        AverageRows(ref MemoryMarshal.GetReference(a), 16, ref Unsafe.Add(ref MemoryMarshal.GetReference(window), origin), ws, width, height, ref MemoryMarshal.GetReference(output), stride);
+    }
+
+    /// <summary>
+    /// Throws unless <paramref name="height"/> rows of 16 bytes, <paramref name="sourceStride"/> apart from
+    /// <paramref name="origin"/>, are in <paramref name="source"/>, and as many rows of <paramref name="width"/> bytes,
+    /// <paramref name="outputStride"/> apart, in <paramref name="output"/>.
+    /// </summary>
+    private static void CheckRows(ReadOnlySpan<byte> source, int origin, int sourceStride, int height, Span<byte> output, int outputStride, int width)
+    {
+        if (origin < 0 || origin + ((height - 1) * sourceStride) + 16 > source.Length || ((height - 1) * outputStride) + width > output.Length)
+        {
+            throw new ArgumentOutOfRangeException(nameof(source));
+        }
+    }
+
+    /// <summary>Copies the first <paramref name="width"/> (2, 4, 8 or 16) bytes of each row, unchecked.</summary>
+    private static void CopyRows(ref byte source, int sourceStride, int width, int height, ref byte output, int outputStride)
+    {
+        switch (width)
+        {
+            case 16:
+                CopyRows<Width16>(ref source, sourceStride, height, ref output, outputStride);
+                break;
+            case 8:
+                CopyRows<Width8>(ref source, sourceStride, height, ref output, outputStride);
+                break;
+            case 4:
+                CopyRows<Width4>(ref source, sourceStride, height, ref output, outputStride);
+                break;
+            default:
+                CopyRows<Width2>(ref source, sourceStride, height, ref output, outputStride);
+                break;
+        }
+    }
+
+    private static void CopyRows<TWidth>(ref byte source, int sourceStride, int height, ref byte output, int outputStride)
+        where TWidth : IRowWidth
+    {
         for (int j = 0; j < height; j++)
         {
-            var avg = RoundingAverage(Vector128.Create(a.Slice(j * 16, 16)), Vector128.Create(window.Slice(origin + (j * ws), 16)));
-            StorePartial(avg, output[(j * stride)..], width);
+            TWidth.Write(Load(ref source, j * sourceStride), ref Unsafe.Add(ref output, j * outputStride));
         }
+    }
+
+    /// <summary>The rounded averages of two blocks' rows, their first <paramref name="width"/> (2, 4, 8 or 16) bytes, unchecked.</summary>
+    private static void AverageRows(ref byte a, int aStride, ref byte b, int bStride, int width, int height, ref byte output, int outputStride)
+    {
+        switch (width)
+        {
+            case 16:
+                AverageRows<Width16>(ref a, aStride, ref b, bStride, height, ref output, outputStride);
+                break;
+            case 8:
+                AverageRows<Width8>(ref a, aStride, ref b, bStride, height, ref output, outputStride);
+                break;
+            case 4:
+                AverageRows<Width4>(ref a, aStride, ref b, bStride, height, ref output, outputStride);
+                break;
+            default:
+                AverageRows<Width2>(ref a, aStride, ref b, bStride, height, ref output, outputStride);
+                break;
+        }
+    }
+
+    private static void AverageRows<TWidth>(ref byte a, int aStride, ref byte b, int bStride, int height, ref byte output, int outputStride)
+        where TWidth : IRowWidth
+    {
+        for (int j = 0; j < height; j++)
+        {
+            TWidth.Write(RoundingAverage(Load(ref a, j * aStride), Load(ref b, j * bStride)), ref Unsafe.Add(ref output, j * outputStride));
+        }
+    }
+
+    /// <summary>A block's width: how many of a row's bytes are written.</summary>
+    private interface IRowWidth
+    {
+        static abstract void Write(Vector128<byte> value, ref byte destination);
+    }
+
+    private readonly struct Width16 : IRowWidth
+    {
+        public static void Write(Vector128<byte> value, ref byte destination) => value.StoreUnsafe(ref destination);
+    }
+
+    private readonly struct Width8 : IRowWidth
+    {
+        public static void Write(Vector128<byte> value, ref byte destination) => Unsafe.WriteUnaligned(ref destination, value.AsUInt64().ToScalar());
+    }
+
+    private readonly struct Width4 : IRowWidth
+    {
+        public static void Write(Vector128<byte> value, ref byte destination) => Unsafe.WriteUnaligned(ref destination, value.AsUInt32().ToScalar());
+    }
+
+    private readonly struct Width2 : IRowWidth
+    {
+        public static void Write(Vector128<byte> value, ref byte destination) => Unsafe.WriteUnaligned(ref destination, value.AsUInt16().ToScalar());
     }
 
     /// <summary>
@@ -522,11 +608,9 @@ internal static partial class InterPrediction
     /// </summary>
     public static void Average(ReadOnlySpan<byte> a, ReadOnlySpan<byte> b, int stride, int width, int height, Span<byte> output, int outputStride)
     {
-        for (int j = 0; j < height; j++)
-        {
-            var avg = RoundingAverage(Vector128.Create(a.Slice(j * stride, 16)), Vector128.Create(b.Slice(j * stride, 16)));
-            StorePartial(avg, output[(j * outputStride)..], width);
-        }
+        CheckRows(a, 0, stride, height, output, outputStride, width);
+        CheckRows(b, 0, stride, height, output, outputStride, width);
+        AverageRows(ref MemoryMarshal.GetReference(a), stride, ref MemoryMarshal.GetReference(b), stride, width, height, ref MemoryMarshal.GetReference(output), outputStride);
     }
 
     /// <summary>(a + b + 1) >> 1 per byte, without widening.</summary>
@@ -548,26 +632,6 @@ internal static partial class InterPrediction
 
     private static Vector128<int> Clamp(Vector128<int> value) =>
         Vector128.Min(Vector128.Max(value, Vector128<int>.Zero), Vector128.Create(255));
-
-    /// <summary>Writes the first <paramref name="count"/> (2, 4, 8 or 16) bytes of a vector.</summary>
-    private static void StorePartial(Vector128<byte> value, Span<byte> destination, int count)
-    {
-        switch (count)
-        {
-            case 16:
-                value.CopyTo(destination);
-                break;
-            case 8:
-                MemoryMarshal.Write(destination, value.AsUInt64().ToScalar());
-                break;
-            case 4:
-                MemoryMarshal.Write(destination, value.AsUInt32().ToScalar());
-                break;
-            default:
-                MemoryMarshal.Write(destination, value.AsUInt16().ToScalar());
-                break;
-        }
-    }
 
     private static byte Clip8(int value) => (byte)Math.Clamp(value, 0, 255);
 }

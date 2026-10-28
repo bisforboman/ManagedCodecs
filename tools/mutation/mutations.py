@@ -32,13 +32,15 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.H264/PictureDecoder.Inter.cs",
          find="int lowestRow = lumaY + (mvY >> 2) + h + 3;", replace="int lowestRow = lumaY + (mvY >> 2);",
          tests=DELAYED_THREADS, repeat=3),
-    # And in the path for bi-predicted partitions (PredictFromTwo), for each of the two references.
+    # And in the path for bi-predicted partitions (PredictFromTwo), for each of the two references. Fewer pictures
+    # overtake their references there (B pictures' lists reach back further), so breaking these shows less often: the
+    # list-0 one survived 3 runs and failed the 4th once (2026-10-28).
     dict(file="src/ManagedCodecs.H264/PictureDecoder.Inter.cs",
          find="int lowestRow0 = lumaY + (mvY0 >> 2) + h + 3;", replace="int lowestRow0 = lumaY + (mvY0 >> 2);",
-         tests=DELAYED_THREADS, repeat=3),
+         tests=DELAYED_THREADS, repeat=10),
     dict(file="src/ManagedCodecs.H264/PictureDecoder.Inter.cs",
          find="int lowestRow1 = lumaY + (mvY1 >> 2) + h + 3;", replace="int lowestRow1 = lumaY + (mvY1 >> 2);",
-         tests=DELAYED_THREADS, repeat=3),
+         tests=DELAYED_THREADS, repeat=10),
     # A field reading a frame coded as a frame: its row y is the frame's row 2y + parity.
     dict(file="src/ManagedCodecs.H264/Picture.cs",
          find=": frame._finalLumaRows > (2 * row) + Parity ||", replace=": frame._finalLumaRows > row ||",

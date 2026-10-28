@@ -280,6 +280,73 @@ public class DeblockingTests
         Assert.True(filtered > 2_000, $"Only {filtered} cases changed both luma and chroma; the test data is too rough.");
     }
 
+    /// <summary>
+    /// The internal edge strengths of a macroblock with motion from one list, in vectors, against 8.7.2.1 block pair by
+    /// block pair: random motion vectors near each other (so both sides of the 4 and limitY thresholds come up),
+    /// coefficients, the partitions' reference pictures, frame and field macroblocks (limitY 4 and 2).
+    /// </summary>
+    [Fact]
+    public void OneListStrengths_MatchTheDefinition()
+    {
+        var random = new Random(31);
+        var mvX = new short[16];
+        var mvY = new short[16];
+        var coefficients = new byte[16];
+        var refs = new int[4];
+        var vertical = new byte[16];
+        var horizontal = new byte[16];
+        var expectedVertical = new byte[16];
+        var expectedHorizontal = new byte[16];
+        for (int n = 0; n < 20_000; n++)
+        {
+            int baseX = random.Next(-2000, 2000);
+            int baseY = random.Next(-2000, 2000);
+            int spread = random.Next(1, 8);
+            for (int i = 0; i < 16; i++)
+            {
+                mvX[i] = (short)(baseX + random.Next(-spread, spread + 1));
+                mvY[i] = (short)(baseY + random.Next(-spread, spread + 1));
+                coefficients[i] = (byte)(random.Next(3) == 0 ? random.Next(1, 17) : 0);
+            }
+
+            for (int i = 0; i < 4; i++)
+            {
+                refs[i] = random.Next(2);
+            }
+
+            int limitY = random.Next(2) == 0 ? 4 : 2;
+            random.NextBytes(vertical);
+            random.NextBytes(horizontal);
+            vertical.AsSpan(0, 4).CopyTo(expectedVertical);
+            horizontal.AsSpan(0, 4).CopyTo(expectedHorizontal);
+            for (int edge = 1; edge < 4; edge++)
+            {
+                for (int k = 0; k < 4; k++)
+                {
+                    expectedVertical[(edge * 4) + k] = Strength((k * 4) + edge - 1, (k * 4) + edge);
+                    expectedHorizontal[(edge * 4) + k] = Strength(((edge - 1) * 4) + k, (edge * 4) + k);
+                }
+            }
+
+            int differ = (refs[0] != refs[1] ? 1 : 0) | (refs[2] != refs[3] ? 2 : 0) | (refs[0] != refs[2] ? 4 : 0) | (refs[1] != refs[3] ? 8 : 0);
+            PictureDecoder<byte>.OneListStrengths(mvX, mvY, coefficients, differ, limitY, vertical, horizontal);
+            Assert.Equal(expectedVertical, vertical);
+            Assert.Equal(expectedHorizontal, horizontal);
+
+            byte Strength(int p, int q)
+            {
+                if (coefficients[p] != 0 || coefficients[q] != 0)
+                {
+                    return 2;
+                }
+
+                int partP = ((p >> 3) * 2) + ((p & 3) >> 1);
+                int partQ = ((q >> 3) * 2) + ((q & 3) >> 1);
+                return (byte)(refs[partP] != refs[partQ] || Math.Abs(mvX[p] - mvX[q]) >= 4 || Math.Abs(mvY[p] - mvY[q]) >= limitY ? 1 : 0);
+            }
+        }
+    }
+
     /// <summary>A plane of flat blocks (<paramref name="block"/> samples a side) a few levels apart, with small noise.</summary>
     private static byte[] Blocks(Random random, int stride, int block)
     {

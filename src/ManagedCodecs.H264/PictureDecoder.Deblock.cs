@@ -446,9 +446,41 @@ internal sealed partial class PictureDecoder<TPixel>
             return;
         }
 
+        if (IsIntra(mbP) || IsIntra(mbQ))
+        {
+            strengths[..4].Fill(4);
+            return;
+        }
+
+        var secondP = _refPic[1].AsSpan(mbP * 4, 4);
+        var secondQ = _refPic[1].AsSpan(mbQ * 4, 4);
+        if (secondP[0] is not null || secondP[1] is not null || secondP[2] is not null || secondP[3] is not null
+            || secondQ[0] is not null || secondQ[1] is not null || secondQ[2] is not null || secondQ[3] is not null)
+        {
+            for (int k = 0; k < 4; k++)
+            {
+                strengths[k] = (byte)BoundaryStrength(mbP, firstP + (k * step), mbQ, k * step, mbEdge: true);
+            }
+
+            return;
+        }
+
+        // Motion from list 0 alone on both sides: MotionStrength's first case, without its tests of the lists.
+        var refsP = _refPic[0].AsSpan(mbP * 4, 4);
+        var refsQ = _refPic[0].AsSpan(mbQ * 4, 4);
+        var mvXP = _mvX[0].AsSpan(mbP * 16, 16);
+        var mvYP = _mvY[0].AsSpan(mbP * 16, 16);
+        var mvXQ = _mvX[0].AsSpan(mbQ * 16, 16);
+        var mvYQ = _mvY[0].AsSpan(mbQ * 16, 16);
         for (int k = 0; k < 4; k++)
         {
-            strengths[k] = (byte)BoundaryStrength(mbP, firstP + (k * step), mbQ, k * step, mbEdge: true);
+            int p = firstP + (k * step);
+            int q = k * step;
+            strengths[k] = HasCoefficients(mbP, p) || HasCoefficients(mbQ, q)
+                ? (byte)2
+                : refsP[((p >> 3) * 2) + ((p & 3) >> 1)] != refsQ[((q >> 3) * 2) + ((q & 3) >> 1)] || Math.Abs(mvXP[p] - mvXQ[q]) >= 4 || Math.Abs(mvYP[p] - mvYQ[q]) >= 4
+                    ? (byte)1
+                    : (byte)0;
         }
     }
 
@@ -532,9 +564,11 @@ internal sealed partial class PictureDecoder<TPixel>
         ReadOnlySpan<byte> coefficients = per8x8;
         if (_transform8x8[mbAddr])
         {
-            for (int i = 0; i < 16; i++)
+            for (int b8 = 0; b8 < 4; b8++)
             {
-                per8x8[i] = (byte)(HasCoefficients(mbAddr, i) ? 1 : 0);
+                byte coded = (byte)(Has8x8Coefficients(mbAddr, b8) ? 1 : 0);
+                int i = ((b8 >> 1) * 8) + ((b8 & 1) * 2);
+                per8x8[i] = per8x8[i + 1] = per8x8[i + 4] = per8x8[i + 5] = coded;
             }
         }
         else
@@ -543,6 +577,17 @@ internal sealed partial class PictureDecoder<TPixel>
         }
 
         int base4x4 = mbAddr * 16;
+        var secondRefs = _refPic[1].AsSpan(mbAddr * 4, 4);
+        if (Vector128.IsHardwareAccelerated && secondRefs[0] is null && secondRefs[1] is null && secondRefs[2] is null && secondRefs[3] is null)
+        {
+            // Motion from list 0 alone (P macroblocks): every segment at once. Edges 1 and 3 lie inside an 8x8
+            // partition, so only edge 2 can have different reference pictures on its two sides.
+            var refs = _refPic[0].AsSpan(mbAddr * 4, 4);
+            int differ = (refs[0] != refs[1] ? 1 : 0) | (refs[2] != refs[3] ? 2 : 0) | (refs[0] != refs[2] ? 4 : 0) | (refs[1] != refs[3] ? 8 : 0);
+            OneListStrengths(_mvX[0].AsSpan(base4x4, 16), _mvY[0].AsSpan(base4x4, 16), coefficients, differ, limitY, vertical, horizontal);
+            return;
+        }
+
         int Strength(int p, int q, ReadOnlySpan<byte> coefficients) =>
             (coefficients[p] | coefficients[q]) != 0 ? 2 : MotionStrength(base4x4 + p, base4x4 + q, limitY);
 
@@ -554,6 +599,63 @@ internal sealed partial class PictureDecoder<TPixel>
                 horizontal[(edge * 4) + k] = (byte)Strength(((edge - 1) * 4) + k, (edge * 4) + k, coefficients);
             }
         }
+    }
+
+    /// <summary>
+    /// bS of the internal edges (1..3) of an inter macroblock whose 16 blocks all take their motion from one list:
+    /// 2 where either block has coefficients, else 1 where the reference pictures differ or the motion vectors are
+    /// 4 quarter samples apart or more (<paramref name="limitY"/> vertically), else 0 (8.7.2.1). The blocks' motion
+    /// vectors in raster order; <paramref name="coefficients"/> nonzero for a block with coefficients;
+    /// <paramref name="differ"/> bits 0 to 3 set where the reference pictures of 8x8 partitions 0 and 1, 2 and 3, 0
+    /// and 2, 1 and 3 differ. All in vectors: a block's left and upper neighbours by shuffles, the vertical edges'
+    /// strengths transposed into place. Edge 0's strengths are left as they are.
+    /// </summary>
+    internal static void OneListStrengths(ReadOnlySpan<short> mvX, ReadOnlySpan<short> mvY, ReadOnlySpan<byte> coefficients, int differ, int limitY, Span<byte> vertical, Span<byte> horizontal)
+    {
+        // Each block's left neighbour (a row's first block takes itself, whose edge is not internal) and upper one.
+        var leftOf = Vector128.Create((short)0, 0, 1, 2, 4, 4, 5, 6);
+        var x0 = Vector128.Create(mvX);
+        var x1 = Vector128.Create(mvX[8..]);
+        var y0 = Vector128.Create(mvY);
+        var y1 = Vector128.Create(mvY[8..]);
+        var limitX = Vector128.Create((short)3);
+        var limitV = Vector128.Create((short)(limitY - 1));
+
+        var farLeft = Vector128.Narrow(
+            (Vector128.GreaterThan(Vector128.Abs(x0 - Vector128.Shuffle(x0, leftOf)), limitX) | Vector128.GreaterThan(Vector128.Abs(y0 - Vector128.Shuffle(y0, leftOf)), limitV)).AsUInt16(),
+            (Vector128.GreaterThan(Vector128.Abs(x1 - Vector128.Shuffle(x1, leftOf)), limitX) | Vector128.GreaterThan(Vector128.Abs(y1 - Vector128.Shuffle(y1, leftOf)), limitV)).AsUInt16());
+
+        // Blocks 0-7's upper neighbours (the first row takes itself), and 8-15's: blocks 4-11.
+        var upOf = Vector128.Create((short)0, 1, 2, 3, 0, 1, 2, 3);
+        var x0Up = Vector128.Shuffle(x0, upOf);
+        var y0Up = Vector128.Shuffle(y0, upOf);
+        var x1Up = Vector128.Create(x0.GetUpper(), x1.GetLower());
+        var y1Up = Vector128.Create(y0.GetUpper(), y1.GetLower());
+        var farUp = Vector128.Narrow(
+            (Vector128.GreaterThan(Vector128.Abs(x0 - x0Up), limitX) | Vector128.GreaterThan(Vector128.Abs(y0 - y0Up), limitV)).AsUInt16(),
+            (Vector128.GreaterThan(Vector128.Abs(x1 - x1Up), limitX) | Vector128.GreaterThan(Vector128.Abs(y1 - y1Up), limitV)).AsUInt16());
+
+        // Edge 2's segments: blocks 2 and 6 (partitions 0 and 1), 10 and 14 (2 and 3); blocks 8, 9 (0 and 2), 10, 11 (1 and 3).
+        byte d0 = (byte)(-(differ & 1));
+        byte d1 = (byte)(-((differ >> 1) & 1));
+        byte d2 = (byte)(-((differ >> 2) & 1));
+        byte d3 = (byte)(-((differ >> 3) & 1));
+        var refsLeft = Vector128.Create(0, 0, d0, 0, 0, 0, d0, 0, 0, 0, d1, 0, 0, 0, d1, 0);
+        var refsUp = Vector128.Create(0, 0, 0, 0, 0, 0, 0, 0, d2, d2, d3, d3, 0, 0, 0, 0);
+
+        var coded = ~Vector128.Equals(Vector128.Create(coefficients), Vector128<byte>.Zero);
+        var codedLeft = coded | Vector128.Shuffle(coded, Vector128.Create((byte)0, 0, 1, 2, 4, 4, 5, 6, 8, 8, 9, 10, 12, 12, 13, 14));
+        var codedUp = coded | Vector128.Shuffle(coded, Vector128.Create((byte)0, 1, 2, 3, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11));
+        var two = Vector128.Create((byte)2);
+        var one = Vector128<byte>.One;
+        var left = Vector128.ConditionalSelect(codedLeft, two, (farLeft | refsLeft) & one);
+        var up = Vector128.ConditionalSelect(codedUp, two, (farUp | refsUp) & one);
+
+        // Block i's left edge is segment i / 4 of vertical edge i % 4; its upper edge segment i % 4 of horizontal edge i / 4.
+        var edgeZero = Vector128.Create((byte)0xFF, 0xFF, 0xFF, 0xFF, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+        var byEdge = Vector128.Shuffle(left, Vector128.Create((byte)0, 4, 8, 12, 1, 5, 9, 13, 2, 6, 10, 14, 3, 7, 11, 15));
+        Vector128.ConditionalSelect(edgeZero, Vector128.Create(vertical), byEdge).CopyTo(vertical);
+        Vector128.ConditionalSelect(edgeZero, Vector128.Create(horizontal), up).CopyTo(horizontal);
     }
 
     /// <summary>
@@ -569,6 +671,12 @@ internal sealed partial class PictureDecoder<TPixel>
     /// </summary>
     private bool HasUniformMotion(int mbAddr)
     {
+        // P_Skip: one motion vector from list 0, and list 1 as the picture's start left it.
+        if (_kind[mbAddr] == MbKind.PSkip && !_directMb[mbAddr])
+        {
+            return true;
+        }
+
         for (int list = 0; list < 2; list++)
         {
             var refs = _refPic[list].AsSpan(mbAddr * 4, 4);

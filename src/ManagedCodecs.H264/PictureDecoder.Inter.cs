@@ -514,10 +514,19 @@ internal sealed partial class PictureDecoder<TPixel>
         int block = (mbAddr * 16) + ((y >> 2) * 4) + (x >> 2);
         var ref0 = _refPic[0][part];
         var ref1 = _refPic[1][part];
-        if (typeof(TPixel) == typeof(byte) && _mbWidthC == 8 && _mbHeightC == 8 && !_pairSlots && (ref0 is null) != (ref1 is null) && slice.Header.Weights is null)
+        if (typeof(TPixel) == typeof(byte) && _mbWidthC == 8 && _mbHeightC == 8 && !_pairSlots && slice.Header.Weights is null)
         {
-            PredictFromOne(ref0 ?? ref1!, ref0 is null ? 1 : 0, mbAddr, block, x, y, w, h);
-            return;
+            if ((ref0 is null) != (ref1 is null))
+            {
+                PredictFromOne(ref0 ?? ref1!, ref0 is null ? 1 : 0, mbAddr, block, x, y, w, h);
+                return;
+            }
+
+            if (ref0 is not null)
+            {
+                PredictFromTwo(slice, ref0, ref1!, mbAddr, part, block, x, y, w, h);
+                return;
+            }
         }
 
         PredictPartitionGeneral(slice, mbAddr, x, y, w, h, part, block, ref0, ref1);
@@ -601,6 +610,63 @@ internal sealed partial class PictureDecoder<TPixel>
         int chromaOut = (chromaY * chromaStride) + chromaX;
         InterPrediction.PredictChroma(reference, 1, chromaX, chromaY, w >> 1, h >> 1, mvX, mvY, picture.Cb.AsSpan(chromaOut), chromaStride);
         InterPrediction.PredictChroma(reference, 2, chromaX, chromaY, w >> 1, h >> 1, mvX, mvY, picture.Cr.AsSpan(chromaOut), chromaStride);
+    }
+
+    /// <summary>
+    /// <see cref="PredictPartition"/> for a bi-predicted partition under the same conditions as <see cref="PredictFromOne"/>:
+    /// both predictions into the scratch blocks, then their rounded average, or implicit weights where they differ from it.
+    /// </summary>
+    private void PredictFromTwo(SliceState slice, Picture ref0, Picture ref1, int mbAddr, int part, int block, int x, int y, int w, int h)
+    {
+        int mvX0 = _mvX[0][block];
+        int mvY0 = _mvY[0][block];
+        int mvX1 = _mvX[1][block];
+        int mvY1 = _mvY[1][block];
+        int lumaX = (_mbColumn[mbAddr] * 16) + x;
+        int lumaY = (_mbRow[mbAddr] * 16) + y;
+        var weighting = slice.Pps.WeightedBipredIdc == 2
+            ? Weighting(slice, _refIdx[0][part], _refIdx[1][part], bi: true, mbAddr, ref0, ref1)
+            : DefaultWeights;
+
+        // As in PredictComponent: each reference's lowest row the 6-tap filter reads, and one more for chroma's.
+        int lowestRow0 = lumaY + (mvY0 >> 2) + h + 3;
+        ref0.WaitForRow(lowestRow0);
+        int lowestRow1 = lumaY + (mvY1 >> 2) + h + 3;
+        ref1.WaitForRow(lowestRow1);
+        var picture = Picture;
+        var prediction0 = (byte[])(object)_predictionL0;
+        var prediction1 = (byte[])(object)_predictionL1;
+        int lumaStride = picture.LumaStride;
+        InterPrediction.PredictLuma(ref0, lumaX, lumaY, w, h, mvX0, mvY0, prediction0, 16);
+        InterPrediction.PredictLuma(ref1, lumaX, lumaY, w, h, mvX1, mvY1, prediction1, 16);
+        Combine(picture.Y.AsSpan((lumaY * lumaStride) + lumaX), lumaStride, w, h, 0);
+        if ((x | y) == 0)
+        {
+            InterPrediction.PrefetchAhead(ref0, lumaX + (mvX0 >> 2), lumaY + (mvY0 >> 2), _mbColumn[mbAddr] & 3);
+        }
+
+        int chromaX = lumaX >> 1;
+        int chromaY = lumaY >> 1;
+        int chromaStride = picture.ChromaStride;
+        int chromaOut = (chromaY * chromaStride) + chromaX;
+        for (int c = 1; c <= 2; c++)
+        {
+            InterPrediction.PredictChroma(ref0, c, chromaX, chromaY, w >> 1, h >> 1, mvX0, mvY0, prediction0, 16);
+            InterPrediction.PredictChroma(ref1, c, chromaX, chromaY, w >> 1, h >> 1, mvX1, mvY1, prediction1, 16);
+            Combine((c == 1 ? picture.Cb : picture.Cr).AsSpan(chromaOut), chromaStride, w >> 1, h >> 1, c);
+        }
+
+        void Combine(Span<byte> output, int outputStride, int width, int height, int component)
+        {
+            if (weighting.IsDefault)
+            {
+                InterPrediction.Average(prediction0, prediction1, 16, width, height, output, outputStride);
+            }
+            else
+            {
+                WeightBoth(_predictionL0, _predictionL1, 16, width, height, MemoryMarshal.Cast<byte, TPixel>(output), outputStride, weighting, component);
+            }
+        }
     }
 
     /// <summary>

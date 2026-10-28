@@ -358,7 +358,7 @@ internal sealed class QmfDctIV(double scale = 1)
 
     /// <summary>
     /// The FFT of 32 of <paramref name="x"/>'s values packed and turned (<paramref name="re"/>, <paramref name="im"/>, 32
-    /// each), whose value at p <see cref="Output"/> turns into the outputs at 2p and 63 - 2p.
+    /// each), whose value at p <see cref="Output(double, double, int)"/> turns into the outputs at 2p and 63 - 2p.
     /// </summary>
     public static void Pretransform(ReadOnlySpan<double> x, bool alternate, Span<double> re, Span<double> im, bool scalar = false)
     {
@@ -413,7 +413,7 @@ internal sealed class QmfDctIV(double scale = 1)
         return ((yr * c) - (yi * s), (yr * s) + (yi * c));
     }
 
-    /// <summary><see cref="Output"/> at p and p + 1.</summary>
+    /// <summary><see cref="Output(double, double, int)"/> at p and p + 1.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public (Vector128<double> Even, Vector128<double> Odd) Output(Vector128<double> yr, Vector128<double> yi, int p)
     {

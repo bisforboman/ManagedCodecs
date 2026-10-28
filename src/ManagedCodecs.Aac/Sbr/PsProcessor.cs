@@ -3,10 +3,7 @@ using System.Runtime.Intrinsics;
 
 namespace ManagedCodecs.Aac.Sbr;
 
-/// <summary>
-/// Parametric stereo (ISO/IEC 14496-3 8.6.4), the baseline decoder with 10 or 20 parameter bands and mixing procedure
-/// Ra: one frame of a mono channel's QMF samples (the input of its synthesis bank) becomes a left and a right one.
-/// </summary>
+/// <summary>Parametric stereo (ISO/IEC 14496-3 8.6.4): 10 or 20 parameter bands and mixing procedure Ra or Rb: one frame of a mono channel's QMF samples (the input of its synthesis bank) becomes a left and a right one.</summary>
 /// <remarks>
 /// <para>
 /// The three lowest QMF bands are split further by the hybrid filterbank (8.6.4.3: 13-tap filters, band 0 into 8
@@ -15,7 +12,7 @@ namespace ManagedCodecs.Aac.Sbr;
 /// one (8.6.4.5): through a fractional delay and three all-pass links up to QMF band 22 (fading above band 3), by plain
 /// delays of 14 and 1 slots above, ducked where a transient's peak runs above its smoothed energy. Each of 22 groups
 /// of (sub-)subbands takes the mixing matrix of its parameter band (8.6.4.6), from the IID's scale factors and the
-/// ICC's angle, interpolated over each envelope from the previous one's. The phase parameters (IPD, OPD) are not
+/// ICC's angle (Ra) or from the IID and the ICC's rho (Rb), interpolated over each envelope from the previous one's. The phase parameters (IPD, OPD) are not
 /// applied, as in the spec's baseline decoder.
 /// </para>
 /// <para>
@@ -102,6 +99,9 @@ internal sealed class PsProcessor
         0.04469901562676742, 0.02514469318284149, 0.014141428569978354, 0.007952581547309726, 0.004472113594487508,
     ];
 
+    // The ICC's dequantized rho for index 0 to 7 (8.6.4.6.2), for mixing procedure Rb.
+    private static readonly double[] Rhos = [1, 0.937, 0.84118, 0.60092, 0.36764, 0, -0.589, -1];
+
     private static readonly double[] Alphas =
     [
         0.0, 0.1784276371622683, 0.2856673302030948, 0.4630723606909662, 0.597163152138217, 0.7853981633974483,
@@ -152,6 +152,9 @@ internal sealed class PsProcessor
     private readonly int[] _lastIcc = new int[Bins];
     private bool _lastFineIid;
 
+    // Mixing procedure Rb (icc_mode 3 to 5), from the last frame whose header enabled ICC.
+    private bool _lastRb;
+
     public PsProcessor()
     {
         Array.Fill(_previousH[0], 1.0);
@@ -170,9 +173,10 @@ internal sealed class PsProcessor
         var (iid, icc) = (_iid, _icc);
         int envelopes = Envelopes(data, hasData, starts, iid, icc);
         bool fine = hasData && data.EnableIid ? data.FineIid : _lastFineIid;
-        if (hasData && data.EnableIcc && data.IccMode >= 3)
+        bool rb = hasData && data.EnableIcc ? data.IccMode >= 3 : _lastRb;
+        if (rb)
         {
-            throw new NotSupportedException("Parametric stereo mixing procedure Rb (icc_mode 3 to 5) is not supported.");
+            statistics.PsRbFrames++;
         }
 
         for (int sb = top; sb < 64; sb++)
@@ -182,12 +186,13 @@ internal sealed class PsProcessor
 
         HybridAnalysis(re, im);
         Decorrelate(re, im, rightRe, rightIm, statistics);
-        Mix(envelopes, starts, iid, icc, fine, re, im, rightRe, rightIm);
+        Mix(envelopes, starts, iid, icc, fine, rb, re, im, rightRe, rightIm);
         HybridSynthesis(_leftRe, _leftIm, re, im);
         HybridSynthesis(_rightRe, _rightIm, rightRe, rightIm);
         iid[envelopes - 1].CopyTo(_lastIid, 0);
         icc[envelopes - 1].CopyTo(_lastIcc, 0);
         _lastFineIid = fine;
+        _lastRb = rb;
         statistics.PsAppliedFrames++;
     }
 
@@ -519,10 +524,10 @@ internal sealed class PsProcessor
         return (r, m);
     }
 
-    // 8.6.4.6: per envelope, each parameter band's matrix (Ra); per group, the matrix stepped linearly from the previous
+    // 8.6.4.6: per envelope, each parameter band's matrix (Ra, or Rb with <paramref name="rb"/>); per group, the matrix stepped linearly from the previous
     // envelope's to it over the envelope, applied to the mono and the decorrelated signal: left = h11 M + h21 D,
     // right = h12 M + h22 D.
-    private void Mix(int envelopes, ReadOnlySpan<int> starts, int[][] iid, int[][] icc, bool fine, double[][] re, double[][] im, double[][] rightRe, double[][] rightIm)
+    private void Mix(int envelopes, ReadOnlySpan<int> starts, int[][] iid, int[][] icc, bool fine, bool rb, double[][] re, double[][] im, double[][] rightRe, double[][] rightIm)
     {
         var scale = fine ? FineScaleFactors : ScaleFactors;
         int steps = fine ? 15 : 7;
@@ -532,6 +537,12 @@ internal sealed class PsProcessor
             for (int bin = 0; bin < Bins; bin++)
             {
                 double right = scale[steps + iid[e][bin]];
+                if (rb)
+                {
+                    MatrixRb(right, Rhos[icc[e][bin]], out h[bin], out h[Bins + bin], out h[(2 * Bins) + bin], out h[(3 * Bins) + bin]);
+                    continue;
+                }
+
                 double left = scale[steps - iid[e][bin]];
                 double alpha = Alphas[icc[e][bin]];
                 double beta = alpha * (right - left) / Math.Sqrt(2);
@@ -582,6 +593,59 @@ internal sealed class PsProcessor
                 _previousH[3][bin] = h[(3 * Bins) + bin];
             }
         }
+    }
+
+    /// <summary>
+    /// Mixing procedure Rb's matrix (8.6.4.6.2) for a parameter band: with c = 10^(IID / 20), here from Ra's scale factor
+    /// of the right channel (<paramref name="right"/> = sqrt(2 / (1 + c^2))), and the ICC's <paramref name="rho"/>,
+    /// alpha = arctan(2 c rho / (c^2 - 1)) / 2 taken in [0, pi / 2], mu = sqrt(1 + (4 rho^2 - 4) / (c + 1 / c)^2) and
+    /// gamma = arctan(sqrt((1 - mu) / (1 + mu))): h11 = sqrt(2) cos(alpha) cos(gamma), h12 = sqrt(2) sin(alpha) cos(gamma),
+    /// h21 = -sqrt(2) sin(alpha) sin(gamma), h22 = sqrt(2) cos(alpha) sin(gamma). The angles' sines and cosines come by
+    /// half-angle identities and square roots alone, which are exact on every platform (CLAUDE.md, HE-AAC: Math's
+    /// trigonometry differs in its last bit on WebAssembly). Rho is taken as at least 0.05, as FFmpeg takes it: without
+    /// that the Rb sample (heaacv2-rb, its ICC down to index 7, rho -1) was up to 0.3 off FFmpeg's output.
+    /// </summary>
+    internal static void MatrixRb(double right, double rho, out double h11, out double h12, out double h21, out double h22)
+    {
+        rho = Math.Max(rho, 0.05);
+        double c2 = (2 / (right * right)) - 1;
+        double c = Math.Sqrt(c2);
+
+        // 2 alpha as the angle of (c^2 - 1, 2 c rho), turned by pi where it is negative (alpha + pi / 2).
+        double x = c2 - 1;
+        double y = 2 * c * rho;
+        if (y < 0)
+        {
+            (x, y) = (-x, -y);
+        }
+
+        double length = Math.Sqrt((x * x) + (y * y));
+        double cosAlpha = 1;
+        double sinAlpha = 0;
+        if (length > 0)
+        {
+            double cos2 = x / length;
+            double sin2 = y / length;
+            if (cos2 >= 0)
+            {
+                cosAlpha = Math.Sqrt((1 + cos2) / 2);
+                sinAlpha = sin2 / (2 * cosAlpha);
+            }
+            else
+            {
+                sinAlpha = Math.Sqrt((1 - cos2) / 2);
+                cosAlpha = sin2 / (2 * sinAlpha);
+            }
+        }
+
+        double sum = c + (1 / c);
+        double mu = Math.Sqrt(Math.Max(0, 1 + (((4 * rho * rho) - 4) / (sum * sum))));
+        double cosGamma = Math.Sqrt((1 + mu) / 2);
+        double sinGamma = Math.Sqrt(Math.Max(0, (1 - mu) / 2));
+        h11 = Math.Sqrt(2) * cosAlpha * cosGamma;
+        h12 = Math.Sqrt(2) * sinAlpha * cosGamma;
+        h21 = -Math.Sqrt(2) * sinAlpha * sinGamma;
+        h22 = Math.Sqrt(2) * cosAlpha * sinGamma;
     }
 
     // The sub-subbands added back into their QMF bands.

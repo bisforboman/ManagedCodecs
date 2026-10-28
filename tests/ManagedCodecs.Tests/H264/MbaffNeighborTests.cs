@@ -98,6 +98,52 @@ public class MbaffNeighborTests
         Assert.Equal(-1, PictureDecoder<byte>.AffNeighbor(field, slices, Width, 6, 16, -1, 16, 16, anySlice: true).Mb);
     }
 
+    /// <summary>
+    /// Table 6-4 from the pairs found once a macroblock (what the decoder uses within a slice) against the lookup that
+    /// finds them every time: every location of 6.4.12 (luma and both chroma sizes) of every macroblock, on random
+    /// pictures three pairs wide and high with random field pairs, slices and pairs not yet decoded, in both slot
+    /// parities (a field picture's macroblocks are one slot of each pair).
+    /// </summary>
+    [Fact]
+    public void PairsFoundOnce_MatchTheLookup()
+    {
+        const int PairsWide = 3;
+        const int Pairs = 9;
+        var random = new Random(31);
+        for (int n = 0; n < 300; n++)
+        {
+            var field = new bool[Pairs * 2];
+            var slices = new int[Pairs * 2];
+            for (int pair = 0; pair < Pairs; pair++)
+            {
+                field[2 * pair] = field[(2 * pair) + 1] = random.Next(2) == 1;
+                slices[2 * pair] = slices[(2 * pair) + 1] = random.Next(5) == 0 ? -1 : random.Next(2);
+            }
+
+            int slotParity = random.Next(2);
+            for (int mb = 0; mb < Pairs * 2; mb++)
+            {
+                if (slices[mb] < 0)
+                {
+                    continue;
+                }
+
+                var pairs = PictureDecoder<byte>.FindAffPairs(field, slices, PairsWide, mb, slotParity);
+                foreach (var (maxW, maxH) in new[] { (16, 16), (8, 8), (8, 16) })
+                {
+                    for (int y = -1; y <= maxH; y++)
+                    {
+                        for (int x = -1; x <= maxW; x++)
+                        {
+                            var expected = PictureDecoder<byte>.AffNeighbor(field, slices, PairsWide, mb, x, y, maxW, maxH, anySlice: false, slotParity);
+                            Assert.Equal(expected, PictureDecoder<byte>.AffNeighbor(in pairs, x, y, maxW, maxH));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     private static bool[] Layout(int current, bool currentField, int[] neighbors, bool neighborField)
     {
         var field = new bool[8];

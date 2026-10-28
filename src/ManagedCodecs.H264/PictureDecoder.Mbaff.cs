@@ -28,6 +28,10 @@ internal sealed partial class PictureDecoder<TPixel>
     private int _fieldParity = -1;
     private bool[] _fieldMb = [];
 
+    // The current macroblock's pairs for Table 6-4 (AffPairsOf), and the slice they were found for.
+    private AffPairs _affPairs = new(-1, false, -1, false, -1, false, -1, false, -1, false);
+    private int _affPairsSlice = -1;
+
     // Intra prediction in MBAFF frames reconstructs into these, with the neighbouring samples
     // gathered around the macroblock (row 0 and column 0), then copies the result out.
     private const int ScratchLumaStride = 32;
@@ -156,10 +160,149 @@ internal sealed partial class PictureDecoder<TPixel>
         return sliceOfMb[slot] >= 0 && (anySlice || sliceOfMb[slot] == sliceOfMb[mbAddr]) ? top : -1;
     }
 
-    /// <summary>Table 6-4: neighbouring locations in MBAFF frames (the deblocking filter also looks into other slices).</summary>
+    /// <summary>
+    /// Table 6-4: neighbouring locations in MBAFF frames (the deblocking filter also looks into other slices). Within
+    /// the slice, from the pairs around the macroblock found once (<see cref="AffPairsOf"/>).
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private (int Mb, int X, int Y) AffNeighbor(int mbAddr, int xN, int yN, int maxW, int maxH, bool anySlice = false) =>
-        AffNeighbor(_fieldMb, _sliceOfMb, _widthInMbs, mbAddr, xN, yN, maxW, maxH, anySlice, Math.Max(_fieldParity, 0));
+        anySlice
+            ? AffNeighbor(_fieldMb, _sliceOfMb, _widthInMbs, mbAddr, xN, yN, maxW, maxH, anySlice: true, Math.Max(_fieldParity, 0))
+            : AffNeighbor(in AffPairsOf(mbAddr), xN, yN, maxW, maxH);
+
+    /// <summary>
+    /// The pairs around a macroblock that Table 6-4 looks into, for its lookups within the slice: found again only
+    /// for another macroblock, or the same one once its field flag or slice is set (a skipped top macroblock's pair
+    /// kind can be inferred after it is marked as in the slice), and forgotten by <see cref="Begin"/>.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private ref readonly AffPairs AffPairsOf(int mbAddr)
+    {
+        if (_affPairs.Mb != mbAddr || _affPairs.Field != _fieldMb[mbAddr] || _affPairsSlice != _sliceOfMb[mbAddr])
+        {
+            _affPairs = FindAffPairs(_fieldMb, _sliceOfMb, _widthInMbs, mbAddr, Math.Max(_fieldParity, 0));
+            _affPairsSlice = _sliceOfMb[mbAddr];
+        }
+
+        return ref _affPairs;
+    }
+
+    /// <summary>
+    /// A macroblock of an MBAFF frame (or field picture) and the pairs around it Table 6-4 looks into: each pair's
+    /// top macroblock, or -1 when it is outside the picture, not decoded or in another slice, and whether it is a
+    /// field pair.
+    /// </summary>
+    internal readonly record struct AffPairs(
+        int Mb, bool Field, int Left, bool LeftField, int Above, bool AboveField, int AboveRight, bool AboveRightField, int AboveLeft, bool AboveLeftField);
+
+    /// <summary>The pairs around <paramref name="mbAddr"/> (<see cref="AffPairs"/>), within its slice.</summary>
+    internal static AffPairs FindAffPairs(ReadOnlySpan<bool> fieldMb, ReadOnlySpan<int> sliceOfMb, int widthInMbs, int mbAddr, int slotParity = 0)
+    {
+        int pair = mbAddr >> 1;
+        int pairY = pair / widthInMbs;
+        int pairX = pair - (pairY * widthInMbs);
+        int left = PairIfAvailable(sliceOfMb, widthInMbs, mbAddr, pairX - 1, pairY, anySlice: false, slotParity);
+        int above = PairIfAvailable(sliceOfMb, widthInMbs, mbAddr, pairX, pairY - 1, anySlice: false, slotParity);
+        int aboveRight = PairIfAvailable(sliceOfMb, widthInMbs, mbAddr, pairX + 1, pairY - 1, anySlice: false, slotParity);
+        int aboveLeft = PairIfAvailable(sliceOfMb, widthInMbs, mbAddr, pairX - 1, pairY - 1, anySlice: false, slotParity);
+        return new AffPairs(
+            mbAddr,
+            fieldMb[mbAddr],
+            left,
+            left >= 0 && fieldMb[left],
+            above,
+            above >= 0 && fieldMb[above],
+            aboveRight,
+            aboveRight >= 0 && fieldMb[aboveRight],
+            aboveLeft,
+            aboveLeft >= 0 && fieldMb[aboveLeft]);
+    }
+
+    /// <summary>
+    /// Table 6-4 from the pairs around the macroblock (<see cref="FindAffPairs"/>): the same as
+    /// <see cref="AffNeighbor(ReadOnlySpan{bool}, ReadOnlySpan{int}, int, int, int, int, int, int, bool, int)"/>
+    /// within the slice, which a test compares it with for every location of every macroblock of random pictures.
+    /// </summary>
+    internal static (int Mb, int X, int Y) AffNeighbor(in AffPairs pairs, int xN, int yN, int maxW, int maxH)
+    {
+        if (yN >= maxH || (xN >= maxW && yN >= 0))
+        {
+            return (-1, 0, 0);
+        }
+
+        int mbAddr = pairs.Mb;
+        if (xN >= 0 && yN >= 0)
+        {
+            return (mbAddr, xN, yN);
+        }
+
+        bool isTop = (mbAddr & 1) == 0;
+        bool frame = !pairs.Field;
+        int n;
+        int yM;
+        if (xN < 0 && yN < 0)
+        {
+            // D: above-left; a frame macroblock's bottom half looks into the left pair instead.
+            if (frame && !isTop)
+            {
+                n = pairs.Left;
+                if (n < 0)
+                {
+                    return (-1, 0, 0);
+                }
+
+                (n, yM) = pairs.LeftField ? (n + 1, (yN + maxH) >> 1) : (n, yN);
+            }
+            else
+            {
+                n = pairs.AboveLeft;
+                if (n < 0)
+                {
+                    return (-1, 0, 0);
+                }
+
+                (n, yM) = frame || !isTop ? (n + 1, yN) : pairs.AboveLeftField ? (n, yN) : (n + 1, 2 * yN);
+            }
+        }
+        else if (xN < 0)
+        {
+            // A: the left pair, row by row.
+            n = pairs.Left;
+            if (n < 0)
+            {
+                return (-1, 0, 0);
+            }
+
+            (n, yM) = AffLeft(n, pairs.LeftField, frame, isTop, yN, maxH);
+        }
+        else
+        {
+            // B (xN < maxW) or C (xN >= maxW), above.
+            bool c = xN >= maxW;
+            if (frame && !isTop)
+            {
+                if (c)
+                {
+                    return (-1, 0, 0);
+                }
+
+                (n, yM) = (mbAddr - 1, yN);
+            }
+            else
+            {
+                n = c ? pairs.AboveRight : pairs.Above;
+                if (n < 0)
+                {
+                    return (-1, 0, 0);
+                }
+
+                bool field = c ? pairs.AboveRightField : pairs.AboveField;
+                (n, yM) = frame || !isTop ? (n + 1, yN) : field ? (n, yN) : (n + 1, 2 * yN);
+            }
+        }
+
+        return (n, xN & (maxW - 1), yM & (maxH - 1));
+    }
 
     /// <summary>
     /// Table 6-4 for macroblock <paramref name="mbAddr"/> of an MBAFF frame <paramref name="widthInMbs"/>

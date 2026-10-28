@@ -106,7 +106,7 @@ MUTATIONS = [
          find="_ipdHistory[bin] = ipd & 63;", replace="_ipdHistory[bin] = 0;",
          tests="DisplayName~heaacv2-ipd"),
     dict(file="src/ManagedCodecs.Aac/Sbr/PsProcessor.cs",
-         find="double sign = gr <= 1 ? -1 : 1;", replace="double sign = 1;",
+         find="negated: (0, 1));", replace="negated: (-1, -1));",
          tests="DisplayName~heaacv2-ipd"),
     dict(file="src/ManagedCodecs.Aac/Sbr/PsProcessor.cs",
          find="double e11 = (hIm[bin] - g11) / length;", replace="double e11 = ((sign * hIm[bin]) - g11) / length;",

@@ -8,6 +8,47 @@ namespace ManagedCodecs.Tests.Aac;
 /// </summary>
 public class PsTests
 {
+    /// <summary>
+    /// Mixing procedure Rb's matrix, by half-angle identities and square roots, against its definition by arctangents
+    /// (8.6.4.6.2) through Math, for every fine IID (-50 to 50 dB, the coarse ones among them) and every ICC index.
+    /// </summary>
+    [Fact]
+    public void RbMatrixMatchesItsDefinition()
+    {
+        double[] decibels = [-50, -45, -40, -35, -30, -25, -22, -19, -16, -13, -10, -8, -6, -4, -2, 0, 2, 4, 6, 8, 10, 13, 16, 19, 22, 25, 30, 35, 40, 45, 50];
+        double[] rhos = [1, 0.937, 0.84118, 0.60092, 0.36764, 0, -0.589, -1];
+        double worst = 0;
+        foreach (double db in decibels)
+        {
+            double c = Math.Pow(10, db / 20);
+            foreach (double sent in rhos)
+            {
+                double rho = Math.Max(sent, 0.05);
+                double alpha = 0.5 * Math.Atan2(2 * c * rho, (c * c) - 1);
+                if (alpha < 0)
+                {
+                    alpha += Math.PI / 2;
+                }
+
+                double mu = Math.Sqrt(1 + (((4 * rho * rho) - 4) / ((c + (1 / c)) * (c + (1 / c)))));
+                double gamma = Math.Atan(Math.Sqrt((1 - mu) / (1 + mu)));
+                double[] expected =
+                [
+                    Math.Sqrt(2) * Math.Cos(alpha) * Math.Cos(gamma), Math.Sqrt(2) * Math.Sin(alpha) * Math.Cos(gamma),
+                    -Math.Sqrt(2) * Math.Sin(alpha) * Math.Sin(gamma), Math.Sqrt(2) * Math.Cos(alpha) * Math.Sin(gamma),
+                ];
+                PsProcessor.MatrixRb(Math.Sqrt(2 / (1 + (c * c))), sent, out double h11, out double h12, out double h21, out double h22);
+                double[] actual = [h11, h12, h21, h22];
+                for (int k = 0; k < 4; k++)
+                {
+                    worst = Math.Max(worst, Math.Abs(actual[k] - expected[k]));
+                }
+            }
+        }
+
+        Assert.True(worst < 1e-9, $"Off by {worst:E3}.");
+    }
+
     [Fact]
     public void CosAndSinMatchMath()
     {

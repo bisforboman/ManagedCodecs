@@ -129,4 +129,17 @@ if wanted heaacv2-stereo; then
   he -p 29 -b 32000 -o "$out/heaacv2-stereo.mp4" "$work/in.wav"
 fi
 
+# Parametric stereo with mixing procedure Rb (icc_mode 3 and 4): the encoder writes only Ra (0 and 1). Rb reads the
+# same IID and ICC parameters through another mixing matrix, so a copy of the tree that adds 3 to the mode it writes
+# makes a valid Rb stream of the encoder's own parameters.
+if wanted heaacv2-rb; then
+  git -C "$fdk/.." archive HEAD | (mkdir "$work/fdk5" && tar -x -C "$work/fdk5")
+  file=$(find "$work/fdk5" -path '*libSBRenc/src/ps_encode.cpp')
+  grep -q 'hPsOut->iccMode = getICCMode(psBands, hPsData->iccQuantMode);' "$file" || { echo "the encoder's iccMode line moved" >&2; exit 1; }
+  sed -i 's/hPsOut->iccMode = getICCMode(psBands, hPsData->iccQuantMode);/hPsOut->iccMode = getICCMode(psBands, hPsData->iccQuantMode) + 3;/' "$file"
+  cmake -S "$work/fdk5" -B "$work/fdk5/build" > /dev/null && cmake --build "$work/fdk5/build" -j4 > /dev/null
+  ff -f lavfi -i "aevalsrc=$music|$music2:s=44100:d=3" -c:a pcm_s16le "$work/in.wav"
+  LD_LIBRARY_PATH=$work/fdk5/build fdkaac --silent -p 29 -b 32000 -o "$out/heaacv2-rb.mp4" "$work/in.wav"
+fi
+
 ls -l "$out"

@@ -107,6 +107,7 @@ public class SbrConformanceTests
             Assert.Equal(stats.PsFrames, stats.PsAppliedFrames);
             Assert.Equal(packets, stats.PsAppliedFrames);
             Assert.True(stats.PsDuckedSlots > 0, "No transients ducked.");
+            Assert.Equal(sampleName.Contains("-rb", StringComparison.Ordinal) ? stats.PsAppliedFrames : 0, stats.PsRbFrames);
         }
 
         if (channels == 1)

@@ -347,6 +347,138 @@ public class DeblockingTests
         }
     }
 
+    /// <summary>
+    /// The internal edge strengths of a macroblock with motion from either list or both, in vectors, against 8.7.2.1
+    /// block pair by block pair: each partition's reference pictures drawn from two pictures or none in each list (so one
+    /// and two vectors, the same picture twice, and swapped lists all come up), random motion vectors near each other,
+    /// coefficients, and frame and field limits.
+    /// </summary>
+    [Fact]
+    public void TwoListStrengths_MatchTheDefinition()
+    {
+        var random = new Random(37);
+        object[] pictures = [new(), new()];
+        var mvX0 = new short[16];
+        var mvY0 = new short[16];
+        var mvX1 = new short[16];
+        var mvY1 = new short[16];
+        var coefficients = new byte[16];
+        var refs0 = new object?[4];
+        var refs1 = new object?[4];
+        var vertical = new byte[16];
+        var horizontal = new byte[16];
+        var expectedVertical = new byte[16];
+        var expectedHorizontal = new byte[16];
+        int limitY = 4;
+        for (int n = 0; n < 50_000; n++)
+        {
+            int spread = random.Next(1, 8);
+            int baseX = random.Next(-2000, 2000);
+            int baseY = random.Next(-2000, 2000);
+            for (int i = 0; i < 16; i++)
+            {
+                mvX0[i] = (short)(baseX + random.Next(-spread, spread + 1));
+                mvY0[i] = (short)(baseY + random.Next(-spread, spread + 1));
+                mvX1[i] = (short)(baseX + random.Next(-spread, spread + 1));
+                mvY1[i] = (short)(baseY + random.Next(-spread, spread + 1));
+                coefficients[i] = (byte)(random.Next(4) == 0 ? 1 : 0);
+            }
+
+            // Mostly one motion per partition, as partitions predict (vectors within an 8x8 partition still differ with
+            // 8x8 partitions split further).
+            for (int k = 0; k < 4; k++)
+            {
+                do
+                {
+                    refs0[k] = random.Next(3) == 0 ? null : pictures[random.Next(2)];
+                    refs1[k] = random.Next(3) == 0 ? null : pictures[random.Next(2)];
+                }
+                while (refs0[k] is null && refs1[k] is null && random.Next(8) != 0);
+            }
+
+            limitY = random.Next(2) == 0 ? 4 : 2;
+            random.NextBytes(vertical);
+            random.NextBytes(horizontal);
+            vertical.AsSpan(0, 4).CopyTo(expectedVertical);
+            horizontal.AsSpan(0, 4).CopyTo(expectedHorizontal);
+            for (int edge = 1; edge < 4; edge++)
+            {
+                for (int k = 0; k < 4; k++)
+                {
+                    expectedVertical[(edge * 4) + k] = Strength((k * 4) + edge - 1, (k * 4) + edge);
+                    expectedHorizontal[(edge * 4) + k] = Strength(((edge - 1) * 4) + k, (edge * 4) + k);
+                }
+            }
+
+            PictureDecoder<byte>.TwoListStrengths(mvX0, mvY0, mvX1, mvY1, coefficients, refs0, refs1, limitY, vertical, horizontal);
+            Assert.True(expectedVertical.AsSpan().SequenceEqual(vertical), $"Case {n}: vertical [{string.Join(",", vertical)}], expected [{string.Join(",", expectedVertical)}]");
+            Assert.True(expectedHorizontal.AsSpan().SequenceEqual(horizontal), $"Case {n}: horizontal [{string.Join(",", horizontal)}], expected [{string.Join(",", expectedHorizontal)}]");
+        }
+
+        // 8.7.2.1 for blocks p and q of one macroblock, neither intra.
+        byte Strength(int p, int q)
+        {
+            if (coefficients[p] != 0 || coefficients[q] != 0)
+            {
+                return 2;
+            }
+
+            int partP = ((p >> 3) * 2) + ((p & 3) >> 1);
+            int partQ = ((q >> 3) * 2) + ((q & 3) >> 1);
+            var (p0, p1, q0, q1) = (refs0[partP], refs1[partP], refs0[partQ], refs1[partQ]);
+            bool Far(short[] xa, short[] ya, int a, short[] xb, short[] yb, int b) => Math.Abs(xa[a] - xb[b]) >= 4 || Math.Abs(ya[a] - yb[b]) >= limitY;
+
+            // Different reference pictures, or a different number of motion vectors.
+            int countP = (p0 is null ? 0 : 1) + (p1 is null ? 0 : 1);
+            int countQ = (q0 is null ? 0 : 1) + (q1 is null ? 0 : 1);
+            var picturesP = new[] { p0, p1 }.Where(r => r is not null).OrderBy(r => Array.IndexOf(pictures, r)).ToArray();
+            var picturesQ = new[] { q0, q1 }.Where(r => r is not null).OrderBy(r => Array.IndexOf(pictures, r)).ToArray();
+            if (countP != countQ || !picturesP.SequenceEqual(picturesQ))
+            {
+                return 1;
+            }
+
+            // The vectors that refer to the same picture, in some pairing.
+            var vectorsP = new List<(short[] X, short[] Y)>();
+            var vectorsQ = new List<(short[] X, short[] Y)>();
+            if (p0 is not null)
+            {
+                vectorsP.Add((mvX0, mvY0));
+            }
+
+            if (p1 is not null)
+            {
+                vectorsP.Add((mvX1, mvY1));
+            }
+
+            if (q0 is not null)
+            {
+                vectorsQ.Add((mvX0, mvY0));
+            }
+
+            if (q1 is not null)
+            {
+                vectorsQ.Add((mvX1, mvY1));
+            }
+
+            var listsP = new[] { p0, p1 }.Where(r => r is not null).ToArray();
+            var listsQ = new[] { q0, q1 }.Where(r => r is not null).ToArray();
+            if (countP == 0)
+            {
+                return (byte)(Far(mvX0, mvY0, p, mvX0, mvY0, q) ? 1 : 0);
+            }
+
+            if (countP == 1)
+            {
+                return (byte)(Far(vectorsP[0].X, vectorsP[0].Y, p, vectorsQ[0].X, vectorsQ[0].Y, q) ? 1 : 0);
+            }
+
+            bool straight = listsP[0] == listsQ[0] && listsP[1] == listsQ[1] && !Far(vectorsP[0].X, vectorsP[0].Y, p, vectorsQ[0].X, vectorsQ[0].Y, q) && !Far(vectorsP[1].X, vectorsP[1].Y, p, vectorsQ[1].X, vectorsQ[1].Y, q);
+            bool swapped = listsP[0] == listsQ[1] && listsP[1] == listsQ[0] && !Far(vectorsP[0].X, vectorsP[0].Y, p, vectorsQ[1].X, vectorsQ[1].Y, q) && !Far(vectorsP[1].X, vectorsP[1].Y, p, vectorsQ[0].X, vectorsQ[0].Y, q);
+            return (byte)(straight || swapped ? 0 : 1);
+        }
+    }
+
     /// <summary>A plane of flat blocks (<paramref name="block"/> samples a side) a few levels apart, with small noise.</summary>
     private static byte[] Blocks(Random random, int stride, int block)
     {

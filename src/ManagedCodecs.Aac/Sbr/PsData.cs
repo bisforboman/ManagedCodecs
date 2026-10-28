@@ -37,7 +37,7 @@ internal sealed class PsData
     private int _lastIccBands = 20;
     private readonly int[] _lastIpd = new int[17];
     private readonly int[] _lastOpd = new int[17];
-    private int _lastPhaseBands = 11;
+    private int _lastPhaseBands;
 
     /// <summary>Whether a header has come: until then the data can't be read.</summary>
     public bool HasHeader { get; private set; }
@@ -60,8 +60,11 @@ internal sealed class PsData
 
     public int IccBands => ParameterBands[IccMode % 3];
 
-    /// <summary>The IPD and OPD's bands: 5, 11 or 17, by the IID's.</summary>
-    public int PhaseBands => PhaseBandCounts[IidMode % 3];
+    /// <summary>
+    /// The IPD and OPD's bands: 5, 11 or 17, by the iid_mode of the last header that enabled IID, as FFmpeg keeps it
+    /// (0 before one: no phase values are read). The FDK encoder's first header with phases has IID disabled.
+    /// </summary>
+    public int PhaseBands { get; private set; }
 
     /// <summary>enable_ipdopd: whether this frame's extension sent phase parameters.</summary>
     public bool EnableIpdOpd { get; private set; }
@@ -101,6 +104,8 @@ internal sealed class PsData
             {
                 throw new InvalidDataException($"Parametric stereo iid_mode {IidMode}, icc_mode {IccMode}.");
             }
+
+            PhaseBands = EnableIid ? PhaseBandCounts[IidMode % 3] : PhaseBands;
 
             if ((EnableIid && IidBands == 34) || (EnableIcc && IccBands == 34))
             {
@@ -247,6 +252,7 @@ internal sealed class PsData
     // 20; the 11th band, which 5 bands lack, from 0.
     private static void DecodePhases(AacBitReader r, Vlc book, bool time, int[] values, int bands, int[] previous, int previousBands)
     {
+        Array.Clear(values);
         for (int b = 0; b < bands; b++)
         {
             int start = !time ? (b == 0 ? 0 : values[b - 1])

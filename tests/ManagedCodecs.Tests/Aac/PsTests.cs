@@ -1,4 +1,6 @@
+using ManagedCodecs.Aac;
 using ManagedCodecs.Aac.Sbr;
+using ManagedCodecs.Tests.H264;
 
 namespace ManagedCodecs.Tests.Aac;
 
@@ -68,6 +70,94 @@ public class PsTests
         }
 
         Assert.True(worst < 1e-15, $"Off by {worst:E3}.");
+    }
+
+    /// <summary>
+    /// The phase parameters' band count follows the iid_mode of the last header that enabled IID, as FFmpeg keeps it: none
+    /// before such a header (the FDK encoder's first phases come under a header with IID disabled, and FFmpeg reads no
+    /// values there), 11 after one with 20 IID bands, and still 11 under a later header without IID.
+    /// </summary>
+    [Fact]
+    public void PhaseBandsFollowTheLastHeaderWithIid()
+    {
+        var data = new PsData();
+        var statistics = new AacStatistics();
+        ReadFrame(data, statistics, iid: false);
+        Assert.True(data.EnableIpdOpd);
+        Assert.Equal(0, data.PhaseBands);
+        Assert.All(data.Ipd[0], v => Assert.Equal(0, v));
+
+        ReadFrame(data, statistics, iid: true);
+        Assert.Equal(11, data.PhaseBands);
+        Assert.Equal([1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1], data.Ipd[0][..11]);
+        Assert.Equal([2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2], data.Opd[0][..11]);
+
+        ReadFrame(data, statistics, iid: false);
+        Assert.Equal(11, data.PhaseBands);
+        Assert.Equal(3, statistics.PsIpdOpdFrames);
+    }
+
+    // A frame with a header (IID in 20 bands, all 0, or none; no ICC) and one envelope, and its extension: the IPD's
+    // deltas in frequency 1 then 0 (all 1), the OPD's 2 then 0 (all 2), as many as the reader takes.
+    private static void ReadFrame(PsData data, AacStatistics statistics, bool iid)
+    {
+        int phaseBands = iid ? 11 : data.PhaseBands;
+        var w = new BitWriter();
+        w.Bits(0b1, 1); // enable_ps_header
+        w.Bits(iid ? 1 : 0, 1);
+        if (iid)
+        {
+            w.Bits(1, 3); // iid_mode: 20 bands
+        }
+
+        w.Bits(0, 1); // enable_icc
+        w.Bits(1, 1); // enable_ext
+        w.Bits(0, 1); // frame_class: fixed
+        w.Bits(1, 2); // one envelope
+        if (iid)
+        {
+            w.Bits(0, 1); // iid_dt
+            for (int b = 0; b < 20; b++)
+            {
+                w.Bits(0, 1); // delta 0
+            }
+        }
+
+        var extension = new BitWriter();
+        extension.Bits(0, 2); // ps_extension_id
+        extension.Bits(1, 1); // enable_ipdopd
+        extension.Bits(0, 1); // ipd_dt
+        for (int b = 0; b < phaseBands; b++)
+        {
+            Code(extension, PsTables.IpdFrequency[b == 0 ? 1 : 0]);
+        }
+
+        extension.Bits(0, 1); // opd_dt
+        for (int b = 0; b < phaseBands; b++)
+        {
+            Code(extension, PsTables.OpdFrequency[b == 0 ? 2 : 0]);
+        }
+
+        extension.Bits(0, 1); // reserved_ps
+        int bytes = (extension.Count + 7) / 8;
+        w.Bits(bytes, 4);
+        foreach (byte b in extension.ToBytes())
+        {
+            w.Bits(b, 8);
+        }
+
+        int bits = w.Count;
+        var r = new AacBitReader(w.ToBytes());
+        Assert.True(data.Read(r, bits, statistics));
+        Assert.Equal(bits, r.Position);
+    }
+
+    private static void Code(BitWriter w, string code)
+    {
+        foreach (char c in code)
+        {
+            w.Bit(c - '0');
+        }
     }
 
     [Fact]

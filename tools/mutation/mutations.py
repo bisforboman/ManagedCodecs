@@ -107,6 +107,11 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.Aac/Sbr/PsProcessor.cs",
          find="double e11 = (hIm[bin] - g11) / length;", replace="double e11 = ((sign * hIm[bin]) - g11) / length;",
          tests="DisplayName~heaacv2-ipd"),
+    # The phase parameters' band count kept from the last header that enabled IID, as FFmpeg keeps it (heaacv2-ipd's
+    # first phases come under a header without IID; its output there stays within the SBR bound, so a parsing test).
+    dict(file="src/ManagedCodecs.Aac/Sbr/PsData.cs",
+         find="PhaseBands = EnableIid ? PhaseBandCounts[IidMode % 3] : PhaseBands;", replace="PhaseBands = PhaseBandCounts[IidMode % 3];",
+         tests="FullyQualifiedName~PhaseBandsFollowTheLastHeaderWithIid"),
     # A pulse on a zero quantized value goes negative (4.6.3.3: x_quant > 0 adds the amplitude, else subtracts it); only
     # the hand-built aac-pulse sample (tools/make-aac-pulse.py) has pulse data.
     dict(file="src/ManagedCodecs.Aac/AacDecoder.cs",

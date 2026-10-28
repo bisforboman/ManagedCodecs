@@ -1,3 +1,6 @@
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+
 namespace ManagedCodecs.H264;
 
 /// <summary>
@@ -31,7 +34,7 @@ internal sealed partial class PictureDecoder<TPixel>
 
     private readonly short[][] _gridMvX = [new short[GridCells], new short[GridCells]];
     private readonly short[][] _gridMvY = [new short[GridCells], new short[GridCells]];
-    private readonly sbyte[][] _gridRefIdx = [new sbyte[GridCells], new sbyte[GridCells]];
+    private readonly sbyte[][] _gridRefIdx = [NewMotionGrid(), NewMotionGrid()];
     private readonly sbyte[][] _gridCounts = [new sbyte[GridCells], new sbyte[GridCells], new sbyte[GridCells]];
     private readonly sbyte[] _gridChromaCounts = new sbyte[2 * GridCells];
     private readonly sbyte[] _gridIntraModes = new sbyte[GridCells];
@@ -68,12 +71,17 @@ internal sealed partial class PictureDecoder<TPixel>
 
         _contextMb = mbAddr;
         _contextFilled = 0;
-        int slice = _sliceOfMb[mbAddr];
-        int Available(int n) => n >= 0 && _sliceOfMb[n] == slice ? n : -1;
-        _contextA = Available(_neighborMbs[mbAddr * 4]);
-        _contextB = Available(_neighborMbs[(mbAddr * 4) + 1]);
-        _contextC = Available(_neighborMbs[(mbAddr * 4) + 2]);
-        _contextD = Available(_neighborMbs[(mbAddr * 4) + 3]);
+        var sliceOfMb = _sliceOfMb;
+        int slice = sliceOfMb[mbAddr];
+        var neighbors = _neighborMbs.AsSpan(mbAddr * 4, 4);
+        int n = neighbors[0];
+        _contextA = n >= 0 && sliceOfMb[n] == slice ? n : -1;
+        n = neighbors[1];
+        _contextB = n >= 0 && sliceOfMb[n] == slice ? n : -1;
+        n = neighbors[2];
+        _contextC = n >= 0 && sliceOfMb[n] == slice ? n : -1;
+        n = neighbors[3];
+        _contextD = n >= 0 && sliceOfMb[n] == slice ? n : -1;
     }
 
     /// <summary>Called by <see cref="Begin"/>: a macroblock address of the next picture is a new macroblock.</summary>
@@ -82,6 +90,12 @@ internal sealed partial class PictureDecoder<TPixel>
     // ---- Motion (8.4.1.3) ----
 
     /// <summary>The motion grid of <paramref name="list"/> for the current macroblock, filled on first use.</summary>
+    /// <remarks>
+    /// Only a cell's reference index says whether it is available (<see cref="NoMotion"/>); an unavailable cell's
+    /// motion is never read. The fifth column below the top row is never written: <see cref="NewMotionGrid"/> marks it.
+    /// Rows of four go as one 8-byte copy (motion) or one 4-byte store (references), unchecked: every index is of a
+    /// macroblock of the picture and a block of it, and the grid's rows are four cells and more.
+    /// </remarks>
     private void FillMotion(int list, int mbAddr)
     {
         EnsureContext(mbAddr);
@@ -92,43 +106,98 @@ internal sealed partial class PictureDecoder<TPixel>
         }
 
         _contextFilled |= bit;
-        var mvX = _gridMvX[list];
-        var mvY = _gridMvY[list];
-        var refIdx = _gridRefIdx[list];
-        void Copy(int cell, int n, int block)
-        {
-            if (n < 0)
-            {
-                mvX[cell] = 0;
-                mvY[cell] = 0;
-                refIdx[cell] = NoMotion;
-                return;
-            }
-
-            mvX[cell] = _mvX[list][(n * 16) + block];
-            mvY[cell] = _mvY[list][(n * 16) + block];
-            refIdx[cell] = _refIdx[list][(n * 4) + ((block >> 3) * 2) + ((block & 3) >> 1)];
-        }
+        ref short gridX = ref MemoryMarshal.GetArrayDataReference(_gridMvX[list]);
+        ref short gridY = ref MemoryMarshal.GetArrayDataReference(_gridMvY[list]);
+        ref sbyte gridRef = ref MemoryMarshal.GetArrayDataReference(_gridRefIdx[list]);
+        ref short mvX = ref MemoryMarshal.GetArrayDataReference(_mvX[list]);
+        ref short mvY = ref MemoryMarshal.GetArrayDataReference(_mvY[list]);
+        ref sbyte refIdx = ref MemoryMarshal.GetArrayDataReference(_refIdx[list]);
 
         // The macroblock itself as stored so far (direct sub-macroblocks are stored before other partitions read).
         for (int by = 0; by < 4; by++)
         {
-            for (int bx = 0; bx < 4; bx++)
+            int cell = Cell(0, by);
+            int block = (mbAddr * 16) + (by * 4);
+            Copy4(ref Unsafe.Add(ref gridX, cell), ref Unsafe.Add(ref mvX, block));
+            Copy4(ref Unsafe.Add(ref gridY, cell), ref Unsafe.Add(ref mvY, block));
+            int part = (mbAddr * 4) + ((by >> 1) * 2);
+            StoreRefs(ref Unsafe.Add(ref gridRef, cell), Unsafe.Add(ref refIdx, part), Unsafe.Add(ref refIdx, part + 1));
+        }
+
+        int a = _contextA;
+        for (int by = 0; by < 4; by++)
+        {
+            int cell = Cell(-1, by);
+            if (a < 0)
             {
-                Copy(Cell(bx, by), mbAddr, (by * 4) + bx);
+                Unsafe.Add(ref gridRef, cell) = NoMotion;
+                continue;
             }
 
-            Copy(Cell(4, by), -1, 0);
-            Copy(Cell(-1, by), _contextA, (by * 4) + 3);
+            int block = (a * 16) + (by * 4) + 3;
+            Unsafe.Add(ref gridX, cell) = Unsafe.Add(ref mvX, block);
+            Unsafe.Add(ref gridY, cell) = Unsafe.Add(ref mvY, block);
+            Unsafe.Add(ref gridRef, cell) = Unsafe.Add(ref refIdx, (a * 4) + ((by >> 1) * 2) + 1);
         }
 
-        for (int bx = 0; bx < 4; bx++)
+        int b = _contextB;
+        int top = Cell(0, -1);
+        if (b < 0)
         {
-            Copy(Cell(bx, -1), _contextB, 12 + bx);
+            StoreRefs(ref Unsafe.Add(ref gridRef, top), NoMotion, NoMotion);
+        }
+        else
+        {
+            Copy4(ref Unsafe.Add(ref gridX, top), ref Unsafe.Add(ref mvX, (b * 16) + 12));
+            Copy4(ref Unsafe.Add(ref gridY, top), ref Unsafe.Add(ref mvY, (b * 16) + 12));
+            StoreRefs(ref Unsafe.Add(ref gridRef, top), Unsafe.Add(ref refIdx, (b * 4) + 2), Unsafe.Add(ref refIdx, (b * 4) + 3));
         }
 
-        Copy(Cell(4, -1), _contextC, 12);
-        Copy(Cell(-1, -1), _contextD, 15);
+        int c = _contextC;
+        int corner = Cell(4, -1);
+        if (c < 0)
+        {
+            Unsafe.Add(ref gridRef, corner) = NoMotion;
+        }
+        else
+        {
+            Unsafe.Add(ref gridX, corner) = Unsafe.Add(ref mvX, (c * 16) + 12);
+            Unsafe.Add(ref gridY, corner) = Unsafe.Add(ref mvY, (c * 16) + 12);
+            Unsafe.Add(ref gridRef, corner) = Unsafe.Add(ref refIdx, (c * 4) + 2);
+        }
+
+        int d = _contextD;
+        corner = Cell(-1, -1);
+        if (d < 0)
+        {
+            Unsafe.Add(ref gridRef, corner) = NoMotion;
+        }
+        else
+        {
+            Unsafe.Add(ref gridX, corner) = Unsafe.Add(ref mvX, (d * 16) + 15);
+            Unsafe.Add(ref gridY, corner) = Unsafe.Add(ref mvY, (d * 16) + 15);
+            Unsafe.Add(ref gridRef, corner) = Unsafe.Add(ref refIdx, (d * 4) + 3);
+        }
+    }
+
+    /// <summary>Copies four motion vector components.</summary>
+    private static void Copy4(ref short destination, ref short source) =>
+        Unsafe.WriteUnaligned(ref Unsafe.As<short, byte>(ref destination), Unsafe.ReadUnaligned<ulong>(ref Unsafe.As<short, byte>(ref source)));
+
+    /// <summary>A grid row's four reference indices from its two 8x8 partitions'.</summary>
+    private static void StoreRefs(ref sbyte destination, sbyte left, sbyte right) =>
+        Unsafe.WriteUnaligned(ref Unsafe.As<sbyte, byte>(ref destination), ((uint)(byte)left * 0x0101) | ((uint)(byte)right * 0x01010000));
+
+    /// <summary>A motion grid's reference indices with the fifth column below the top row unavailable, as it stays.</summary>
+    private static sbyte[] NewMotionGrid()
+    {
+        var grid = new sbyte[GridCells];
+        for (int by = 0; by < 4; by++)
+        {
+            grid[Cell(4, by)] = NoMotion;
+        }
+
+        return grid;
     }
 
     /// <summary>
@@ -159,14 +228,37 @@ internal sealed partial class PictureDecoder<TPixel>
             return;
         }
 
+        ref short gridX = ref MemoryMarshal.GetArrayDataReference(_gridMvX[list]);
+        ref short gridY = ref MemoryMarshal.GetArrayDataReference(_gridMvY[list]);
+        ref sbyte gridRef = ref MemoryMarshal.GetArrayDataReference(_gridRefIdx[list]);
+
+        // A partition is 1, 2 or 4 blocks wide, inside the macroblock (so inside the grid): one store a row.
+        ulong pairX = (ushort)mvX * 0x0001000100010001UL;
+        ulong pairY = (ushort)mvY * 0x0001000100010001UL;
+        uint refs = (byte)refIdx * 0x01010101u;
         for (int by = y >> 2; by < (y + h) >> 2; by++)
         {
-            for (int bx = x >> 2; bx < (x + w) >> 2; bx++)
+            int cell = Cell(x >> 2, by);
+            ref byte rowX = ref Unsafe.As<short, byte>(ref Unsafe.Add(ref gridX, cell));
+            ref byte rowY = ref Unsafe.As<short, byte>(ref Unsafe.Add(ref gridY, cell));
+            ref byte rowRef = ref Unsafe.As<sbyte, byte>(ref Unsafe.Add(ref gridRef, cell));
+            switch (w)
             {
-                int cell = Cell(bx, by);
-                _gridMvX[list][cell] = (short)mvX;
-                _gridMvY[list][cell] = (short)mvY;
-                _gridRefIdx[list][cell] = (sbyte)refIdx;
+                case 16:
+                    Unsafe.WriteUnaligned(ref rowX, pairX);
+                    Unsafe.WriteUnaligned(ref rowY, pairY);
+                    Unsafe.WriteUnaligned(ref rowRef, refs);
+                    break;
+                case 8:
+                    Unsafe.WriteUnaligned(ref rowX, (uint)pairX);
+                    Unsafe.WriteUnaligned(ref rowY, (uint)pairY);
+                    Unsafe.WriteUnaligned(ref rowRef, (ushort)refs);
+                    break;
+                default:
+                    Unsafe.WriteUnaligned(ref rowX, (ushort)pairX);
+                    Unsafe.WriteUnaligned(ref rowY, (ushort)pairY);
+                    rowRef = (byte)refs;
+                    break;
             }
         }
     }

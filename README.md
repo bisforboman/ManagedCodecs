@@ -242,7 +242,10 @@ the end of the file, a zero image width or channel count, an `mb_type` code over
 fixed; a later round (after 0.1.0-preview.2) a field picture's packet going on with a frame's slice, and an H.264
 frame of 16384x14336 whose concealment took 30 s a picture; a longer one concealing errors (two hours of `h264` and
 `file`) too many reference list modifications, SPS crop offsets and a first_mb_in_slice that overflowed `int`. An
-hour each of `mjpeg` and `aac` after that (17 and 18 million inputs) found nothing.
+hour each of `mjpeg` and `aac` after that (17 and 18 million inputs) found nothing. Field pictures' long-term marking (after 0.2.0): 40
+minutes of `h264` seeded with the long-term field samples alone (4.4 million inputs, with and without concealment)
+found nothing, and `ReferenceListTests` marks random field pictures with random memory management operations and
+checks the lists after each.
 
 ### WebAssembly
 

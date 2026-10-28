@@ -3,7 +3,7 @@ using System.Runtime.Intrinsics;
 
 namespace ManagedCodecs.Aac.Sbr;
 
-/// <summary>Parametric stereo (ISO/IEC 14496-3 8.6.4): 10 or 20 parameter bands and mixing procedure Ra or Rb: one frame of a mono channel's QMF samples (the input of its synthesis bank) becomes a left and a right one.</summary>
+/// <summary>Parametric stereo (ISO/IEC 14496-3 8.6.4): 10, 20 or 34 parameter bands and mixing procedure Ra or Rb: one frame of a mono channel's QMF samples (the input of its synthesis bank) becomes a left and a right one.</summary>
 /// <remarks>
 /// <para>
 /// The three lowest QMF bands are split further by the hybrid filterbank (8.6.4.3: 13-tap filters, band 0 into 8
@@ -13,6 +13,13 @@ namespace ManagedCodecs.Aac.Sbr;
 /// delays of 14 and 1 slots above, ducked where a transient's peak runs above its smoothed energy. Each of 22 groups
 /// of (sub-)subbands takes the mixing matrix of its parameter band (8.6.4.6), from the IID's scale factors and the
 /// ICC's angle (Ra) or from the IID and the ICC's rho (Rb), interpolated over each envelope from the previous one's.
+/// </para>
+/// <para>
+/// In 34 bands (a <see cref="Layout"/> of its own) the five lowest QMF bands split instead (8.6.4.3: band 0 into 12, band
+/// 1 into 8, bands 2 to 4 into 4 complex sub-subbands), 50 groups share 34 parameter bands, and the all-pass decay starts
+/// at band 5. As in FFmpeg, a frame is processed in 34 bands when IID or ICC is sent in 34 (the other mapped up by the
+/// spec's index maps), and a switch between 20 and 34 clears the decorrelator and moves the last matrices to the new
+/// bands.
 /// </para>
 /// <para>
 /// The phase parameters, when a frame sends them, turn the lowest 11 parameter bands' matrices complex as FFmpeg does
@@ -47,7 +54,7 @@ internal sealed class PsProcessor
     private const double EnergySmoothing = 0.25;
     private const double TransientImpact = 1.5;
 
-    // 8.6.4.3: the prototype filters of the 8-band (complex) and 2-band (real) hybrid filters.
+    // 8.6.4.3: the prototype filters of 20 bands' 8-band (complex) and 2-band (real) hybrid filters.
     private static readonly double[] Prototype8 =
     [
         0.00746082949812, 0.02270420949825, 0.04546865930473, 0.07266113929591, 0.09885108575264, 0.11793710567217, 0.125,
@@ -127,7 +134,7 @@ internal sealed class PsProcessor
     /// each, in the filters' order), the other 18 ranges of QMF bands from 5; each group's parameter band; the
     /// sub-subbands' centre frequencies (FFmpeg's, in 24ths of a QMF band, whose phase factors equal libxaac's 34-band
     /// tables, Apache-2.0); the decay's cutoff (QMF band 5); and the groups whose phases start negated (9 to 13, as
-    /// FFmpeg negates them; libxaac negates 9 to 11; no sample sends phases in 34 bands).
+    /// FFmpeg negates them: libxaac's 9 to 11 leaves heaacv2-34-ipd 5e-3 off on average).
     /// </summary>
     internal static readonly Layout Layout34 = new(
         bins: 34,
@@ -244,6 +251,11 @@ internal sealed class PsProcessor
     // The imaginary parts of the matrix the last envelope with phase parameters ended on, its IPD and OPD indices, and
     // the two envelopes' indices before the next one (8 times the older plus the newer), which the smoothing takes.
     private readonly double[][] _previousHIm = Buffers(4, MaxBins);
+
+    // The imaginary parts per envelope slot (1 to the envelope count), as FFmpeg keeps them: written only for the phase
+    // bands, so the bands above hold what that slot last held (in 20 bands after 34, the 34-band values of bands 11 to
+    // 16, which FFmpeg interpolates towards: without them the heaacv2-34-ipd sample was up to 0.2 off).
+    private readonly double[][][] _imSlots = [.. Enumerable.Range(0, 4).Select(_ => Buffers(PsData.MaxEnvelopes + 2, MaxBins))];
     private readonly int[] _lastIpd = new int[MaxPhaseBins];
     private readonly int[] _lastOpd = new int[MaxPhaseBins];
     private readonly int[] _ipdHistory = new int[MaxPhaseBins];
@@ -258,6 +270,12 @@ internal sealed class PsProcessor
         Array.Fill(_previousH[0], 1.0);
         Array.Fill(_previousH[1], 1.0);
     }
+
+    /// <summary>Whether the decorrelator holds nothing: its transient detector, fractional delays, links and plain delays (for tests).</summary>
+    internal bool DecorrelatorIsClear =>
+        _peakDecay.All(v => v == 0) && _peakDifference.All(v => v == 0) && _energy.All(v => v == 0)
+        && new[] { _hybridDelayRe, _hybridDelayIm, _qmfDelayRe, _qmfDelayIm }.All(rows => rows.All(row => row.All(v => v == 0)))
+        && new[] { _hybridLinkRe, _hybridLinkIm, _qmfLinkRe, _qmfLinkIm }.All(links => links.All(rows => rows.All(row => row.All(v => v == 0))));
 
     /// <summary>
     /// Turns one frame of the mono QMF samples (<paramref name="re"/>, <paramref name="im"/>: 32 slots, bands 0 to 2 with
@@ -695,7 +713,15 @@ internal sealed class PsProcessor
                     h[(3 * MaxBins) + bin] = right * PsMath.Sin(beta - alpha);
                 }
 
-                if (phases && bin < layout.PhaseBins)
+                if (phases && bin >= layout.PhaseBins)
+                {
+                    // What this slot last held, as FFmpeg interpolates it.
+                    for (int m = 0; m < 4; m++)
+                    {
+                        hIm[(m * MaxBins) + bin] = _imSlots[m][e + 1][bin];
+                    }
+                }
+                else if (phases)
                 {
                     // h11 and h21 turned by the smoothed OPD, h12 and h22 by the OPD less the IPD.
                     int opd = (_opdHistory[bin] * 8) + _opd[e][bin];
@@ -714,6 +740,7 @@ internal sealed class PsProcessor
                         (double cos, double sin) = m == 0 || m == 2 ? (opdRe, opdIm) : (turnRe, turnIm);
                         hIm[i] = h[i] * sin;
                         h[i] *= cos;
+                        _imSlots[m][e + 1][bin] = hIm[i];
                     }
                 }
                 else
@@ -1031,7 +1058,7 @@ internal sealed class PsProcessor
     // A switch between 20 and 34 bands, as FFmpeg makes it: the decorrelator starts over (its transient detector and
     // every delay line cleared), the matrices the last envelope ended on and the phases' history move to the new bands
     // (20 to 34 by repeating and averaging, 34 to 20 by averaging), and the last parameters move with them.
-    private void SwitchLayout(bool to34)
+    internal void SwitchLayout(bool to34)
     {
         Array.Clear(_peakDecay);
         Array.Clear(_peakDifference);
@@ -1072,7 +1099,7 @@ internal sealed class PsProcessor
     }
 
     // A matrix entry's values per parameter band from 20 bands to 34 (repeated, two averaged) or from 34 to 20 (averaged).
-    private static void MapValues(double[] values, bool to34)
+    internal static void MapValues(double[] values, bool to34)
     {
         Span<double> p = stackalloc double[MaxBins];
         values.CopyTo(p);

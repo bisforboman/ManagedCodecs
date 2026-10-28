@@ -207,6 +207,12 @@ internal sealed partial class PictureDecoder<TPixel>
             int qp = _qp[mbAddr];
             int qpLeft = mbX > 0 ? _qp[mbAddr - 1] : qp;
             int qpAbove = mbY > 0 ? _qp[mbAddr - _widthInMbs] : qp;
+            if (typeof(TPixel) == typeof(byte) && _mbHeightC == 8 && Vector128.IsHardwareAccelerated)
+            {
+                FilterMacroblock420(Unsafe.As<byte[]>(PlaneY), Unsafe.As<byte[]>(PlaneCb), Unsafe.As<byte[]>(PlaneCr), lumaOrigin, lumaStride, chromaOrigin, chromaStride, vertical, horizontal, qpLeft, qpAbove, qp, slice);
+                continue;
+            }
+
             FilterLumaEdges(PlaneY, lumaOrigin, lumaStride, vertical, horizontal, qpLeft, qpAbove, qp, slice);
 
             // 4:4:4 chroma: the luma filter on the luma edges (chromaStyleFilteringFlag 0, 8.7.2), at the QP_C of each side.
@@ -238,6 +244,130 @@ internal sealed partial class PictureDecoder<TPixel>
                 FilterChromaEdge(PlaneCb, PlaneCr, chromaOrigin + (edge * 4 * chromaStride), chromaStride, 1, horizontal.Slice(edge * 8, 4), ChromaQp(qpP, slice.CbQpOffset, _qpBdOffset), qpCb, ChromaQp(qpP, slice.CrQpOffset, _qpBdOffset), qpCr, slice.AlphaOffset, slice.BetaOffset, bitDepth: _bitDepth);
             }
         }
+    }
+
+    /// <summary>
+    /// A frame macroblock of 8-bit 4:2:0 samples, its luma edges and then its chroma edges: what
+    /// <see cref="FilterLumaEdges"/> and the chroma edges of <see cref="DeblockRows"/> do through
+    /// <see cref="FilterEdge"/> and <see cref="FilterChromaEdge"/>, with the parameters of each pair of
+    /// QPs (left, upper and internal edges) worked out once a macroblock and the vector filters called
+    /// directly. The two must agree (<c>Macroblock420_MatchesEdgeByEdge</c>).
+    /// </summary>
+    internal static void FilterMacroblock420(byte[] y, byte[] cb, byte[] cr, int lumaOrigin, int lumaStride, int chromaOrigin, int chromaStride, ReadOnlySpan<byte> vertical, ReadOnlySpan<byte> horizontal, int qpLeft, int qpAbove, int qp, SliceInfo slice)
+    {
+        int alphaOffset = slice.AlphaOffset;
+        int betaOffset = slice.BetaOffset;
+        ulong innerVertical = MemoryMarshal.Read<ulong>(vertical[4..]) | MemoryMarshal.Read<uint>(vertical[12..]);
+        ulong innerHorizontal = MemoryMarshal.Read<ulong>(horizontal[4..]) | MemoryMarshal.Read<uint>(horizontal[12..]);
+        bool innerFiltered = false;
+        EdgeParameters inner = default;
+        if ((innerVertical | innerHorizontal) != 0)
+        {
+            innerFiltered = LumaParameters(qp, qp, alphaOffset, betaOffset, out inner);
+        }
+
+        if (MemoryMarshal.Read<uint>(vertical) != 0 && LumaParameters(qpLeft, qp, alphaOffset, betaOffset, out var left))
+        {
+            LumaColumn(y, lumaOrigin, lumaStride, vertical, left);
+        }
+
+        if (innerFiltered && innerVertical != 0)
+        {
+            for (int edge = 1; edge < 4; edge++)
+            {
+                if (MemoryMarshal.Read<uint>(vertical[(edge * 4)..]) != 0)
+                {
+                    LumaColumn(y, lumaOrigin + (edge * 4), lumaStride, vertical[(edge * 4)..], inner);
+                }
+            }
+        }
+
+        if (MemoryMarshal.Read<uint>(horizontal) != 0 && LumaParameters(qpAbove, qp, alphaOffset, betaOffset, out var above))
+        {
+            FilterRows(y, lumaOrigin, lumaStride, 16, SegmentLanes(horizontal, LumaSegments), above, chroma: false);
+        }
+
+        if (innerFiltered && innerHorizontal != 0)
+        {
+            for (int edge = 1; edge < 4; edge++)
+            {
+                if (MemoryMarshal.Read<uint>(horizontal[(edge * 4)..]) != 0)
+                {
+                    FilterRows(y, lumaOrigin + (edge * 4 * lumaStride), lumaStride, 16, SegmentLanes(horizontal[(edge * 4)..], LumaSegments), inner, chroma: false);
+                }
+            }
+        }
+
+        // Chroma edges 0 and 4 take the bS of luma edges 0 and 8.
+        bool verticalEdges = (MemoryMarshal.Read<uint>(vertical) | MemoryMarshal.Read<uint>(vertical[8..])) != 0;
+        bool horizontalEdges = (MemoryMarshal.Read<uint>(horizontal) | MemoryMarshal.Read<uint>(horizontal[8..])) != 0;
+        if (!verticalEdges && !horizontalEdges)
+        {
+            return;
+        }
+
+        int qpCb = ChromaQp(qp, slice.CbQpOffset);
+        int qpCr = ChromaQp(qp, slice.CrQpOffset);
+        var innerCb = ChromaParameters(qpCb, qpCb, alphaOffset, betaOffset, out bool innerCbFiltered);
+        var innerCr = ChromaParameters(qpCr, qpCr, alphaOffset, betaOffset, out bool innerCrFiltered);
+        bool innerChroma = innerCbFiltered || innerCrFiltered;
+        if (verticalEdges)
+        {
+            ChromaEdge(cb, cr, chromaOrigin, 1, chromaStride, vertical, qpLeft, qpCb, qpCr, slice);
+            if (innerChroma && MemoryMarshal.Read<uint>(vertical[8..]) != 0)
+            {
+                FilterColumns(cb, cr, chromaOrigin, chromaOrigin, chromaStride, SegmentLanes(vertical[8..], ChromaSegments), innerCb, innerCr, chroma: true);
+            }
+        }
+
+        if (horizontalEdges)
+        {
+            ChromaEdge(cb, cr, chromaOrigin, chromaStride, 1, horizontal, qpAbove, qpCb, qpCr, slice);
+            if (innerChroma && MemoryMarshal.Read<uint>(horizontal[8..]) != 0)
+            {
+                FilterChromaRows(cb, cr, chromaOrigin + (4 * chromaStride), chromaStride, SegmentLanes(horizontal[8..], ChromaSegments), innerCb, innerCr);
+            }
+        }
+
+        static void LumaColumn(byte[] plane, int q0, int stride, ReadOnlySpan<byte> strengths, in EdgeParameters parameters) =>
+            FilterColumns(plane, plane, q0 - 4, q0 - 4 + (8 * stride), stride, SegmentLanes(strengths, LumaSegments), parameters, parameters, chroma: false);
+
+        // The macroblock edge of Cb and Cr: QP_C of the neighbour (by this slice's offsets) and of the macroblock.
+        static void ChromaEdge(byte[] cb, byte[] cr, int q0, int across, int along, ReadOnlySpan<byte> strengths, int qpP, int qpCb, int qpCr, SliceInfo slice)
+        {
+            if (MemoryMarshal.Read<uint>(strengths) == 0)
+            {
+                return;
+            }
+
+            var cbParameters = ChromaParameters(ChromaQp(qpP, slice.CbQpOffset), qpCb, slice.AlphaOffset, slice.BetaOffset, out bool cbFiltered);
+            var crParameters = ChromaParameters(ChromaQp(qpP, slice.CrQpOffset), qpCr, slice.AlphaOffset, slice.BetaOffset, out bool crFiltered);
+            if (!cbFiltered && !crFiltered)
+            {
+                return;
+            }
+
+            var bs = SegmentLanes(strengths, ChromaSegments);
+            if (across == 1)
+            {
+                FilterColumns(cb, cr, q0 - 4, q0 - 4, along, bs, cbParameters, crParameters, chroma: true);
+            }
+            else
+            {
+                FilterChromaRows(cb, cr, q0, across, bs, cbParameters, crParameters);
+            }
+        }
+    }
+
+    /// <summary>A luma edge's parameters (8-bit samples); false when alpha or beta is 0, which lets no sample pass.</summary>
+    private static bool LumaParameters(int qpP, int qpQ, int alphaOffset, int betaOffset, out EdgeParameters parameters)
+    {
+        int qpAv = (qpP + qpQ + 1) >> 1;
+        int indexA = Math.Clamp(qpAv + alphaOffset, 0, 51);
+        int alpha = Alpha[indexA];
+        int beta = Beta[Math.Clamp(qpAv + betaOffset, 0, 51)];
+        parameters = new EdgeParameters(indexA, alpha, beta);
+        return alpha != 0 && beta != 0;
     }
 
     /// <summary>

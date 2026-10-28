@@ -588,6 +588,13 @@ internal sealed partial class PictureDecoder<TPixel>
             return;
         }
 
+        if (Vector128.IsHardwareAccelerated)
+        {
+            // Either list, or both: each pair of partitions' rule from its reference pictures, the motion compared in vectors.
+            TwoListStrengths(_mvX[0].AsSpan(base4x4, 16), _mvY[0].AsSpan(base4x4, 16), _mvX[1].AsSpan(base4x4, 16), _mvY[1].AsSpan(base4x4, 16), coefficients, new ReadOnlySpan<object?>(_refPic[0], mbAddr * 4, 4), new ReadOnlySpan<object?>(_refPic[1], mbAddr * 4, 4), limitY, vertical, horizontal);
+            return;
+        }
+
         int Strength(int p, int q, ReadOnlySpan<byte> coefficients) =>
             (coefficients[p] | coefficients[q]) != 0 ? 2 : MotionStrength(base4x4 + p, base4x4 + q, limitY);
 
@@ -656,6 +663,115 @@ internal sealed partial class PictureDecoder<TPixel>
         var byEdge = Vector128.Shuffle(left, Vector128.Create((byte)0, 4, 8, 12, 1, 5, 9, 13, 2, 6, 10, 14, 3, 7, 11, 15));
         Vector128.ConditionalSelect(edgeZero, Vector128.Create(vertical), byEdge).CopyTo(vertical);
         Vector128.ConditionalSelect(edgeZero, Vector128.Create(horizontal), up).CopyTo(horizontal);
+    }
+
+    /// <summary>
+    /// <see cref="OneListStrengths"/> for motion from either list or both (B macroblocks): which motion vectors an edge
+    /// between two partitions compares follows from their reference pictures alone (<see cref="MotionRule"/>), so each
+    /// pair of partitions takes one rule, and every lane computes the four distances (list 0 or 1 on either side) and
+    /// takes its pair's rule. The partitions' reference pictures of list 0 and 1 in <paramref name="refs0"/> and
+    /// <paramref name="refs1"/> (null where a list is unused), compared by identity.
+    /// </summary>
+    internal static void TwoListStrengths(ReadOnlySpan<short> mvX0, ReadOnlySpan<short> mvY0, ReadOnlySpan<short> mvX1, ReadOnlySpan<short> mvY1, ReadOnlySpan<byte> coefficients, ReadOnlySpan<object?> refs0, ReadOnlySpan<object?> refs1, int limitY, Span<byte> vertical, Span<byte> horizontal)
+    {
+        // Rules by pair: partitions 0 to 3 with themselves, then the two pairs an edge 2 crosses.
+        Span<byte> rules = stackalloc byte[16];
+        for (int k = 0; k < 4; k++)
+        {
+            rules[k] = MotionRule(refs0[k], refs1[k], refs0[k], refs1[k]);
+        }
+
+        rules[4] = MotionRule(refs0[0], refs1[0], refs0[1], refs1[1]);
+        rules[5] = MotionRule(refs0[2], refs1[2], refs0[3], refs1[3]);
+        var leftRules = Vector128.Shuffle(Vector128.Create(rules), Vector128.Create((byte)0, 0, 4, 1, 0, 0, 4, 1, 2, 2, 5, 3, 2, 2, 5, 3));
+        rules[4] = MotionRule(refs0[0], refs1[0], refs0[2], refs1[2]);
+        rules[5] = MotionRule(refs0[1], refs1[1], refs0[3], refs1[3]);
+        var upRules = Vector128.Shuffle(Vector128.Create(rules), Vector128.Create((byte)0, 0, 1, 1, 0, 0, 1, 1, 4, 4, 5, 5, 2, 2, 3, 3));
+
+        var x0 = (Vector128.Create(mvX0), Vector128.Create(mvX0[8..]));
+        var y0 = (Vector128.Create(mvY0), Vector128.Create(mvY0[8..]));
+        var x1 = (Vector128.Create(mvX1), Vector128.Create(mvX1[8..]));
+        var y1 = (Vector128.Create(mvY1), Vector128.Create(mvY1[8..]));
+        var limits = (Vector128.Create((short)3), Vector128.Create((short)(limitY - 1)));
+
+        var farLeft = Select(leftRules, Far(Left(x0), Left(y0), x0, y0, limits), Far(Left(x1), Left(y1), x1, y1, limits), Far(Left(x0), Left(y0), x1, y1, limits), Far(Left(x1), Left(y1), x0, y0, limits));
+        var farUp = Select(upRules, Far(Up(x0), Up(y0), x0, y0, limits), Far(Up(x1), Up(y1), x1, y1, limits), Far(Up(x0), Up(y0), x1, y1, limits), Far(Up(x1), Up(y1), x0, y0, limits));
+
+        var coded = ~Vector128.Equals(Vector128.Create(coefficients), Vector128<byte>.Zero);
+        var codedLeft = coded | Vector128.Shuffle(coded, Vector128.Create((byte)0, 0, 1, 2, 4, 4, 5, 6, 8, 8, 9, 10, 12, 12, 13, 14));
+        var codedUp = coded | Vector128.Shuffle(coded, Vector128.Create((byte)0, 1, 2, 3, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11));
+        var two = Vector128.Create((byte)2);
+        var left = Vector128.ConditionalSelect(codedLeft, two, farLeft & Vector128<byte>.One);
+        var up = Vector128.ConditionalSelect(codedUp, two, farUp & Vector128<byte>.One);
+
+        var edgeZero = Vector128.Create((byte)0xFF, 0xFF, 0xFF, 0xFF, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+        var byEdge = Vector128.Shuffle(left, Vector128.Create((byte)0, 4, 8, 12, 1, 5, 9, 13, 2, 6, 10, 14, 3, 7, 11, 15));
+        Vector128.ConditionalSelect(edgeZero, Vector128.Create(vertical), byEdge).CopyTo(vertical);
+        Vector128.ConditionalSelect(edgeZero, Vector128.Create(horizontal), up).CopyTo(horizontal);
+
+        // Each block's left neighbour (a row's first block takes itself), and its upper one (the first row takes itself).
+        static (Vector128<short>, Vector128<short>) Left((Vector128<short> Low, Vector128<short> High) v)
+        {
+            var leftOf = Vector128.Create((short)0, 0, 1, 2, 4, 4, 5, 6);
+            return (Vector128.Shuffle(v.Low, leftOf), Vector128.Shuffle(v.High, leftOf));
+        }
+
+        static (Vector128<short>, Vector128<short>) Up((Vector128<short> Low, Vector128<short> High) v) =>
+            (Vector128.Shuffle(v.Low, Vector128.Create((short)0, 1, 2, 3, 0, 1, 2, 3)), Vector128.Create(v.Low.GetUpper(), v.High.GetLower()));
+
+        // Lanes where p's and q's vectors are 4 quarter samples apart or more (limitY vertically).
+        static Vector128<byte> Far((Vector128<short> Low, Vector128<short> High) px, (Vector128<short> Low, Vector128<short> High) py, (Vector128<short> Low, Vector128<short> High) qx, (Vector128<short> Low, Vector128<short> High) qy, (Vector128<short> X, Vector128<short> Y) limits) =>
+            Vector128.Narrow(
+                (Vector128.GreaterThan(Vector128.Abs(px.Low - qx.Low), limits.X) | Vector128.GreaterThan(Vector128.Abs(py.Low - qy.Low), limits.Y)).AsUInt16(),
+                (Vector128.GreaterThan(Vector128.Abs(px.High - qx.High), limits.X) | Vector128.GreaterThan(Vector128.Abs(py.High - qy.High), limits.Y)).AsUInt16());
+
+        // bS 1 lanes by each lane's rule (MotionRule's numbers).
+        static Vector128<byte> Select(Vector128<byte> rule, Vector128<byte> f00, Vector128<byte> f11, Vector128<byte> f01, Vector128<byte> f10)
+        {
+            var same = f00 | f11;
+            var crossed = f01 | f10;
+            return Vector128.Equals(rule, Vector128<byte>.Zero)
+                | (Vector128.Equals(rule, Vector128.Create((byte)1)) & f00)
+                | (Vector128.Equals(rule, Vector128.Create((byte)2)) & f11)
+                | (Vector128.Equals(rule, Vector128.Create((byte)3)) & f01)
+                | (Vector128.Equals(rule, Vector128.Create((byte)4)) & f10)
+                | (Vector128.Equals(rule, Vector128.Create((byte)5)) & same)
+                | (Vector128.Equals(rule, Vector128.Create((byte)6)) & crossed)
+                | (Vector128.Equals(rule, Vector128.Create((byte)7)) & same & crossed);
+        }
+    }
+
+    /// <summary>
+    /// What <see cref="MotionStrength"/> compares between blocks p and q, decided by their reference pictures alone:
+    /// 0, bS 1 whatever the motion (different pictures, or a different number of them); 1 to 4, whether list 0 and 0,
+    /// 1 and 1, p's 0 and q's 1, or p's 1 and q's 0 are far apart; 5, either of 0-0 and 1-1; 6, either of 0-1 and 1-0;
+    /// 7, both pairings far (each block's two vectors refer to one picture, so either pairing may match).
+    /// </summary>
+    internal static byte MotionRule(object? p0, object? p1, object? q0, object? q1)
+    {
+        if (p1 is null && q1 is null)
+        {
+            return p0 != q0 ? (byte)0 : (byte)1;
+        }
+
+        int countP = (p0 is null ? 0 : 1) + (p1 is null ? 0 : 1);
+        int countQ = (q0 is null ? 0 : 1) + (q1 is null ? 0 : 1);
+        if (countP != countQ)
+        {
+            return 0;
+        }
+
+        if (countP == 1)
+        {
+            return (p0 ?? p1) != (q0 ?? q1) ? (byte)0 : (byte)(p0 is null ? (q0 is null ? 2 : 4) : (q0 is null ? 3 : 1));
+        }
+
+        if (!((p0 == q0 && p1 == q1) || (p0 == q1 && p1 == q0)))
+        {
+            return 0;
+        }
+
+        return p0 != p1 ? (p0 == q0 ? (byte)5 : (byte)6) : (byte)7;
     }
 
     /// <summary>

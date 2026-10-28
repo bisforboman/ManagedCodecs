@@ -446,9 +446,41 @@ internal sealed partial class PictureDecoder<TPixel>
             return;
         }
 
+        if (IsIntra(mbP) || IsIntra(mbQ))
+        {
+            strengths[..4].Fill(4);
+            return;
+        }
+
+        var secondP = _refPic[1].AsSpan(mbP * 4, 4);
+        var secondQ = _refPic[1].AsSpan(mbQ * 4, 4);
+        if (secondP[0] is not null || secondP[1] is not null || secondP[2] is not null || secondP[3] is not null
+            || secondQ[0] is not null || secondQ[1] is not null || secondQ[2] is not null || secondQ[3] is not null)
+        {
+            for (int k = 0; k < 4; k++)
+            {
+                strengths[k] = (byte)BoundaryStrength(mbP, firstP + (k * step), mbQ, k * step, mbEdge: true);
+            }
+
+            return;
+        }
+
+        // Motion from list 0 alone on both sides: MotionStrength's first case, without its tests of the lists.
+        var refsP = _refPic[0].AsSpan(mbP * 4, 4);
+        var refsQ = _refPic[0].AsSpan(mbQ * 4, 4);
+        var mvXP = _mvX[0].AsSpan(mbP * 16, 16);
+        var mvYP = _mvY[0].AsSpan(mbP * 16, 16);
+        var mvXQ = _mvX[0].AsSpan(mbQ * 16, 16);
+        var mvYQ = _mvY[0].AsSpan(mbQ * 16, 16);
         for (int k = 0; k < 4; k++)
         {
-            strengths[k] = (byte)BoundaryStrength(mbP, firstP + (k * step), mbQ, k * step, mbEdge: true);
+            int p = firstP + (k * step);
+            int q = k * step;
+            strengths[k] = HasCoefficients(mbP, p) || HasCoefficients(mbQ, q)
+                ? (byte)2
+                : refsP[((p >> 3) * 2) + ((p & 3) >> 1)] != refsQ[((q >> 3) * 2) + ((q & 3) >> 1)] || Math.Abs(mvXP[p] - mvXQ[q]) >= 4 || Math.Abs(mvYP[p] - mvYQ[q]) >= 4
+                    ? (byte)1
+                    : (byte)0;
         }
     }
 
@@ -637,6 +669,12 @@ internal sealed partial class PictureDecoder<TPixel>
     /// </summary>
     private bool HasUniformMotion(int mbAddr)
     {
+        // P_Skip: one motion vector from list 0, and list 1 as the picture's start left it.
+        if (_kind[mbAddr] == MbKind.PSkip && !_directMb[mbAddr])
+        {
+            return true;
+        }
+
         for (int list = 0; list < 2; list++)
         {
             var refs = _refPic[list].AsSpan(mbAddr * 4, 4);

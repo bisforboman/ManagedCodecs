@@ -321,6 +321,28 @@ public class QmfTests
         }
     }
 
+    /// <summary>The DCT-IVs' twiddles and the full synthesis bank's v in vectors give the scalar loops' bits.</summary>
+    [Fact]
+    public void VectorFullTransform_MatchesScalarExactly()
+    {
+        var random = new Random(8);
+        var real = Enumerable.Range(0, 64).Select(_ => (random.NextDouble() - 0.5) * 1e6).ToArray();
+        var imaginary = Enumerable.Range(0, 64).Select(_ => (random.NextDouble() - 0.5) * 1e6).ToArray();
+        foreach (bool alternate in new[] { false, true })
+        {
+            var (vectorRe, vectorIm, scalarRe, scalarIm) = (new double[32], new double[32], new double[32], new double[32]);
+            QmfDctIV.Pretransform(real, alternate, vectorRe, vectorIm);
+            QmfDctIV.Pretransform(real, alternate, scalarRe, scalarIm, scalar: true);
+            Assert.Equal(scalarRe, vectorRe);
+            Assert.Equal(scalarIm, vectorIm);
+        }
+
+        var (vector, scalar) = (new double[128], new double[128]);
+        QmfSynthesis.FullTransform(real, imaginary, vector);
+        QmfSynthesis.FullTransform(real, imaginary, scalar, scalar: true);
+        Assert.Equal(scalar, vector);
+    }
+
     /// <summary>The analysis bank's output turn in vectors gives the scalar loop's bits.</summary>
     [Fact]
     public void VectorAnalysisOutput_MatchesScalarExactly()

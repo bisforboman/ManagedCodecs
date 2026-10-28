@@ -1,6 +1,8 @@
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics;
+using System.Runtime.Intrinsics.Arm;
+using System.Runtime.Intrinsics.X86;
 
 namespace ManagedCodecs.Aac.Sbr;
 
@@ -227,7 +229,7 @@ internal sealed class QmfSynthesis
     /// at p, which give v at 2p, 63 - 2p, 64 + 2p and 127 - 2p together.
     /// </summary>
     [SkipLocalsInit]
-    private static void FullTransform(ReadOnlySpan<double> real, ReadOnlySpan<double> imaginary, Span<double> v)
+    internal static void FullTransform(ReadOnlySpan<double> real, ReadOnlySpan<double> imaginary, Span<double> v, bool scalar = false)
     {
         if (v.Length < 128)
         {
@@ -238,9 +240,37 @@ internal sealed class QmfSynthesis
         Span<double> aIm = stackalloc double[32];
         Span<double> bRe = stackalloc double[32];
         Span<double> bIm = stackalloc double[32];
-        QmfDctIV.Pretransform(real, alternate: false, aRe, aIm);
-        QmfDctIV.Pretransform(imaginary, alternate: true, bRe, bIm);
+        QmfDctIV.Pretransform(real, alternate: false, aRe, aIm, scalar);
+        QmfDctIV.Pretransform(imaginary, alternate: true, bRe, bIm, scalar);
         ref double w = ref MemoryMarshal.GetReference(v);
+        if (Vector128.IsHardwareAccelerated && !scalar)
+        {
+            // Two p at a time, P = (p, p + 1) and Q = (30 - p, 31 - p): the values of v at 2p and 2p + 2 come from P, those
+            // between them (63 - 2q) from Q, and the same for Q's even ones and P's odd ones, so each four of v are two
+            // vectors zipped.
+            ref double ar = ref MemoryMarshal.GetReference(aRe);
+            ref double ai = ref MemoryMarshal.GetReference(aIm);
+            ref double br = ref MemoryMarshal.GetReference(bRe);
+            ref double bi = ref MemoryMarshal.GetReference(bIm);
+            for (int p = 0; p < 16; p += 2)
+            {
+                int q = 30 - p;
+                (var aP, var aOddP) = Dct.Output(Vector128.LoadUnsafe(ref ar, (nuint)p), Vector128.LoadUnsafe(ref ai, (nuint)p), p);
+                (var bP, var bOddP) = Dct.Output(Vector128.LoadUnsafe(ref br, (nuint)p), Vector128.LoadUnsafe(ref bi, (nuint)p), p);
+                (var aQ, var aOddQ) = Dct.Output(Vector128.LoadUnsafe(ref ar, (nuint)q), Vector128.LoadUnsafe(ref ai, (nuint)q), q);
+                (var bQ, var bOddQ) = Dct.Output(Vector128.LoadUnsafe(ref br, (nuint)q), Vector128.LoadUnsafe(ref bi, (nuint)q), q);
+
+                // v(2p) = B(63 - 2p) - A(2p), v(63 - 2p) = B(2p) - A(63 - 2p), v(64 + 2p) = A(63 - 2p) + B(2p),
+                // v(127 - 2p) = A(2p) + B(63 - 2p), as in the scalar loop.
+                Store(ref w, 2 * p, bOddP - aP, QmfState.Reverse(bQ - aOddQ));
+                Store(ref w, 60 - (2 * p), bOddQ - aQ, QmfState.Reverse(bP - aOddP));
+                Store(ref w, 64 + (2 * p), aOddP + bP, QmfState.Reverse(aQ + bOddQ));
+                Store(ref w, 124 - (2 * p), aOddQ + bQ, QmfState.Reverse(aP + bOddP));
+            }
+
+            return;
+        }
+
         for (int p = 0; p < 32; p++)
         {
             (double a, double aOdd) = Dct.Output(aRe[p], aIm[p], p);
@@ -250,6 +280,15 @@ internal sealed class QmfSynthesis
             Unsafe.Add(ref w, 64 + (2 * p)) = aOdd + b; // v(64 + n) = A(63 - n) + B(n), n = 2p
             Unsafe.Add(ref w, 127 - (2 * p)) = a + bOdd; // n = 63 - 2p
         }
+    }
+
+    // even(0) odd(0) even(1) odd(1) at w[n..n + 4].
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void Store(ref double w, int n, Vector128<double> even, Vector128<double> odd)
+    {
+        (var low, var high) = QmfState.Zip(even, odd);
+        low.StoreUnsafe(ref w, (nuint)n);
+        high.StoreUnsafe(ref w, (nuint)(n + 2));
     }
 
     // The DCT-IVs with the 1/64 of v(n).
@@ -321,7 +360,7 @@ internal sealed class QmfDctIV(double scale = 1)
     /// The FFT of 32 of <paramref name="x"/>'s values packed and turned (<paramref name="re"/>, <paramref name="im"/>, 32
     /// each), whose value at p <see cref="Output"/> turns into the outputs at 2p and 63 - 2p.
     /// </summary>
-    public static void Pretransform(ReadOnlySpan<double> x, bool alternate, Span<double> re, Span<double> im)
+    public static void Pretransform(ReadOnlySpan<double> x, bool alternate, Span<double> re, Span<double> im, bool scalar = false)
     {
         if (x.Length < 64 || re.Length < 32 || im.Length < 32)
         {
@@ -334,7 +373,24 @@ internal sealed class QmfDctIV(double scale = 1)
         ref double i = ref MemoryMarshal.GetReference(im);
         ref double preCos = ref MemoryMarshal.GetArrayDataReference(PreCos);
         ref double preSin = ref MemoryMarshal.GetArrayDataReference(PreSin);
-        for (int m = 0; m < 32; m++)
+        int m = 0;
+        if (Vector128.IsHardwareAccelerated && !scalar)
+        {
+            // x(2m) and x(2m + 2) are the first of the pairs at 2m and 2m + 2; x(63 - 2m) and x(61 - 2m) the second of
+            // those at 62 - 2m and 60 - 2m.
+            var sign = Vector128.Create(odd);
+            for (; m < 32; m += 2)
+            {
+                var a = QmfState.Zip(Vector128.LoadUnsafe(ref input, (nuint)(2 * m)), Vector128.LoadUnsafe(ref input, (nuint)((2 * m) + 2))).Low;
+                var b = sign * QmfState.Zip(Vector128.LoadUnsafe(ref input, (nuint)(62 - (2 * m))), Vector128.LoadUnsafe(ref input, (nuint)(60 - (2 * m)))).High;
+                var c = Vector128.LoadUnsafe(ref preCos, (nuint)m);
+                var sn = Vector128.LoadUnsafe(ref preSin, (nuint)m);
+                ((a * c) + (b * sn)).StoreUnsafe(ref r, (nuint)m);
+                ((a * sn) - (b * c)).StoreUnsafe(ref i, (nuint)m);
+            }
+        }
+
+        for (; m < 32; m++)
         {
             // (a - i b)(cos + i sin), a = x(2m), b = x(63 - 2m) (an odd k, so negated if alternate).
             double a = Unsafe.Add(ref input, 2 * m);
@@ -356,6 +412,15 @@ internal sealed class QmfDctIV(double scale = 1)
         double s = Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(_postSin), p);
         return ((yr * c) - (yi * s), (yr * s) + (yi * c));
     }
+
+    /// <summary><see cref="Output"/> at p and p + 1.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public (Vector128<double> Even, Vector128<double> Odd) Output(Vector128<double> yr, Vector128<double> yi, int p)
+    {
+        var c = Vector128.LoadUnsafe(ref MemoryMarshal.GetArrayDataReference(_postCos), (nuint)p);
+        var s = Vector128.LoadUnsafe(ref MemoryMarshal.GetArrayDataReference(_postSin), (nuint)p);
+        return ((yr * c) - (yi * s), (yr * s) + (yi * c));
+    }
 }
 
 /// <summary>
@@ -364,6 +429,27 @@ internal sealed class QmfDctIV(double scale = 1)
 /// </summary>
 internal static class QmfState
 {
+    /// <summary>(a(0), b(0)) and (a(1), b(1)).</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static (Vector128<double> Low, Vector128<double> High) Zip(Vector128<double> a, Vector128<double> b)
+    {
+        if (Sse2.IsSupported)
+        {
+            return (Sse2.UnpackLow(a, b), Sse2.UnpackHigh(a, b));
+        }
+
+        if (AdvSimd.Arm64.IsSupported)
+        {
+            return (AdvSimd.Arm64.ZipLow(a, b), AdvSimd.Arm64.ZipHigh(a, b));
+        }
+
+        return (Vector128.Create(a.GetElement(0), b.GetElement(0)), Vector128.Create(a.GetElement(1), b.GetElement(1)));
+    }
+
+    /// <summary>(v(1), v(0)).</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static Vector128<double> Reverse(Vector128<double> v) => Vector128.Shuffle(v, Vector128.Create(1L, 0L));
+
     /// <summary>(outRe + i outIm)[k] = (re + i im)[k] (cos + i sin)[k], for k below re's length.</summary>
     public static void Rotate(ReadOnlySpan<double> re, ReadOnlySpan<double> im, ReadOnlySpan<double> cos, ReadOnlySpan<double> sin, Span<double> outRe, Span<double> outIm)
     {

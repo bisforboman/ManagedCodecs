@@ -463,24 +463,36 @@ internal sealed partial class PictureDecoder<TPixel>
             FieldStatistics.FromOwnFirstField += reference.Whole == Picture ? 1 : 0;
         }
 
-        // Motion vectors are stored a 4x4 block, references an 8x8 partition: each row and each
-        // partition is written once, and the rows of a partition as wide as the macroblock in one go.
-        var mvXs = _mvX[list].AsSpan(mbAddr * 16, 16);
-        var mvYs = _mvY[list].AsSpan(mbAddr * 16, 16);
-        if (w == 16)
+        // Motion vectors are stored a 4x4 block, references an 8x8 partition: each row of a partition in one store
+        // (4, 2 or 1 vectors), checked against the arrays once, and the four partitions of a 16x16 one at once.
+        short[] xs = _mvX[list];
+        short[] ys = _mvY[list];
+        if ((uint)((mbAddr * 16) + 15) >= (uint)Math.Min(xs.Length, ys.Length))
         {
-            mvXs.Slice(y, h).Fill((short)mvX);
-            mvYs.Slice(y, h).Fill((short)mvY);
+            throw new IndexOutOfRangeException();
         }
-        else
+
+        ref byte firstX = ref Unsafe.As<short, byte>(ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(xs), mbAddr * 16));
+        ref byte firstY = ref Unsafe.As<short, byte>(ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(ys), mbAddr * 16));
+        ulong rowX = (ushort)mvX * 0x0001_0001_0001_0001ul;
+        ulong rowY = (ushort)mvY * 0x0001_0001_0001_0001ul;
+        for (int row = y; row < y + h; row += 4)
         {
-            for (int by = y / 4; by < (y + h) / 4; by++)
+            int at = 2 * (row + (x >> 2));
+            switch (w)
             {
-                for (int bx = x / 4; bx < (x + w) / 4; bx++)
-                {
-                    mvXs[(by * 4) + bx] = (short)mvX;
-                    mvYs[(by * 4) + bx] = (short)mvY;
-                }
+                case 16:
+                    Unsafe.WriteUnaligned(ref Unsafe.Add(ref firstX, at), rowX);
+                    Unsafe.WriteUnaligned(ref Unsafe.Add(ref firstY, at), rowY);
+                    break;
+                case 8:
+                    Unsafe.WriteUnaligned(ref Unsafe.Add(ref firstX, at), (uint)rowX);
+                    Unsafe.WriteUnaligned(ref Unsafe.Add(ref firstY, at), (uint)rowY);
+                    break;
+                default:
+                    Unsafe.WriteUnaligned(ref Unsafe.Add(ref firstX, at), (ushort)rowX);
+                    Unsafe.WriteUnaligned(ref Unsafe.Add(ref firstY, at), (ushort)rowY);
+                    break;
             }
         }
 
@@ -488,6 +500,15 @@ internal sealed partial class PictureDecoder<TPixel>
         var refIds = _refId[list].AsSpan(mbAddr * 4, 4);
         var refParities = _refParity[list].AsSpan(mbAddr * 4, 4);
         var refPics = _refPic[list].AsSpan(mbAddr * 4, 4);
+        if (w == 16 && h == 16)
+        {
+            MemoryMarshal.Write(MemoryMarshal.AsBytes(refIdxs), (byte)refIdx * 0x01010101u);
+            refIds.Fill(referenceId);
+            MemoryMarshal.Write(MemoryMarshal.AsBytes(refParities), (byte)reference.Parity * 0x01010101u);
+            refPics[0] = refPics[1] = refPics[2] = refPics[3] = reference;
+            return;
+        }
+
         for (int py = y / 8; py <= (y + h - 1) / 8; py++)
         {
             for (int px = x / 8; px <= (x + w - 1) / 8; px++)
@@ -915,14 +936,27 @@ internal sealed partial class PictureDecoder<TPixel>
     /// </remarks>
     private Motion MotionNeighbor(int list, int mbAddr, int x, int y, int currentBlock)
     {
-        var (n, xW, yW) = Neighbor(mbAddr, x, y);
+        // In frames the location within the neighbour is the location modulo 16 (Neighbor's own rule), worked out
+        // here so that no tuple goes through memory.
+        int n;
+        int xW = x & 15;
+        int yW = y & 15;
+        if (_pairSlots)
+        {
+            (n, xW, yW) = Neighbor(mbAddr, x, y);
+        }
+        else
+        {
+            n = NeighborMb(mbAddr, x, y);
+        }
+
         if (n < 0)
         {
             return new Motion(false, -1, 0, 0);
         }
 
-        int bx = xW / 4;
-        int by = yW / 4;
+        int bx = xW >> 2;
+        int by = yW >> 2;
         if (n == mbAddr && BlockIndex(bx, by) >= currentBlock)
         {
             return new Motion(false, -1, 0, 0);

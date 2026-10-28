@@ -399,6 +399,11 @@ internal sealed partial class PictureDecoder<TPixel>
         byte[] absMvd = _absMvd[list][component];
         int AbsMvd(int nx, int ny)
         {
+            if (nx >= 0 && ny >= 0)
+            {
+                return absMvd[(mbAddr * 16) + ((ny >> 2) * 4) + (nx >> 2)]; // inside the macroblock
+            }
+
             var (n, xW, yW) = Neighbor(mbAddr, nx, ny);
             if (n < 0)
             {
@@ -444,13 +449,13 @@ internal sealed partial class PictureDecoder<TPixel>
     {
         byte absX = (byte)Math.Min(Math.Abs(mvdX), 127);
         byte absY = (byte)Math.Min(Math.Abs(mvdY), 127);
+        var lists = _absMvd[list];
+        var horizontal = lists[0].AsSpan(mbAddr * 16, 16);
+        var vertical = lists[1].AsSpan(mbAddr * 16, 16);
         for (int by = y / 4; by < (y + h) / 4; by++)
         {
-            for (int bx = x / 4; bx < (x + w) / 4; bx++)
-            {
-                _absMvd[list][0][(mbAddr * 16) + (by * 4) + bx] = absX;
-                _absMvd[list][1][(mbAddr * 16) + (by * 4) + bx] = absY;
-            }
+            horizontal.Slice((by * 4) + (x / 4), w / 4).Fill(absX);
+            vertical.Slice((by * 4) + (x / 4), w / 4).Fill(absY);
         }
     }
 
@@ -590,6 +595,13 @@ internal sealed partial class PictureDecoder<TPixel>
     /// </summary>
     private int CodedBlockFlagInc(int mbAddr, BlockCategory category, int x, int y, int component)
     {
+        // A 4x4 luma block's neighbours inside the macroblock: their own counts (the macroblock is not I_PCM).
+        if (category is BlockCategory.LumaAc or BlockCategory.Luma4x4 && x > 0 && y > 0)
+        {
+            var own = _totalCoeff[component].AsSpan((mbAddr * 16) + (y * 4) + x - 4);
+            return (own[3] != 0 ? 1 : 0) + (own[0] != 0 ? 2 : 0);
+        }
+
         bool chroma = category is BlockCategory.ChromaDc or BlockCategory.ChromaAc;
         byte[] counts = chroma ? _totalCoeffChroma : _totalCoeff[component];
         int maxH = chroma ? _mbHeightC : 16;

@@ -150,6 +150,24 @@ weigh paff-b-cavlc-wp paff-b-cavlc explicit
 weigh paff-b-adaptive-wp paff-b-adaptive explicit
 weigh paff-mbaff-wp paff-mbaff explicit
 
+# Memory management operation 5 in a field picture, which no encoder at hand writes: tools/h264-add-mmco5.py puts it into
+# the first field of the first non-IDR I frame and rebases the frame_num and pic_order_cnt_lsb of everything after it.
+# With one reference frame and P fields only, the lists after that I frame hold its fields alone, as the encoder had
+# them, so the stream stays valid: JM's decoder gives it exactly the encoder's reconstruction (checked here), and FFmpeg
+# the same (its references as for any sample).
+# mmco5 name [lencod options]: P field pictures, one reference frame, an I frame every fourth.
+mmco5() {
+  local name=$1; shift
+  wanted "$name" || return 0
+  lencod "$name-in" -p PicInterlace=1 -p NumberBFrames=0 -p NumberReferenceFrames=1 -p IntraPeriod=4 "$@"
+  python3 "$tools/h264-add-mmco5.py" "$work/$name-in.264" "$work/$name.264"
+  (cd "$work" && "$jm/bin/ldecod.exe" -i "$name.264" -o "$name-jm.yuv" > "$name-ldecod.log" 2>&1)
+  cmp "$work/$name-jm.yuv" "$work/rec.yuv"
+  ffmpeg -hide_banner -loglevel error -y -r 25 -i "$work/$name.264" -c copy "$out/jm-$name.mp4"
+}
+mmco5 paff-mmco5                                      # CABAC
+mmco5 paff-mmco5-cavlc -p SymbolMode=0 -p InputFile=noisy.yuv  # CAVLC, noisy
+
 # ---- Bit depths 9, 12 and 14 (libx264 writes only 8 and 10), and 8 bits for what libx264 never writes ----
 # Progressive frames (176x144, 10 of them) of a moving noisy test pattern, at each depth and chroma format the
 # sample needs (noise=N sets the noise). deep name bits yuvformat [lencod options]: High 10 for 9 bits, High 4:4:4 Predictive above 10 (no

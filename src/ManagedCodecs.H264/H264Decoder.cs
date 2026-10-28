@@ -428,7 +428,7 @@ public sealed class H264Decoder : IVideoDecoder
             _lastReference = picture;
 
             // PrevRefFrameNum (7.4.3); after memory_management_control_operation 5 it is 0.
-            _prevRefFrameNum = state.Header.MemoryManagement.Any(op => op.Op == 5) ? 0 : state.Header.FrameNum;
+            _prevRefFrameNum = FrameNumAfter(state.Header);
         }
 
         if (state.SecondField)
@@ -627,12 +627,16 @@ public sealed class H264Decoder : IVideoDecoder
     /// <summary>How often MBAFF frames used field and frame pairs and mixed them, so tests can check samples exercise them.</summary>
     internal MbaffStatistics MbaffStatistics { get; } = new();
 
+    // frame_num as the pictures after this one see it: 0 after memory_management_control_operation 5 (7.4.3).
+    private static int FrameNumAfter(SliceHeader header) => header.MemoryManagement.Any(op => op.Op == 5) ? 0 : header.FrameNum;
+
     private PictureJob StartPicture(SliceHeader header, SequenceParameterSet sps, long pts, List<VideoFrame> frames)
     {
         // The second field of a frame (7.4.1.2.4): the other parity right after the first, with its
-        // frame_num, not IDR, and a reference if and only if the first one is.
+        // frame_num (0 after a first field with memory_management_control_operation 5), not IDR, and a
+        // reference if and only if the first one is.
         bool secondField = header.FieldPic && _firstField?.State is { } first
-            && first.Header.Parity == 1 - header.Parity && first.Header.FrameNum == header.FrameNum && first.Sps == sps
+            && first.Header.Parity == 1 - header.Parity && FrameNumAfter(first.Header) == header.FrameNum && first.Sps == sps
             && !header.IsIdr && (first.Header.NalRefIdc != 0) == (header.NalRefIdc != 0);
         if (_firstField is not null && !secondField)
         {

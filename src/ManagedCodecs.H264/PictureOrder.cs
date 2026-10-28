@@ -22,10 +22,6 @@ internal sealed class PictureOrder
     public int Next(SliceHeader header, SequenceParameterSet sps)
     {
         bool mmco5 = header.MemoryManagement.Any(op => op.Op == 5);
-        if (mmco5 && header.FieldPic)
-        {
-            throw new NotSupportedException("memory_management_control_operation 5 in a field picture is not supported.");
-        }
 
         int top;
         int bottom;
@@ -57,7 +53,7 @@ internal sealed class PictureOrder
             if (header.NalRefIdc != 0)
             {
                 // After memory_management_control_operation 5 the picture's own order count is
-                // rebased to 0 (8.2.1), and that is what the next picture continues from.
+                // rebased to 0 (8.2.1), and that is what the next picture continues from (a field's: 0).
                 _prevPicOrderCntMsb = mmco5 ? 0 : msb;
                 _prevPicOrderCntLsb = mmco5 ? top - Math.Min(top, bottom) : lsb;
             }
@@ -88,8 +84,9 @@ internal sealed class PictureOrder
 
         if (header.FieldPic)
         {
-            // Type 1 gives a bottom field its offset from the top (8-10); the others the same value.
-            int field = header.BottomField ? bottom : top;
+            // Type 1 gives a bottom field its offset from the top (8-10); the others the same value. After
+            // memory_management_control_operation 5 the field's order count is rebased to 0, as a frame's smaller one.
+            int field = mmco5 ? 0 : header.BottomField ? bottom : top;
             Fields = (field, field);
             return field;
         }

@@ -54,8 +54,8 @@ and code that reproduces FFmpeg's reading where it differs from the spec), and n
   or by an iTunSMPB tag without one.
 - **HE-AAC** (spectral band replication, at twice the core's rate, or downsampled at the core's own): signalled in the
   config or only by its data, mono to 5.1, coupled pairs; within 1e-6 of FFmpeg's float output where its single precision is not the limit (see
-  docs/conformance.md). Parametric stereo (HE-AAC v2): the baseline decoder (10 and 20 bands, mixing procedure Ra, no
-  IPD or OPD), a mono stream decoded to stereo; within 3e-4 of FFmpeg's output, 3e-6 on average. A frame's channels
+  docs/conformance.md). Parametric stereo (HE-AAC v2): 10 and 20 bands, mixing procedures Ra and Rb, no
+  IPD or OPD (the baseline decoder's), a mono stream decoded to stereo; within 3e-4 of FFmpeg's output, 3e-6 on average. A frame's channels
   through SBR on several threads (`Threads`).
 - **Containers**: AVI (video), MP4 (video and audio tracks, fragmented files too, edit lists of several edits)
   and raw AAC (ADTS), with packets and timestamps as FFmpeg's demuxers give them.
@@ -64,7 +64,7 @@ and code that reproduces FFmpeg's reading where it differs from the spec), and n
 
 ### Open
 
-- AAC: parametric stereo with 34 bands or mixing procedure Rb (no encoder at hand sends them, nor downsampled SBR with
+- AAC: parametric stereo with 34 bands or IPD and OPD (no encoder at hand sends them, nor downsampled SBR with
   parametric stereo, which decodes but is untested); SBR's speed (5.1 HE-AAC at about 0.41 ms a frame, 100 times
   real time, 2.2 times FFmpeg's time on one thread; Benchmarking).
 - MJPEG: files from real cameras (the samples are all FFmpeg's), and packets holding one field (FFmpeg decodes none).

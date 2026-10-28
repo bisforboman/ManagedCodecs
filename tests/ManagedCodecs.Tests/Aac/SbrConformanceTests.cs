@@ -107,6 +107,16 @@ public class SbrConformanceTests
             Assert.Equal(stats.PsFrames, stats.PsAppliedFrames);
             Assert.Equal(packets, stats.PsAppliedFrames);
             Assert.True(stats.PsDuckedSlots > 0, "No transients ducked.");
+
+            // Rb from the first header on: a frame before it is mixed with the defaults (ICC 0, rho 1, where Ra and Rb agree).
+            if (sampleName.Contains("-rb", StringComparison.Ordinal))
+            {
+                Assert.InRange(stats.PsRbFrames, stats.PsAppliedFrames - 1, stats.PsAppliedFrames);
+            }
+            else
+            {
+                Assert.Equal(0, stats.PsRbFrames);
+            }
         }
 
         if (channels == 1)

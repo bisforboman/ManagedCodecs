@@ -504,7 +504,7 @@ in single precision moves this decoder's output (log correlation 0.91); with a t
 
 Parametric stereo (HE-AAC v2, `PsProcessor`) follows the spec's baseline decoder: the hybrid analysis filters on the
 three lowest QMF bands (six slots of look-ahead from the SBR low band), decorrelation by a fractional delay and three
-all-pass links (plain delays above QMF band 23), transient ducking, mixing procedure Ra with the matrices ramped
+all-pass links (plain delays above QMF band 23), transient ducking, mixing procedure Ra or Rb with the matrices ramped
 linearly over each envelope, and the hybrid synthesis; the right channel gets a QMF synthesis bank of its own. A mono
 stream with it decodes to stereo (`Channels` is 2, from the config's object type 29 or sync extension, or, signalled
 only by its data, once the first access unit is decoded), and an MP4 track signalling it reports two channels, as
@@ -516,8 +516,11 @@ of 0.347 7e-4, no transient ducking 2e-4 (and 8e-2 at most). The cos and sin of 
 two-part reduction by pi/2 and a series, checked against Math on random input) and the scale factors and ICC angles
 (literals, matching libxaac's float tables to 6e-8) keep the output the same on WebAssembly; the phase factors are
 checked against libxaac's. 10-band parameters map to the 20 bins as band b / 2 (no sample sends 10 bands); 34 bands
-and procedure Rb (icc_mode 3 to 5) throw NotSupportedException, and the phase parameters (IPD, OPD) are ignored, as
-the baseline decoder does. Its data is read (`PsData`): every
+throw NotSupportedException, and the phase parameters (IPD, OPD) are ignored, as the baseline decoder does. Mixing
+procedure Rb (icc_mode 3 to 5) comes from a patched FDK encoder that writes its own parameters with icc_mode + 3
+(`heaacv2-rb`, tools/make-heaac-samples.sh; every frame mixed by Rb, `PsRbFrames`), and matches FFmpeg as the Ra sample
+does once rho is taken as at least 0.05, as FFmpeg takes it (without, up to 0.3 off; whether the spec says so is not
+checked here, its text being out of reach). Its data is read (`PsData`): every
 frame of the v2 sample to the end of its extension, less than a byte of padding left (the FDK encoder sends 20 bands,
 fine IID quantization, ICC in 20 bands, no IPD or OPD; reading the envelopes' IID and ICC interleaved instead of IID
 first fails it on the third frame). Its codebooks are enumerated from PacketVideo's decoding trees and checked to be

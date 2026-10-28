@@ -13,6 +13,10 @@ run time.
 
 ## Unreleased
 
+### Added
+
+- HE-AAC v2: parametric stereo with mixing procedure Rb (icc_mode 3 to 5), which threw `NotSupportedException`.
+
 ### Documentation
 
 - Native AOT on x64: set `IlcInstructionSet` (x86-64-v3) in the app, or the AVX2 and 256-bit paths are left out (AAC

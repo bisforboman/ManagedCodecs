@@ -84,6 +84,14 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.Aac/AacDecoder.cs",
          find="output.Pts = packet.Pts + SamplesToTime(dropped);", replace="output.Pts = packet.Pts;",
          tests="FullyQualifiedName~FramePtsMatchFfmpeg"),
+    # Parametric stereo's mixing procedure Rb, which only the patched-FDK heaacv2-rb sample sends, and its rho taken as at
+    # least 0.05, as FFmpeg takes it.
+    dict(file="src/ManagedCodecs.Aac/Sbr/PsProcessor.cs",
+         find="bool rb = hasData && data.EnableIcc ? data.IccMode >= 3 : _lastRb;", replace="bool rb = false;",
+         tests="DisplayName~heaacv2-rb"),
+    dict(file="src/ManagedCodecs.Aac/Sbr/PsProcessor.cs",
+         find="rho = Math.Max(rho, 0.05);", replace="rho = Math.Max(rho, -1);",
+         tests="DisplayName~heaacv2-rb"),
     # A pulse on a zero quantized value goes negative (4.6.3.3: x_quant > 0 adds the amplitude, else subtracts it); only
     # the hand-built aac-pulse sample (tools/make-aac-pulse.py) has pulse data.
     dict(file="src/ManagedCodecs.Aac/AacDecoder.cs",

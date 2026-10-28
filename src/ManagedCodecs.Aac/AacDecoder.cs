@@ -1313,6 +1313,9 @@ internal sealed class AacStatistics
     /// <summary>Frames mixed into two channels by parametric stereo (with this frame's data or the last).</summary>
     public int PsAppliedFrames { get; set; }
 
+    /// <summary>Of those, frames mixed by procedure Rb (icc_mode 3 to 5) rather than Ra.</summary>
+    public int PsRbFrames { get; set; }
+
     /// <summary>Time slots and bands whose decorrelated signal a transient attenuated.</summary>
     public int PsDuckedSlots { get; set; }
 }

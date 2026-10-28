@@ -420,20 +420,21 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private int NeighborMb(int mbAddr, int x, int y, int maxW = 16, int maxH = 16)
     {
-        if (_pairSlots)
-        {
-            return AffNeighborMb(mbAddr, x, y, maxW, maxH);
-        }
-
         if (y >= maxH || (x >= maxW && y >= 0))
         {
             return -1;
         }
 
-        // Inside the macroblock, or A, B, C or D (6.4.9) as the picture's edges allow.
+        // Inside the macroblock, or A, B, C or D (6.4.9) as the picture's edges allow; in MBAFF frames and field
+        // pictures as Table 6-4 has them (which agrees on the cases above, so they need no call).
         if (y >= 0 && x >= 0)
         {
             return mbAddr;
+        }
+
+        if (_pairSlots)
+        {
+            return AffNeighborMb(mbAddr, x, y, maxW, maxH);
         }
 
         int n = _neighborMbs[(mbAddr * 4) + (y >= 0 ? 0 : x < 0 ? 3 : x >= maxW ? 2 : 1)];

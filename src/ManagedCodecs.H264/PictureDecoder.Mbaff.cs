@@ -121,7 +121,13 @@ internal sealed partial class PictureDecoder<TPixel>
     {
         if (_pairSlots)
         {
-            return AffNeighbor(mbAddr, xN, yN, maxW, maxH);
+            // Most lookups are inside the macroblock (or right of or below it): Table 6-4's first cases, without the call.
+            if (yN >= maxH || (xN >= maxW && yN >= 0))
+            {
+                return (-1, 0, 0);
+            }
+
+            return xN >= 0 && yN >= 0 ? (mbAddr, xN, yN) : AffNeighbor(mbAddr, xN, yN, maxW, maxH);
         }
 
         // maxW and maxH are 8 or 16: the mask is (xN + maxW) % maxW for xN from -maxW on.
@@ -151,6 +157,7 @@ internal sealed partial class PictureDecoder<TPixel>
     }
 
     /// <summary>Table 6-4: neighbouring locations in MBAFF frames (the deblocking filter also looks into other slices).</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private (int Mb, int X, int Y) AffNeighbor(int mbAddr, int xN, int yN, int maxW, int maxH, bool anySlice = false) =>
         AffNeighbor(_fieldMb, _sliceOfMb, _widthInMbs, mbAddr, xN, yN, maxW, maxH, anySlice, Math.Max(_fieldParity, 0));
 

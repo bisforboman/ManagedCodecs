@@ -125,13 +125,7 @@ internal sealed partial class PictureDecoder<TPixel>
     {
         if (_pairSlots)
         {
-            // Most lookups are inside the macroblock (or right of or below it): Table 6-4's first cases, without the call.
-            if (yN >= maxH || (xN >= maxW && yN >= 0))
-            {
-                return (-1, 0, 0);
-            }
-
-            return xN >= 0 && yN >= 0 ? (mbAddr, xN, yN) : AffNeighbor(mbAddr, xN, yN, maxW, maxH);
+            return AffNeighborInSlice(mbAddr, xN, yN, maxW, maxH);
         }
 
         // maxW and maxH are 8 or 16: the mask is (xN + maxW) % maxW for xN from -maxW on.
@@ -169,6 +163,14 @@ internal sealed partial class PictureDecoder<TPixel>
         anySlice
             ? AffNeighbor(_fieldMb, _sliceOfMb, _widthInMbs, mbAddr, xN, yN, maxW, maxH, anySlice: true, Math.Max(_fieldParity, 0))
             : AffNeighbor(in AffPairsOf(mbAddr), xN, yN, maxW, maxH);
+
+    /// <summary>
+    /// <see cref="Neighbor"/> in MBAFF frames and field pictures: Table 6-4 within the slice. Out of line, so that
+    /// <see cref="Neighbor"/> stays small enough to inline into its callers in frames.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private (int Mb, int X, int Y) AffNeighborInSlice(int mbAddr, int xN, int yN, int maxW, int maxH) =>
+        AffNeighbor(in AffPairsOf(mbAddr), xN, yN, maxW, maxH);
 
     /// <summary>
     /// The pairs around a macroblock that Table 6-4 looks into, for its lookups within the slice: found again only

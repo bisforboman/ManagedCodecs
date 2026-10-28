@@ -119,3 +119,34 @@ plain array reads at fixed offsets.
 - **Slices.** Availability is per slice; the multi-slice samples and the concealment tests (slices lost) cover it.
 - **Frame threading.** None of this reads other pictures, so no wait changes and no mutation entries; the delayed-
   thread tests run as before.
+
+## Outcome of the first pull request (2026-10-28)
+
+**Not merged: in frames the context is slower than the lookups it replaces.** The first pull request was built as
+decided: `PictureDecoder.Context.cs` held the grids (motion of each list, luma and chroma coefficient counts, intra
+modes), filled on a macroblock's first read with its inside copied from the picture-wide arrays, and kept up to date
+by `StoreMotion`, the residual readers and the intra mode loop; `MotionNeighbor`, `LumaNc`, `ChromaNc`,
+`PredictIntra4x4Mode` and `IntraMbNeighbors` read it in frames. It decoded every sample bit-exact, and the
+verification switch (`NeighbourContextMatchesLookups`, every sample, and the concealment tests) passed. It also earned
+its keep once: it caught a bug of the context itself at once (two quantities sharing a "filled" bit), which the
+output comparison alone would have found only as a mismatched frame.
+
+Measured against main, the order alternating, normalized by untouched functions: **+3.0%** of the decoding time of
+`h264-bench-720p.mp4` and **+4.2%** of the 720p libx264 default stream, in every run. By instructions (callgrind on the
+AOT build), after two rounds of making the fill and the write-through cheaper (unchecked 8-byte copies of four
+motion vectors, packed reference stores, the fifth column marked once): 50.28 to 52.22 M a frame (+3.9%) and 71.40 to
+74.22 M (+4.0%). The lookups it took away cost about 2.6 M instructions a frame on the CAVLC stream (`Neighbor` 1.46,
+`MotionNeighbor`'s own 0.67, `LumaNc` and `ChromaNc` 0.44); the context cost about 3.6 M (the fill 1.5, its reads 1.1,
+the write-through 0.5, finding A to D 0.35, the count grids 0.5).
+
+Why: in frames the lookups were already cheap. `NeighborMb` reads A to D from a table made with the decoder and
+inlines into its callers, about 770 instructions a macroblock all told; the context fills its grids, writes each
+value twice (the picture-wide arrays stay the store for later macroblocks, the deblocking filter and later pictures)
+and checks what is filled at every read. FFmpeg's cache pays because its decoder is built around it, with no second
+copy to keep in step. The branch `claude/neighbour-context-progressive` keeps the code and the verification switch.
+
+**Changed plan (the owner's choice, 2026-10-28):** no grids for frames, nor (for the same reason) for CABAC's
+ctxIdxInc. What is left of the plan is MBAFF frames and field pictures, where each lookup is Table 6-4's case analysis
+(`AffNeighbor`, 10.2% of `h264-mbaff-default.mp4`'s time, about 33 calls a macroblock): resolve each macroblock's
+neighbouring rows once (the left pair's macroblock and row for each of its luma and chroma block rows, the upper
+pair's), not its values, and read the picture-wide arrays through that. Measured the same way before it is kept.

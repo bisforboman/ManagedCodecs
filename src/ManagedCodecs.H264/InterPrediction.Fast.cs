@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics;
+using System.Runtime.Intrinsics.X86;
 
 namespace ManagedCodecs.H264;
 
@@ -141,6 +142,48 @@ internal static partial class InterPrediction
                 HalfVertical(window, ws, g + (xFrac == 3 ? 1 : 0), width, height, second);
                 Average(first, second, width, height, output, outputStride);
                 break;
+        }
+    }
+
+    /// <summary>
+    /// Asks the cache for the reference area a macroblock four to the right will probably read (its motion like this
+    /// one's): four of its 16 luma rows and two of its chroma rows a macroblock, in turn by <paramref name="phase"/>,
+    /// so that the four macroblocks before it cover all of them. (<paramref name="x"/>, <paramref name="y"/>) is this
+    /// macroblock's integer reference position; nothing is fetched outside the planes. A hint only: no output depends on it.
+    /// </summary>
+    public static unsafe void PrefetchAhead(Picture reference, int x, int y, int phase)
+    {
+        if (!Sse.IsSupported)
+        {
+            return;
+        }
+
+        int stride = reference.LumaStride;
+        int row = y + (phase * 4);
+        int column = x + 64;
+        byte[] luma = reference.Y;
+        if ((uint)column < (uint)stride && row >= 0 && ((row + 4) * stride) <= luma.Length)
+        {
+            byte* p = (byte*)Unsafe.AsPointer(ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(luma), (row * stride) + column));
+            Sse.Prefetch0(p);
+            Sse.Prefetch0(p + stride);
+            Sse.Prefetch0(p + (2 * stride));
+            Sse.Prefetch0(p + (3 * stride));
+        }
+
+        int chromaStride = reference.ChromaStride;
+        int chromaRow = (y >> 1) + (phase * 2);
+        int chromaColumn = column >> 1;
+        byte[] cb = reference.Cb;
+        if ((uint)chromaColumn < (uint)chromaStride && chromaRow >= 0 && ((chromaRow + 2) * chromaStride) <= cb.Length)
+        {
+            int offset = (chromaRow * chromaStride) + chromaColumn;
+            byte* b = (byte*)Unsafe.AsPointer(ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(cb), offset));
+            byte* r = (byte*)Unsafe.AsPointer(ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(reference.Cr), offset));
+            Sse.Prefetch0(b);
+            Sse.Prefetch0(b + chromaStride);
+            Sse.Prefetch0(r);
+            Sse.Prefetch0(r + chromaStride);
         }
     }
 

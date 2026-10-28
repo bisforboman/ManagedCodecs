@@ -590,6 +590,11 @@ internal sealed partial class PictureDecoder<TPixel>
         var picture = Picture;
         int lumaStride = picture.LumaStride;
         InterPrediction.PredictLuma(reference, lumaX, lumaY, w, h, mvX, mvY, picture.Y.AsSpan((lumaY * lumaStride) + lumaX), lumaStride);
+        if ((x | y) == 0)
+        {
+            InterPrediction.PrefetchAhead(reference, lumaX + (mvX >> 2), lumaY + (mvY >> 2), _mbColumn[mbAddr] & 3);
+        }
+
         int chromaX = lumaX >> 1;
         int chromaY = lumaY >> 1;
         int chromaStride = picture.ChromaStride;

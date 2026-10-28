@@ -17,6 +17,13 @@ run time.
 
 - H.264: memory management operation 5 in field pictures, which threw `NotSupportedException`.
 
+### Changed
+
+- H.264 decodes CABAC streams faster: the deblocking filter's edge strengths of bi-predicted blocks in vectors, CABAC's
+  context selection reading neighbours inside the macroblock directly, and its significance map without per-bin
+  bounds checks. About 3% fewer instructions a frame on CABAC streams with B frames, 1 to 2% faster on the cloud VM
+  measured (docs/notes/h264-speed-gap-2026-10.md); CAVLC streams are unchanged; the output is the same.
+
 ## 0.2.0 – 2026-10-28
 
 Parametric stereo complete (mixing procedure Rb, phase parameters, 34 bands), long-term references in H.264 field

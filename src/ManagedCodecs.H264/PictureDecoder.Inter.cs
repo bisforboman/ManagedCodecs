@@ -499,6 +499,8 @@ internal sealed partial class PictureDecoder<TPixel>
                 refPics[part] = reference;
             }
         }
+
+        StoreContextMotion(list, mbAddr, x, y, w, h, refIdx, mvX, mvY);
     }
 
     /// <summary>
@@ -894,6 +896,18 @@ internal sealed partial class PictureDecoder<TPixel>
     /// macroblock with twice the motion and half the index.
     /// </remarks>
     private Motion MotionNeighbor(int list, int mbAddr, int x, int y, int currentBlock)
+    {
+        if (!UseContext)
+        {
+            return MotionNeighborLookup(list, mbAddr, x, y, currentBlock);
+        }
+
+        var motion = ContextMotion(list, mbAddr, x, y, currentBlock);
+        return VerifyNeighbourContext ? Verified(motion, MotionNeighborLookup(list, mbAddr, x, y, currentBlock), $"motion of list {list} at ({x}, {y}) of macroblock {mbAddr}") : motion;
+    }
+
+    /// <summary><see cref="MotionNeighbor"/> by <see cref="Neighbor"/>: MBAFF frames and field pictures, and the context's reference.</summary>
+    private Motion MotionNeighborLookup(int list, int mbAddr, int x, int y, int currentBlock)
     {
         var (n, xW, yW) = Neighbor(mbAddr, x, y);
         if (n < 0)

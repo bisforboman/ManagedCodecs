@@ -190,6 +190,7 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
         Sps = sps;
         Picture = picture;
         DecodedMbCount = 0;
+        ResetContext();
         _decodedPrefix = Math.Max(fieldParity, 0);
         _deblockedRows = 0;
         _reportedRows = 0;
@@ -452,13 +453,37 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
         ((((index >> 2) & 1) * 2) + (index & 1), (((index >> 3) & 1) * 2) + ((index >> 1) & 1));
 
     /// <summary>nC for a luma 4x4 block (9.2.1), or in 4:4:4 a Cb or Cr one (<paramref name="component"/> 1 or 2).</summary>
-    private int LumaNc(int mbAddr, int x, int y, int component = 0) =>
+    private int LumaNc(int mbAddr, int x, int y, int component = 0)
+    {
+        if (!UseContext)
+        {
+            return LumaNcLookup(mbAddr, x, y, component);
+        }
+
+        int nC = ContextLumaNc(mbAddr, x, y, component);
+        return VerifyNeighbourContext ? Verified(nC, LumaNcLookup(mbAddr, x, y, component), $"luma nC of block ({x}, {y}), component {component}, of macroblock {mbAddr}") : nC;
+    }
+
+    /// <summary><see cref="LumaNc"/> by <see cref="Neighbor"/>.</summary>
+    private int LumaNcLookup(int mbAddr, int x, int y, int component) =>
         CombineNc(
             NeighborTotalCoeff(mbAddr, (x * 4) - 1, y * 4, chroma: false, component),
             NeighborTotalCoeff(mbAddr, x * 4, (y * 4) - 1, chroma: false, component));
 
     /// <summary>nC for a chroma AC 4x4 block of component <paramref name="c"/> (9.2.1).</summary>
-    private int ChromaNc(int mbAddr, int c, int x, int y) =>
+    private int ChromaNc(int mbAddr, int c, int x, int y)
+    {
+        if (!UseContext)
+        {
+            return ChromaNcLookup(mbAddr, c, x, y);
+        }
+
+        int nC = ContextChromaNc(mbAddr, c, x, y);
+        return VerifyNeighbourContext ? Verified(nC, ChromaNcLookup(mbAddr, c, x, y), $"chroma nC of block ({x}, {y}), component {c}, of macroblock {mbAddr}") : nC;
+    }
+
+    /// <summary><see cref="ChromaNc"/> by <see cref="Neighbor"/>.</summary>
+    private int ChromaNcLookup(int mbAddr, int c, int x, int y) =>
         CombineNc(
             NeighborTotalCoeff(mbAddr, (x * 4) - 1, y * 4, chroma: true, c),
             NeighborTotalCoeff(mbAddr, x * 4, (y * 4) - 1, chroma: true, c));
@@ -572,6 +597,8 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
                     modes[((y + 1) * 4) + x] = (sbyte)mode;
                     modes[((y + 1) * 4) + x + 1] = (sbyte)mode;
                 }
+
+                StoreContextIntraMode(mbAddr, x, y, mode, transform8x8);
             }
 
             cbpLuma = 0;
@@ -718,6 +745,18 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
     /// <summary>Intra4x4PredMode prediction (8.3.1.1).</summary>
     private int PredictIntra4x4Mode(SliceState slice, int mbAddr, int x, int y)
     {
+        if (!UseContext)
+        {
+            return PredictIntra4x4ModeLookup(slice, mbAddr, x, y);
+        }
+
+        int mode = ContextIntra4x4Mode(slice, mbAddr, x, y);
+        return VerifyNeighbourContext ? Verified(mode, PredictIntra4x4ModeLookup(slice, mbAddr, x, y), $"predicted intra mode of block ({x}, {y}) of macroblock {mbAddr}") : mode;
+    }
+
+    /// <summary><see cref="PredictIntra4x4Mode"/> by <see cref="Neighbor"/>.</summary>
+    private int PredictIntra4x4ModeLookup(SliceState slice, int mbAddr, int x, int y)
+    {
         var (a, xA, yA) = Neighbor(mbAddr, (x * 4) - 1, y * 4);
         var (b, xB, yB) = Neighbor(mbAddr, x * 4, (y * 4) - 1);
         bool constrained = slice.Pps.ConstrainedIntraPred;
@@ -741,6 +780,18 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
 
     /// <summary>Availability of the A, B, C and D macroblocks for intra prediction of the current one.</summary>
     private (bool A, bool B, bool C, bool D) IntraMbNeighbors(SliceState slice, int mbAddr)
+    {
+        if (!UseContext)
+        {
+            return IntraMbNeighborsLookup(slice, mbAddr);
+        }
+
+        var neighbors = ContextIntraMbNeighbors(slice, mbAddr);
+        return VerifyNeighbourContext ? Verified(neighbors, IntraMbNeighborsLookup(slice, mbAddr), $"intra availability of macroblock {mbAddr}") : neighbors;
+    }
+
+    /// <summary><see cref="IntraMbNeighbors"/> by <see cref="NeighborMb"/>.</summary>
+    private (bool A, bool B, bool C, bool D) IntraMbNeighborsLookup(SliceState slice, int mbAddr)
     {
         bool Usable(int n) => n >= 0 && !(slice.Pps.ConstrainedIntraPred && IsInter(n));
         return (Usable(NeighborMb(mbAddr, -1, 0)), Usable(NeighborMb(mbAddr, 0, -1)), Usable(NeighborMb(mbAddr, 16, -1)), Usable(NeighborMb(mbAddr, -1, -1)));
@@ -843,6 +894,7 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
             {
                 // In 4:2:2 the blocks come by 8x8 quadrant (chroma4x4BlkIdx), which is raster order here too.
                 chromaCounts[(c * 8) + b] = (byte)ReadBlock(slice, r, mbAddr, BlockCategory.ChromaAc, b & 1, b >> 1, c, 15, residual.ChromaAc[(c * 8) + b], scanAc);
+                StoreContextChromaCount(mbAddr, c, b & 1, b >> 1, chromaCounts[(c * 8) + b]);
             }
         }
     }
@@ -882,6 +934,7 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
             var (x, y) = BlockPosition(idx);
             var category = is16x16 ? BlockCategory.LumaAc : BlockCategory.Luma4x4;
             counts[(y * 4) + x] = (byte)ReadBlock(slice, r, mbAddr, category, x, y, component, scan.Length, residual.Luma[(y * 4) + x], scan);
+            StoreContextCount(mbAddr, component, x, y, counts[(y * 4) + x]);
         }
     }
 
@@ -912,6 +965,10 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
                 counts[(y8 * 4) + x8 + 1] = count;
                 counts[((y8 + 1) * 4) + x8] = count;
                 counts[((y8 + 1) * 4) + x8 + 1] = count;
+                StoreContextCount(mbAddr, component, x8, y8, count);
+                StoreContextCount(mbAddr, component, x8 + 1, y8, count);
+                StoreContextCount(mbAddr, component, x8, y8 + 1, count);
+                StoreContextCount(mbAddr, component, x8 + 1, y8 + 1, count);
                 continue;
             }
 
@@ -922,6 +979,7 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
                 var (x, y) = BlockPosition((b8 * 4) + i4);
                 int nC = LumaNc(mbAddr, x, y, component);
                 counts[(y * 4) + x] = (byte)Cavlc.ReadResidualBlock(r, nC, 16, block, (field ? CavlcField8x8Scan : Cavlc8x8Scan).AsSpan(i4 * 16, 16));
+                StoreContextCount(mbAddr, component, x, y, counts[(y * 4) + x]);
             }
         }
     }

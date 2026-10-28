@@ -122,6 +122,9 @@ public sealed class H264Decoder : IVideoDecoder
     /// <summary>For tests of frame threading: sleep up to this many milliseconds before each picture and after each macroblock row, at random.</summary>
     internal int RowDelay { get; init; }
 
+    /// <summary>For tests: every picture decoder checks its neighbour context against the lookups it replaces (PictureDecoder.Context.cs).</summary>
+    internal bool VerifyNeighbourContext { get; init; }
+
     /// <summary>
     /// Conceal damaged slice data instead of failing the picture's <see cref="Decode(Packet)"/>: the macroblocks a slice
     /// decoded before the damage stay, the picture's other slices are decoded, and every macroblock left missing is a
@@ -732,8 +735,8 @@ public sealed class H264Decoder : IVideoDecoder
             {
                 // The statistics are shared, counted without locks: exact with one thread (which tests use).
                 IPictureDecoder Plane(int plane) => sps.BitDepthLuma > 8
-                    ? new PictureDecoder<ushort>(sps, plane) { Statistics = MbaffStatistics, FieldStatistics = FieldStatistics, RowDelay = RowDelay }
-                    : new PictureDecoder<byte>(sps, plane) { Statistics = MbaffStatistics, FieldStatistics = FieldStatistics, RowDelay = RowDelay };
+                    ? new PictureDecoder<ushort>(sps, plane) { Statistics = MbaffStatistics, FieldStatistics = FieldStatistics, RowDelay = RowDelay, VerifyNeighbourContext = VerifyNeighbourContext }
+                    : new PictureDecoder<byte>(sps, plane) { Statistics = MbaffStatistics, FieldStatistics = FieldStatistics, RowDelay = RowDelay, VerifyNeighbourContext = VerifyNeighbourContext };
                 var decoder = sps.SeparateColourPlanes ? new SeparatePlanesDecoder([Plane(0), Plane(1), Plane(2)]) : Plane(0);
                 _decoders.Add(decoder);
                 return decoder;

@@ -198,7 +198,9 @@ public class H264ConcealmentTests
     private static List<(long Pts, byte[] Data, bool Damaged)> Decode(VideoStreamInfo video, List<(byte[] Data, long Pts)> packets, int damaged, bool conceal, int threads, int rowDelay = 0)
     {
         int lengthSize = (video.CodecPrivate.Span[4] & 3) + 1;
-        var decoder = new H264Decoder(video) { ConcealErrors = conceal, Threads = threads, RowDelay = rowDelay };
+
+        // The neighbour context checked against its lookups too: macroblocks after a lost slice, and concealed ones.
+        var decoder = new H264Decoder(video) { ConcealErrors = conceal, Threads = threads, RowDelay = rowDelay, VerifyNeighbourContext = true };
         var frames = new List<(long, byte[], bool)>();
         void Take(IReadOnlyList<VideoFrame> output)
         {

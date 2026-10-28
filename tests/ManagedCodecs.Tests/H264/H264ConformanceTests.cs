@@ -56,6 +56,16 @@ public class H264ConformanceTests
         CompareWithFfmpeg(sampleName, borrowFrames: false, dispose: true, threads: 4, rowDelay: 1);
 
     /// <summary>
+    /// The same with every picture decoder checking its neighbour context (PictureDecoder.Context.cs) against the
+    /// lookups it replaces: each nC, neighbouring motion, predicted intra mode and intra availability is derived both
+    /// ways, and a difference throws (docs/decisions/2026-10-28-h264-neighbour-context.md).
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(Samples))]
+    public Task NeighbourContextMatchesLookups(string sampleName) =>
+        CompareWithFfmpeg(sampleName, borrowFrames: false, dispose: true, verifyNeighbourContext: true);
+
+    /// <summary>
     /// The same through the asynchronous API: packets from <see cref="IDemuxer.ReadPacketsAsync"/>, frames from
     /// <see cref="H264Decoder.DecodeAsync"/> and <see cref="H264Decoder.FlushAsync"/> with two threads, which await the
     /// pictures being decoded instead of blocking.
@@ -65,7 +75,7 @@ public class H264ConformanceTests
     public Task MatchesFfmpegAsynchronously(string sampleName) =>
         CompareWithFfmpeg(sampleName, borrowFrames: false, dispose: true, threads: 2, asynchronous: true);
 
-    private static async Task CompareWithFfmpeg(string sampleName, bool borrowFrames, bool dispose, int threads = 1, int rowDelay = 0, bool asynchronous = false)
+    private static async Task CompareWithFfmpeg(string sampleName, bool borrowFrames, bool dispose, int threads = 1, int rowDelay = 0, bool asynchronous = false, bool verifyNeighbourContext = false)
     {
         var lines = File.ReadAllLines(TestSamples.ReferenceOf(sampleName, ".framemd5"));
         var expected = FrameMd5.Parse(lines).Where(e => e.StreamIndex == 0).ToList(); // FFmpeg lists video first
@@ -73,7 +83,7 @@ public class H264ConformanceTests
 
         using var demuxer = Mp4Demuxer.Open(TestSamples.PathOf(sampleName));
         var video = demuxer.Video!;
-        var decoder = new H264Decoder(video) { BorrowFrames = borrowFrames, Threads = threads, RowDelay = rowDelay };
+        var decoder = new H264Decoder(video) { BorrowFrames = borrowFrames, Threads = threads, RowDelay = rowDelay, VerifyNeighbourContext = verifyNeighbourContext };
 
         int index = 0;
         long firstPts = 0;

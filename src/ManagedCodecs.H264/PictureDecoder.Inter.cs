@@ -520,12 +520,12 @@ internal sealed partial class PictureDecoder<TPixel>
             return;
         }
 
-        PredictPartition(slice, mbAddr, x, y, w, h, part, block, ref0, ref1);
+        PredictPartitionGeneral(slice, mbAddr, x, y, w, h, part, block, ref0, ref1);
     }
 
-    /// <summary><see cref="PredictPartition(SliceState, int, int, int, int, int)"/> for every other partition.</summary>
+    /// <summary><see cref="PredictPartition"/> for every other partition.</summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private void PredictPartition(SliceState slice, int mbAddr, int x, int y, int w, int h, int part, int block, Picture? ref0, Picture? ref1)
+    private void PredictPartitionGeneral(SliceState slice, int mbAddr, int x, int y, int w, int h, int part, int block, Picture? ref0, Picture? ref1)
     {
         // Where the partition is, in the coordinates of the references (a field macroblock's are
         // its field's), and where its samples go in the picture.

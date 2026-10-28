@@ -274,6 +274,71 @@ public class ReferenceListTests
         Assert.Equal(["0t", "1b", "0b", "1t"], Fields(refs.BuildList(FieldHeader(2, bottom: false, numRef: 4), FieldSps)));
     }
 
+    /// <summary>
+    /// Random field marking, as a damaged or hostile stream may send it: IDR pairs short- or long-term, then field
+    /// pictures with random memory management operations (1, 2, 3, 4 and 6, with numbers near the real ones) or none.
+    /// After every field the lists build for both parities and are sound: no field twice, every field a reference,
+    /// short-term fields before long-term ones (but in list 1), and no two frames holding one LongTermFrameIdx.
+    /// </summary>
+    [Fact]
+    public void FieldMarking_RandomOperationsKeepTheListsSound()
+    {
+        var sps = FieldSps3;
+        for (int seed = 0; seed < 300; seed++)
+        {
+            var random = new Random(seed);
+            var refs = new ReferenceList();
+            for (int n = 0; n < 24; n++)
+            {
+                bool idr = n == 0 || random.Next(12) == 0;
+                if (idr)
+                {
+                    refs.Clear();
+                }
+
+                int frameNum = idr ? 0 : n % 16;
+                var frame = new Picture(1, 1) { FrameNum = frameNum, Poc = 2 * n, TopPoc = 2 * n, BottomPoc = (2 * n) + 1 };
+                bool bottomFirst = random.Next(4) == 0;
+                for (int field = 0; field < 2; field++)
+                {
+                    bool bottom = bottomFirst ? field == 0 : field == 1;
+                    var operations = (field == 0 && idr) || random.Next(2) == 0 ? null : RandomOperations(random);
+                    var header = FieldHeader(frameNum, bottom, idr: idr && field == 0, operations: operations, longTerm: idr && random.Next(2) == 0);
+                    refs.MarkField(header, frame, sps, secondField: field == 1);
+                    for (int parity = 0; parity < 2; parity++)
+                    {
+                        AssertSound(refs.BuildList(FieldHeader(frameNum + 1, bottom: parity == 1, numRef: 64), sps));
+                        var (l0, l1) = refs.BuildLists(FieldBHeader(frameNum + 1, bottom: parity == 1, numRef: 64), sps, currentPoc: (2 * n) + 1);
+                        AssertSound(l0);
+                        AssertSound(l1, ordered: false); // its first two swap when it equals list 0, long-term or not
+                    }
+                }
+            }
+        }
+
+        // Operation 6 last: an index the current field took by 6 and a later 3 then gives another frame stays with both
+        // (the current field joins the references after its operations, as in JM's decoder), which no encoder writes.
+        static IReadOnlyList<MemoryManagementOperation> RandomOperations(Random random) =>
+            [.. Enumerable.Range(0, random.Next(4)).Select(_ => random.Next(5) switch
+            {
+                0 => new MemoryManagementOperation(1, random.Next(1, 8), 0, 0, 0),
+                1 => Op2(random.Next(8)),
+                2 => Op3(random.Next(1, 8), random.Next(4)),
+                3 => Op4(random.Next(5)),
+                _ => Op6(random.Next(4)),
+            }).OrderBy(op => op.Op == 6)];
+
+        static void AssertSound(List<Picture> list, bool ordered = true)
+        {
+            Assert.Equal(list.Count, list.Distinct().Count());
+            Assert.All(list, f => Assert.True(f.IsShortTermReference || f.IsLongTermReference));
+            int firstLong = list.FindIndex(f => f.IsLongTermReference);
+            Assert.True(!ordered || firstLong < 0 || list.Skip(firstLong).All(f => f.IsLongTermReference), "A short-term field after a long-term one.");
+            var holders = list.Where(f => f.IsLongTermReference).Select(f => f.Frame).Distinct().ToList();
+            Assert.Equal(holders.Count, holders.Select(f => f.LongTermFrameIdx).Distinct().Count());
+        }
+    }
+
     private static MemoryManagementOperation Op2(int longTermPicNum) => new(2, 0, longTermPicNum, 0, 0);
 
     private static MemoryManagementOperation Op3(int differenceOfPicNums, int longTermFrameIdx) => new(3, differenceOfPicNums, 0, longTermFrameIdx, 0);

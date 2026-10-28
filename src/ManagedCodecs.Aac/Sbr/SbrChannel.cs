@@ -658,7 +658,7 @@ internal sealed class SbrChannel(bool downsampled = false)
         }
     }
 
-    // Parametric stereo: the frame's synthesis input (and the hybrid filters' 6 slots of the three lowest bands after it,
+    // Parametric stereo: the frame's synthesis input (and the hybrid filters' 6 slots of the five lowest bands after it,
     // from the low band) mixed into a left and a right channel, each through a synthesis bank of its own.
     private void SynthesizeStereo(SbrElement? element, Span<float> left, Span<float> right, AacStatistics statistics)
     {
@@ -675,8 +675,8 @@ internal sealed class SbrChannel(bool downsampled = false)
 
         for (int l = Slots; l < Slots + PsProcessor.LookAhead; l++)
         {
-            _lowReal[l + HfAdjust].AsSpan(0, 3).CopyTo(_stereoRe[l]);
-            _lowImaginary[l + HfAdjust].AsSpan(0, 3).CopyTo(_stereoIm[l]);
+            _lowReal[l + HfAdjust].AsSpan(0, PsProcessor.HybridQmfBands).CopyTo(_stereoRe[l]);
+            _lowImaginary[l + HfAdjust].AsSpan(0, PsProcessor.HybridQmfBands).CopyTo(_stereoIm[l]);
         }
 
         int top = element is { HasFrame: true, Frequencies: { } frequencies } ? frequencies.Kx + frequencies.M : 32;

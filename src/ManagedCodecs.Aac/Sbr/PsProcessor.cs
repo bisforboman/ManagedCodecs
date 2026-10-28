@@ -34,19 +34,18 @@ internal sealed class PsProcessor
     // The SBR low band's look-ahead past the frame, which the hybrid filters reach into.
     public const int LookAhead = 6;
 
-    private const int HybridBands = 12;
-    private const int Bins = 20;
-    private const int SubQmfGroups = 10;
-    private const int Groups = 22;
+    // The largest layout's (34 bands') counts, which the buffers take.
+    private const int MaxHybridBands = 32;
+    private const int MaxBins = 34;
+    private const int MaxPhaseBins = 17;
+    public const int HybridQmfBands = 5;
     private const int AllPassBands = 23;
     private const int ShortDelayBands = 35;
     private const int LongDelay = 14;
-    private const int DecayCutoff = 3;
     private const double DecaySlope = 0.05;
     private const double PeakDecay = 0.765928338364649;
     private const double EnergySmoothing = 0.25;
     private const double TransientImpact = 1.5;
-    private const int PhaseBins = 11;
 
     // 8.6.4.3: the prototype filters of the 8-band (complex) and 2-band (real) hybrid filters.
     private static readonly double[] Prototype8 =
@@ -66,14 +65,6 @@ internal sealed class PsProcessor
     private static readonly double[] ModulationCos = [.. Enumerable.Range(0, 8 * 13).Select(i => QmfTrig.CosPi256(-32 * ((2 * (i / 13)) + 1) * ((i % 13) - 6)))];
     private static readonly double[] ModulationSin = [.. Enumerable.Range(0, 8 * 13).Select(i => QmfTrig.SinPi256(-32 * ((2 * (i / 13)) + 1) * ((i % 13) - 6)))];
 
-    // The groups (8.6.4.6, 20 bands): the first 10 single hybrid sub-subbands (12 of them: band 0's 0 to 7 with 4 and 5
-    // unused, band 1's 8 and 9, band 2's 10 and 11), the other 12 ranges of QMF bands; and each group's parameter band.
-    private static readonly int[] GroupBorders = [6, 7, 0, 1, 2, 3, 9, 8, 10, 11, 3, 4, 5, 6, 7, 8, 9, 11, 14, 18, 23, 35, 64];
-    private static readonly int[] GroupBins = [1, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19];
-
-    // The centre frequency of each hybrid sub-subband, in QMF bands, for the decorrelator's phase factors.
-    private static readonly double[] HybridCentres = [0.125, 0.375, 0.625, 0.875, 0, 0, -0.375, -0.125, 1.75, 1.25, 2.25, 2.75];
-
     // The decorrelator's all-pass links (8.6.4.5): their delays in slots, decay factors and fractional delays.
     private static readonly int[] LinkDelays = [3, 4, 5];
     private static readonly double[] LinkDecays = [0.65143905753106, 0.56471812200776, 0.48954165955695];
@@ -81,11 +72,28 @@ internal sealed class PsProcessor
     private const double Fraction = 0.39;
     private const int AllPassDelay = 2;
 
-    // exp(-i pi q f) for the main fractional delay (q = 0.39) and each link's, by hybrid sub-subband and by QMF band.
-    internal static readonly (double[] Re, double[] Im) HybridPhase = Phases(HybridCentres, Fraction);
+    // exp(-i pi q f) for the main fractional delay (q = 0.39) and each link's, by QMF band (centred at band + 0.5 in
+    // either layout).
     internal static readonly (double[] Re, double[] Im) QmfPhase = Phases(QmfCentres(), Fraction);
-    private static readonly (double[] Re, double[] Im)[] HybridLinkPhase = [.. LinkFractions.Select(q => Phases(HybridCentres, q))];
     internal static readonly (double[] Re, double[] Im)[] QmfLinkPhase = [.. LinkFractions.Select(q => Phases(QmfCentres(), q))];
+
+    /// <summary>
+    /// The 20-band layout (8.6.4.6): the first 10 groups single hybrid sub-subbands (12 of them: band 0's 0 to 7 with 4
+    /// and 5 unused, band 1's 8 and 9, band 2's 10 and 11), the other 12 ranges of QMF bands from 3; each group's
+    /// parameter band; the sub-subbands' centre frequencies in QMF bands, for the decorrelator's phase factors; the
+    /// all-pass decay's cutoff (QMF band 3); and the groups whose phases start negated (0 and 1, of negative frequency).
+    /// </summary>
+    internal static readonly Layout Layout20 = new(
+        bins: 20,
+        hybridBands: 12,
+        qmfStart: 3,
+        subQmfGroups: 10,
+        groupBorders: [6, 7, 0, 1, 2, 3, 9, 8, 10, 11, 3, 4, 5, 6, 7, 8, 9, 11, 14, 18, 23, 35, 64],
+        groupBins: [1, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19],
+        centres: [0.125, 0.375, 0.625, 0.875, 0, 0, -0.375, -0.125, 1.75, 1.25, 2.25, 2.75],
+        decayCutoff: 3,
+        phaseBins: 11,
+        negated: (0, 1));
 
     // The IID's scale factors (8.6.4.6.2), sqrt(2 / (1 + c^2)) with c = 10^(IID / 20) for IID index -7 to 7 (coarse)
     // or -15 to 15 (fine), and the ICC's angle alpha = acos(rho) / 2 for index 0 to 7; computed from the spec's IID and
@@ -120,34 +128,37 @@ internal sealed class PsProcessor
         1.1003085943613728, 1.5707963267948966,
     ];
 
-    // The three hybrid-filtered QMF bands from 6 slots before the frame to 6 after (44 slots, the first 12 the previous
-    // frame's last), real and imaginary.
     // A frame's parameters as 20 bands per envelope (one more for variable borders' fill), and the transient ducking
     // factors per slot and parameter band.
-    private readonly int[][] _iid = [.. Enumerable.Range(0, PsData.MaxEnvelopes + 1).Select(_ => new int[Bins])];
-    private readonly int[][] _icc = [.. Enumerable.Range(0, PsData.MaxEnvelopes + 1).Select(_ => new int[Bins])];
-    private readonly int[][] _ipd = [.. Enumerable.Range(0, PsData.MaxEnvelopes + 1).Select(_ => new int[PhaseBins])];
-    private readonly int[][] _opd = [.. Enumerable.Range(0, PsData.MaxEnvelopes + 1).Select(_ => new int[PhaseBins])];
-    private readonly double[][] _ratio = Buffers(Slots, Bins);
+    private readonly int[][] _iid = [.. Enumerable.Range(0, PsData.MaxEnvelopes + 1).Select(_ => new int[MaxBins])];
+    private readonly int[][] _icc = [.. Enumerable.Range(0, PsData.MaxEnvelopes + 1).Select(_ => new int[MaxBins])];
+    private readonly int[][] _ipd = [.. Enumerable.Range(0, PsData.MaxEnvelopes + 1).Select(_ => new int[MaxPhaseBins])];
+    private readonly int[][] _opd = [.. Enumerable.Range(0, PsData.MaxEnvelopes + 1).Select(_ => new int[MaxPhaseBins])];
+    private readonly double[][] _ratio = Buffers(Slots, MaxBins);
 
-    private readonly double[][] _bandRe = Buffers(3, Slots + 12);
-    private readonly double[][] _bandIm = Buffers(3, Slots + 12);
+    // The layout the frame is processed in.
+    private Layout _layout = Layout20;
+
+    // The five lowest QMF bands (whichever layout splits them) from 6 slots before the frame to 6 after (44 slots, the
+    // first 12 the previous frame's last), real and imaginary.
+    private readonly double[][] _bandRe = Buffers(HybridQmfBands, Slots + 12);
+    private readonly double[][] _bandIm = Buffers(HybridQmfBands, Slots + 12);
 
     // The hybrid sub-subbands of the mono signal, then of the left; of the decorrelated one, then of the right; by slot.
-    private readonly double[][] _leftRe = Buffers(Slots, HybridBands);
-    private readonly double[][] _leftIm = Buffers(Slots, HybridBands);
-    private readonly double[][] _rightRe = Buffers(Slots, HybridBands);
-    private readonly double[][] _rightIm = Buffers(Slots, HybridBands);
+    private readonly double[][] _leftRe = Buffers(Slots, MaxHybridBands);
+    private readonly double[][] _leftIm = Buffers(Slots, MaxHybridBands);
+    private readonly double[][] _rightRe = Buffers(Slots, MaxHybridBands);
+    private readonly double[][] _rightIm = Buffers(Slots, MaxHybridBands);
 
     // The decorrelator's state: per (sub-)subband, the 2-slot fractional delay and each link's delay line (sharing
     // their indices), and the plain delays of the QMF bands from 23 up: 14 slots below band 35, one from it up, each
     // band's index moving one a slot from the same start, so one index serves all the 14-slot ones.
-    private readonly double[][] _hybridDelayRe = Buffers(AllPassDelay, HybridBands);
-    private readonly double[][] _hybridDelayIm = Buffers(AllPassDelay, HybridBands);
+    private readonly double[][] _hybridDelayRe = Buffers(AllPassDelay, MaxHybridBands);
+    private readonly double[][] _hybridDelayIm = Buffers(AllPassDelay, MaxHybridBands);
     private readonly double[][] _qmfDelayRe = Buffers(LongDelay, 64);
     private readonly double[][] _qmfDelayIm = Buffers(LongDelay, 64);
-    private readonly double[][][] _hybridLinkRe = [.. LinkDelays.Select(d => Buffers(d, HybridBands))];
-    private readonly double[][][] _hybridLinkIm = [.. LinkDelays.Select(d => Buffers(d, HybridBands))];
+    private readonly double[][][] _hybridLinkRe = [.. LinkDelays.Select(d => Buffers(d, MaxHybridBands))];
+    private readonly double[][][] _hybridLinkIm = [.. LinkDelays.Select(d => Buffers(d, MaxHybridBands))];
     private readonly double[][][] _qmfLinkRe = [.. LinkDelays.Select(d => Buffers(d, 64))];
     private readonly double[][][] _qmfLinkIm = [.. LinkDelays.Select(d => Buffers(d, 64))];
     private int _qmfDelayIndex;
@@ -155,24 +166,24 @@ internal sealed class PsProcessor
     private int _delayIndex;
 
     // The transient detector's smoothed peak, peak excess and energy, per parameter band.
-    private readonly double[] _peakDecay = new double[Bins];
-    private readonly double[] _peakDifference = new double[Bins];
-    private readonly double[] _energy = new double[Bins];
+    private readonly double[] _peakDecay = new double[MaxBins];
+    private readonly double[] _peakDifference = new double[MaxBins];
+    private readonly double[] _energy = new double[MaxBins];
 
     // The mixing matrix (h11, h12, h21, h22) the last envelope ended on, per parameter band; and its IID and ICC indices,
     // which a frame without parameters keeps.
-    private readonly double[][] _previousH = [new double[Bins], new double[Bins], new double[Bins], new double[Bins]];
-    private readonly int[] _lastIid = new int[Bins];
-    private readonly int[] _lastIcc = new int[Bins];
+    private readonly double[][] _previousH = Buffers(4, MaxBins);
+    private readonly int[] _lastIid = new int[MaxBins];
+    private readonly int[] _lastIcc = new int[MaxBins];
     private bool _lastFineIid;
 
     // The imaginary parts of the matrix the last envelope with phase parameters ended on, its IPD and OPD indices, and
     // the two envelopes' indices before the next one (8 times the older plus the newer), which the smoothing takes.
-    private readonly double[][] _previousHIm = [new double[Bins], new double[Bins], new double[Bins], new double[Bins]];
-    private readonly int[] _lastIpd = new int[PhaseBins];
-    private readonly int[] _lastOpd = new int[PhaseBins];
-    private readonly int[] _ipdHistory = new int[PhaseBins];
-    private readonly int[] _opdHistory = new int[PhaseBins];
+    private readonly double[][] _previousHIm = Buffers(4, MaxBins);
+    private readonly int[] _lastIpd = new int[MaxPhaseBins];
+    private readonly int[] _lastOpd = new int[MaxPhaseBins];
+    private readonly int[] _ipdHistory = new int[MaxPhaseBins];
+    private readonly int[] _opdHistory = new int[MaxPhaseBins];
     private bool _lastIpdOpd;
 
     // Mixing procedure Rb (icc_mode 3 to 5), from the last frame whose header enabled ICC.
@@ -228,6 +239,7 @@ internal sealed class PsProcessor
     // to increase. No parameters (none sent, or none this frame) keep the last values over the whole frame.
     private int Envelopes(PsData data, bool hasData, Span<int> starts, int[][] iid, int[][] icc)
     {
+        var layout = _layout;
         int count = hasData ? data.NumEnvelopes : 0;
         if (count == 0)
         {
@@ -242,14 +254,14 @@ internal sealed class PsProcessor
 
         for (int e = 0; e < count; e++)
         {
-            for (int b = 0; b < Bins; b++)
+            for (int b = 0; b < layout.Bins; b++)
             {
                 iid[e][b] = data.EnableIid ? data.Iid[e][data.IidBands == 10 ? b / 2 : b] : 0;
                 icc[e][b] = data.EnableIcc ? data.Icc[e][data.IccBands == 10 ? b / 2 : b] : 0;
             }
 
             // 5 bands cover the lowest 10 of 20; the 11th takes 0.
-            for (int b = 0; b < PhaseBins; b++)
+            for (int b = 0; b < layout.PhaseBins; b++)
             {
                 bool coarse = data.PhaseBands == 5;
                 _ipd[e][b] = coarse ? (b < 10 ? data.Ipd[e][b / 2] : 0) : data.Ipd[e][b];
@@ -294,7 +306,8 @@ internal sealed class PsProcessor
     // 8.6.4.3: the 13-tap filters on the three lowest bands, slot i from their slots i - 6 to i + 6.
     private void HybridAnalysis(double[][] re, double[][] im)
     {
-        for (int band = 0; band < 3; band++)
+        // All five bands' history, whichever layout splits them, so a switch of layout finds it in place.
+        for (int band = 0; band < HybridQmfBands; band++)
         {
             var bandRe = _bandRe[band];
             var bandIm = _bandIm[band];
@@ -367,9 +380,11 @@ internal sealed class PsProcessor
     // 8.6.4.5: the decorrelated signal, into _rightRe/_rightIm (hybrid) and rightRe/rightIm (QMF bands from 3).
     private void Decorrelate(double[][] re, double[][] im, double[][] rightRe, double[][] rightIm, AacStatistics statistics)
     {
+        var layout = _layout;
+
         // The transient detector: each parameter band's power by slot, against its smoothed peak.
         var ratio = _ratio;
-        Span<double> power = stackalloc double[Bins];
+        Span<double> power = stackalloc double[MaxBins];
         int ducked = 0;
         for (int i = 0; i < Slots; i++)
         {
@@ -378,19 +393,19 @@ internal sealed class PsProcessor
             var hybridIm = _leftIm[i];
             var rowRe = re[i];
             var rowIm = im[i];
-            for (int gr = 0; gr < Groups; gr++)
+            for (int gr = 0; gr < layout.Groups; gr++)
             {
                 // Each band's sum in subband order, as it was added to power[bin] one by one.
-                int bin = GroupBins[gr];
+                int bin = layout.GroupBins[gr];
                 double sum = power[bin];
-                if (gr < SubQmfGroups)
+                if (gr < layout.SubQmfGroups)
                 {
-                    int sb = GroupBorders[gr];
+                    int sb = layout.GroupBorders[gr];
                     sum += (hybridRe[sb] * hybridRe[sb]) + (hybridIm[sb] * hybridIm[sb]);
                 }
                 else
                 {
-                    for (int sb = GroupBorders[gr]; sb < GroupBorders[gr + 1]; sb++)
+                    for (int sb = layout.GroupBorders[gr]; sb < layout.GroupBorders[gr + 1]; sb++)
                     {
                         sum += (rowRe[sb] * rowRe[sb]) + (rowIm[sb] * rowIm[sb]);
                     }
@@ -400,7 +415,7 @@ internal sealed class PsProcessor
             }
 
             var slotRatio = ratio[i];
-            for (int bin = 0; bin < Bins; bin++)
+            for (int bin = 0; bin < layout.Bins; bin++)
             {
                 double p = power[bin];
                 double peak = Math.Max(_peakDecay[bin] * PeakDecay, p);
@@ -427,11 +442,11 @@ internal sealed class PsProcessor
         {
             var hybridDelayRe = _hybridDelayRe[d];
             var hybridDelayIm = _hybridDelayIm[d];
-            for (int gr = 0; gr < SubQmfGroups; gr++)
+            for (int gr = 0; gr < layout.SubQmfGroups; gr++)
             {
-                int sb = GroupBorders[gr];
-                var (outRe, outIm) = AllPass(_leftRe[i][sb], _leftIm[i][sb], sb, 1, hybridDelayRe, hybridDelayIm, HybridPhase, _hybridLinkRe, _hybridLinkIm, HybridLinkPhase, linkIndex);
-                double duck = ratio[i][GroupBins[gr]];
+                int sb = layout.GroupBorders[gr];
+                var (outRe, outIm) = AllPass(_leftRe[i][sb], _leftIm[i][sb], sb, 1, hybridDelayRe, hybridDelayIm, layout.HybridPhase, _hybridLinkRe, _hybridLinkIm, layout.HybridLinkPhase, linkIndex);
+                double duck = ratio[i][layout.GroupBins[gr]];
                 _rightRe[i][sb] = duck * outRe;
                 _rightIm[i][sb] = duck * outIm;
             }
@@ -440,16 +455,16 @@ internal sealed class PsProcessor
             var inIm = im[i];
             var outRow = rightRe[i];
             var outRowIm = rightIm[i];
-            AllPassRow(inRe, inIm, GroupBorders[SubQmfGroups], AllPassBands, _qmfDelayRe[d], _qmfDelayIm[d], _qmfLinkRe, _qmfLinkIm, linkIndex, delayedRe, delayedIm);
+            AllPassRow(inRe, inIm, layout.GroupBorders[layout.SubQmfGroups], AllPassBands, layout.QmfDecay, _qmfDelayRe[d], _qmfDelayIm[d], _qmfLinkRe, _qmfLinkIm, linkIndex, delayedRe, delayedIm);
 
             // The plain delays: what went in 14 slots ago below band 35, one slot ago from it up.
             Delay(inRe, inIm, AllPassBands, ShortDelayBands, _qmfDelayRe[_qmfDelayIndex], _qmfDelayIm[_qmfDelayIndex], delayedRe, delayedIm);
             Delay(inRe, inIm, ShortDelayBands, 64, _qmfDelayRe[0], _qmfDelayIm[0], delayedRe, delayedIm);
             _qmfDelayIndex = _qmfDelayIndex + 1 >= LongDelay ? 0 : _qmfDelayIndex + 1;
-            for (int gr = SubQmfGroups; gr < Groups; gr++)
+            for (int gr = layout.SubQmfGroups; gr < layout.Groups; gr++)
             {
-                double duck = ratio[i][GroupBins[gr]];
-                for (int sb = GroupBorders[gr]; sb < GroupBorders[gr + 1]; sb++)
+                double duck = ratio[i][layout.GroupBins[gr]];
+                for (int sb = layout.GroupBorders[gr]; sb < layout.GroupBorders[gr + 1]; sb++)
                 {
                     outRow[sb] = duck * delayedRe[sb];
                     outRowIm[sb] = duck * delayedIm[sb];
@@ -476,8 +491,8 @@ internal sealed class PsProcessor
         inIm[first..end].CopyTo(rowIm.AsSpan(first..end));
     }
 
-    // The decay of the all-pass links by QMF subband: 1 up to DecayCutoff, then falling by DecaySlope a subband.
-    private static readonly double[] QmfDecay = [.. Enumerable.Range(0, 64).Select(sb => sb <= DecayCutoff ? 1 : Math.Max(0, 1 + (DecayCutoff * DecaySlope) - (DecaySlope * sb)))];
+    /// <summary>The decay of the all-pass links by QMF subband: 1 up to <paramref name="cutoff"/>, then falling by DecaySlope a subband.</summary>
+    internal static double[] QmfDecays(int cutoff) => [.. Enumerable.Range(0, 64).Select(sb => sb <= cutoff ? 1 : Math.Max(0, 1 + (cutoff * DecaySlope) - (DecaySlope * sb)))];
 
     /// <summary>
     /// The QMF subbands <paramref name="first"/> .. <paramref name="end"/> - 1 of one slot through the all-pass filter
@@ -485,7 +500,7 @@ internal sealed class PsProcessor
     /// subbands at a time where Vector256 is accelerated, each lane with AllPass's operations in its order (no fused
     /// multiply-adds), so the output is the same to the bit (<c>PsAllPassRow_MatchesScalar</c>); the rest one by one.
     /// </summary>
-    internal static void AllPassRow(ReadOnlySpan<double> inRe, ReadOnlySpan<double> inIm, int first, int end, double[] delayRe, double[] delayIm, double[][][] linkRe, double[][][] linkIm, ReadOnlySpan<int> linkIndex, Span<double> outRe, Span<double> outIm)
+    internal static void AllPassRow(ReadOnlySpan<double> inRe, ReadOnlySpan<double> inIm, int first, int end, double[] decay, double[] delayRe, double[] delayIm, double[][][] linkRe, double[][][] linkIm, ReadOnlySpan<int> linkIndex, Span<double> outRe, Span<double> outIm)
     {
         int sb = first;
         if (Vector256.IsHardwareAccelerated)
@@ -500,7 +515,7 @@ internal sealed class PsProcessor
                 var phaseIm = Vector256.Create<double>(QmfPhase.Im.AsSpan(sb));
                 var r = (delayedRe * phaseRe) - (delayedIm * phaseIm);
                 var m = (delayedRe * phaseIm) + (delayedIm * phaseRe);
-                var decay = Vector256.Create<double>(QmfDecay.AsSpan(sb));
+                var decays = Vector256.Create<double>(decay.AsSpan(sb));
                 for (int link = 0; link < 3; link++)
                 {
                     var bufRe = linkRe[link][linkIndex[link]].AsSpan(sb);
@@ -508,7 +523,7 @@ internal sealed class PsProcessor
                     var lp = QmfLinkPhase[link];
                     var lpRe = Vector256.Create<double>(lp.Re.AsSpan(sb));
                     var lpIm = Vector256.Create<double>(lp.Im.AsSpan(sb));
-                    var a = decay * Vector256.Create(LinkDecays[link]);
+                    var a = decays * Vector256.Create(LinkDecays[link]);
                     var storedRe = Vector256.Create<double>(bufRe);
                     var storedIm = Vector256.Create<double>(bufIm);
                     var nextRe = (storedRe * lpRe) - (storedIm * lpIm) - (a * r);
@@ -526,7 +541,7 @@ internal sealed class PsProcessor
 
         for (; sb < end; sb++)
         {
-            (outRe[sb], outIm[sb]) = AllPass(inRe[sb], inIm[sb], sb, QmfDecay[sb], delayRe, delayIm, QmfPhase, linkRe, linkIm, QmfLinkPhase, linkIndex);
+            (outRe[sb], outIm[sb]) = AllPass(inRe[sb], inIm[sb], sb, decay[sb], delayRe, delayIm, QmfPhase, linkRe, linkIm, QmfLinkPhase, linkIndex);
         }
     }
 
@@ -568,18 +583,19 @@ internal sealed class PsProcessor
     // right = h12 M + h22 D.
     private void Mix(int envelopes, ReadOnlySpan<int> starts, int[][] iid, int[][] icc, bool fine, bool rb, bool phases, double[][] re, double[][] im, double[][] rightRe, double[][] rightIm)
     {
+        var layout = _layout;
         var scale = fine ? FineScaleFactors : ScaleFactors;
         int steps = fine ? 15 : 7;
-        Span<double> h = stackalloc double[4 * Bins];
-        Span<double> hIm = stackalloc double[4 * Bins];
+        Span<double> h = stackalloc double[4 * MaxBins];
+        Span<double> hIm = stackalloc double[4 * MaxBins];
         for (int e = 0; e < envelopes; e++)
         {
-            for (int bin = 0; bin < Bins; bin++)
+            for (int bin = 0; bin < layout.Bins; bin++)
             {
                 double right = scale[steps + iid[e][bin]];
                 if (rb)
                 {
-                    MatrixRb(right, Rhos[icc[e][bin]], out h[bin], out h[Bins + bin], out h[(2 * Bins) + bin], out h[(3 * Bins) + bin]);
+                    MatrixRb(right, Rhos[icc[e][bin]], out h[bin], out h[MaxBins + bin], out h[(2 * MaxBins) + bin], out h[(3 * MaxBins) + bin]);
                 }
                 else
                 {
@@ -587,12 +603,12 @@ internal sealed class PsProcessor
                     double alpha = Alphas[icc[e][bin]];
                     double beta = alpha * (right - left) / Math.Sqrt(2);
                     h[bin] = left * PsMath.Cos(beta + alpha);
-                    h[Bins + bin] = right * PsMath.Cos(beta - alpha);
-                    h[(2 * Bins) + bin] = left * PsMath.Sin(beta + alpha);
-                    h[(3 * Bins) + bin] = right * PsMath.Sin(beta - alpha);
+                    h[MaxBins + bin] = right * PsMath.Cos(beta - alpha);
+                    h[(2 * MaxBins) + bin] = left * PsMath.Sin(beta + alpha);
+                    h[(3 * MaxBins) + bin] = right * PsMath.Sin(beta - alpha);
                 }
 
-                if (phases && bin < PhaseBins)
+                if (phases && bin < layout.PhaseBins)
                 {
                     // h11 and h21 turned by the smoothed OPD, h12 and h22 by the OPD less the IPD.
                     int opd = (_opdHistory[bin] * 8) + _opd[e][bin];
@@ -607,7 +623,7 @@ internal sealed class PsProcessor
                     double turnIm = (opdIm * ipdRe) - (opdRe * ipdIm);
                     for (int m = 0; m < 4; m++)
                     {
-                        int i = (m * Bins) + bin;
+                        int i = (m * MaxBins) + bin;
                         (double cos, double sin) = m == 0 || m == 2 ? (opdRe, opdIm) : (turnRe, turnIm);
                         hIm[i] = h[i] * sin;
                         h[i] *= cos;
@@ -615,25 +631,25 @@ internal sealed class PsProcessor
                 }
                 else
                 {
-                    hIm[bin] = hIm[Bins + bin] = hIm[(2 * Bins) + bin] = hIm[(3 * Bins) + bin] = 0;
+                    hIm[bin] = hIm[MaxBins + bin] = hIm[(2 * MaxBins) + bin] = hIm[(3 * MaxBins) + bin] = 0;
                 }
             }
 
             int length = starts[e + 1] - starts[e];
-            for (int gr = 0; gr < Groups; gr++)
+            for (int gr = 0; gr < layout.Groups; gr++)
             {
-                int bin = GroupBins[gr];
-                bool hybrid = gr < SubQmfGroups;
-                int first = GroupBorders[gr];
-                int last = hybrid ? first + 1 : GroupBorders[gr + 1];
+                int bin = layout.GroupBins[gr];
+                bool hybrid = gr < layout.SubQmfGroups;
+                int first = layout.GroupBorders[gr];
+                int last = hybrid ? first + 1 : layout.GroupBorders[gr + 1];
                 double h11 = _previousH[0][bin];
                 double h12 = _previousH[1][bin];
                 double h21 = _previousH[2][bin];
                 double h22 = _previousH[3][bin];
                 double d11 = (h[bin] - h11) / length;
-                double d12 = (h[Bins + bin] - h12) / length;
-                double d21 = (h[(2 * Bins) + bin] - h21) / length;
-                double d22 = (h[(3 * Bins) + bin] - h22) / length;
+                double d12 = (h[MaxBins + bin] - h12) / length;
+                double d21 = (h[(2 * MaxBins) + bin] - h21) / length;
+                double d22 = (h[(3 * MaxBins) + bin] - h22) / length;
                 if (!phases)
                 {
                     for (int i = starts[e]; i < starts[e + 1]; i++)
@@ -658,15 +674,15 @@ internal sealed class PsProcessor
 
                 // The imaginary parts start from the previous envelope's, negated in the sub-subbands of negative
                 // frequency (groups 0 and 1), as FFmpeg starts them (it doesn't negate the end).
-                double sign = gr <= 1 ? -1 : 1;
+                double sign = gr >= layout.Negated.First && gr <= layout.Negated.Last ? -1 : 1;
                 double g11 = sign * _previousHIm[0][bin];
                 double g12 = sign * _previousHIm[1][bin];
                 double g21 = sign * _previousHIm[2][bin];
                 double g22 = sign * _previousHIm[3][bin];
                 double e11 = (hIm[bin] - g11) / length;
-                double e12 = (hIm[Bins + bin] - g12) / length;
-                double e21 = (hIm[(2 * Bins) + bin] - g21) / length;
-                double e22 = (hIm[(3 * Bins) + bin] - g22) / length;
+                double e12 = (hIm[MaxBins + bin] - g12) / length;
+                double e21 = (hIm[(2 * MaxBins) + bin] - g21) / length;
+                double e22 = (hIm[(3 * MaxBins) + bin] - g22) / length;
                 for (int i = starts[e]; i < starts[e + 1]; i++)
                 {
                     h11 += d11;
@@ -695,14 +711,14 @@ internal sealed class PsProcessor
                 }
             }
 
-            for (int bin = 0; bin < Bins; bin++)
+            for (int bin = 0; bin < layout.Bins; bin++)
             {
                 for (int m = 0; m < 4; m++)
                 {
-                    _previousH[m][bin] = h[(m * Bins) + bin];
+                    _previousH[m][bin] = h[(m * MaxBins) + bin];
                     if (phases)
                     {
-                        _previousHIm[m][bin] = hIm[(m * Bins) + bin];
+                        _previousHIm[m][bin] = hIm[(m * MaxBins) + bin];
                     }
                 }
             }
@@ -820,4 +836,58 @@ internal sealed class PsProcessor
         ([.. centres.Select(f => PsMath.Cos(-Math.PI * q * f))], [.. centres.Select(f => PsMath.Sin(-Math.PI * q * f))]);
 
     private static double[][] Buffers(int count, int length) => [.. Enumerable.Range(0, count).Select(_ => new double[length])];
+
+    /// <summary>
+    /// A parameter band layout (20 or 34 bands): the hybrid sub-subbands that replace the lowest QMF bands, the groups of
+    /// (sub-)subbands that share a parameter band, and the decorrelator's tables that depend on them.
+    /// </summary>
+    internal sealed class Layout
+    {
+        public Layout(int bins, int hybridBands, int qmfStart, int subQmfGroups, int[] groupBorders, int[] groupBins, double[] centres, int decayCutoff, int phaseBins, (int First, int Last) negated)
+        {
+            Bins = bins;
+            HybridBands = hybridBands;
+            QmfStart = qmfStart;
+            GroupBorders = groupBorders;
+            GroupBins = groupBins;
+            SubQmfGroups = subQmfGroups;
+            HybridPhase = Phases(centres, Fraction);
+            HybridLinkPhase = [.. LinkFractions.Select(q => Phases(centres, q))];
+            QmfDecay = QmfDecays(decayCutoff);
+            PhaseBins = phaseBins;
+            Negated = negated;
+        }
+
+        /// <summary>Parameter bands: 20 or 34.</summary>
+        public int Bins { get; }
+
+        /// <summary>Hybrid sub-subbands, indexed as the groups' first borders give them.</summary>
+        public int HybridBands { get; }
+
+        /// <summary>The first QMF band not split into sub-subbands: 3 or 5.</summary>
+        public int QmfStart { get; }
+
+        /// <summary>Each hybrid group's sub-subband, then each QMF group's first band and the end (64).</summary>
+        public int[] GroupBorders { get; }
+
+        /// <summary>Each group's parameter band.</summary>
+        public int[] GroupBins { get; }
+
+        public int Groups => GroupBins.Length;
+
+        /// <summary>The groups of single hybrid sub-subbands, which come first.</summary>
+        public int SubQmfGroups { get; }
+
+        public (double[] Re, double[] Im) HybridPhase { get; }
+
+        public (double[] Re, double[] Im)[] HybridLinkPhase { get; }
+
+        public double[] QmfDecay { get; }
+
+        /// <summary>The parameter bands that take phase parameters: 11 or 17.</summary>
+        public int PhaseBins { get; }
+
+        /// <summary>The hybrid groups whose phases' imaginary parts start each envelope negated, as FFmpeg starts them.</summary>
+        public (int First, int Last) Negated { get; }
+    }
 }

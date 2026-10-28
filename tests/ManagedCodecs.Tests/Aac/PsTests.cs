@@ -164,8 +164,8 @@ public class PsTests
     public void PhasesMatchLibxaac()
     {
         // exp(-i pi 0.39 f): the first hybrid sub-subband's (f = 0.125) and the first QMF band's (f = 0.5).
-        Assert.Equal(0.9882950187, PsProcessor.HybridPhase.Re[0], 1e-7);
-        Assert.Equal(-0.1525546163, PsProcessor.HybridPhase.Im[0], 1e-7);
+        Assert.Equal(0.9882950187, PsProcessor.Layout20.HybridPhase.Re[0], 1e-7);
+        Assert.Equal(-0.1525546163, PsProcessor.Layout20.HybridPhase.Im[0], 1e-7);
         Assert.Equal(0.8181497455, PsProcessor.QmfPhase.Re[0], 1e-7);
     }
 
@@ -174,11 +174,13 @@ public class PsTests
     /// line and link states, to the bit, from the first subband it filters to one past the last, tails included.
     /// </summary>
     [Theory]
-    [InlineData(3, 23)]
-    [InlineData(0, 22)]
-    [InlineData(5, 6)]
-    public void PsAllPassRow_MatchesScalar(int first, int end)
+    [InlineData(3, 23, 3)]
+    [InlineData(0, 22, 3)]
+    [InlineData(5, 6, 3)]
+    [InlineData(5, 23, 5)]
+    public void PsAllPassRow_MatchesScalar(int first, int end, int cutoff)
     {
+        var decays = PsProcessor.QmfDecays(cutoff);
         var random = new Random((first * 64) + end);
         double Next() => (random.NextDouble() - 0.5) * Math.Pow(10, random.Next(-3, 4));
         double[] Row() => [.. Enumerable.Range(0, 64).Select(_ => Next())];
@@ -200,13 +202,14 @@ public class PsTests
             var expectedIm = new double[64];
             for (int sb = first; sb < end; sb++)
             {
-                double decay = sb <= 3 ? 1 : Math.Max(0, 1 + (3 * 0.05) - (0.05 * sb));
+                double decay = sb <= cutoff ? 1 : Math.Max(0, 1 + (cutoff * 0.05) - (0.05 * sb));
+                Assert.Equal(decay, decays[sb]);
                 (expectedRe[sb], expectedIm[sb]) = PsProcessor.AllPass(inRe[sb], inIm[sb], sb, decay, expectedDelayRe, expectedDelayIm, PsProcessor.QmfPhase, expectedLinkRe, expectedLinkIm, PsProcessor.QmfLinkPhase, linkIndex);
             }
 
             var outRe = new double[64];
             var outIm = new double[64];
-            PsProcessor.AllPassRow(inRe, inIm, first, end, delayRe, delayIm, linkRe, linkIm, linkIndex, outRe, outIm);
+            PsProcessor.AllPassRow(inRe, inIm, first, end, decays, delayRe, delayIm, linkRe, linkIm, linkIndex, outRe, outIm);
             Assert.Equal(expectedRe, outRe);
             Assert.Equal(expectedIm, outIm);
             Assert.Equal(expectedDelayRe, delayRe);

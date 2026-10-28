@@ -121,6 +121,7 @@ internal sealed partial class PictureDecoder<TPixel>
     /// <paramref name="maxW"/> x <paramref name="maxH"/> samples (16 for luma, 8 for chroma), and the
     /// location inside it; Mb is -1 when it is not available.
     /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private (int Mb, int X, int Y) Neighbor(int mbAddr, int xN, int yN, int maxW = 16, int maxH = 16)
     {
         if (_pairSlots)

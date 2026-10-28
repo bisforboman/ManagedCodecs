@@ -142,15 +142,24 @@ field order counts are checked too. Not reached by JM's streams: a B frame after
 its co-located field pair in display order (so the bottom field is the nearer one), and a B
 frame over a field pair partitioned below 16x16. Field marking that JM's streams never reach
 (the second field of a frame not sliding the window, memory management operation 1 by field
-PicNum) and the field B lists' list 1 swap have unit tests; other memory management operations
-in field pictures and a field without its pair throw NotSupportedException. Long-term references
+PicNum) and the field B lists' list 1 swap have unit tests; memory management operation 5 in a
+field picture and a field without its pair throw NotSupportedException. Long-term references
 used by field pictures: `jm-paff-b-adaptive-temporal-ltr` codes its IDR picture as a frame marked
 long-term and later pictures as fields, so the P and B field lists carry its fields after the
 short-term ones (parity alternating) and temporal direct asks whether they are long-term; the
-sample fails when either is broken. Marking field pictures long-term (an IDR field pair, operation
-6 in a second field) stays rejected: JM's encoder crashes writing it, and FFmpeg (6.1.1, and its
-master) mishandles it, dropping the first field's reference when the second field takes the same
-LongTermFrameIdx, so neither can check it.
+sample fails when either is broken. Field pictures marked long-term: JM's encoder crashes writing
+an IDR field pair marked long-term (for the second field it writes operation 3, naming the first
+field, where operation 6 belongs), so `make-jm-samples.sh` builds a copy with that one value
+changed. FFmpeg (6.1.1, and its master) drops the first field's mark when the second field takes
+the same LongTermFrameIdx, so its output is wrong from the second frame on; JM's decoder gives
+exactly the encoder's reconstruction (the script checks it), and its frames are the reference
+(`samples/jm-ref/`): `jm-paff-ltr` (B fields, CABAC), `jm-paff-ltr-cavlc` (P fields) and
+`jm-paff-ltr-adaptive` (fields and frames, noisy) predict from the long-term pair throughout, and
+fail when the IDR field's long_term_reference_flag or the second field's operation 6 is not
+applied as the spec says. Operations 2, 3 and 4 in field pictures (by LongTermPicNum of either
+parity; an index given to a field of a frame whose other field holds it; both fields above the
+maximum) have unit tests. With temporal direct, JM's decoder and encoder disagree on such a
+stream, so no sample has both.
 
 ### OpenH264 and rewritten libx264 streams
 

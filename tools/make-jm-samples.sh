@@ -42,12 +42,13 @@ ffmpeg -hide_banner -loglevel error -y -f lavfi -i "testsrc2=size=320x256:rate=5
   -vf tinterlace=interleave_top -frames:v 10 -pix_fmt gray -f rawvideo "$work/noisygray.yuv"
 cp "$jm/bin/encoder_main.cfg" "$work/"
 
-# lencod name [options]: encoder_main.cfg's settings with the options on top, into $work/name.264. In 4:0:0 JM exits
+# lencod name [options]: encoder_main.cfg's settings with the options on top, into $work/name.264 (with $lencod_exe
+# instead of the tree's encoder when set). In 4:0:0 JM exits
 # with 100 after writing the whole stream ("free_mem2Dpel: trying to free unused memory", freeing chroma planes it
 # never made): that one is not a failure.
 lencod() {
   local name=$1; shift
-  (cd "$work" && "$jm/bin/lencod.exe" -d encoder_main.cfg -p InputFile=src.yuv -p SourceWidth=320 -p SourceHeight=256 \
+  (cd "$work" && "${lencod_exe:-$jm/bin/lencod.exe}" -d encoder_main.cfg -p InputFile=src.yuv -p SourceWidth=320 -p SourceHeight=256 \
     -p FramesToBeEncoded=10 -p FrameRate=25 -p OutputFile="$name.264" -p ReconFile=rec.yuv "$@" > "$name.log" 2>&1) ||
     grep -q "free_mem2Dpel: trying to free unused memory" "$work/$name.log"
 }
@@ -298,3 +299,38 @@ planes-il planes-paff-cavlc -p PicInterlace=1 -p SymbolMode=0 -p NumberBFrames=0
 planes-il planes-paff -p PicInterlace=1 -p NumberBFrames=1 -p DirectModeType=0    # field pictures, CABAC, B, temporal direct
 planes-il planes-mbaff -p MbInterlace=2 -p ReferenceReorder=0 -p PocMemoryManagement=0 -p NumberBFrames=1  # MBAFF
 planes-il planes-mbaff-ltr -p MbInterlace=2 -p ReferenceReorder=0 -p PocMemoryManagement=0 -p NumberBFrames=1 -p DirectModeType=0 -p SetFirstAsLongTerm=1  # MBAFF B, temporal direct over a long-term frame (JM crashes with long-term field pictures, and with implicit weights here)
+
+# ---- Long-term field pictures: references from JM's own decoder ----
+# SetFirstAsLongTerm=1 with field pictures marks the IDR top field long-term (long_term_reference_flag), and JM's
+# encoder then fails ("field for long term marking not found"): for the bottom field, which is not an IDR picture, it
+# writes memory_management_control_operation 3 naming the top field, already long-term, where operation 6 (mark the
+# current field long-term, LongTermFrameIdx 0) belongs. A copy of the tree with that one value changed writes it. FFmpeg
+# (6.1.1 and master) drops the top field's mark when the bottom one takes the same LongTermFrameIdx with operation 6, so
+# its output is wrong from the second frame on ("Missing reference picture"); JM's decoder gives exactly the encoder's
+# reconstruction, checked here, and that is the reference (samples/jm-ref/, as for separate colour planes).
+# ltr-fields name [lencod options]: the moving pattern as field pictures over a long-term IDR field pair.
+ltr-fields() {
+  local name=$1; shift
+  wanted "$name" || return 0
+  mkdir -p "$ref"
+  if [[ ! -x $work/jm-ltr/bin/lencod.exe ]]; then
+    cp -r "$jm" "$work/jm-ltr"
+    local mmco=$work/jm-ltr/lencod/src/mmco.c
+    [[ $(grep -c 'tmp_drpm2->memory_management_control_operation = 3;' "$mmco") == 1 ]] ||
+      { echo "mmco_long_term's operation moved" >&2; exit 1; }
+    sed -i 's/tmp_drpm2->memory_management_control_operation = 3;/tmp_drpm2->memory_management_control_operation = 6;/' "$mmco"
+    make -C "$work/jm-ltr/lencod" CFLAGS="-fcommon -O2" > /dev/null 2>&1
+  fi
+  lencod_exe=$work/jm-ltr/bin/lencod.exe lencod "$name" -p SetFirstAsLongTerm=1 "$@"
+  "$tools/mux-h264.py" "$work/$name.264" "$ref/jm-$name.mp4" 512
+  (cd "$work" && "$jm/bin/ldecod.exe" -p InputFile="$name.264" -p OutputFile="$name.dec.yuv" > "$name.dec.log" 2>&1)
+  cmp "$work/$name.dec.yuv" "$work/rec.yuv"
+  ffmpeg -hide_banner -loglevel error -y -f rawvideo -pix_fmt yuv420p -s 320x256 -r 25 -i "$work/$name.dec.yuv" \
+    -f framemd5 "$ref/jm-$name.framemd5"
+  ffmpeg -hide_banner -loglevel quiet -y -copyts -i "$ref/jm-$name.mp4" -c copy -f framemd5 "$ref/jm-$name.packets.framemd5"
+  ffprobe -v quiet -show_packets -show_data_hash MD5 -show_entries packet=stream_index,pts,dts,duration,size,flags,data_hash \
+    -of csv=p=0 "$ref/jm-$name.mp4" > "$ref/jm-$name.packets.csv"
+}
+ltr-fields paff-ltr -p PicInterlace=1 -p NumberBFrames=1  # B fields (spatial direct: with temporal direct JM's decoder and encoder disagree)
+ltr-fields paff-ltr-cavlc -p PicInterlace=1 -p NumberBFrames=0 -p SymbolMode=0  # P fields, CAVLC
+ltr-fields paff-ltr-adaptive -p PicInterlace=2 -p NumberBFrames=1 -p IntraPeriod=4 -p InputFile=noisy.yuv  # fields and frames

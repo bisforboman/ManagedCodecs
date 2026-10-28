@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
 namespace ManagedCodecs.H264;
@@ -506,6 +507,7 @@ internal sealed partial class PictureDecoder<TPixel>
     /// rounded average), explicit weights from the slice's table, or implicit weights from the
     /// order count distances (bi-predicted blocks of B slices with weighted_bipred_idc 2).
     /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void PredictPartition(SliceState slice, int mbAddr, int x, int y, int w, int h)
     {
         int part = (mbAddr * 4) + ((y >> 3) * 2) + (x >> 3);
@@ -518,6 +520,13 @@ internal sealed partial class PictureDecoder<TPixel>
             return;
         }
 
+        PredictPartition(slice, mbAddr, x, y, w, h, part, block, ref0, ref1);
+    }
+
+    /// <summary><see cref="PredictPartition(SliceState, int, int, int, int, int)"/> for every other partition.</summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void PredictPartition(SliceState slice, int mbAddr, int x, int y, int w, int h, int part, int block, Picture? ref0, Picture? ref1)
+    {
         // Where the partition is, in the coordinates of the references (a field macroblock's are
         // its field's), and where its samples go in the picture.
         var (lumaX, lumaY, lumaOut, lumaStride, chromaOut, chromaStride) = PartitionPlace(mbAddr, x, y);

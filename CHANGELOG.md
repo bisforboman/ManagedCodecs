@@ -15,6 +15,8 @@ run time.
 
 ### Added
 
+- H.264: long-term references marked in field pictures (an IDR field pair marked long-term, memory management
+  operations 2, 3, 4 and 6 in field pictures), which threw `NotSupportedException`.
 - HE-AAC v2: parametric stereo with mixing procedure Rb (icc_mode 3 to 5), which threw `NotSupportedException`.
 - HE-AAC v2: parametric stereo in 34 bands (iid_mode or icc_mode 2 or 5), which threw `NotSupportedException`.
 - HE-AAC v2: parametric stereo's phase parameters (IPD and OPD), which were ignored: a stream that sends them decoded

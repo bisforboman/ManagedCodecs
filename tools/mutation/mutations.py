@@ -72,6 +72,19 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.H264/H264Decoder.cs",
          find="&& RoundUp16(_containerHeight) == RoundUp16(sps.Height)", replace="",
          tests="DisplayName~h264-container-crop"),
+    # Long-term field pictures (reference: JM's decoder; FFmpeg breaks the second): an IDR field marked long-term by
+    # long_term_reference_flag; a field taking a LongTermFrameIdx keeps it on the other field of its own frame.
+    dict(file="src/ManagedCodecs.H264/ReferenceList.cs",
+         find="                MarkFieldLongTerm(field, 0);", replace="                field.IsShortTermReference = true;",
+         tests="DisplayName~jm-paff-ltr"),
+    dict(file="src/ManagedCodecs.H264/ReferenceList.cs",
+         find="if (holder is not null && !(holder == keep && !holder.IsLongTermReference))", replace="if (holder is not null)",
+         tests="DisplayName~jm-paff-ltr"),
+    # The second field of a frame whose first field is long-term does not slide the window either (a unit test).
+    dict(file="src/ManagedCodecs.H264/ReferenceList.cs",
+         find="else if (!(secondField && frame.Field(1 - header.Parity).IsReference))",
+         replace="else if (!(secondField && frame.Field(1 - header.Parity).IsShortTermReference))",
+         tests="FullyQualifiedName~ReferenceListTests"),
 
     # ---- MP4 (as FFmpeg reads it)
     # Negative composition offsets in 'ctts': FFmpeg leaves the last two entries out of the shift.

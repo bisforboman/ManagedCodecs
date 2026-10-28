@@ -177,6 +177,112 @@ public class ReferenceListTests
     }
 
     [Fact]
+    public void FieldMarking_Operation3MakesFieldsLongTermAndAPairSharesItsIndex()
+    {
+        var sps = FieldSps3;
+        var refs = new ReferenceList();
+        DecodeFields(refs, 0, idr: true, sps);
+        DecodeFields(refs, 1, sps: sps);
+
+        // The top field of frame 2 (CurrPicNum 5) allows one long-term index, then gives index 0 to the top field of
+        // frame 1 (PicNum 3) and then to its bottom field (PicNum 2): the index already held by the other field of the
+        // same frame stays with it, and the frame becomes a long-term pair.
+        var frame2 = new Picture(1, 1) { FrameNum = 2 };
+        refs.MarkField(FieldHeader(2, bottom: false, operations: [Op4(1), Op3(2, 0), Op3(3, 0)]), frame2, sps, secondField: false);
+
+        // Short-term fields first (frame 2's top field and frame 0, bottom parity first), then the long-term pair.
+        Assert.Equal(["0b", "2t", "0t", "1b", "1t"], Fields(refs.BuildList(FieldHeader(2, bottom: true, numRef: 5), sps)));
+    }
+
+    [Fact]
+    public void FieldMarking_Operation3TakesTheIndexFromAnotherFrame()
+    {
+        var sps = FieldSps3;
+        var refs = new ReferenceList();
+        DecodeFields(refs, 0, idr: true, sps);
+        DecodeFields(refs, 1, sps: sps);
+
+        // Frame 2's top field gives index 0 to frame 0's top field (PicNum 1), then to frame 1's top field (PicNum 3):
+        // frame 0's top field, of another frame, loses it and is no reference at all.
+        var frame2 = new Picture(1, 1) { FrameNum = 2 };
+        refs.MarkField(FieldHeader(2, bottom: false, operations: [Op4(1), Op3(4, 0), Op3(2, 0)]), frame2, sps, secondField: false);
+
+        Assert.Equal(["1b", "2t", "0b", "1t"], Fields(refs.BuildList(FieldHeader(2, bottom: true, numRef: 4), sps)));
+    }
+
+    [Fact]
+    public void FieldMarking_Operation2UnmarksByFieldLongTermPicNum()
+    {
+        var sps = FieldSps3;
+        var refs = new ReferenceList();
+        DecodeFields(refs, 0, idr: true, sps, longTerm: true);
+        DecodeFields(refs, 1, sps: sps);
+
+        // Frame 0 is a long-term pair at index 0. For the bottom field of frame 2, LongTermPicNum 0 is the top field
+        // (the other parity: 2 * 0) and 1 the bottom one (2 * 0 + 1): operation 2 with 0 takes the top field's mark.
+        var frame2 = new Picture(1, 1) { FrameNum = 2 };
+        refs.MarkField(FieldHeader(2, bottom: false), frame2, sps, secondField: false);
+        refs.MarkField(FieldHeader(2, bottom: true, operations: [Op2(0)]), frame2, sps, secondField: true);
+
+        Assert.Equal(["2t", "2b", "1t", "1b", "0b"], Fields(refs.BuildList(FieldHeader(3, bottom: false, numRef: 5), sps)));
+    }
+
+    [Fact]
+    public void FieldMarking_Operation4UnmarksBothFieldsAboveTheMaximum()
+    {
+        var sps = FieldSps3;
+        var refs = new ReferenceList();
+        DecodeFields(refs, 0, idr: true, sps);
+        DecodeFields(refs, 1, sps: sps);
+
+        // Frame 1 becomes a long-term pair at index 1, then a maximum index of 0 takes both its fields' marks.
+        var frame2 = new Picture(1, 1) { FrameNum = 2 };
+        refs.MarkField(FieldHeader(2, bottom: false, operations: [Op4(2), Op3(2, 1), Op3(3, 1)]), frame2, sps, secondField: false);
+        Assert.Equal(["0b", "2t", "0t", "1b", "1t"], Fields(refs.BuildList(FieldHeader(2, bottom: true, numRef: 5), sps)));
+        refs.MarkField(FieldHeader(2, bottom: true, operations: [Op4(1)]), frame2, sps, secondField: true);
+
+        Assert.Equal(["2t", "2b", "0t", "0b"], Fields(refs.BuildList(FieldHeader(3, bottom: false, numRef: 4), sps)));
+    }
+
+    [Fact]
+    public void FieldMarking_Operation6MarksTheCurrentFieldAndKeepsItsPairsIndex()
+    {
+        var sps = FieldSps3;
+        var refs = new ReferenceList();
+        DecodeFields(refs, 0, idr: true, sps);
+
+        // Frame 1's top field takes index 0 with operation 6, and its bottom field the same: the pair keeps both.
+        var frame1 = new Picture(1, 1) { FrameNum = 1 };
+        refs.MarkField(FieldHeader(1, bottom: false, operations: [Op4(1), Op6(0)]), frame1, sps, secondField: false);
+        refs.MarkField(FieldHeader(1, bottom: true, operations: [Op6(0)]), frame1, sps, secondField: true);
+
+        Assert.Equal(["0t", "0b", "1t", "1b"], Fields(refs.BuildList(FieldHeader(2, bottom: false, numRef: 4), sps)));
+    }
+
+    [Fact]
+    public void FieldMarking_SecondFieldOfALongTermFirstFieldDoesNotSlideTheWindow()
+    {
+        var refs = new ReferenceList();
+        DecodeFields(refs, 0, idr: true);
+
+        // Frame 1's top field is long-term (operation 6); its bottom field, marked without operations, is the second
+        // field of a reference frame: short-term, and the window (two frames, full) does not push frame 0 out.
+        var frame1 = new Picture(1, 1) { FrameNum = 1 };
+        refs.MarkField(FieldHeader(1, bottom: false, operations: [Op4(1), Op6(0)]), frame1, FieldSps, secondField: false);
+        refs.MarkField(FieldHeader(1, bottom: true), frame1, FieldSps, secondField: true);
+
+        Assert.Equal(["0t", "1b", "0b", "1t"], Fields(refs.BuildList(FieldHeader(2, bottom: false, numRef: 4), FieldSps)));
+    }
+
+    private static MemoryManagementOperation Op2(int longTermPicNum) => new(2, 0, longTermPicNum, 0, 0);
+
+    private static MemoryManagementOperation Op3(int differenceOfPicNums, int longTermFrameIdx) => new(3, differenceOfPicNums, 0, longTermFrameIdx, 0);
+
+    private static MemoryManagementOperation Op4(int maxLongTermFrameIdxPlus1) => new(4, 0, 0, 0, maxLongTermFrameIdxPlus1);
+
+    private static MemoryManagementOperation Op6(int longTermFrameIdx) => new(6, 0, 0, longTermFrameIdx, 0);
+
+    [Fact]
     public void FieldBLists_OrderFramesByOrderCountThenAlternateParity()
     {
         // Frames with fields at order counts 0 and 1, and 8 and 9; the B field is the top one at 4.
@@ -234,7 +340,9 @@ public class ReferenceListTests
         RefPicListModificationL1 = [],
     };
 
-    private static void DecodeFields(ReferenceList refs, int frameNum, bool idr = false, SequenceParameterSet? sps = null, int topPoc = 0)
+    // An IDR pair marked long-term (longTerm) has its top field so marked by long_term_reference_flag and its bottom field
+    // by operation 6, as an encoder writes it.
+    private static void DecodeFields(ReferenceList refs, int frameNum, bool idr = false, SequenceParameterSet? sps = null, int topPoc = 0, bool longTerm = false)
     {
         if (idr)
         {
@@ -242,12 +350,13 @@ public class ReferenceListTests
         }
 
         var frame = new Picture(1, 1) { FrameNum = frameNum, Poc = topPoc, TopPoc = topPoc, BottomPoc = topPoc + 1 };
-        refs.MarkField(FieldHeader(frameNum, bottom: false, idr: idr), frame, sps ?? FieldSps, secondField: false);
-        refs.MarkField(FieldHeader(frameNum, bottom: true), frame, sps ?? FieldSps, secondField: true);
+        refs.MarkField(FieldHeader(frameNum, bottom: false, idr: idr, longTerm: longTerm), frame, sps ?? FieldSps, secondField: false);
+        refs.MarkField(FieldHeader(frameNum, bottom: true, operations: longTerm ? [Op6(0)] : null), frame, sps ?? FieldSps, secondField: true);
     }
 
-    private static SliceHeader FieldHeader(int frameNum, bool bottom, bool idr = false, int numRef = 1, IReadOnlyList<MemoryManagementOperation>? operations = null) => new()
+    private static SliceHeader FieldHeader(int frameNum, bool bottom, bool idr = false, int numRef = 1, IReadOnlyList<MemoryManagementOperation>? operations = null, bool longTerm = false) => new()
     {
+        LongTermReference = longTerm,
         Type = SliceType.P,
         FrameNum = frameNum,
         FieldPic = true,

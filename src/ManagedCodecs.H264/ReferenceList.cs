@@ -261,57 +261,146 @@ internal sealed class ReferenceList
 
     /// <summary>
     /// Marks a just-decoded reference field (8.2.5) of frame <paramref name="frame"/>. The second
-    /// field of a pair whose first field is a short-term reference is marked the same, without the
-    /// sliding window (8.2.5.3); otherwise as a picture of its own, the window counting frames.
-    /// Of the adaptive operations only 1 (unmark a field) is supported in field pictures.
+    /// field of a pair whose first field is a reference is marked without the sliding window
+    /// (8.2.5.3); otherwise the window counts frames. The adaptive operations work on fields
+    /// (8.2.5.4): PicNum and LongTermPicNum count the current field's parity as 2n + 1 and the
+    /// other as 2n, and a LongTermFrameIdx taken by another field frees it unless that field is the
+    /// other field of the same frame. Operation 5 is rejected before (<see cref="PictureOrder"/>).
     /// </summary>
     public void MarkField(SliceHeader header, Picture frame, SequenceParameterSet sps, bool secondField)
     {
         int maxFrameNum = 1 << sps.Log2MaxFrameNum;
         UpdateFrameNumWrap(header.FrameNum, maxFrameNum);
         var field = frame.Field(header.Parity);
-        if (header.IsIdr && header.LongTermReference)
+        if (header.IsIdr)
         {
-            throw new NotSupportedException("Long-term IDR field pictures are not supported.");
+            // All earlier references were dropped when the IDR picture started.
+            if (header.LongTermReference)
+            {
+                MarkFieldLongTerm(field, 0);
+                _maxLongTermFrameIdx = 0;
+            }
+            else
+            {
+                field.IsShortTermReference = true;
+                _maxLongTermFrameIdx = -1;
+            }
+
+            _pictures.Add(frame);
+            return;
         }
 
+        bool currentIsLongTerm = false;
         if (header.AdaptiveRefPicMarking)
         {
             int currPicNum = (2 * header.FrameNum) + 1;
             foreach (var op in header.MemoryManagement)
             {
-                if (op.Op != 1)
+                switch (op.Op)
                 {
-                    throw new NotSupportedException($"memory_management_control_operation {op.Op} in field pictures is not supported.");
-                }
+                    case 1:
+                        UnmarkField(ShortTermField(currPicNum - op.DifferenceOfPicNums, header.Parity));
+                        break;
+                    case 2:
+                        UnmarkField(Fields().FirstOrDefault(f => f.IsLongTermReference && LongTermPicNum(f, header.Parity) == op.LongTermPicNum));
+                        break;
+                    case 3:
+                        var target = ShortTermField(currPicNum - op.DifferenceOfPicNums, header.Parity);
+                        if (target is not null)
+                        {
+                            FreeLongTermFrameIdx(op.LongTermFrameIdx, target.Frame);
+                            MarkFieldLongTerm(target, op.LongTermFrameIdx);
+                        }
 
-                int picNum = currPicNum - op.DifferenceOfPicNums;
-                var target = _pictures.SelectMany(p => new[] { p.Field(0), p.Field(1) })
-                    .FirstOrDefault(f => f.IsShortTermReference && (2 * f.Frame.FrameNumWrap) + (f.Parity == header.Parity ? 1 : 0) == picNum);
-                if (target is not null)
-                {
-                    target.IsShortTermReference = false;
-                    if (!target.HasReferenceField)
-                    {
-                        _pictures.Remove(target.Frame);
-                    }
+                        break;
+                    case 4:
+                        _maxLongTermFrameIdx = op.MaxLongTermFrameIdxPlus1 - 1;
+                        foreach (var p in _pictures.Where(p => HasLongTermField(p) && p.LongTermFrameIdx > _maxLongTermFrameIdx).ToList())
+                        {
+                            UnmarkLongTermFields(p);
+                        }
+
+                        break;
+                    case 6:
+                        FreeLongTermFrameIdx(op.LongTermFrameIdx, frame);
+                        MarkFieldLongTerm(field, op.LongTermFrameIdx);
+                        currentIsLongTerm = true;
+                        break;
+                    default:
+                        throw new NotSupportedException($"memory_management_control_operation {op.Op} in field pictures is not supported.");
                 }
             }
         }
-        else if (!header.IsIdr && !(secondField && frame.Field(1 - header.Parity).IsShortTermReference))
+        else if (!(secondField && frame.Field(1 - header.Parity).IsReference))
         {
             SlidingWindow(sps);
         }
 
-        if (header.IsIdr)
+        if (!currentIsLongTerm)
         {
-            _maxLongTermFrameIdx = -1;
+            field.IsShortTermReference = true;
         }
 
-        field.IsShortTermReference = true;
         if (!_pictures.Contains(frame))
         {
             _pictures.Add(frame);
+        }
+    }
+
+    // Every field of the frames marked as references.
+    private IEnumerable<Picture> Fields() => _pictures.SelectMany(p => new[] { p.Field(0), p.Field(1) });
+
+    // The short-term field whose PicNum (8.2.4.1) is picNum, for a field picture of parity currentParity.
+    private Picture? ShortTermField(int picNum, int currentParity) =>
+        Fields().FirstOrDefault(f => f.IsShortTermReference && (2 * f.Frame.FrameNumWrap) + (f.Parity == currentParity ? 1 : 0) == picNum);
+
+    private static int LongTermPicNum(Picture field, int currentParity) => (2 * field.Frame.LongTermFrameIdx) + (field.Parity == currentParity ? 1 : 0);
+
+    private static bool HasLongTermField(Picture frame) => frame.Field(0).IsLongTermReference || frame.Field(1).IsLongTermReference;
+
+    // 8.2.5.4.3 and 8.2.5.4.6 for fields: LongTermFrameIdx is about to go to a field of frame keep, so a frame or field
+    // pair holding it loses both fields' long-term marks, and a single field holding it its own, unless it is keep's
+    // other field.
+    private void FreeLongTermFrameIdx(int longTermFrameIdx, Picture keep)
+    {
+        var holder = _pictures.FirstOrDefault(p => HasLongTermField(p) && p.LongTermFrameIdx == longTermFrameIdx);
+        if (holder is not null && !(holder == keep && !holder.IsLongTermReference))
+        {
+            UnmarkLongTermFields(holder);
+        }
+    }
+
+    private static void MarkFieldLongTerm(Picture field, int longTermFrameIdx)
+    {
+        field.IsShortTermReference = false;
+        field.IsLongTermReference = true;
+        field.Frame.LongTermFrameIdx = longTermFrameIdx;
+    }
+
+    // Takes the long-term marks off a frame's fields, and the frame out of the references if no field is left.
+    private void UnmarkLongTermFields(Picture frame)
+    {
+        foreach (var field in (ReadOnlySpan<Picture>)[frame.Field(0), frame.Field(1)])
+        {
+            if (field.IsLongTermReference)
+            {
+                UnmarkField(field);
+            }
+        }
+    }
+
+    private void UnmarkField(Picture? field)
+    {
+        if (field is null)
+        {
+            return;
+        }
+
+        field.IsShortTermReference = false;
+        field.IsLongTermReference = false;
+        if (!field.HasReferenceField)
+        {
+            _pictures.Remove(field.Frame);
         }
     }
 

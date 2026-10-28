@@ -1,6 +1,8 @@
 name: FFmpeg and samples
 description: >-
-  FFmpeg and ImageMagick (../ffmpeg), then tools/make-samples.sh's samples, cached on the scripts and the packages.
+  FFmpeg and ImageMagick (../ffmpeg), then tools/make-samples.sh's samples, cached on the scripts, the committed
+  samples (samples/jm/, jm-ref/, heaac/ and the rest, which make-samples.sh copies and writes references for: a new one
+  must not find the cache of a checkout without it) and the packages.
 runs:
   using: composite
   steps:
@@ -11,7 +13,7 @@ runs:
       id: samples
       with:
         path: samples
-        key: samples-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools/make-samples.sh', 'tools/*.py') }}-${{ steps.ffmpeg.outputs.key }}
+        key: samples-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools/make-samples.sh', 'tools/*.py', 'samples/**') }}-${{ steps.ffmpeg.outputs.key }}
 
     - name: Generate samples
       if: steps.samples.outputs.cache-hit != 'true'

@@ -19,7 +19,7 @@ namespace ManagedCodecs.Tests.Aac;
 /// </para>
 /// <para>
 /// Parametric stereo (HE-AAC v2) comes out as stereo, as FFmpeg's does, and is held to the same bounds (it agrees to
-/// about 3e-4 at most, 3e-6 on average); its mean is held tighter, since a decay slope of 0.06 instead of 0.05 stays
+/// about 5e-4 at most, 7e-6 on average, with phase parameters too); its mean is held tighter, since a decay slope of 0.06 instead of 0.05 stays
 /// within the SBR bound.
 /// </para>
 /// </remarks>

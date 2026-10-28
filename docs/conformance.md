@@ -158,8 +158,9 @@ exactly the encoder's reconstruction (the script checks it), and its frames are 
 fail when the IDR field's long_term_reference_flag or the second field's operation 6 is not
 applied as the spec says. Operations 2, 3 and 4 in field pictures (by LongTermPicNum of either
 parity; an index given to a field of a frame whose other field holds it; both fields above the
-maximum) have unit tests. With temporal direct, JM's decoder and encoder disagree on such a
-stream, so no sample has both.
+maximum) have unit tests. `jm-paff-ltr-temporal` adds temporal direct over the long-term fields:
+there JM's encoder reconstructs three of its B frames unlike JM's decoder, which this decoder
+agrees with frame for frame, so the encoder is taken to be the one wrong and its check skipped.
 
 ### OpenH264 and rewritten libx264 streams
 

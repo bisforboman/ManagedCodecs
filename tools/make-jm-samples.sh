@@ -307,7 +307,9 @@ planes-il planes-mbaff-ltr -p MbInterlace=2 -p ReferenceReorder=0 -p PocMemoryMa
 # current field long-term, LongTermFrameIdx 0) belongs. A copy of the tree with that one value changed writes it. FFmpeg
 # (6.1.1 and master) drops the top field's mark when the bottom one takes the same LongTermFrameIdx with operation 6, so
 # its output is wrong from the second frame on ("Missing reference picture"); JM's decoder gives exactly the encoder's
-# reconstruction, checked here, and that is the reference (samples/jm-ref/, as for separate colour planes).
+# reconstruction, checked here, and that is the reference (samples/jm-ref/, as for separate colour planes). Except with
+# temporal direct (a name ending in -temporal): there JM's encoder reconstructs its B frames unlike its decoder, which this
+# decoder, written apart from both, agrees with frame for frame; the encoder is the odd one out, and the check is skipped.
 # ltr-fields name [lencod options]: the moving pattern as field pictures over a long-term IDR field pair.
 ltr-fields() {
   local name=$1; shift
@@ -324,13 +326,14 @@ ltr-fields() {
   lencod_exe=$work/jm-ltr/bin/lencod.exe lencod "$name" -p SetFirstAsLongTerm=1 "$@"
   "$tools/mux-h264.py" "$work/$name.264" "$ref/jm-$name.mp4" 512
   (cd "$work" && "$jm/bin/ldecod.exe" -p InputFile="$name.264" -p OutputFile="$name.dec.yuv" > "$name.dec.log" 2>&1)
-  cmp "$work/$name.dec.yuv" "$work/rec.yuv"
+  [[ $name == *-temporal ]] || cmp "$work/$name.dec.yuv" "$work/rec.yuv"
   ffmpeg -hide_banner -loglevel error -y -f rawvideo -pix_fmt yuv420p -s 320x256 -r 25 -i "$work/$name.dec.yuv" \
     -f framemd5 "$ref/jm-$name.framemd5"
   ffmpeg -hide_banner -loglevel quiet -y -copyts -i "$ref/jm-$name.mp4" -c copy -f framemd5 "$ref/jm-$name.packets.framemd5"
   ffprobe -v quiet -show_packets -show_data_hash MD5 -show_entries packet=stream_index,pts,dts,duration,size,flags,data_hash \
     -of csv=p=0 "$ref/jm-$name.mp4" > "$ref/jm-$name.packets.csv"
 }
-ltr-fields paff-ltr -p PicInterlace=1 -p NumberBFrames=1  # B fields (spatial direct: with temporal direct JM's decoder and encoder disagree)
+ltr-fields paff-ltr -p PicInterlace=1 -p NumberBFrames=1  # B fields, spatial direct
+ltr-fields paff-ltr-temporal -p PicInterlace=1 -p NumberBFrames=1 -p DirectModeType=0  # temporal direct: long-term fields as co-located references
 ltr-fields paff-ltr-cavlc -p PicInterlace=1 -p NumberBFrames=0 -p SymbolMode=0  # P fields, CAVLC
 ltr-fields paff-ltr-adaptive -p PicInterlace=2 -p NumberBFrames=1 -p IntraPeriod=4 -p InputFile=noisy.yuv  # fields and frames

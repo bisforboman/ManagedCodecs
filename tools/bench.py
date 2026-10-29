@@ -4,9 +4,12 @@ against another (--base), and writes a Markdown table and a JSON record of the r
 
 Every sample is decoded --runs times by each side, the two interleaved and the order alternating (with the same one
 first in every pair, an A/A test of one build once showed a 10% "regression"), and the median wall time per decoded
-frame is taken. mcdec's time is its whole process (demuxing, .NET's startup and JIT, as tools/compare.sh), so the loop
-counts are chosen to wash startup out. FFmpeg decodes single-threaded (-threads 1), as mcdec does by default; one more
-row times mcdec on the 720p sample with 4 threads against 1.
+frame is taken. mcdec's time is its whole process (demuxing, .NET's startup and JIT, as tools/compare.sh), and also
+its last loop alone ("steady": code the JIT has optimized, what a long file costs a frame). The loop counts do not wash
+startup out on the short samples: on the 50-frame H.264 clips it was about 45% of the whole-process time, which FFmpeg
+barely has (its time a frame is the same at 1 loop and at 20), so the steady ratio is ours over FFmpeg's
+whole-process time. FFmpeg decodes single-threaded (-threads 1), as mcdec does by default; one more row times mcdec on
+the 720p sample with 4 threads against 1.
 
 Usage (from the repository root, after tools/make-samples.sh and a Release build of tools/ManagedCodecs.Cli):
   tools/bench.py --runs 5 --report bench.md --json bench.json
@@ -63,6 +66,13 @@ def rtime(output):
     return float(match.group(1))
 
 
+def last_loop(output):
+    match = re.search(r"^last loop: [0-9.]+ ms, ([0-9.]+) us per frame", output, re.MULTILINE)
+    if not match:
+        sys.exit(f"no last loop: line in:\n{output}")
+    return float(match.group(1))
+
+
 def frames(output):
     match = re.search(r"^decoded (\d+) video and (\d+) audio", output, re.MULTILINE)
     if not match:
@@ -71,14 +81,16 @@ def frames(output):
 
 
 def mcdec(dll, path, loops, threads=1):
-    """Wall time per decoded frame in microseconds, and the frames per loop."""
+    """Wall time per decoded frame in microseconds (the whole process, and the last loop's when loops > 1), and the
+    frames per loop."""
     # A .dll runs on the runtime; anything else is a native executable (a Native AOT publish of mcdec).
     command = (["dotnet", dll] if dll.endswith(".dll") else [dll]) + [path, "--loops", str(loops)]
     if threads != 1:
         command += ["--threads", str(threads)]
     output = run(command)
     count = frames(output)
-    return rtime(output) * 1e6 / (count * loops), count
+    steady = last_loop(output) if loops > 1 else None
+    return (rtime(output) * 1e6 / (count * loops), steady), count
 
 
 def ffmpeg(path, loops, count):
@@ -88,7 +100,8 @@ def ffmpeg(path, loops, count):
 
 
 def interleaved(runs, first, second):
-    """Medians of runs of two timings, interleaved, the order alternating."""
+    """Medians of runs of two timings, interleaved, the order alternating; a timing that is a tuple has the median of
+    each of its parts."""
     a, b = [], []
     for i in range(runs):
         if i % 2 == 0:
@@ -97,7 +110,13 @@ def interleaved(runs, first, second):
         else:
             b.append(second())
             a.append(first())
-    return statistics.median(a), statistics.median(b)
+    return median(a), median(b)
+
+
+def median(values):
+    if isinstance(values[0], tuple):
+        return tuple(statistics.median(part) for part in zip(*values))
+    return statistics.median(values)
 
 
 def version(command, pattern):
@@ -145,28 +164,32 @@ def main():
     }
 
     if args.base:
-        header = "| Sample | Loops | Base (µs) | Branch (µs) | Branch / base |\n| --- | ---: | ---: | ---: | ---: |"
+        header = ("| Sample | Loops | Base (µs) | Branch (µs) | Branch / base | Base, steady | Branch, steady | Steady ratio |\n"
+                  "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |")
     else:
-        header = "| Sample | Loops | ManagedCodecs (µs) | FFmpeg (µs) | Ratio |\n| --- | ---: | ---: | ---: | ---: |"
+        header = ("| Sample | Loops | ManagedCodecs (µs) | FFmpeg (µs) | Ratio | ManagedCodecs, steady | Steady ratio |\n"
+                  "| --- | ---: | ---: | ---: | ---: | ---: | ---: |")
     lines = [header]
     for name, loops, description in samples:
         path = os.path.join(args.samples, name)
         print(f"{name} x {loops} loops", file=sys.stderr, flush=True)
         _, count = mcdec(args.mcdec, path, 1)  # warms the file cache and counts frames
         if args.base:
-            base, ours = interleaved(args.runs, lambda: mcdec(args.base, path, loops)[0], lambda: mcdec(args.mcdec, path, loops)[0])
-            record["results"].append({"sample": name, "loops": loops, "base_us": round(base, 1), "branch_us": round(ours, 1), "ratio": round(ours / base, 3)})
-            lines.append(f"| `{name}` ({description}) | {loops} | {base:.0f} | {ours:.0f} | {ours / base:.3f} |")
+            (base, base_steady), (ours, steady) = interleaved(args.runs, lambda: mcdec(args.base, path, loops)[0], lambda: mcdec(args.mcdec, path, loops)[0])
+            record["results"].append({"sample": name, "loops": loops, "base_us": round(base, 1), "branch_us": round(ours, 1), "ratio": round(ours / base, 3),
+                                      "base_steady_us": round(base_steady, 1), "branch_steady_us": round(steady, 1), "steady_ratio": round(steady / base_steady, 3)})
+            lines.append(f"| `{name}` ({description}) | {loops} | {base:.0f} | {ours:.0f} | {ours / base:.3f} | {base_steady:.0f} | {steady:.0f} | {steady / base_steady:.3f} |")
         else:
-            ours, theirs = interleaved(args.runs, lambda: mcdec(args.mcdec, path, loops)[0], lambda: ffmpeg(path, loops, count))
-            record["results"].append({"sample": name, "loops": loops, "managedcodecs_us": round(ours, 1), "ffmpeg_us": round(theirs, 1), "ratio": round(ours / theirs, 3)})
-            lines.append(f"| `{name}` ({description}) | {loops} | {ours:.0f} | {theirs:.0f} | {ours / theirs:.2f} |")
+            (ours, steady), theirs = interleaved(args.runs, lambda: mcdec(args.mcdec, path, loops)[0], lambda: ffmpeg(path, loops, count))
+            record["results"].append({"sample": name, "loops": loops, "managedcodecs_us": round(ours, 1), "ffmpeg_us": round(theirs, 1), "ratio": round(ours / theirs, 3),
+                                      "steady_us": round(steady, 1), "steady_ratio": round(steady / theirs, 3)})
+            lines.append(f"| `{name}` ({description}) | {loops} | {ours:.0f} | {theirs:.0f} | {ours / theirs:.2f} | {steady:.0f} | {steady / theirs:.2f} |")
 
     if not args.base and (not args.only or THREADS_SAMPLE[0] in args.only):
         name, loops = THREADS_SAMPLE
         path = os.path.join(args.samples, name)
         print(f"{name} x {loops} loops, 1 and 4 threads", file=sys.stderr, flush=True)
-        one, four = interleaved(args.runs, lambda: mcdec(args.mcdec, path, loops)[0], lambda: mcdec(args.mcdec, path, loops, threads=4)[0])
+        (one, _), (four, _) = interleaved(args.runs, lambda: mcdec(args.mcdec, path, loops)[0], lambda: mcdec(args.mcdec, path, loops, threads=4)[0])
         record["threads"] = {"sample": name, "loops": loops, "one_us": round(one, 1), "four_us": round(four, 1), "ratio": round(four / one, 3)}
         lines.append("")
         lines.append(f"`{name}` with 4 threads: {four:.0f} µs a frame against {one:.0f} with 1 ({four / one:.2f} of the time).")
@@ -174,7 +197,8 @@ def main():
     m = record["machine"]
     lines.append("")
     lines.append(f"{m['cpus']} CPUs ({m['cpu']}, {m['arch']}), FFmpeg {record['ffmpeg']}, .NET SDK {record['dotnet']}; "
-                 f"medians of {args.runs} interleaved runs, wall time per decoded frame (AAC frames 1024 samples, HE-AAC 2048).")
+                 f"medians of {args.runs} interleaved runs, wall time per decoded frame (AAC frames 1024 samples, HE-AAC 2048): the "
+                 f"whole process, and \"steady\" mcdec's last loop alone, without .NET's startup and JIT.")
     report = "\n".join(lines) + "\n"
     print(report)
     if args.report:

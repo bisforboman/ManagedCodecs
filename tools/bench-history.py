@@ -25,7 +25,9 @@ def main():
     print("ManagedCodecs' wall time per decoded frame over FFmpeg's, single-threaded (lower is faster; below 1 is faster")
     print("than FFmpeg), the medians of interleaved runs on GitHub-hosted runners, which vary by a few percent from run to")
     print("run. *4 threads* is mcdec's time with 4 threads over its time with 1 on the 720p sample. A run's own record has")
-    print("the times in µs, the CPU and the FFmpeg and .NET versions.")
+    print("the times in µs, the CPU and the FFmpeg and .NET versions. The first table a machine is mcdec's whole process,")
+    print(".NET's startup and JIT included (a large share of the short samples' time); the second, from 2026-10-29 on,")
+    print("its last loop alone (steady state) over FFmpeg's time.")
     for arch in sorted({r["machine"]["arch"] for r in records}):
         runs = sorted((r for r in records if r["machine"]["arch"] == arch), key=lambda r: r["date"], reverse=True)
         samples = []
@@ -36,16 +38,27 @@ def main():
 
         print()
         print(f"## {arch}")
-        print()
-        short = [os.path.splitext(os.path.basename(s))[0] for s in samples]
-        print("| Date | Commit | " + " | ".join(short) + " | 4 threads |")
-        print("| --- | --- | " + " | ".join("---:" for _ in samples) + " | ---: |")
-        for run in runs:
-            ratios = {r["sample"]: r["ratio"] for r in run["results"]}
-            cells = [f"{ratios[s]:.2f}" if s in ratios else "" for s in samples]
-            threads = f"{run['threads']['ratio']:.2f}" if "threads" in run else ""
-            commit = (run.get("commit") or "")[:7]
-            print(f"| {run['date'][:10]} | {commit} | " + " | ".join(cells) + f" | {threads} |")
+        table(runs, samples, "ratio", threads=True)
+        steady = [r for r in runs if any("steady_ratio" in result for result in r["results"])]
+        if steady:
+            print()
+            print(f"### {arch}, steady state")
+            table(steady, samples, "steady_ratio", threads=False)
+
+
+def table(runs, samples, key, threads):
+    print()
+    short = [os.path.splitext(os.path.basename(s))[0] for s in samples]
+    print("| Date | Commit | " + " | ".join(short) + (" | 4 threads |" if threads else " |"))
+    print("| --- | --- | " + " | ".join("---:" for _ in samples) + (" | ---: |" if threads else " |"))
+    for run in runs:
+        ratios = {r["sample"]: r[key] for r in run["results"] if key in r}
+        cells = [f"{ratios[s]:.2f}" if s in ratios else "" for s in samples]
+        commit = (run.get("commit") or "")[:7]
+        row = f"| {run['date'][:10]} | {commit} | " + " | ".join(cells) + " |"
+        if threads:
+            row += f" {run['threads']['ratio']:.2f} |" if "threads" in run else "  |"
+        print(row)
 
 
 if __name__ == "__main__":

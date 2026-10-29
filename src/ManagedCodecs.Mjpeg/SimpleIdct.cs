@@ -417,104 +417,53 @@ internal static class SimpleIdct
         var dcShortcut = r0 << DcShift;
         var rowRounding = Vector128.Create(1 << (RowShift - 1));
         var (a0Low, a0High) = Vector128.Widen(r0);
-        Butterfly128(
-            (a0Low * W4) + rowRounding,
-            (a0High * W4) + rowRounding,
-            r1,
-            r2,
-            r3,
-            r4,
-            r5,
-            r6,
-            r7,
-            out var o0,
-            out var o1,
-            out var o2,
-            out var o3,
-            out var o4,
-            out var o5,
-            out var o6,
-            out var o7);
+
+        // The butterfly on the low and the high four lanes, each called here: a method taking both halves has more
+        // parameters than the JIT inlines, and its results would go through memory.
+        var (c1Low, c1High) = Vector128.Widen(r1);
+        var (c2Low, c2High) = Vector128.Widen(r2);
+        var (c3Low, c3High) = Vector128.Widen(r3);
+        var (c4Low, c4High) = Vector128.Widen(r4);
+        var (c5Low, c5High) = Vector128.Widen(r5);
+        var (c6Low, c6High) = Vector128.Widen(r6);
+        var (c7Low, c7High) = Vector128.Widen(r7);
+        HalfButterfly((a0Low * W4) + rowRounding, c1Low, c2Low, c3Low, c4Low, c5Low, c6Low, c7Low, out var l0, out var l1, out var l2, out var l3, out var l4, out var l5, out var l6, out var l7);
+        HalfButterfly((a0High * W4) + rowRounding, c1High, c2High, c3High, c4High, c5High, c6High, c7High, out var h0, out var h1, out var h2, out var h3, out var h4, out var h5, out var h6, out var h7);
 
         // A row result keeps its low 16 bits, like a C store to int16_t: Narrow truncates.
-        r0 = Vector128.ConditionalSelect(dcOnly, dcShortcut, Vector128.Narrow(o0.Low >> RowShift, o0.High >> RowShift));
-        r1 = Vector128.ConditionalSelect(dcOnly, dcShortcut, Vector128.Narrow(o1.Low >> RowShift, o1.High >> RowShift));
-        r2 = Vector128.ConditionalSelect(dcOnly, dcShortcut, Vector128.Narrow(o2.Low >> RowShift, o2.High >> RowShift));
-        r3 = Vector128.ConditionalSelect(dcOnly, dcShortcut, Vector128.Narrow(o3.Low >> RowShift, o3.High >> RowShift));
-        r4 = Vector128.ConditionalSelect(dcOnly, dcShortcut, Vector128.Narrow(o4.Low >> RowShift, o4.High >> RowShift));
-        r5 = Vector128.ConditionalSelect(dcOnly, dcShortcut, Vector128.Narrow(o5.Low >> RowShift, o5.High >> RowShift));
-        r6 = Vector128.ConditionalSelect(dcOnly, dcShortcut, Vector128.Narrow(o6.Low >> RowShift, o6.High >> RowShift));
-        r7 = Vector128.ConditionalSelect(dcOnly, dcShortcut, Vector128.Narrow(o7.Low >> RowShift, o7.High >> RowShift));
+        r0 = Vector128.ConditionalSelect(dcOnly, dcShortcut, Vector128.Narrow(l0 >> RowShift, h0 >> RowShift));
+        r1 = Vector128.ConditionalSelect(dcOnly, dcShortcut, Vector128.Narrow(l1 >> RowShift, h1 >> RowShift));
+        r2 = Vector128.ConditionalSelect(dcOnly, dcShortcut, Vector128.Narrow(l2 >> RowShift, h2 >> RowShift));
+        r3 = Vector128.ConditionalSelect(dcOnly, dcShortcut, Vector128.Narrow(l3 >> RowShift, h3 >> RowShift));
+        r4 = Vector128.ConditionalSelect(dcOnly, dcShortcut, Vector128.Narrow(l4 >> RowShift, h4 >> RowShift));
+        r5 = Vector128.ConditionalSelect(dcOnly, dcShortcut, Vector128.Narrow(l5 >> RowShift, h5 >> RowShift));
+        r6 = Vector128.ConditionalSelect(dcOnly, dcShortcut, Vector128.Narrow(l6 >> RowShift, h6 >> RowShift));
+        r7 = Vector128.ConditionalSelect(dcOnly, dcShortcut, Vector128.Narrow(l7 >> RowShift, h7 >> RowShift));
 
         // Column pass. Transposed back, vector k is row k again and each lane is a column.
         TransposeVector128(ref r0, ref r1, ref r2, ref r3, ref r4, ref r5, ref r6, ref r7);
 
         var columnRounding = Vector128.Create(ColumnRounding);
         var (c0Low, c0High) = Vector128.Widen(r0);
-        Butterfly128(
-            (c0Low + columnRounding) * W4,
-            (c0High + columnRounding) * W4,
-            r1,
-            r2,
-            r3,
-            r4,
-            r5,
-            r6,
-            r7,
-            out var y0,
-            out var y1,
-            out var y2,
-            out var y3,
-            out var y4,
-            out var y5,
-            out var y6,
-            out var y7);
+        (c1Low, c1High) = Vector128.Widen(r1);
+        (c2Low, c2High) = Vector128.Widen(r2);
+        (c3Low, c3High) = Vector128.Widen(r3);
+        (c4Low, c4High) = Vector128.Widen(r4);
+        (c5Low, c5High) = Vector128.Widen(r5);
+        (c6Low, c6High) = Vector128.Widen(r6);
+        (c7Low, c7High) = Vector128.Widen(r7);
+        HalfButterfly((c0Low + columnRounding) * W4, c1Low, c2Low, c3Low, c4Low, c5Low, c6Low, c7Low, out l0, out l1, out l2, out l3, out l4, out l5, out l6, out l7);
+        HalfButterfly((c0High + columnRounding) * W4, c1High, c2High, c3High, c4High, c5High, c6High, c7High, out h0, out h1, out h2, out h3, out h4, out h5, out h6, out h7);
 
         ref byte output = ref MemoryMarshal.GetReference(dest);
-        StoreRow128(ref output, 0, y0);
-        StoreRow128(ref output, stride, y1);
-        StoreRow128(ref output, 2 * stride, y2);
-        StoreRow128(ref output, 3 * stride, y3);
-        StoreRow128(ref output, 4 * stride, y4);
-        StoreRow128(ref output, 5 * stride, y5);
-        StoreRow128(ref output, 6 * stride, y6);
-        StoreRow128(ref output, 7 * stride, y7);
-    }
-
-    /// <summary>
-    /// <see cref="Butterfly"/> for eight lanes held as two four-lane halves: <paramref name="aLow"/>
-    /// and <paramref name="aHigh"/> are the scaled and rounded DC terms of lanes 0-3 and 4-7.
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static void Butterfly128(
-        Vector128<int> aLow,
-        Vector128<int> aHigh,
-        Vector128<short> v1,
-        Vector128<short> v2,
-        Vector128<short> v3,
-        Vector128<short> v4,
-        Vector128<short> v5,
-        Vector128<short> v6,
-        Vector128<short> v7,
-        out (Vector128<int> Low, Vector128<int> High) o0,
-        out (Vector128<int> Low, Vector128<int> High) o1,
-        out (Vector128<int> Low, Vector128<int> High) o2,
-        out (Vector128<int> Low, Vector128<int> High) o3,
-        out (Vector128<int> Low, Vector128<int> High) o4,
-        out (Vector128<int> Low, Vector128<int> High) o5,
-        out (Vector128<int> Low, Vector128<int> High) o6,
-        out (Vector128<int> Low, Vector128<int> High) o7)
-    {
-        var (c1Low, c1High) = Vector128.Widen(v1);
-        var (c2Low, c2High) = Vector128.Widen(v2);
-        var (c3Low, c3High) = Vector128.Widen(v3);
-        var (c4Low, c4High) = Vector128.Widen(v4);
-        var (c5Low, c5High) = Vector128.Widen(v5);
-        var (c6Low, c6High) = Vector128.Widen(v6);
-        var (c7Low, c7High) = Vector128.Widen(v7);
-        HalfButterfly(aLow, c1Low, c2Low, c3Low, c4Low, c5Low, c6Low, c7Low, out var l0, out var l1, out var l2, out var l3, out var l4, out var l5, out var l6, out var l7);
-        HalfButterfly(aHigh, c1High, c2High, c3High, c4High, c5High, c6High, c7High, out var h0, out var h1, out var h2, out var h3, out var h4, out var h5, out var h6, out var h7);
-        (o0, o1, o2, o3, o4, o5, o6, o7) = ((l0, h0), (l1, h1), (l2, h2), (l3, h3), (l4, h4), (l5, h5), (l6, h6), (l7, h7));
+        StoreRow128(ref output, 0, l0, h0);
+        StoreRow128(ref output, stride, l1, h1);
+        StoreRow128(ref output, 2 * stride, l2, h2);
+        StoreRow128(ref output, 3 * stride, l3, h3);
+        StoreRow128(ref output, 4 * stride, l4, h4);
+        StoreRow128(ref output, 5 * stride, l5, h5);
+        StoreRow128(ref output, 6 * stride, l6, h6);
+        StoreRow128(ref output, 7 * stride, l7, h7);
     }
 
     /// <summary>The butterfly of <see cref="Butterfly"/> on four lanes.</summary>
@@ -562,11 +511,11 @@ internal static class SimpleIdct
 
     /// <summary>Shifts a column-pass row down, clamps it to 0..255 and stores its eight bytes.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static void StoreRow128(ref byte dest, int offset, (Vector128<int> Low, Vector128<int> High) row)
+    private static void StoreRow128(ref byte dest, int offset, Vector128<int> rowLow, Vector128<int> rowHigh)
     {
         var max = Vector128.Create(255);
-        var low = Vector128.Clamp(row.Low >> ColShift, Vector128<int>.Zero, max);
-        var high = Vector128.Clamp(row.High >> ColShift, Vector128<int>.Zero, max);
+        var low = Vector128.Clamp(rowLow >> ColShift, Vector128<int>.Zero, max);
+        var high = Vector128.Clamp(rowHigh >> ColShift, Vector128<int>.Zero, max);
         var bytes = Vector128.Narrow(Vector128.Narrow(low, high).AsUInt16(), Vector128<ushort>.Zero).AsUInt64();
         Unsafe.WriteUnaligned(ref Unsafe.Add(ref dest, offset), bytes.ToScalar());
     }

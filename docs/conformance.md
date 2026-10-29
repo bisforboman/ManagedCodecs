@@ -310,16 +310,17 @@ with rewritten parameter sets) stay as a second check.
 ending inside a macroblock) keeps the macroblocks it decoded; the failing one and the rest of the slice are marked
 missing at once, so the rows below them are neither deblocked nor reported to other pictures before they are filled.
 The picture's other slices are decoded, then every missing macroblock becomes an inter macroblock with no coefficients
-and the slice's QP, in a slice of its own. Its motion is guessed by boundary matching (Lam, Reibman and Liu, "Recovery of lost or erroneously received motion vectors", ICASSP 1993):
-the candidates are zero motion from list 0 entry 0 of the picture's first P or B slice (an intra picture: the latest
-reference; none, after a damaged IDR picture, and for now an intra second field, whose latest reference is its own
-frame: mid-grey, and no guess) and the motion of each 4x4 block of an available inter neighbour (left, above, right,
-below; decoded, or concealed before it) along their shared edge, list 0's or else list 1's; each predicts the
-macroblock's luma, and the one whose outer samples differ least from the neighbours' samples next to them is taken
-(the earlier on a tie, zero motion first). Missing macroblocks are filled in address order, so the guess does not
-depend on threads. MBAFF frames keep zero motion (a neighbouring pair of the other kind would need its motion
-converted between frame and field units). Deblocking, co-located motion and later direct prediction then read it as any
-other. A lost picture (a frame_num gap; its packet missing, or its slice headers damaged) is the frame inferred for the
+and the slice's QP, in a slice of its own. Its motion is guessed by boundary matching (Lam, Reibman and Liu, "Recovery
+of lost or erroneously received motion vectors", ICASSP 1993): the candidates are zero motion from list 0 entry 0 of the
+picture's first P or B slice (an intra picture: the latest reference; none, after a damaged IDR picture, and for now an
+intra second field, whose latest reference is its own frame: mid-grey, and no guess) and the motion of each 4x4 block of
+an available inter neighbour (left, above, right, below; decoded, or concealed before it) along their shared edge, list
+0's or else list 1's; each predicts the macroblock's luma, and the one whose outer samples differ least from the
+neighbours' samples next to them is taken (the earlier on a tie, zero motion first). Missing macroblocks are filled in
+address order, so the guess does not depend on threads. MBAFF frames keep zero motion (a neighbouring pair of the other
+kind would need its motion converted between frame and field units). Deblocking, co-located motion and later direct
+prediction then read it as any other. A lost picture (a frame_num gap; its packet missing, or its slice headers
+damaged) is the frame inferred for the
 gap (8.2.5.2), which then copies the latest reference once that is done, with no motion; a slice whose reference lists
 cannot be built (no reference at all, or a list modification naming a lost one) is not decoded and its macroblocks are
 concealed. The frame is flagged `VideoFrame.IsDamaged`, as is every picture whose reference lists hold a damaged

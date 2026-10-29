@@ -18,6 +18,9 @@ run time.
 - MJPEG decodes about 3% faster on ARM64 (and x64 without AVX2): the 128-bit IDCT's butterflies are inlined, where
   they were a call a pass with their results through memory. GitHub's ARM64 runner, `compare.yml`; x64 with AVX2 is
   unchanged; the output is the same.
+- HE-AAC decodes about 4% faster on ARM64 (and x64 without AVX2): SBR's patch filter, covariances and gains, and
+  parametric stereo's all-pass filter have 128-bit paths, where they had only 256-bit ones and ran scalar there.
+  GitHub's ARM64 runner, `compare.yml` (5.1 and v2 stereo); x64 with AVX2 runs the same code; the output is the same.
 
 ## 0.2.1 – 2026-10-29
 

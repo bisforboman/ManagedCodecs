@@ -288,6 +288,36 @@ internal sealed class SbrChannel(bool downsampled = false)
                 (Vector256.LoadUnsafe(ref y0, (nuint)i) + (ai0 * r1) + (ar0 * j1) + (ai1 * r2) + (ar1 * j2)).StoreUnsafe(ref outIm, (nuint)i);
             }
         }
+        else if (!Vector256.IsHardwareAccelerated && Vector128.IsHardwareAccelerated && length >= 2 && re0.Length >= length && im0.Length >= length && re1.Length >= length
+            && im1.Length >= length && re2.Length >= length && im2.Length >= length && a0Real.Length >= length
+            && a0Imaginary.Length >= length && a1Real.Length >= length && a1Imaginary.Length >= length && imaginary.Length >= length)
+        {
+            ref double x0 = ref MemoryMarshal.GetReference(re0);
+            ref double y0 = ref MemoryMarshal.GetReference(im0);
+            ref double x1 = ref MemoryMarshal.GetReference(re1);
+            ref double y1 = ref MemoryMarshal.GetReference(im1);
+            ref double x2 = ref MemoryMarshal.GetReference(re2);
+            ref double y2 = ref MemoryMarshal.GetReference(im2);
+            ref double c0 = ref MemoryMarshal.GetReference(a0Real);
+            ref double d0 = ref MemoryMarshal.GetReference(a0Imaginary);
+            ref double c1 = ref MemoryMarshal.GetReference(a1Real);
+            ref double d1 = ref MemoryMarshal.GetReference(a1Imaginary);
+            ref double outRe = ref MemoryMarshal.GetReference(real);
+            ref double outIm = ref MemoryMarshal.GetReference(imaginary);
+            for (; i + 2 <= length; i += 2)
+            {
+                var r1 = Vector128.LoadUnsafe(ref x1, (nuint)i);
+                var j1 = Vector128.LoadUnsafe(ref y1, (nuint)i);
+                var r2 = Vector128.LoadUnsafe(ref x2, (nuint)i);
+                var j2 = Vector128.LoadUnsafe(ref y2, (nuint)i);
+                var ar0 = Vector128.LoadUnsafe(ref c0, (nuint)i);
+                var ai0 = Vector128.LoadUnsafe(ref d0, (nuint)i);
+                var ar1 = Vector128.LoadUnsafe(ref c1, (nuint)i);
+                var ai1 = Vector128.LoadUnsafe(ref d1, (nuint)i);
+                (Vector128.LoadUnsafe(ref x0, (nuint)i) + (ar0 * r1) - (ai0 * j1) + (ar1 * r2) - (ai1 * j2)).StoreUnsafe(ref outRe, (nuint)i);
+                (Vector128.LoadUnsafe(ref y0, (nuint)i) + (ai0 * r1) + (ar0 * j1) + (ai1 * r2) + (ar1 * j2)).StoreUnsafe(ref outIm, (nuint)i);
+            }
+        }
 
         for (; i < real.Length; i++)
         {
@@ -313,7 +343,7 @@ internal sealed class SbrChannel(bool downsampled = false)
     /// <summary>
     /// 4.6.18.6.2's covariances phi(i, j) = the sum over n in 0..37 of X_Low(k, n + 2 - i) X_Low*(k, n + 2 - j) of the
     /// subbands below <paramref name="count"/>, into <paramref name="phi"/> (<see cref="Covariance"/> runs of 32): four
-    /// subbands at a time, each lane summing in <see cref="CovariancesScalar"/>'s order, which does the rest.
+    /// subbands at a time (two with Vector128 alone), each lane summing in <see cref="CovariancesScalar"/>'s order, which does the rest.
     /// </summary>
     internal static void Covariances(double[][] real, double[][] imaginary, int count, Span<double> phi)
     {
@@ -338,6 +368,46 @@ internal sealed class SbrChannel(bool downsampled = false)
                     var im1 = Vector256.Create(imaginary[n + 1].AsSpan(k));
                     var re2 = Vector256.Create(real[n].AsSpan(k));
                     var im2 = Vector256.Create(imaginary[n].AsSpan(k));
+                    phi01Real += (re0 * re1) + (im0 * im1);
+                    phi01Imaginary += (im0 * re1) - (re0 * im1);
+                    phi02Real += (re0 * re2) + (im0 * im2);
+                    phi02Imaginary += (im0 * re2) - (re0 * im2);
+                    phi11 += (re1 * re1) + (im1 * im1);
+                    phi12Real += (re1 * re2) + (im1 * im2);
+                    phi12Imaginary += (im1 * re2) - (re1 * im2);
+                    phi22 += (re2 * re2) + (im2 * im2);
+                }
+
+                phi01Real.CopyTo(phi[(Covariance.Phi01Real + k)..]);
+                phi01Imaginary.CopyTo(phi[(Covariance.Phi01Imaginary + k)..]);
+                phi02Real.CopyTo(phi[(Covariance.Phi02Real + k)..]);
+                phi02Imaginary.CopyTo(phi[(Covariance.Phi02Imaginary + k)..]);
+                phi11.CopyTo(phi[(Covariance.Phi11 + k)..]);
+                phi12Real.CopyTo(phi[(Covariance.Phi12Real + k)..]);
+                phi12Imaginary.CopyTo(phi[(Covariance.Phi12Imaginary + k)..]);
+                phi22.CopyTo(phi[(Covariance.Phi22 + k)..]);
+            }
+        }
+        else if (!Vector256.IsHardwareAccelerated && Vector128.IsHardwareAccelerated)
+        {
+            for (; k + 2 <= count; k += 2)
+            {
+                var phi01Real = Vector128<double>.Zero;
+                var phi01Imaginary = Vector128<double>.Zero;
+                var phi02Real = Vector128<double>.Zero;
+                var phi02Imaginary = Vector128<double>.Zero;
+                var phi11 = Vector128<double>.Zero;
+                var phi12Real = Vector128<double>.Zero;
+                var phi12Imaginary = Vector128<double>.Zero;
+                var phi22 = Vector128<double>.Zero;
+                for (int n = 0; n < Buffered - 2; n++)
+                {
+                    var re0 = Vector128.Create(real[n + 2].AsSpan(k));
+                    var im0 = Vector128.Create(imaginary[n + 2].AsSpan(k));
+                    var re1 = Vector128.Create(real[n + 1].AsSpan(k));
+                    var im1 = Vector128.Create(imaginary[n + 1].AsSpan(k));
+                    var re2 = Vector128.Create(real[n].AsSpan(k));
+                    var im2 = Vector128.Create(imaginary[n].AsSpan(k));
                     phi01Real += (re0 * re1) + (im0 * im1);
                     phi01Imaginary += (im0 * re1) - (re0 * im1);
                     phi02Real += (re0 * re2) + (im0 * im2);
@@ -719,7 +789,7 @@ internal sealed class SbrChannel(bool downsampled = false)
     /// One slot's subbands kx .. kx + m - 1 (<paramref name="real"/>, <paramref name="imaginary"/>) times their gains, plus
     /// their noise (where there is no sinusoid, and the envelope has noise) and their sinusoids, without smoothing: the
     /// noise index moves one a subband from <paramref name="noiseIndex"/>. Four subbands at a time where Vector256 is
-    /// accelerated, each lane with <see cref="ApplyGainsScalar"/>'s operations in its order (the noise added under a mask,
+    /// accelerated (two with Vector128 alone, ARM64's), each lane with <see cref="ApplyGainsScalar"/>'s operations in its order (the noise added under a mask,
     /// not as a zero), so the output is the same to the bit (<c>SbrApplyGains_MatchesScalar</c>).
     /// </summary>
     internal static void ApplyGains(Span<double> real, Span<double> imaginary, ReadOnlySpan<double> gain, ReadOnlySpan<double> noise, ReadOnlySpan<double> tone, int kx, int noiseIndex, int sineIndex, bool noNoise)
@@ -751,6 +821,30 @@ internal sealed class SbrChannel(bool downsampled = false)
                 im = Vector256.ConditionalSelect(mask, im + (n * Vector256.Create(noiseIm[i..])), im);
                 re += t * sineRe;
                 im += t * Vector256.Create(sign[i..]) * sineIm;
+                re.CopyTo(real[i..]);
+                im.CopyTo(imaginary[i..]);
+            }
+        }
+        else if (!Vector256.IsHardwareAccelerated && Vector128.IsHardwareAccelerated)
+        {
+            var noiseRe = NoiseReal.AsSpan((noiseIndex + 1) & 511, m);
+            var noiseIm = NoiseImaginary.AsSpan((noiseIndex + 1) & 511, m);
+            var sign = SineSign.AsSpan(kx, m);
+            var sineRe = Vector128.Create(SineReal[sineIndex]);
+            var sineIm = Vector128.Create(SineImaginary[sineIndex]);
+            var addNoise = noNoise ? Vector128<double>.Zero : Vector128<double>.AllBitsSet;
+            for (; i + 2 <= m; i += 2)
+            {
+                var g = Vector128.Create(gain[i..]);
+                var n = Vector128.Create(noise[i..]);
+                var t = Vector128.Create(tone[i..]);
+                var re = Vector128.Create<double>(real[i..]) * g;
+                var im = Vector128.Create<double>(imaginary[i..]) * g;
+                var mask = Vector128.Equals(t, Vector128<double>.Zero) & addNoise;
+                re = Vector128.ConditionalSelect(mask, re + (n * Vector128.Create(noiseRe[i..])), re);
+                im = Vector128.ConditionalSelect(mask, im + (n * Vector128.Create(noiseIm[i..])), im);
+                re += t * sineRe;
+                im += t * Vector128.Create(sign[i..]) * sineIm;
                 re.CopyTo(real[i..]);
                 im.CopyTo(imaginary[i..]);
             }

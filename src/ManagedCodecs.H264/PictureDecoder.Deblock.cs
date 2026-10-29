@@ -623,6 +623,13 @@ internal sealed partial class PictureDecoder<TPixel>
     }
 
     /// <summary>
+    /// Two vectors of 16-bit lane masks (all ones or zero) as one of 8-bit masks. Narrowed as signed lanes, -1 and 0:
+    /// Mono's WebAssembly interpreter narrows with the saturating instructions, which turn an unsigned 0xFFFF into
+    /// 0 rather than truncating it to 0xFF (issue #206), and agree with truncation only on values the narrower type holds.
+    /// </summary>
+    private static Vector128<byte> NarrowMasks(Vector128<short> low, Vector128<short> high) => Vector128.Narrow(low, high).AsByte();
+
+    /// <summary>
     /// bS of the internal edges (1..3) of an inter macroblock whose 16 blocks all take their motion from one list:
     /// 2 where either block has coefficients, else 1 where the reference pictures differ or the motion vectors are
     /// 4 quarter samples apart or more (<paramref name="limitY"/> vertically), else 0 (8.7.2.1). The blocks' motion
@@ -642,9 +649,9 @@ internal sealed partial class PictureDecoder<TPixel>
         var limitX = Vector128.Create((short)3);
         var limitV = Vector128.Create((short)(limitY - 1));
 
-        var farLeft = Vector128.Narrow(
-            (Vector128.GreaterThan(Vector128.Abs(x0 - Vector128.Shuffle(x0, leftOf)), limitX) | Vector128.GreaterThan(Vector128.Abs(y0 - Vector128.Shuffle(y0, leftOf)), limitV)).AsUInt16(),
-            (Vector128.GreaterThan(Vector128.Abs(x1 - Vector128.Shuffle(x1, leftOf)), limitX) | Vector128.GreaterThan(Vector128.Abs(y1 - Vector128.Shuffle(y1, leftOf)), limitV)).AsUInt16());
+        var farLeft = NarrowMasks(
+            Vector128.GreaterThan(Vector128.Abs(x0 - Vector128.Shuffle(x0, leftOf)), limitX) | Vector128.GreaterThan(Vector128.Abs(y0 - Vector128.Shuffle(y0, leftOf)), limitV),
+            Vector128.GreaterThan(Vector128.Abs(x1 - Vector128.Shuffle(x1, leftOf)), limitX) | Vector128.GreaterThan(Vector128.Abs(y1 - Vector128.Shuffle(y1, leftOf)), limitV));
 
         // Blocks 0-7's upper neighbours (the first row takes itself), and 8-15's: blocks 4-11.
         var upOf = Vector128.Create((short)0, 1, 2, 3, 0, 1, 2, 3);
@@ -652,9 +659,9 @@ internal sealed partial class PictureDecoder<TPixel>
         var y0Up = Vector128.Shuffle(y0, upOf);
         var x1Up = Vector128.Create(x0.GetUpper(), x1.GetLower());
         var y1Up = Vector128.Create(y0.GetUpper(), y1.GetLower());
-        var farUp = Vector128.Narrow(
-            (Vector128.GreaterThan(Vector128.Abs(x0 - x0Up), limitX) | Vector128.GreaterThan(Vector128.Abs(y0 - y0Up), limitV)).AsUInt16(),
-            (Vector128.GreaterThan(Vector128.Abs(x1 - x1Up), limitX) | Vector128.GreaterThan(Vector128.Abs(y1 - y1Up), limitV)).AsUInt16());
+        var farUp = NarrowMasks(
+            Vector128.GreaterThan(Vector128.Abs(x0 - x0Up), limitX) | Vector128.GreaterThan(Vector128.Abs(y0 - y0Up), limitV),
+            Vector128.GreaterThan(Vector128.Abs(x1 - x1Up), limitX) | Vector128.GreaterThan(Vector128.Abs(y1 - y1Up), limitV));
 
         // Edge 2's segments: blocks 2 and 6 (partitions 0 and 1), 10 and 14 (2 and 3); blocks 8, 9 (0 and 2), 10, 11 (1 and 3).
         byte d0 = (byte)(-(differ & 1));
@@ -738,9 +745,9 @@ internal sealed partial class PictureDecoder<TPixel>
         // Lanes where p's and q's vectors are 4 quarter samples apart or more (limitY vertically).
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         static Vector128<byte> Far((Vector128<short> Low, Vector128<short> High) px, (Vector128<short> Low, Vector128<short> High) py, (Vector128<short> Low, Vector128<short> High) qx, (Vector128<short> Low, Vector128<short> High) qy, (Vector128<short> X, Vector128<short> Y) limits) =>
-            Vector128.Narrow(
-                (Vector128.GreaterThan(Vector128.Abs(px.Low - qx.Low), limits.X) | Vector128.GreaterThan(Vector128.Abs(py.Low - qy.Low), limits.Y)).AsUInt16(),
-                (Vector128.GreaterThan(Vector128.Abs(px.High - qx.High), limits.X) | Vector128.GreaterThan(Vector128.Abs(py.High - qy.High), limits.Y)).AsUInt16());
+            NarrowMasks(
+                Vector128.GreaterThan(Vector128.Abs(px.Low - qx.Low), limits.X) | Vector128.GreaterThan(Vector128.Abs(py.Low - qy.Low), limits.Y),
+                Vector128.GreaterThan(Vector128.Abs(px.High - qx.High), limits.X) | Vector128.GreaterThan(Vector128.Abs(py.High - qy.High), limits.Y));
 
         // bS 1 lanes by each lane's rule (MotionRule's numbers).
         [MethodImpl(MethodImplOptions.AggressiveInlining)]

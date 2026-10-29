@@ -1,0 +1,85 @@
+name: Profile
+
+# Where mcdec spends its time on the hosted x64 and ARM64 runners: perf samples one decode of a sample (steady state:
+# tiered compilation off, enough loops that the JIT's start is a few percent) and the run summary lists the functions
+# above a share, by symbol and by library. For a machine the cloud VM can't be (ARM64), before a change aimed at it;
+# CLAUDE.md, Timing, says how to read perf shares. Dispatch it ("Run workflow", or `gh workflow run profile.yml
+# --ref <branch> -f sample=<name>`).
+on:
+  workflow_dispatch:
+    inputs:
+      sample:
+        description: The sample to decode, as tools/bench.py names it (under samples/)
+        default: testsrc-420.avi
+      loops:
+        description: mcdec's --loops
+        default: '200'
+      threshold:
+        description: The smallest share listed, in percent
+        default: '0.5'
+
+permissions:
+  contents: read
+
+jobs:
+  profile:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
+        with:
+          dotnet-version: 10.0.x
+
+      - uses: ./.github/actions/samples
+
+      - name: Install perf
+        run: |
+          sudo apt-get install -y -q linux-tools-generic > /dev/null
+          # The runner's kernel has no matching linux-tools package; the generic one's perf works with it.
+          perf="$(ls /usr/lib/linux-tools-*/perf | head -1)"
+          echo "PERF=$perf" >> "$GITHUB_ENV"
+          sudo sysctl -q kernel.perf_event_paranoid=1 kernel.kptr_restrict=0
+
+      - name: Build
+        run: dotnet build tools/ManagedCodecs.Cli -c Release
+
+      - name: Profile
+        env:
+          SAMPLE: ${{ inputs.sample }}
+          LOOPS: ${{ inputs.loops }}
+          THRESHOLD: ${{ inputs.threshold }}
+          # The JIT's code by name (a perf map), without double mapping (else it shows as bare addresses).
+          DOTNET_PerfMapEnabled: '1'
+          DOTNET_EnableWriteXorExecute: '0'
+          DOTNET_TieredCompilation: '0'
+        run: |
+          mcdec=tools/ManagedCodecs.Cli/bin/Release/net10.0/mcdec.dll
+          "$PERF" record -q -e cpu-clock -F 2000 -o perf.data dotnet "$mcdec" "samples/$SAMPLE" --loops "$LOOPS" | tee mcdec.txt
+          cpu="$(grep -m1 -E '^(model name|Model)' /proc/cpuinfo | cut -d: -f2 | xargs || uname -m)"
+          {
+            echo "### $(uname -m) ($cpu): \`$SAMPLE\`, $LOOPS loops, $(git rev-parse --short HEAD)"
+            echo
+            echo '```'
+            grep -E '^(decoded|bench|last loop)' mcdec.txt
+            echo '```'
+            echo
+            echo "By library:"
+            echo
+            echo '```'
+            "$PERF" report -i perf.data --no-children --sort dso --percent-limit "$THRESHOLD" --stdio 2>/dev/null | grep -v '^#' | grep -v '^$'
+            echo '```'
+            echo
+            echo "By function (above $THRESHOLD%):"
+            echo
+            echo '```'
+            # Signatures shortened: the parameter list and the [Optimized] tag go.
+            "$PERF" report -i perf.data --no-children --sort symbol --percent-limit "$THRESHOLD" --stdio 2>/dev/null \
+              | grep -v '^#' | grep -v '^$' | sed -E 's/\(.*\)\[[A-Za-z0-9]+\]//; s/\[\.\] //' | cut -c1-160
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

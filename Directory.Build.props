@@ -36,7 +36,7 @@
        CI packs on every pull request (ci.yml). The meta-package has no assemblies to compare. -->
   <PropertyGroup Condition="$(MSBuildProjectDirectory.Replace('\', '/').Contains('/src/')) And '$(MSBuildProjectName)' != 'ManagedCodecs'">
     <EnablePackageValidation>true</EnablePackageValidation>
-    <PackageValidationBaselineVersion>0.2.1</PackageValidationBaselineVersion>
+    <PackageValidationBaselineVersion>0.2.2</PackageValidationBaselineVersion>
     <!-- CP0003, an assembly version below the baseline's: local and CI builds are 0.0.0-dev; a release's version is
          always above the last. -->
     <NoWarn>$(NoWarn);CP0003</NoWarn>

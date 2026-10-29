@@ -82,4 +82,7 @@ jobs:
             "$PERF" report -i perf.data --no-children --sort symbol --percent-limit "$THRESHOLD" --stdio 2>/dev/null \
               | grep -v '^#' | grep -v '^$' | sed -E 's/\(.*\)\[[A-Za-z0-9]+\]//; s/\[\.\] //' | cut -c1-160
             echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
+          } > report.md
+          # In the log too, where the API reads it (a run summary has no API).
+          cat report.md
+          cat report.md >> "$GITHUB_STEP_SUMMARY"

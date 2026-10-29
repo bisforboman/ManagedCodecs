@@ -327,6 +327,38 @@ EPYC 7763 on 2026-10-25 and in the first run of 2026-10-29, a 9V74 on 2026-10-28
 moves from hour to hour, and FFmpeg's and ours do not move together (unchanged code's ratios once moved by -14 to +16%
 between two snapshots of a day): only comparisons made on one machine at one time count.
 
+### Startup and the JIT
+
+mcdec turns tiered compilation off (its project file), so each method is compiled fully optimized on its first call
+and short runs aren't timed on unoptimized code; that is also what the ratios above measure. An app has the runtime's
+defaults, tiered compilation and dynamic PGO, which start faster but cost a short file more. `h264-high-default.mp4`
+(50 frames, 320x240) decoded by one process, on a 4-core cloud VM (2026-10-29; median of 3, process wall time):
+
+| Runtime settings | 1 loop (50 frames) | 20 loops | 100 loops | A frame, steady |
+| --- | ---: | ---: | ---: | ---: |
+| Tiered compilation off (mcdec) | 0.60 s | 1.44 s | 5.1 s | about 850 µs |
+| Defaults: tiered compilation, dynamic PGO | 0.47 s | 2.46 s | 5.5 s | about 735 µs |
+| Tiered compilation, `TieredPGO` off | 0.43 s | 1.52 s | 5.0 s | about 810 µs |
+| ReadyToRun (`--instruction-set:x86-64-v3`), tiering off | 0.41 s | about 1.56 s | | |
+
+Dynamic PGO runs instrumented code first and pays that back only on long files (about 9% less a frame once it is done,
+but still behind after 5,000 frames here). For short files, turn it off in the app's project:
+
+```xml
+<TieredPGO>false</TieredPGO>
+```
+
+ReadyToRun, set when the app publishes (it compiles these packages too), saves about 0.2 s a process. Give crossgen
+the instruction set, or the vector paths it leaves out run slower with tiering off:
+
+```xml
+<PublishReadyToRun>true</PublishReadyToRun>
+<PublishReadyToRunCrossgen2ExtraArgs>--instruction-set:x86-64-v3</PublishReadyToRunCrossgen2ExtraArgs>
+```
+
+Most of the H.264 decoder is still compiled at run time even then (267 methods, 115 of them
+`PictureDecoder<byte>`'s), which is why the gain is small. Native AOT (below) compiles nothing at run time.
+
 ### Native AOT
 
 On x64, a Native AOT publish compiles for the instruction set it is given, not the machine it runs on. Under its

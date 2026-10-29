@@ -348,7 +348,21 @@ internal static class Imdct
             for (int span = 1; span < length; span *= 2)
             {
                 int k0 = span - 1;
-                if (Vector256.IsHardwareAccelerated && span >= Vector256<double>.Count)
+
+                // Two stages in one pass where both are wide enough: each block of 4 span values loaded once, through
+                // the half-span-span butterflies and then those of 2 span, in registers (the same operations in the
+                // same order as stage by stage).
+                if (2 * span < length && Vector256.IsHardwareAccelerated && span >= Vector256<double>.Count)
+                {
+                    TwoStages256(ref r, ref i, ref cos, ref sin, length, span);
+                    span *= 2;
+                }
+                else if (2 * span < length && !Vector256.IsHardwareAccelerated && Vector128.IsHardwareAccelerated && span >= Vector128<double>.Count)
+                {
+                    TwoStages128(ref r, ref i, ref cos, ref sin, length, span);
+                    span *= 2;
+                }
+                else if (Vector256.IsHardwareAccelerated && span >= Vector256<double>.Count)
                 {
                     for (int start = 0; start < length; start += 2 * span)
                     {
@@ -418,6 +432,85 @@ internal static class Imdct
                     }
                 }
             }
+        }
+
+        private static void TwoStages256(ref double r, ref double i, ref double cos, ref double sin, int length, int span)
+        {
+            int k1 = span - 1;
+            int k2 = (2 * span) - 1;
+            for (int start = 0; start < length; start += 4 * span)
+            {
+                for (int k = 0; k < span; k += Vector256<double>.Count)
+                {
+                    nuint a = (nuint)(start + k);
+                    nuint b = a + (nuint)span;
+                    nuint c = b + (nuint)span;
+                    nuint d = c + (nuint)span;
+                    var c1 = Vector256.LoadUnsafe(ref cos, (nuint)(k1 + k));
+                    var s1 = Vector256.LoadUnsafe(ref sin, (nuint)(k1 + k));
+                    var (r0, i0, r1, i1) = Butterfly(Vector256.LoadUnsafe(ref r, a), Vector256.LoadUnsafe(ref i, a), Vector256.LoadUnsafe(ref r, b), Vector256.LoadUnsafe(ref i, b), c1, s1);
+                    var (r2, i2, r3, i3) = Butterfly(Vector256.LoadUnsafe(ref r, c), Vector256.LoadUnsafe(ref i, c), Vector256.LoadUnsafe(ref r, d), Vector256.LoadUnsafe(ref i, d), c1, s1);
+                    var (r0b, i0b, r2b, i2b) = Butterfly(r0, i0, r2, i2, Vector256.LoadUnsafe(ref cos, (nuint)(k2 + k)), Vector256.LoadUnsafe(ref sin, (nuint)(k2 + k)));
+                    var (r1b, i1b, r3b, i3b) = Butterfly(r1, i1, r3, i3, Vector256.LoadUnsafe(ref cos, (nuint)(k2 + span + k)), Vector256.LoadUnsafe(ref sin, (nuint)(k2 + span + k)));
+                    r0b.StoreUnsafe(ref r, a);
+                    i0b.StoreUnsafe(ref i, a);
+                    r1b.StoreUnsafe(ref r, b);
+                    i1b.StoreUnsafe(ref i, b);
+                    r2b.StoreUnsafe(ref r, c);
+                    i2b.StoreUnsafe(ref i, c);
+                    r3b.StoreUnsafe(ref r, d);
+                    i3b.StoreUnsafe(ref i, d);
+                }
+            }
+        }
+
+        private static void TwoStages128(ref double r, ref double i, ref double cos, ref double sin, int length, int span)
+        {
+            int k1 = span - 1;
+            int k2 = (2 * span) - 1;
+            for (int start = 0; start < length; start += 4 * span)
+            {
+                for (int k = 0; k < span; k += Vector128<double>.Count)
+                {
+                    nuint a = (nuint)(start + k);
+                    nuint b = a + (nuint)span;
+                    nuint c = b + (nuint)span;
+                    nuint d = c + (nuint)span;
+                    var c1 = Vector128.LoadUnsafe(ref cos, (nuint)(k1 + k));
+                    var s1 = Vector128.LoadUnsafe(ref sin, (nuint)(k1 + k));
+                    var (r0, i0, r1, i1) = Butterfly(Vector128.LoadUnsafe(ref r, a), Vector128.LoadUnsafe(ref i, a), Vector128.LoadUnsafe(ref r, b), Vector128.LoadUnsafe(ref i, b), c1, s1);
+                    var (r2, i2, r3, i3) = Butterfly(Vector128.LoadUnsafe(ref r, c), Vector128.LoadUnsafe(ref i, c), Vector128.LoadUnsafe(ref r, d), Vector128.LoadUnsafe(ref i, d), c1, s1);
+                    var (r0b, i0b, r2b, i2b) = Butterfly(r0, i0, r2, i2, Vector128.LoadUnsafe(ref cos, (nuint)(k2 + k)), Vector128.LoadUnsafe(ref sin, (nuint)(k2 + k)));
+                    var (r1b, i1b, r3b, i3b) = Butterfly(r1, i1, r3, i3, Vector128.LoadUnsafe(ref cos, (nuint)(k2 + span + k)), Vector128.LoadUnsafe(ref sin, (nuint)(k2 + span + k)));
+                    r0b.StoreUnsafe(ref r, a);
+                    i0b.StoreUnsafe(ref i, a);
+                    r1b.StoreUnsafe(ref r, b);
+                    i1b.StoreUnsafe(ref i, b);
+                    r2b.StoreUnsafe(ref r, c);
+                    i2b.StoreUnsafe(ref i, c);
+                    r3b.StoreUnsafe(ref r, d);
+                    i3b.StoreUnsafe(ref i, d);
+                }
+            }
+        }
+
+        // One butterfly: (a + w b, a - w b) with w = c + i s, in the scalar loop's order.
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static (Vector256<double> Ra, Vector256<double> Ia, Vector256<double> Rb, Vector256<double> Ib) Butterfly(
+            Vector256<double> ra, Vector256<double> ia, Vector256<double> rb, Vector256<double> ib, Vector256<double> c, Vector256<double> s)
+        {
+            var tr = (rb * c) - (ib * s);
+            var ti = (rb * s) + (ib * c);
+            return (ra + tr, ia + ti, ra - tr, ia - ti);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static (Vector128<double> Ra, Vector128<double> Ia, Vector128<double> Rb, Vector128<double> Ib) Butterfly(
+            Vector128<double> ra, Vector128<double> ia, Vector128<double> rb, Vector128<double> ib, Vector128<double> c, Vector128<double> s)
+        {
+            var tr = (rb * c) - (ib * s);
+            var ti = (rb * s) + (ib * c);
+            return (ra + tr, ia + ti, ra - tr, ia - ti);
         }
 
         private void BitReverse(Span<double> re, Span<double> im)

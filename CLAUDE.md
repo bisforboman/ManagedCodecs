@@ -82,7 +82,9 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
   move together, by hand while StyleBro is a prerelease. Package versions are central (Directory.Packages.props).
 - **Timing**: `tools/compare.sh <file> <loops>` runs `mcdec` (tools/ManagedCodecs.Cli) and
   `ffmpeg -benchmark -threads 1` on the same file (README, Benchmarking); `tools/bench.py` runs README's whole list,
-  interleaved, and `--base <mcdec.dll>` one build against another. `compare.yml` (dispatch it on the branch) does that on
+  interleaved, and `--base <mcdec.dll>` one build against another. Its first ratio is mcdec's whole process over FFmpeg's; on the 50-frame
+  H.264 clips .NET's startup and JIT were about 45% of that (FFmpeg's has almost none), so judge decoding by the
+  "steady" columns (mcdec's last loop), noisier on short clips: compare medians. `compare.yml` (dispatch it on the branch) does that on
   hosted x64 and ARM64 runners, quieter than a cloud VM; `benchmark.yml` runs weekly and keeps the history (the
   `benchmarks` branch: a ratio moving there across runs is a regression, one run's number is not). Cloud VMs are noisy: compare before/after
   on one machine, repeat runs, and don't trust one number. Comparing two builds: interleave their runs and

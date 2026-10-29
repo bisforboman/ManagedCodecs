@@ -11,6 +11,14 @@ share internals, so each depends on the others at exactly its own version (`[X]`
 then reports a mix of versions (NU1107, or NU1608 for a newer one referenced directly) rather than letting it fail at
 run time.
 
+## Unreleased
+
+### Changed
+
+- MJPEG decodes about 3% faster on ARM64 (and x64 without AVX2): the 128-bit IDCT's butterflies are inlined, where
+  they were a call a pass with their results through memory. GitHub's ARM64 runner, `compare.yml`; x64 with AVX2 is
+  unchanged; the output is the same.
+
 ## 0.2.1 – 2026-10-29
 
 Faster HE-AAC (the QMF banks by smaller transforms) and CABAC H.264, and memory management operation 5 in H.264 field

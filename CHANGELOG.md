@@ -21,8 +21,8 @@ run time.
 
 - HE-AAC decodes faster: the full QMF synthesis bank takes two DCT-IVs of 64 points, each by a complex FFT of 32, where
   it took a complex FFT of 128, and the analysis bank a complex FFT of 32 for its 64 real values, where it took one of
-  64, both with their twiddles in vectors. About 7%, 4% and 4% faster on 5.1 HE-AAC (synthesis, analysis, twiddles) on
-  the cloud VM measured (interleaved runs); the output moves only in its last bits (to 1e-12 of the peak).
+  64, both with their twiddles in vectors. Together 14 to 16% faster on 5.1 HE-AAC and 8 to 10% on HE-AAC v2, on
+  GitHub's x64 and ARM64 runners (`compare.yml`); the output moves only in its last bits (to 1e-12 of the peak).
 - H.264 decodes CABAC streams faster: the deblocking filter's edge strengths of bi-predicted blocks in vectors, CABAC's
   context selection reading neighbours inside the macroblock directly, and its significance map without per-bin
   bounds checks. About 3% fewer instructions a frame on CABAC streams with B frames, 1 to 2% faster on the cloud VM

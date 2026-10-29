@@ -602,7 +602,7 @@ internal sealed class PsProcessor
     /// <summary>
     /// The QMF subbands <paramref name="first"/> .. <paramref name="end"/> - 1 of one slot through the all-pass filter
     /// (<see cref="AllPass"/>), into <paramref name="outRe"/> and <paramref name="outIm"/> at the same indices: four
-    /// subbands at a time where Vector256 is accelerated, each lane with AllPass's operations in its order (no fused
+    /// subbands at a time where Vector256 is accelerated (two with Vector128 alone), each lane with AllPass's operations in its order (no fused
     /// multiply-adds), so the output is the same to the bit (<c>PsAllPassRow_MatchesScalar</c>); the rest one by one.
     /// </summary>
     internal static void AllPassRow(ReadOnlySpan<double> inRe, ReadOnlySpan<double> inIm, int first, int end, double[] decay, double[] delayRe, double[] delayIm, double[][][] linkRe, double[][][] linkIm, ReadOnlySpan<int> linkIndex, Span<double> outRe, Span<double> outIm)
@@ -631,6 +631,41 @@ internal sealed class PsProcessor
                     var a = decays * Vector256.Create(LinkDecays[link]);
                     var storedRe = Vector256.Create<double>(bufRe);
                     var storedIm = Vector256.Create<double>(bufIm);
+                    var nextRe = (storedRe * lpRe) - (storedIm * lpIm) - (a * r);
+                    var nextIm = (storedRe * lpIm) + (storedIm * lpRe) - (a * m);
+                    (r + (a * nextRe)).CopyTo(bufRe);
+                    (m + (a * nextIm)).CopyTo(bufIm);
+                    r = nextRe;
+                    m = nextIm;
+                }
+
+                r.CopyTo(outRe[sb..]);
+                m.CopyTo(outIm[sb..]);
+            }
+        }
+        else if (!Vector256.IsHardwareAccelerated && Vector128.IsHardwareAccelerated)
+        {
+            for (; sb + 2 <= end; sb += 2)
+            {
+                var delayedRe = Vector128.Create<double>(delayRe.AsSpan(sb));
+                var delayedIm = Vector128.Create<double>(delayIm.AsSpan(sb));
+                Vector128.Create<double>(inRe[sb..]).CopyTo(delayRe.AsSpan(sb));
+                Vector128.Create<double>(inIm[sb..]).CopyTo(delayIm.AsSpan(sb));
+                var phaseRe = Vector128.Create<double>(QmfPhase.Re.AsSpan(sb));
+                var phaseIm = Vector128.Create<double>(QmfPhase.Im.AsSpan(sb));
+                var r = (delayedRe * phaseRe) - (delayedIm * phaseIm);
+                var m = (delayedRe * phaseIm) + (delayedIm * phaseRe);
+                var decays = Vector128.Create<double>(decay.AsSpan(sb));
+                for (int link = 0; link < 3; link++)
+                {
+                    var bufRe = linkRe[link][linkIndex[link]].AsSpan(sb);
+                    var bufIm = linkIm[link][linkIndex[link]].AsSpan(sb);
+                    var lp = QmfLinkPhase[link];
+                    var lpRe = Vector128.Create<double>(lp.Re.AsSpan(sb));
+                    var lpIm = Vector128.Create<double>(lp.Im.AsSpan(sb));
+                    var a = decays * Vector128.Create(LinkDecays[link]);
+                    var storedRe = Vector128.Create<double>(bufRe);
+                    var storedIm = Vector128.Create<double>(bufIm);
                     var nextRe = (storedRe * lpRe) - (storedIm * lpIm) - (a * r);
                     var nextIm = (storedRe * lpIm) + (storedIm * lpRe) - (a * m);
                     (r + (a * nextRe)).CopyTo(bufRe);

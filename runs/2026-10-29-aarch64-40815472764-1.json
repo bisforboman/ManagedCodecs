@@ -1,0 +1,154 @@
+{
+ "date": "2026-10-29T04:04:40Z",
+ "commit": "7bb58ecdf01f585556a7f2eb24fb4e25ae8e7a2d",
+ "machine": {
+  "arch": "aarch64",
+  "cpu": "aarch64",
+  "cpus": 4
+ },
+ "ffmpeg": "6.1.1-3ubuntu5",
+ "dotnet": "10.0.403",
+ "runs": 5,
+ "results": [
+  {
+   "sample": "testsrc-420.avi",
+   "loops": 100,
+   "managedcodecs_us": 265.0,
+   "ffmpeg_us": 216.2,
+   "ratio": 1.226
+  },
+  {
+   "sample": "testsrc-444.avi",
+   "loops": 100,
+   "managedcodecs_us": 456.4,
+   "ffmpeg_us": 318.8,
+   "ratio": 1.432
+  },
+  {
+   "sample": "noise-q1.avi",
+   "loops": 100,
+   "managedcodecs_us": 873.6,
+   "ffmpeg_us": 804.0,
+   "ratio": 1.087
+  },
+  {
+   "sample": "h264-p-refs.mp4",
+   "loops": 40,
+   "managedcodecs_us": 431.0,
+   "ffmpeg_us": 176.0,
+   "ratio": 2.449
+  },
+  {
+   "sample": "h264-bench-720p.mp4",
+   "loops": 10,
+   "managedcodecs_us": 5010.0,
+   "ffmpeg_us": 2108.0,
+   "ratio": 2.377
+  },
+  {
+   "sample": "h264-main-p-refs.mp4",
+   "loops": 40,
+   "managedcodecs_us": 544.0,
+   "ffmpeg_us": 247.5,
+   "ratio": 2.198
+  },
+  {
+   "sample": "h264-b-pyramid.mp4",
+   "loops": 20,
+   "managedcodecs_us": 936.0,
+   "ffmpeg_us": 363.0,
+   "ratio": 2.579
+  },
+  {
+   "sample": "h264-wp-default.mp4",
+   "loops": 20,
+   "managedcodecs_us": 820.0,
+   "ffmpeg_us": 256.0,
+   "ratio": 3.203
+  },
+  {
+   "sample": "h264-high-default.mp4",
+   "loops": 20,
+   "managedcodecs_us": 871.0,
+   "ffmpeg_us": 264.0,
+   "ratio": 3.299
+  },
+  {
+   "sample": "h264-high-b.mp4",
+   "loops": 40,
+   "managedcodecs_us": 1057.0,
+   "ffmpeg_us": 410.0,
+   "ratio": 2.578
+  },
+  {
+   "sample": "h264-10bit-b.mp4",
+   "loops": 40,
+   "managedcodecs_us": 1410.0,
+   "ffmpeg_us": 557.0,
+   "ratio": 2.531
+  },
+  {
+   "sample": "h264-high-motion.mp4",
+   "loops": 20,
+   "managedcodecs_us": 3835.0,
+   "ffmpeg_us": 2526.0,
+   "ratio": 1.518
+  },
+  {
+   "sample": "h264-10bit-motion.mp4",
+   "loops": 20,
+   "managedcodecs_us": 4328.0,
+   "ffmpeg_us": 2876.0,
+   "ratio": 1.505
+  },
+  {
+   "sample": "h264-mbaff-default.mp4",
+   "loops": 40,
+   "managedcodecs_us": 1101.0,
+   "ffmpeg_us": 384.0,
+   "ratio": 2.867
+  },
+  {
+   "sample": "jm/jm-paff-b.mp4",
+   "loops": 200,
+   "managedcodecs_us": 1031.5,
+   "ffmpeg_us": 421.5,
+   "ratio": 2.447
+  },
+  {
+   "sample": "aac-stereo-48k.mp4",
+   "loops": 100,
+   "managedcodecs_us": 39.5,
+   "ffmpeg_us": 40.2,
+   "ratio": 0.982
+  },
+  {
+   "sample": "aac-5.1.mp4",
+   "loops": 100,
+   "managedcodecs_us": 110.6,
+   "ffmpeg_us": 59.4,
+   "ratio": 1.863
+  },
+  {
+   "sample": "heaac/heaac-5.1.mp4",
+   "loops": 100,
+   "managedcodecs_us": 447.0,
+   "ffmpeg_us": 232.8,
+   "ratio": 1.92
+  },
+  {
+   "sample": "heaac/heaacv2-stereo.mp4",
+   "loops": 100,
+   "managedcodecs_us": 190.3,
+   "ffmpeg_us": 106.8,
+   "ratio": 1.782
+  }
+ ],
+ "threads": {
+  "sample": "h264-bench-720p.mp4",
+  "loops": 10,
+  "one_us": 4974.0,
+  "four_us": 1912.0,
+  "ratio": 0.384
+ }
+}

@@ -337,6 +337,10 @@ internal sealed class Picture
     // Progress is written by the thread decoding the picture after the data it covers, and read by the threads of
     // later pictures.
     private readonly object _progressLock = new();
+
+    // What each thread waiting on the frame waits for: a report wakes them only once one of these holds, not on every
+    // row (each wake-up a context switch, which cost about half of what 4 threads spend above 1 thread's CPU).
+    private readonly List<Func<bool>> _waiting = [];
     private readonly int[] _fieldDecodedMbRows = new int[2];
     private readonly int[] _fieldFinalRows = new int[2];
     private volatile int _decodedMbRows;
@@ -415,7 +419,14 @@ internal sealed class Picture
                 Volatile.Write(ref frame._fieldFinalRows[Parity], finalLumaRows);
             }
 
-            Monitor.PulseAll(frame._progressLock);
+            foreach (var ready in frame._waiting)
+            {
+                if (ready())
+                {
+                    Monitor.PulseAll(frame._progressLock);
+                    break;
+                }
+            }
         }
     }
 
@@ -496,14 +507,22 @@ internal sealed class Picture
         var frame = Frame;
         lock (frame._progressLock)
         {
-            while (!ready())
+            frame._waiting.Add(ready);
+            try
             {
-                if (frame._failed)
+                while (!ready())
                 {
-                    throw new InvalidDataException("A picture this one predicts from could not be decoded.");
-                }
+                    if (frame._failed)
+                    {
+                        throw new InvalidDataException("A picture this one predicts from could not be decoded.");
+                    }
 
-                Monitor.Wait(frame._progressLock);
+                    Monitor.Wait(frame._progressLock);
+                }
+            }
+            finally
+            {
+                frame._waiting.Remove(ready);
             }
         }
     }

@@ -26,20 +26,23 @@ jobs:
           echo "PERF=$perf" >> "$GITHUB_ENV"
           sudo sysctl -q kernel.perf_event_paranoid=-1 kernel.kptr_restrict=0
       - name: Build
-        run: dotnet build tools/ManagedCodecs.Cli -c Release
+        run: |
+          dotnet build tools/ManagedCodecs.Cli -c Release -v q
+          git fetch -q origin main && git worktree add -q "$RUNNER_TEMP/base" origin/main
+          dotnet build "$RUNNER_TEMP/base/tools/ManagedCodecs.Cli" -c Release -v q
       - name: Counters
         env:
           DOTNET_TieredCompilation: '0'
         run: |
-          mcdec=tools/ManagedCodecs.Cli/bin/Release/net10.0/mcdec.dll
-          grep -m1 -E '^(model name|Model)' /proc/cpuinfo || true; nproc; lscpu | grep -iE 'thread|core|socket|cache' || true
-          "$PERF" list hw cache 2>/dev/null | head -40
-          ev=task-clock,context-switches,cpu-migrations,cycles,instructions,branch-misses,cache-references,cache-misses,L1-dcache-loads,L1-dcache-load-misses,LLC-loads,LLC-load-misses,dTLB-load-misses
+          branch=tools/ManagedCodecs.Cli/bin/Release/net10.0/mcdec.dll
+          base=$RUNNER_TEMP/base/tools/ManagedCodecs.Cli/bin/Release/net10.0/mcdec.dll
+          grep -m1 -E '^(model name|Model)' /proc/cpuinfo || true
           for s in h264-bench-720p.mp4 h264-high-default.mp4; do
-            for r in 1 2 3; do
-              for t in 1 4; do
-                echo "=== $s threads $t run $r"
-                "$PERF" stat -e "$ev" dotnet "$mcdec" "samples/$s" --loops 20 --threads $t 2>&1 | grep -vE '^\s*$'
+            for r in 1 2 3 4 5; do
+              for v in main m0 m32 m64; do
+                case $v in main) d=$base; m=0;; m0) d=$branch; m=0;; m32) d=$branch; m=32;; m64) d=$branch; m=64;; esac
+                MC_WAIT_MARGIN=$m "$PERF" stat -x, -e task-clock,context-switches,cycles,instructions dotnet "$d" "samples/$s" --loops 20 --threads 4 2> ps.txt > out.txt
+                echo "$s $v run $r: $(grep -o 'rtime=[0-9.]*s' out.txt) $(grep -o 'stime=[0-9.]*s' out.txt) $(awk -F, '{printf "%s=%s ", $3, $1}' ps.txt)"
               done
             done
           done

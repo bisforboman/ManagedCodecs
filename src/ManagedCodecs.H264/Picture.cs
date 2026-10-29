@@ -341,6 +341,9 @@ internal sealed class Picture
     // What each thread waiting on the frame waits for: a report wakes them only once one of these holds, not on every
     // row (each wake-up a context switch, which cost about half of what 4 threads spend above 1 thread's CPU).
     private readonly List<Func<bool>> _waiting = [];
+
+    // Scratch: rows past the one needed that a blocking wait waits for too.
+    private static readonly int WaitMargin = int.Parse(Environment.GetEnvironmentVariable("MC_WAIT_MARGIN") ?? "0");
     private readonly int[] _fieldDecodedMbRows = new int[2];
     private readonly int[] _fieldFinalRows = new int[2];
     private volatile int _decodedMbRows;
@@ -464,7 +467,8 @@ internal sealed class Picture
         int clamped = Math.Clamp(row, 0, height - 1);
         if (!RowReady(clamped))
         {
-            Wait(() => RowReady(clamped));
+            int margin = Math.Min(clamped + WaitMargin, height - 1);
+            Wait(() => RowReady(margin));
         }
     }
 

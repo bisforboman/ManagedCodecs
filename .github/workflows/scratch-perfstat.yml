@@ -1,0 +1,45 @@
+name: Scratch perf stat
+# Scratch, not for merging: hardware counters for one thread against four on the 720p sample.
+on:
+  push:
+    branches: [claude/scratch-perfstat]
+permissions:
+  contents: read
+jobs:
+  stat:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
+        with:
+          dotnet-version: 10.0.x
+      - uses: ./.github/actions/samples
+      - name: Install perf
+        run: |
+          sudo apt-get install -y -q linux-tools-generic > /dev/null
+          perf="$(ls /usr/lib/linux-tools-*/perf | head -1)"
+          echo "PERF=$perf" >> "$GITHUB_ENV"
+          sudo sysctl -q kernel.perf_event_paranoid=-1 kernel.kptr_restrict=0
+      - name: Build
+        run: dotnet build tools/ManagedCodecs.Cli -c Release
+      - name: Counters
+        env:
+          DOTNET_TieredCompilation: '0'
+        run: |
+          mcdec=tools/ManagedCodecs.Cli/bin/Release/net10.0/mcdec.dll
+          grep -m1 -E '^(model name|Model)' /proc/cpuinfo || true; nproc; lscpu | grep -iE 'thread|core|socket|cache' || true
+          "$PERF" list hw cache 2>/dev/null | head -40
+          ev=task-clock,context-switches,cpu-migrations,cycles,instructions,branch-misses,cache-references,cache-misses,L1-dcache-loads,L1-dcache-load-misses,LLC-loads,LLC-load-misses,dTLB-load-misses
+          for s in h264-bench-720p.mp4 h264-high-default.mp4; do
+            for r in 1 2 3; do
+              for t in 1 4; do
+                echo "=== $s threads $t run $r"
+                "$PERF" stat -e "$ev" dotnet "$mcdec" "samples/$s" --loops 20 --threads $t 2>&1 | grep -vE '^\s*$'
+              done
+            done
+          done

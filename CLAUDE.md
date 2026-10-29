@@ -235,6 +235,9 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
   covered in practice by the motion compensation waits: the co-located motion wait and ListsDamaged's; that file says
   why). A frame's second field runs on a decoder of its own alongside its first: it waits for
   the first's `Begin` (which resets both fields' slots), and its frame is copied out only once the first is done.
+- Hardware counters (`perf stat -e cycles,instructions`): GitHub's ARM64 runner has them, the x64 runner and the cloud
+  VM do not (`<not supported>`), and the x64 runner's 4 vCPUs are 2 cores with SMT; `perf record -e context-switches -g`
+  works everywhere and shows where threads block.
 - Measuring frame threading: perf samples only threads that run, so blocked time is invisible to it; time the waits
   (a Stopwatch around `Picture.Wait`, logging waiter, reference, row and duration, in a scratch copy) and the front
   end's wait for the oldest picture. mcdec's loops each start a fresh decoder on an IDR picture, whose followers

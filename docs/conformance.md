@@ -309,10 +309,16 @@ with rewritten parameter sets) stay as a second check.
 `H264Decoder.ConcealErrors` (off by default). A slice whose data fails (a syntax element out of range, or the data
 ending inside a macroblock) keeps the macroblocks it decoded; the failing one and the rest of the slice are marked
 missing at once, so the rows below them are neither deblocked nor reported to other pictures before they are filled.
-The picture's other slices are decoded, then every missing macroblock becomes an inter macroblock with zero motion
-from list 0 entry 0 of the picture's first P or B slice (an intra picture: the latest reference; none, after a damaged
-IDR picture, and for now an intra second field, whose latest reference is its own frame: mid-grey), no coefficients and
-the slice's QP, in a slice of its own. Deblocking, co-located motion and later direct prediction then read it as any
+The picture's other slices are decoded, then every missing macroblock becomes an inter macroblock with no coefficients
+and the slice's QP, in a slice of its own. Its motion is guessed by boundary matching (Lam, Reibman and Liu, "Recovery of lost or erroneously received motion vectors", ICASSP 1993):
+the candidates are zero motion from list 0 entry 0 of the picture's first P or B slice (an intra picture: the latest
+reference; none, after a damaged IDR picture, and for now an intra second field, whose latest reference is its own
+frame: mid-grey, and no guess) and the motion of each 4x4 block of an available inter neighbour (left, above, right,
+below; decoded, or concealed before it) along their shared edge, list 0's or else list 1's; each predicts the
+macroblock's luma, and the one whose outer samples differ least from the neighbours' samples next to them is taken
+(the earlier on a tie, zero motion first). Missing macroblocks are filled in address order, so the guess does not
+depend on threads. MBAFF frames keep zero motion (a neighbouring pair of the other kind would need its motion
+converted between frame and field units). Deblocking, co-located motion and later direct prediction then read it as any
 other. A lost picture (a frame_num gap; its packet missing, or its slice headers damaged) is the frame inferred for the
 gap (8.2.5.2), which then copies the latest reference once that is done, with no motion; a slice whose reference lists
 cannot be built (no reference at all, or a list modification naming a lost one) is not decoded and its macroblocks are
@@ -324,7 +330,7 @@ unlike the macroblocks' copies from a reference), and the missing field is repor
 so that pictures predicting from the frame do not wait for it; the frame carries its own field's timestamp. A lost
 bottom field followed by the next frame's top field with the same frame_num, both non-reference, would pair them as one
 frame (7.4.1.2.4 says they are a pair): that needs consecutive non-reference frames, which JM's samples do not have.
-Nothing of FFmpeg's (error_resilience.c guesses motion) is ported. JM codes an intra frame's second
+Nothing of FFmpeg's (error_resilience.c guesses motion its own way) is ported. JM codes an intra frame's second
 field as P, so no sample has an intra second field to test the grey case's alternative (its first field) with.
 
 Without concealment, a gap the SPS does not allow fails every picture up to the next IDR picture: the lost picture's
@@ -339,9 +345,22 @@ out, the unflagged ones are bit-exact, the flagged ones within a loose PSNR floo
 give the same frames and flags; lost packets likewise (an IDR picture, an inter one, a B picture other B pictures
 predict from, OpenH264's long-term references, a JM field pair, and one field of a pair: reference and non-reference,
 top and bottom, whose frames come out from one field). Without concealment no frame comes out wrong. The malformed-input sweep and the fuzz
-target run concealing too. Measured against FFmpeg on the same damage (8 bytes flipped in a B picture of
-`h264-high-b.mp4`, 20 frames affected): mean PSNR against the clean decode 23.8 dB, as FFmpeg's (23.8 dB; worst frame
-18.2 dB, FFmpeg's 19.7). Damage that still parses is not detected and spreads unflagged: with 8 bytes flipped in one of 6
+target run concealing too. Measured against FFmpeg on the same damage (the last NAL unit of
+every Nth packet cut to half, the damaged stream given to FFmpeg as Annex B; mean and worst PSNR of the flagged frames
+against the clean decode, in dB; 2026-10-29):
+
+| Sample, N | Zero motion | Guessed | FFmpeg |
+| --- | --- | --- | --- |
+| `h264-high-b.mp4`, 10 | 23.6, 18.1 | 26.3, 22.8 | 27.6, 20.2 |
+| `h264-high-b.mp4`, 4 | 21.6, 16.9 | 25.6, 19.6 | 20.8, 17.1 |
+| `h264-high-motion.mp4`, 10 | 27.6, 14.9 | 30.3, 17.7 | 26.2, 17.2 |
+| `h264-bench-720p.mp4`, 10 | 26.3, 22.1 | 28.3, 21.7 | 29.7, 22.7 |
+| `h264-bench-720p.mp4`, 4 | 23.9, 19.7 | 26.6, 21.4 | 28.5, 21.9 |
+| `h264-main-slices.mp4`, 10 | 22.3, 20.1 | 37.0, 25.2 | 31.1, 27.4 |
+| `h264-b-pyramid.mp4`, 6 | 20.9, 14.3 | 27.4, 21.1 | 18.9, 15.4 |
+| `h264-p-refs.mp4`, 6 | 26.9, 20.5 | 27.4, 19.7 | 25.0, 19.1 |
+
+`H264ConcealmentTests.CutPacket_MotionGuessed` keeps two of them above floors that zero motion falls below. Damage that still parses is not detected and spreads unflagged: with 8 bytes flipped in one of 6
 packets of each of 21 samples, 13 samples had at least one such packet (CAVLC and CABAC alike). Cut slice data was detected in every case: a conforming
 CABAC slice ends inside its data (9.3.4.5 writes the stop bit last), so consuming bits past it is damage.
 

@@ -11,6 +11,15 @@ share internals, so each depends on the others at exactly its own version (`[X]`
 then reports a mix of versions (NU1107, or NU1608 for a newer one referenced directly) rather than letting it fail at
 run time.
 
+## Unreleased
+
+### Changed
+
+- H.264 concealment (`ConcealErrors`) guesses the motion of a missing macroblock from its neighbours (the candidate whose
+  prediction matches their edges best), where it copied its place in one reference: on streams cut in packet after
+  packet, the concealed frames come 0.5 to 15 dB closer to the clean decode (mean PSNR; docs/conformance.md), ahead of
+  FFmpeg's on five of the eight measured. MBAFF frames still copy.
+
 ## 0.2.2 – 2026-10-29
 
 Faster MJPEG and HE-AAC on ARM64 (and x64 without AVX2). The public API is that of 0.2.0, unchanged.

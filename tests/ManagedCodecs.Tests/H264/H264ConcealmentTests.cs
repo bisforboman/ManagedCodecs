@@ -63,6 +63,29 @@ public class H264ConcealmentTests
         Assert.Equal(concealed.Select(f => (f.Pts, f.Damaged, FrameMd5.Hash(f.Data))), threaded.Select(f => (f.Pts, f.Damaged, FrameMd5.Hash(f.Data))));
     }
 
+    /// <summary>
+    /// The quality of the guess: a missing macroblock takes the motion of a neighbour that matches its edges best, which
+    /// for these streams (camera-like motion) comes far closer to the clean decode than zero motion from one reference.
+    /// The floors are the mean PSNR of the flagged frames with the guess, rounded down (zero motion gave 29.7 and
+    /// 21.9 dB): docs/conformance.md has the comparison with FFmpeg's.
+    /// </summary>
+    [Theory]
+    [InlineData("h264-main-slices.mp4", 33)]
+    [InlineData("h264-high-b.mp4", 25)]
+    public void CutPacket_MotionGuessed(string sampleName, double floor)
+    {
+        if (!ParameterSetRewriter.Exists(sampleName))
+        {
+            return;
+        }
+
+        var (video, packets) = Read(sampleName);
+        var clean = Decode(video, packets, damaged: -1, conceal: false, threads: 1).ToDictionary(f => f.Pts);
+        var concealed = Decode(video, packets, packets.Count / 2, conceal: true, threads: 1).Where(f => f.Damaged).ToList();
+        double mean = concealed.Average(f => Math.Min(Psnr(clean[f.Pts].Data, f.Data), 99));
+        Assert.True(mean > floor, $"mean PSNR {mean:F2} dB over {concealed.Count} frames");
+    }
+
     /// <summary>Without concealment the damaged picture fails, and so do the pictures predicted from it: no frame that comes out is wrong.</summary>
     [Theory]
     [InlineData("h264-main-slices.mp4", 1)]

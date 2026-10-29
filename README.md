@@ -255,8 +255,9 @@ checks the lists after each.
 
 The libraries run unchanged on `browser-wasm`. `tools/wasm-check.sh [aot]` decodes every sample there, under
 Node, and natively (`mcdec --hash`, a SHA-256 of each file's decoded frames and audio samples), and fails unless the
-output is the same. All 279 sample files agree, interpreted or compiled ahead of time, and CI's `wasm` job runs the
-AOT build on every pull request. The native build is the one checked against FFmpeg, so the wasm output matches
+output is the same. All 342 sample files agree, interpreted or compiled ahead of time, and CI's `wasm` job runs both
+on every pull request (until 0.2.2 it ran only the AOT build, and the interpreter's H.264 output was wrong from 0.2.0
+on, #206). The native build is the one checked against FFmpeg, so the wasm output matches
 FFmpeg as well. `tools/ManagedCodecs.Wasm` needs the `wasm-tools` workload (`dotnet workload install wasm-tools`),
 so it is not part of `ManagedCodecs.slnx`.
 

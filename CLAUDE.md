@@ -223,6 +223,11 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
   Emscripten's file system doesn't see the host's (files come in through `[JSImport]` from main.mjs), and the runtime
   prints `MONO_WASM:` notes on stdout under Node (it can't fetch its symbol file). `dotnet publish` puts the app in
   `bin/Release/net10.0/browser-wasm/AppBundle`, whatever `-o` says.
+  Mono's interpreter optimizes a method only after enough calls, and only then uses SIMD instructions, some with other
+  semantics: `Vector128.Narrow` saturates there as WebAssembly's narrowing does (lanes read as signed, an unsigned
+  0xFFFF becomes 0), so narrow only values the narrower type holds, comparison masks as signed lanes
+  (`NarrowMasks`). Such a bug shows only after warm-up, so a file can decode right alone and wrong after others:
+  find it with a probe that runs the vector function against its scalar reference many thousand times in the bundle.
 - Frame threading (`H264Decoder.Threads`): a picture's worker may read only what an earlier picture has reported
   done (`Picture.WaitForRow`, `WaitForMotion`), and never marking state (the front end marks later pictures
   meanwhile; read `MarkSnapshot`). Rows (pair rows of MBAFF frames and field pictures, a field picture's per field)

@@ -13,6 +13,13 @@ run time.
 
 ## Unreleased
 
+### Fixed
+
+- H.264 under the WebAssembly interpreter (browser-wasm without AOT, SIMD on, the default): frames came out wrong from
+  0.2.0 on, and differently from one decode to the next, as the interpreter narrows the deblocking strengths'
+  comparison masks with saturation once it has optimized the function (#206). The masks are now narrowed as signed
+  lanes, which every runtime narrows alike; CI's `wasm` job checks the interpreted build too.
+
 ### Changed
 
 - H.264 concealment (`ConcealErrors`) guesses the motion of a missing macroblock from its neighbours (the candidate whose

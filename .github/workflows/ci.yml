@@ -157,13 +157,15 @@ jobs:
         env:
           DOTNET_EnableHWIntrinsic: 0
 
-  # The decoders on WebAssembly (browser-wasm, compiled ahead of time as a web app would ship them, run by Node):
-  # tools/wasm-check.sh decodes every sample there and natively and fails unless the output is the same. It takes the
-  # samples from the build job rather than installing FFmpeg too.
+  # The decoders on WebAssembly (browser-wasm, run by Node), compiled ahead of time as a web app would ship them and
+  # interpreted, as the runtime runs them without AOT: tools/wasm-check.sh decodes every sample there and natively and
+  # fails unless the output is the same. The interpreter's SIMD differs from the AOT code's (it narrowed comparison
+  # masks with saturation, #206), so each needs its own run. It takes the samples from the build job rather than
+  # installing FFmpeg too.
   wasm:
     needs: build
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
@@ -191,3 +193,6 @@ jobs:
 
       - name: Decode every sample on WebAssembly and compare with the native output
         run: tools/wasm-check.sh aot
+
+      - name: The same, interpreted (with SIMD, the runtime's default)
+        run: tools/wasm-check.sh

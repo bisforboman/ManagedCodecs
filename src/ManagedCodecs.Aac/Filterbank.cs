@@ -164,8 +164,8 @@ internal static class Imdct
         var plan = spec.Length == 1024 ? Long : Short;
         int m = plan.Size;
         int quarter = m / 2;
-        Span<double> re = stackalloc double[quarter];
-        Span<double> im = stackalloc double[quarter];
+        Span<float> re = stackalloc float[quarter];
+        Span<float> im = stackalloc float[quarter];
 
         // Pre-twiddle: v[j] = (X[2j] + i X[M-1-2j]) * e^(-i pi (j + 1/4) / M).
         for (int j = 0; j < quarter; j++)
@@ -174,11 +174,11 @@ internal static class Imdct
             double b = spec[m - 1 - (2 * j)];
             double c = plan.PreCos[j];
             double s = plan.PreSin[j];
-            re[j] = (a * c) + (b * s);
-            im[j] = (b * c) - (a * s);
+            re[j] = (float)((a * c) + (b * s));
+            im[j] = (float)((b * c) - (a * s));
         }
 
-        plan.Fft(re, im);
+        plan.FftFloat(re, im);
 
         // Post-twiddle by e^(-i pi l / M), giving the DCT-IV u[2l] = Re, u[M-1-2l] = -Im; then
         // fold out: x[n] = u[n + M/2], -u[3M/2 - 1 - n], -u[n - 3M/2] over the three ranges.
@@ -320,6 +320,103 @@ internal static class Imdct
 
         private readonly double[] _stageCos;
         private readonly double[] _stageSin;
+        private float[]? _stageCosF;
+        private float[]? _stageSinF;
+
+        /// <summary>Scratch measurement: <see cref="Fft"/> in single precision, four lanes on 128-bit vectors.</summary>
+        public void FftFloat(Span<float> re, Span<float> im)
+        {
+            _stageCosF ??= [.. _stageCos.Select(x => (float)x)];
+            _stageSinF ??= [.. _stageSin.Select(x => (float)x)];
+            int length = re.Length;
+            for (int n = 0; n < length; n++)
+            {
+                int j = _bitReverse[n];
+                if (j > n)
+                {
+                    (re[n], re[j]) = (re[j], re[n]);
+                    (im[n], im[j]) = (im[j], im[n]);
+                }
+            }
+
+            ref float r = ref MemoryMarshal.GetReference(re);
+            ref float i = ref MemoryMarshal.GetReference(im);
+            ref float cos = ref MemoryMarshal.GetArrayDataReference(_stageCosF);
+            ref float sin = ref MemoryMarshal.GetArrayDataReference(_stageSinF);
+            for (int span = 1; span < length; span *= 2)
+            {
+                int k0 = span - 1;
+                if (Vector256.IsHardwareAccelerated && span >= Vector256<float>.Count)
+                {
+                    for (int start = 0; start < length; start += 2 * span)
+                    {
+                        for (int k = 0; k < span; k += Vector256<float>.Count)
+                        {
+                            var c = Vector256.LoadUnsafe(ref cos, (nuint)(k0 + k));
+                            var s = Vector256.LoadUnsafe(ref sin, (nuint)(k0 + k));
+                            nuint a = (nuint)(start + k);
+                            nuint b = a + (nuint)span;
+                            var rb = Vector256.LoadUnsafe(ref r, b);
+                            var ib = Vector256.LoadUnsafe(ref i, b);
+                            var ra = Vector256.LoadUnsafe(ref r, a);
+                            var ia = Vector256.LoadUnsafe(ref i, a);
+                            var tr = (rb * c) - (ib * s);
+                            var ti = (rb * s) + (ib * c);
+                            (ra - tr).StoreUnsafe(ref r, b);
+                            (ia - ti).StoreUnsafe(ref i, b);
+                            (ra + tr).StoreUnsafe(ref r, a);
+                            (ia + ti).StoreUnsafe(ref i, a);
+                        }
+                    }
+                }
+                else if (Vector128.IsHardwareAccelerated && span >= Vector128<float>.Count)
+                {
+                    for (int start = 0; start < length; start += 2 * span)
+                    {
+                        for (int k = 0; k < span; k += Vector128<float>.Count)
+                        {
+                            var c = Vector128.LoadUnsafe(ref cos, (nuint)(k0 + k));
+                            var s = Vector128.LoadUnsafe(ref sin, (nuint)(k0 + k));
+                            nuint a = (nuint)(start + k);
+                            nuint b = a + (nuint)span;
+                            var rb = Vector128.LoadUnsafe(ref r, b);
+                            var ib = Vector128.LoadUnsafe(ref i, b);
+                            var ra = Vector128.LoadUnsafe(ref r, a);
+                            var ia = Vector128.LoadUnsafe(ref i, a);
+                            var tr = (rb * c) - (ib * s);
+                            var ti = (rb * s) + (ib * c);
+                            (ra - tr).StoreUnsafe(ref r, b);
+                            (ia - ti).StoreUnsafe(ref i, b);
+                            (ra + tr).StoreUnsafe(ref r, a);
+                            (ia + ti).StoreUnsafe(ref i, a);
+                        }
+                    }
+                }
+                else
+                {
+                    for (int start = 0; start < length; start += 2 * span)
+                    {
+                        for (int k = 0; k < span; k++)
+                        {
+                            float c = Unsafe.Add(ref cos, k0 + k);
+                            float s = Unsafe.Add(ref sin, k0 + k);
+                            int a = start + k;
+                            int b = a + span;
+                            float rb = Unsafe.Add(ref r, b);
+                            float ib = Unsafe.Add(ref i, b);
+                            float tr = (rb * c) - (ib * s);
+                            float ti = (rb * s) + (ib * c);
+                            float ra = Unsafe.Add(ref r, a);
+                            float ia = Unsafe.Add(ref i, a);
+                            Unsafe.Add(ref r, b) = ra - tr;
+                            Unsafe.Add(ref i, b) = ia - ti;
+                            Unsafe.Add(ref r, a) = ra + tr;
+                            Unsafe.Add(ref i, a) = ia + ti;
+                        }
+                    }
+                }
+            }
+        }
 
         public int Size { get; }
 

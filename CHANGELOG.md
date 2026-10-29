@@ -19,6 +19,9 @@ run time.
   prediction matches their edges best), where it copied its place in one reference: on streams cut in packet after
   packet, the concealed frames come 0.5 to 15 dB closer to the clean decode (mean PSNR; docs/conformance.md), ahead of
   FFmpeg's on five of the eight measured. MBAFF frames still copy.
+- H.264 frame threading spends 2 to 5% less CPU for the same speed: a picture waiting on its reference's rows waits for
+  32 rows more once it has to block, and a reference's progress wakes only the waits it satisfies, which halves the
+  context switches (GitHub's x64 and ARM64 runners, 4 threads).
 
 ## 0.2.2 – 2026-10-29
 

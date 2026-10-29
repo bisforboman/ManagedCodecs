@@ -83,10 +83,13 @@ and code that reproduces FFmpeg's reading where it differs from the spec), and n
   each, which decodes in 2.4 times a P picture's time with the P pictures trailing it: short GOPs gain less; medians
   of five interleaved runs), on 4 cores without SMT where four single-threaded decodes run side by side about 7%
   slower. Workers wait for references' rows about 18% of the time, and each picture takes about 30% more CPU than
-  alone at 720p, 60% at 320x240 (perf stat's task clock): spread over every hot function, the ones reading
-  references most (in one profile), and not waiting (locks and progress
-  reports are under 0.2% of the CPU). It is not yet explained; this VM has no hardware counters to tell cache misses
-  from the rest. Decoding a picture's rows on several threads would mostly shorten the
+  alone at 720p, 60% at 320x240 (perf stat's task clock). GitHub's ARM64 runner has hardware counters (2026-10-29):
+  with 4 threads the instructions rise only 2 to 3.5%, so it is no extra work; about half the extra CPU was the
+  kernel's, from 8 to 14 context switches a picture as pictures blocked on their references' rows one macroblock row at
+  a time, and the rest is a lower IPC (2.57 to 2.37 at 720p) and clock with four cores busy. A wait that has to block
+  now waits for 32 rows more, and a report wakes only waits it satisfies: context switches fell 35 to 50% and the CPU
+  time 2 to 5% on both runners, the wall time unchanged. (The x64 runner's 4 vCPUs are 2 cores with SMT, so its
+  threads share cores.) Decoding a picture's rows on several threads would mostly shorten the
   IDR picture's lead: about a tenth of a 50-frame GOP's time, little of a 250-frame one's.
 
 ## Getting started

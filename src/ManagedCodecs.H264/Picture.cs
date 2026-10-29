@@ -337,6 +337,18 @@ internal sealed class Picture
     // Progress is written by the thread decoding the picture after the data it covers, and read by the threads of
     // later pictures.
     private readonly object _progressLock = new();
+
+    // What each thread waiting on the frame waits for: a report wakes them only once one of these holds, not on every
+    // row (each wake-up is a context switch; the kernel's share was about half of what 4 threads spend above 1 thread's
+    // CPU).
+    private readonly List<Func<bool>> _waiting = [];
+
+    // How many luma rows past the one it needs a wait that has to block waits for: a picture following its reference
+    // closely would otherwise block and wake again for nearly every macroblock row. Waiting longer is always safe (a
+    // reference never waits on the pictures predicting from it); 32 rows halved the context switches and took 2 to 5%
+    // off the CPU time of 4 threads, without changing the wall time (64 rows began to cost wall time on small pictures).
+    private const int WaitMargin = 32;
+
     private readonly int[] _fieldDecodedMbRows = new int[2];
     private readonly int[] _fieldFinalRows = new int[2];
     private volatile int _decodedMbRows;
@@ -415,7 +427,14 @@ internal sealed class Picture
                 Volatile.Write(ref frame._fieldFinalRows[Parity], finalLumaRows);
             }
 
-            Monitor.PulseAll(frame._progressLock);
+            foreach (var ready in frame._waiting)
+            {
+                if (ready())
+                {
+                    Monitor.PulseAll(frame._progressLock);
+                    break;
+                }
+            }
         }
     }
 
@@ -453,7 +472,8 @@ internal sealed class Picture
         int clamped = Math.Clamp(row, 0, height - 1);
         if (!RowReady(clamped))
         {
-            Wait(() => RowReady(clamped));
+            int margin = Math.Min(clamped + WaitMargin, height - 1);
+            Wait(() => RowReady(margin));
         }
     }
 
@@ -496,14 +516,22 @@ internal sealed class Picture
         var frame = Frame;
         lock (frame._progressLock)
         {
-            while (!ready())
+            frame._waiting.Add(ready);
+            try
             {
-                if (frame._failed)
+                while (!ready())
                 {
-                    throw new InvalidDataException("A picture this one predicts from could not be decoded.");
-                }
+                    if (frame._failed)
+                    {
+                        throw new InvalidDataException("A picture this one predicts from could not be decoded.");
+                    }
 
-                Monitor.Wait(frame._progressLock);
+                    Monitor.Wait(frame._progressLock);
+                }
+            }
+            finally
+            {
+                frame._waiting.Remove(ready);
             }
         }
     }

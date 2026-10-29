@@ -57,6 +57,10 @@ MUTATIONS = [
          tests="FullyQualifiedName~H264ConcealmentTests", repeat=3),
 
     # ---- H.264
+    # Concealment guesses a missing macroblock's motion from its neighbours (boundary matching), not zero motion.
+    dict(file="src/ManagedCodecs.H264/PictureDecoder.Conceal.cs",
+         find="        if (count == 1)", replace="        if (count >= 1)",
+         tests="FullyQualifiedName~CutPacket_MotionGuessed"),
     # MBAFF: frame-to-field vertical motion halves with truncation towards zero.
     dict(file="src/ManagedCodecs.H264/PictureDecoder.Direct.cs",
          find="VerticalScale.FrameToField => col.MvY / 2,", replace="VerticalScale.FrameToField => col.MvY >> 1,",

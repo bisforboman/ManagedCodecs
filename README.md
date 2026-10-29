@@ -69,7 +69,8 @@ and code that reproduces FFmpeg's reading where it differs from the spec), and n
 - MJPEG: files from real cameras (the samples are all FFmpeg's), and packets holding one field (FFmpeg decodes none).
 - H.264: luma and chroma bit depths that differ are rejected on purpose (no mainstream
   encoder or decoder, FFmpeg included, handles them, and they would need a bit depth for each plane in the frame
-  API); guessing motion for concealed macroblocks (they copy their place in a reference); without concealment, a
+  API); guessing motion for concealed macroblocks in MBAFF frames (they copy their place in a reference; elsewhere the
+  motion is guessed from the neighbours); without concealment, a
   lost reference fails pictures up to the next IDR picture, not an MMCO 5 one (by design: the MMCO 5 picture itself
   would have to be decoded from lists that can no longer be trusted, so its marking never applies).
 - H.264 speed: 1.85 to 3.29 times FFmpeg's time on one thread, interlaced video included (Benchmarking); at 720p

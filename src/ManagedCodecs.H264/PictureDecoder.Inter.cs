@@ -515,9 +515,10 @@ internal sealed partial class PictureDecoder<TPixel>
         int handleSlot = frameIdx;
         if (field)
         {
-            reference = reference.Field((mbAddr & 1) ^ (refIdx & 1));
+            int parity = (mbAddr & 1) ^ (refIdx & 1);
+            reference = reference.Field(parity);
             Statistics.OppositeParity += refIdx & 1;
-            handleSlot = 32 + (frameIdx * 2) + (refIdx & 1);
+            handleSlot = 32 + (frameIdx * 2) + parity;
         }
 
         if (_fieldParity >= 0)

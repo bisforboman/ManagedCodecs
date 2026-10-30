@@ -403,7 +403,7 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
 
         /// <summary>
         /// Per list, the handles (<see cref="HandleOf"/>) of the list's pictures, 0 until first used: a frame's at its
-        /// index, and from 32 an MBAFF field macroblock's fields, two a frame (same parity, then opposite).
+        /// index, and from 32 the fields an MBAFF field macroblock reads, two a frame (top, then bottom).
         /// </summary>
         public byte[][] Handles { get; } = [new byte[32 + 64], new byte[32 + 64]];
 

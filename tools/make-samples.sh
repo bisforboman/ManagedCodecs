@@ -22,6 +22,11 @@ ff -f lavfi -i testsrc2=size=320x240:rate=25 -t 1 -c:v mjpeg -pix_fmt yuvj422p -
 ff -f lavfi -i testsrc2=size=320x240:rate=25 -t 1 -c:v mjpeg -pix_fmt yuvj420p -q:v 3 -huffman default samples/testsrc-stdhuff.avi
 # Noise at the highest quality: large coefficients exercise the IDCT's full range
 ff -f lavfi -i testsrc2=size=320x240:rate=25,noise=alls=60:allf=t -t 1 -c:v mjpeg -pix_fmt yuvj420p -q:v 1 samples/noise-q1.avi
+# A dropped frame: with MP3 alongside, FFmpeg's muxer writes an empty '00dc' chunk after the first frame while
+# interleaving the audio. FFmpeg's demuxer counts it, giving no packet for it but pts 0, 2, 3, ... after
+# (AviDemuxerTests checks the gap is there).
+ff -f lavfi -i testsrc2=size=320x240:rate=25:duration=2,format=yuvj420p -f lavfi -i sine=duration=3 -c:v mjpeg -c:a libmp3lame \
+  samples/avi-dropped-frame.avi
 # Grayscale (FFmpeg's MJPEG encoder has no gray output, so ImageMagick encodes the frames)
 frames=$(mktemp -d)
 ff -f lavfi -i testsrc2=size=322x238:rate=25 -t 1 -pix_fmt gray "$frames/f%02d.png"

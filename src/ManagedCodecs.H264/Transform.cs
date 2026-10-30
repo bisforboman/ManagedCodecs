@@ -2,6 +2,7 @@ using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics;
+using System.Runtime.Intrinsics.Arm;
 using System.Runtime.Intrinsics.X86;
 
 namespace ManagedCodecs.H264;
@@ -228,7 +229,7 @@ internal static class Transform
     {
         _ = d[63];
         _ = dest[(7 * stride) + 7];
-        if (Sse2.IsSupported && InverseTransform8x8Add16(d, dest, stride))
+        if (Simd.IsSupported && InverseTransform8x8Add16(d, dest, stride))
         {
             return;
         }
@@ -297,7 +298,7 @@ internal static class Transform
         return true;
 
         static Vector128<short> Pack(ref int row, int offset) =>
-            Sse2.PackSignedSaturate(Vector128.LoadUnsafe(ref row, (nuint)offset), Vector128.LoadUnsafe(ref row, (nuint)(offset + 4)));
+            Simd.PackSignedSaturate(Vector128.LoadUnsafe(ref row, (nuint)offset), Vector128.LoadUnsafe(ref row, (nuint)(offset + 4)));
     }
 
     /// <summary>Two rows of residuals, each shifted down 6, added to their 8 samples and clipped to 8 bits.</summary>
@@ -306,9 +307,9 @@ internal static class Transform
     {
         ref byte row1 = ref Unsafe.Add(ref row0, stride);
         var prediction = Vector128.Create(Unsafe.ReadUnaligned<ulong>(ref row0), Unsafe.ReadUnaligned<ulong>(ref row1)).AsByte();
-        var sum0 = Sse2.Add(Sse2.UnpackLow(prediction, Vector128<byte>.Zero).AsInt16(), Sse2.ShiftRightArithmetic(residual0, 6));
-        var sum1 = Sse2.Add(Sse2.UnpackHigh(prediction, Vector128<byte>.Zero).AsInt16(), Sse2.ShiftRightArithmetic(residual1, 6));
-        var samples = Sse2.PackUnsignedSaturate(sum0, sum1).AsUInt64();
+        var sum0 = Simd.Add(Simd.UnpackLow(prediction, Vector128<byte>.Zero).AsInt16(), Simd.ShiftRightArithmetic(residual0, 6));
+        var sum1 = Simd.Add(Simd.UnpackHigh(prediction, Vector128<byte>.Zero).AsInt16(), Simd.ShiftRightArithmetic(residual1, 6));
+        var samples = Simd.PackUnsignedSaturate(sum0, sum1).AsUInt64();
         Unsafe.WriteUnaligned(ref row0, samples.GetElement(0));
         Unsafe.WriteUnaligned(ref row1, samples.GetElement(1));
     }
@@ -317,30 +318,30 @@ internal static class Transform
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void Transpose8x8(ref Vector128<short> v0, ref Vector128<short> v1, ref Vector128<short> v2, ref Vector128<short> v3, ref Vector128<short> v4, ref Vector128<short> v5, ref Vector128<short> v6, ref Vector128<short> v7)
     {
-        var t0 = Sse2.UnpackLow(v0, v1);
-        var t1 = Sse2.UnpackHigh(v0, v1);
-        var t2 = Sse2.UnpackLow(v2, v3);
-        var t3 = Sse2.UnpackHigh(v2, v3);
-        var t4 = Sse2.UnpackLow(v4, v5);
-        var t5 = Sse2.UnpackHigh(v4, v5);
-        var t6 = Sse2.UnpackLow(v6, v7);
-        var t7 = Sse2.UnpackHigh(v6, v7);
-        var u0 = Sse2.UnpackLow(t0.AsInt32(), t2.AsInt32());
-        var u1 = Sse2.UnpackHigh(t0.AsInt32(), t2.AsInt32());
-        var u2 = Sse2.UnpackLow(t1.AsInt32(), t3.AsInt32());
-        var u3 = Sse2.UnpackHigh(t1.AsInt32(), t3.AsInt32());
-        var u4 = Sse2.UnpackLow(t4.AsInt32(), t6.AsInt32());
-        var u5 = Sse2.UnpackHigh(t4.AsInt32(), t6.AsInt32());
-        var u6 = Sse2.UnpackLow(t5.AsInt32(), t7.AsInt32());
-        var u7 = Sse2.UnpackHigh(t5.AsInt32(), t7.AsInt32());
-        v0 = Sse2.UnpackLow(u0.AsInt64(), u4.AsInt64()).AsInt16();
-        v1 = Sse2.UnpackHigh(u0.AsInt64(), u4.AsInt64()).AsInt16();
-        v2 = Sse2.UnpackLow(u1.AsInt64(), u5.AsInt64()).AsInt16();
-        v3 = Sse2.UnpackHigh(u1.AsInt64(), u5.AsInt64()).AsInt16();
-        v4 = Sse2.UnpackLow(u2.AsInt64(), u6.AsInt64()).AsInt16();
-        v5 = Sse2.UnpackHigh(u2.AsInt64(), u6.AsInt64()).AsInt16();
-        v6 = Sse2.UnpackLow(u3.AsInt64(), u7.AsInt64()).AsInt16();
-        v7 = Sse2.UnpackHigh(u3.AsInt64(), u7.AsInt64()).AsInt16();
+        var t0 = Simd.UnpackLow(v0, v1);
+        var t1 = Simd.UnpackHigh(v0, v1);
+        var t2 = Simd.UnpackLow(v2, v3);
+        var t3 = Simd.UnpackHigh(v2, v3);
+        var t4 = Simd.UnpackLow(v4, v5);
+        var t5 = Simd.UnpackHigh(v4, v5);
+        var t6 = Simd.UnpackLow(v6, v7);
+        var t7 = Simd.UnpackHigh(v6, v7);
+        var u0 = Simd.UnpackLow(t0.AsInt32(), t2.AsInt32());
+        var u1 = Simd.UnpackHigh(t0.AsInt32(), t2.AsInt32());
+        var u2 = Simd.UnpackLow(t1.AsInt32(), t3.AsInt32());
+        var u3 = Simd.UnpackHigh(t1.AsInt32(), t3.AsInt32());
+        var u4 = Simd.UnpackLow(t4.AsInt32(), t6.AsInt32());
+        var u5 = Simd.UnpackHigh(t4.AsInt32(), t6.AsInt32());
+        var u6 = Simd.UnpackLow(t5.AsInt32(), t7.AsInt32());
+        var u7 = Simd.UnpackHigh(t5.AsInt32(), t7.AsInt32());
+        v0 = Simd.UnpackLow(u0.AsInt64(), u4.AsInt64()).AsInt16();
+        v1 = Simd.UnpackHigh(u0.AsInt64(), u4.AsInt64()).AsInt16();
+        v2 = Simd.UnpackLow(u1.AsInt64(), u5.AsInt64()).AsInt16();
+        v3 = Simd.UnpackHigh(u1.AsInt64(), u5.AsInt64()).AsInt16();
+        v4 = Simd.UnpackLow(u2.AsInt64(), u6.AsInt64()).AsInt16();
+        v5 = Simd.UnpackHigh(u2.AsInt64(), u6.AsInt64()).AsInt16();
+        v6 = Simd.UnpackLow(u3.AsInt64(), u7.AsInt64()).AsInt16();
+        v7 = Simd.UnpackHigh(u3.AsInt64(), u7.AsInt64()).AsInt16();
     }
 
     /// <summary>The 8-point transform of 8.5.13.2 lane by lane: input k in vk, output k back there.</summary>
@@ -596,7 +597,7 @@ internal static class Transform
     {
         _ = d[15];
         _ = dest[(3 * stride) + 3];
-        if (Sse2.IsSupported && InverseTransformAdd16(d, dest, stride))
+        if (Simd.IsSupported && InverseTransformAdd16(d, dest, stride))
         {
             return;
         }
@@ -656,14 +657,14 @@ internal static class Transform
             return false;
         }
 
-        var rows01 = Sse2.PackSignedSaturate(rows0 + Vector128.CreateScalar(32), rows1);
-        var rows23 = Sse2.PackSignedSaturate(rows2, rows3);
+        var rows01 = Simd.PackSignedSaturate(rows0 + Vector128.CreateScalar(32), rows1);
+        var rows23 = Simd.PackSignedSaturate(rows2, rows3);
         var (columns01, columns23) = Transpose4x4(rows01, rows23);
         var (f01, f32) = Transform4Lanes(columns01, columns23); // f0 | f1 and f3 | f2, a lane a row
-        var (g01, g23) = Transpose4x4(f01, Sse2.Shuffle(f32.AsInt32(), 0b01_00_11_10).AsInt16());
+        var (g01, g23) = Transpose4x4(f01, Simd.SwapHalves(f32.AsInt32()).AsInt16());
         var (h01, h32) = Transform4Lanes(g01, g23); // rows 0 | 1 and 3 | 2 of the result
-        h01 = Sse2.ShiftRightArithmetic(h01, 6);
-        h32 = Sse2.ShiftRightArithmetic(h32, 6);
+        h01 = Simd.ShiftRightArithmetic(h01, 6);
+        h32 = Simd.ShiftRightArithmetic(h32, 6);
 
         ref byte target = ref MemoryMarshal.GetReference(dest);
         ref byte row1 = ref Unsafe.Add(ref target, stride);
@@ -671,9 +672,9 @@ internal static class Transform
         ref byte row3 = ref Unsafe.Add(ref target, 3 * stride);
         var prediction01 = Vector128.Create(Unsafe.ReadUnaligned<uint>(ref target), Unsafe.ReadUnaligned<uint>(ref row1), 0, 0).AsByte();
         var prediction32 = Vector128.Create(Unsafe.ReadUnaligned<uint>(ref row3), Unsafe.ReadUnaligned<uint>(ref row2), 0, 0).AsByte();
-        var sum01 = Sse2.Add(Sse2.UnpackLow(prediction01, Vector128<byte>.Zero).AsInt16(), h01);
-        var sum32 = Sse2.Add(Sse2.UnpackLow(prediction32, Vector128<byte>.Zero).AsInt16(), h32);
-        var samples = Sse2.PackUnsignedSaturate(sum01, sum32).AsUInt32();
+        var sum01 = Simd.Add(Simd.UnpackLow(prediction01, Vector128<byte>.Zero).AsInt16(), h01);
+        var sum32 = Simd.Add(Simd.UnpackLow(prediction32, Vector128<byte>.Zero).AsInt16(), h32);
+        var samples = Simd.PackUnsignedSaturate(sum01, sum32).AsUInt32();
         Unsafe.WriteUnaligned(ref target, samples.GetElement(0));
         Unsafe.WriteUnaligned(ref row1, samples.GetElement(1));
         Unsafe.WriteUnaligned(ref row3, samples.GetElement(2));
@@ -684,10 +685,10 @@ internal static class Transform
     /// <summary>Transposes a 4x4 matrix of shorts held as rows 0 | 1 and rows 2 | 3.</summary>
     private static (Vector128<short> Columns01, Vector128<short> Columns23) Transpose4x4(Vector128<short> rows01, Vector128<short> rows23)
     {
-        var low = Sse2.UnpackLow(rows01, rows23); // r0c0 r2c0 r0c1 r2c1 r0c2 r2c2 r0c3 r2c3
-        var high = Sse2.UnpackHigh(rows01, rows23); // r1c0 r3c0 r1c1 r3c1 ...
-        var mixed0 = Sse2.UnpackLow(low, high); // r0c0 r1c0 r2c0 r3c0 r0c1 r1c1 r2c1 r3c1
-        var mixed1 = Sse2.UnpackHigh(low, high); // columns 2 and 3
+        var low = Simd.UnpackLow(rows01, rows23); // r0c0 r2c0 r0c1 r2c1 r0c2 r2c2 r0c3 r2c3
+        var high = Simd.UnpackHigh(rows01, rows23); // r1c0 r3c0 r1c1 r3c1 ...
+        var mixed0 = Simd.UnpackLow(low, high); // r0c0 r1c0 r2c0 r3c0 r0c1 r1c1 r2c1 r3c1
+        var mixed1 = Simd.UnpackHigh(low, high); // columns 2 and 3
         return (mixed0, mixed1);
     }
 
@@ -699,13 +700,13 @@ internal static class Transform
     {
         // The high halves (x1 and x3) are the ones halved: x0 + x2 | x1 + (x3 >> 1) and x0 - x2 | (x1 >> 1) - x3.
         var high = Vector128.Create(0, 0, 0, 0, -1, -1, -1, -1).AsInt16();
-        var x01Half = Vector128.ConditionalSelect(high, Sse2.ShiftRightArithmetic(x01, 1), x01);
-        var x23Half = Vector128.ConditionalSelect(high, Sse2.ShiftRightArithmetic(x23, 1), x23);
-        var e03 = Sse2.Add(x01, x23Half); // e0 | e3
-        var e12 = Sse2.Subtract(x01Half, x23); // e1 | e2
-        var e01 = Sse2.UnpackLow(e03.AsInt64(), e12.AsInt64()).AsInt16();
-        var e32 = Sse2.UnpackHigh(e03.AsInt64(), e12.AsInt64()).AsInt16();
-        return (Sse2.Add(e01, e32), Sse2.Subtract(e01, e32));
+        var x01Half = Vector128.ConditionalSelect(high, Simd.ShiftRightArithmetic(x01, 1), x01);
+        var x23Half = Vector128.ConditionalSelect(high, Simd.ShiftRightArithmetic(x23, 1), x23);
+        var e03 = Simd.Add(x01, x23Half); // e0 | e3
+        var e12 = Simd.Subtract(x01Half, x23); // e1 | e2
+        var e01 = Simd.UnpackLow(e03.AsInt64(), e12.AsInt64()).AsInt16();
+        var e32 = Simd.UnpackHigh(e03.AsInt64(), e12.AsInt64()).AsInt16();
+        return (Simd.Add(e01, e32), Simd.Subtract(e01, e32));
     }
 
     /// <summary>The scalar <see cref="InverseTransformAdd{TPixel}"/>: for deeper samples, and the 8-bit one's reference.</summary>
@@ -871,6 +872,65 @@ internal static class Transform
             f[8 + j] = t0 - t1 - t2 + t3;
             f[12 + j] = t0 - t1 + t2 - t3;
         }
+    }
+
+    /// <summary>
+    /// The SSE2 operations of the 16-bit transforms, on x64 SSE2's own and on ARM64 the same in AdvSimd (saturating
+    /// narrows, zips): the 16-bit paths need one or the other, and elsewhere (WebAssembly) the 32-bit ones run.
+    /// </summary>
+    private static class Simd
+    {
+        public static bool IsSupported => Sse2.IsSupported || AdvSimd.Arm64.IsSupported;
+
+        /// <summary>a's lanes then b's, each saturated to 16 bits, as packssdw.</summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector128<short> PackSignedSaturate(Vector128<int> a, Vector128<int> b) => Sse2.IsSupported
+            ? Sse2.PackSignedSaturate(a, b)
+            : AdvSimd.ExtractNarrowingSaturateUpper(AdvSimd.ExtractNarrowingSaturateLower(a), b);
+
+        /// <summary>a's lanes then b's, each saturated to 0 .. 255, as packuswb.</summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector128<byte> PackUnsignedSaturate(Vector128<short> a, Vector128<short> b) => Sse2.IsSupported
+            ? Sse2.PackUnsignedSaturate(a, b)
+            : AdvSimd.ExtractNarrowingSaturateUnsignedUpper(AdvSimd.ExtractNarrowingSaturateUnsignedLower(a), b);
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector128<byte> UnpackLow(Vector128<byte> a, Vector128<byte> b) => Sse2.IsSupported ? Sse2.UnpackLow(a, b) : AdvSimd.Arm64.ZipLow(a, b);
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector128<byte> UnpackHigh(Vector128<byte> a, Vector128<byte> b) => Sse2.IsSupported ? Sse2.UnpackHigh(a, b) : AdvSimd.Arm64.ZipHigh(a, b);
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector128<short> UnpackLow(Vector128<short> a, Vector128<short> b) => Sse2.IsSupported ? Sse2.UnpackLow(a, b) : AdvSimd.Arm64.ZipLow(a, b);
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector128<short> UnpackHigh(Vector128<short> a, Vector128<short> b) => Sse2.IsSupported ? Sse2.UnpackHigh(a, b) : AdvSimd.Arm64.ZipHigh(a, b);
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector128<int> UnpackLow(Vector128<int> a, Vector128<int> b) => Sse2.IsSupported ? Sse2.UnpackLow(a, b) : AdvSimd.Arm64.ZipLow(a, b);
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector128<int> UnpackHigh(Vector128<int> a, Vector128<int> b) => Sse2.IsSupported ? Sse2.UnpackHigh(a, b) : AdvSimd.Arm64.ZipHigh(a, b);
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector128<long> UnpackLow(Vector128<long> a, Vector128<long> b) => Sse2.IsSupported ? Sse2.UnpackLow(a, b) : AdvSimd.Arm64.ZipLow(a, b);
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector128<long> UnpackHigh(Vector128<long> a, Vector128<long> b) => Sse2.IsSupported ? Sse2.UnpackHigh(a, b) : AdvSimd.Arm64.ZipHigh(a, b);
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector128<short> Add(Vector128<short> a, Vector128<short> b) => a + b;
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector128<short> Subtract(Vector128<short> a, Vector128<short> b) => a - b;
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector128<short> ShiftRightArithmetic(Vector128<short> value, byte count) => value >> count;
+
+        /// <summary>Lanes 2, 3, 0, 1: the halves swapped.</summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector128<int> SwapHalves(Vector128<int> value) =>
+            Sse2.IsSupported ? Sse2.Shuffle(value, 0b01_00_11_10) : AdvSimd.ExtractVector128(value, value, 2);
     }
 }
 

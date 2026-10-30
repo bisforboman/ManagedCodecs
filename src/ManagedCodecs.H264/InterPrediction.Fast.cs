@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics;
+using System.Runtime.Intrinsics.Arm;
 using System.Runtime.Intrinsics.X86;
 
 namespace ManagedCodecs.H264;
@@ -316,7 +317,8 @@ internal static partial class InterPrediction
     /// <summary>
     /// A row filtered across, (8 - xFrac) A + xFrac B, for its first eight samples: with SSSE3 one load, its samples
     /// paired with their right-hand neighbours by a shuffle, and one multiply-add of the pairs with the weights
-    /// (<paramref name="pairWeights"/>: 8 - xFrac and xFrac in turn); else both samples widened and multiplied.
+    /// (<paramref name="pairWeights"/>: 8 - xFrac and xFrac in turn); on ARM64 the two multiplies widening and
+    /// accumulating; else both samples widened and multiplied.
     /// </summary>
     private static Vector128<short> Across(ref byte source, int offset, Vector128<short> left, Vector128<short> right, Vector128<sbyte> pairWeights)
     {
@@ -324,6 +326,13 @@ internal static partial class InterPrediction
         {
             var pairs = Ssse3.Shuffle(Load(ref source, offset), Vector128.Create((byte)0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8));
             return Ssse3.MultiplyAddAdjacent(pairs, pairWeights);
+        }
+
+        if (AdvSimd.IsSupported)
+        {
+            // umull and umlal: the eight samples and their neighbours, each times its weight, widened in the multiply.
+            var weighted = AdvSimd.MultiplyWideningLower(Load(ref source, offset).GetLower(), AdvSimd.ExtractNarrowingLower(left).AsByte());
+            return AdvSimd.MultiplyWideningLowerAndAdd(weighted, Load(ref source, offset + 1).GetLower(), AdvSimd.ExtractNarrowingLower(right).AsByte()).AsInt16();
         }
 
         return (Lower(Load(ref source, offset)) * left) + (Lower(Load(ref source, offset + 1)) * right);

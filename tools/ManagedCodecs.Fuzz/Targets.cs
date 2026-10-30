@@ -55,7 +55,10 @@ public static class Targets
         }
     }
 
-    /// <summary>Demuxes a container file and decodes every packet of the streams there are decoders for.</summary>
+    /// <summary>
+    /// Demuxes a container file and decodes every packet of the streams there are decoders for. An MP4 file is read again
+    /// one track at a time and by <see cref="Mp4Demuxer.ReadPacketInfo"/>, which must give the same packets.
+    /// </summary>
     public static void DecodeFile(byte[] file, int threads = 1, bool conceal = false)
     {
         using var demuxer = Demuxer.Open(new MemoryStream(file));
@@ -68,8 +71,10 @@ public static class Targets
             _ => null,
         };
         IAudioDecoder? audioDecoder = audio?.Codec == CodecIds.Aac ? new AacDecoder(audio) : null;
+        var infos = new List<PacketInfo>();
         foreach (var packet in demuxer.ReadPackets())
         {
+            infos.Add(Info(packet));
             if (videoDecoder is not null && packet.StreamIndex == video!.StreamIndex)
             {
                 Release(videoDecoder.Decode(packet));
@@ -83,6 +88,33 @@ public static class Targets
         if (videoDecoder is not null)
         {
             Release(videoDecoder.Flush());
+        }
+
+        if (demuxer is Mp4Demuxer mp4)
+        {
+            CheckSame(infos, mp4.ReadPacketInfo(), "ReadPacketInfo");
+            foreach (var (tracks, stream) in new[] { (MediaTypes.Video, video?.StreamIndex), (MediaTypes.Audio, audio?.StreamIndex) })
+            {
+                if (stream is { } index)
+                {
+                    using var one = new Mp4Demuxer(new MemoryStream(file), tracks);
+                    var expected = infos.Where(p => p.StreamIndex == index).ToList();
+                    CheckSame(expected, one.ReadPackets().Select(Info), $"{tracks} only");
+                    CheckSame(expected, one.ReadPacketInfo(), $"{tracks} only, ReadPacketInfo");
+                }
+            }
+        }
+    }
+
+    private static PacketInfo Info(Packet p) => new(p.StreamIndex, p.Sequence, p.Data.Length, p.IsKeyframe, p.Dts, p.Pts, p.Duration, p.SkipSamples, p.Discard);
+
+    private static void CheckSame(List<PacketInfo> expected, IEnumerable<PacketInfo> actual, string what)
+    {
+        var list = actual.ToList();
+        int differs = Enumerable.Range(0, Math.Min(expected.Count, list.Count)).FirstOrDefault(i => expected[i] != list[i], -1);
+        if (differs >= 0 || expected.Count != list.Count)
+        {
+            throw new InvalidOperationException($"{what}: packet {(differs >= 0 ? differs : Math.Min(expected.Count, list.Count))} differs from ReadPackets' ({expected.Count} packets, {list.Count} here).");
         }
     }
 

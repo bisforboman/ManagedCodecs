@@ -96,6 +96,14 @@ prediction, so libx264's default Main profile output decodes; and High profile's
 with Intra 8x8 prediction, so libx264's default output decodes too, and scaling matrices (the
 default ones and custom lists). Frames come out in display order.
 
+Each frame's `VideoFrame.PictureType` is FFmpeg's `pict_type`, compared with `ffprobe -show_frames` frame by frame on
+every sample FFmpeg decodes (`name.picttypes`, in the conformance tests, with threads too). FFmpeg takes the type of
+the picture's first slice (`h264_frame_start`; the spec gives a picture no type of its own), so a frame of two field
+pictures has its first field's type (I and P fields give I; JM's PAFF samples hold such pairs), and a picture whose
+slices differ in type has its first slice's: no encoder used here mixes them, so `H264PictureTypeTests` builds such a
+stream (ffprobe gives it I, I, P too). SI and SP, which FFmpeg reports too, would come from the Extended profile's
+switching slices, which the decoder rejects. A concealed frame has the type of the slices that arrived.
+
 ### The container's picture size
 
 FFmpeg's decoder crops a frame further to the size the container gives (MP4's sample entry), where that only takes

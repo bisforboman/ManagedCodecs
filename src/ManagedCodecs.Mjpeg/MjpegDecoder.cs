@@ -105,6 +105,13 @@ public sealed class MjpegDecoder : IVideoDecoder
     /// </summary>
     public VideoFrame Decode(ReadOnlySpan<byte> packet)
     {
+        var frame = DecodeFrame(packet);
+        frame.PictureType = PictureType.I;
+        return frame;
+    }
+
+    private VideoFrame DecodeFrame(ReadOnlySpan<byte> packet)
+    {
         var first = DecodeImage(packet, out int end);
         int height = first.Header.Height;
         if (!IsField(height))

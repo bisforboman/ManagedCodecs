@@ -47,6 +47,9 @@ public class H264ConcealmentTests
         foreach (var frame in concealed)
         {
             var expected = clean[frame.Pts].Data;
+
+            // The cut is at the packet's end, so its picture keeps its first slice, which gives the frame its type.
+            Assert.Equal(clean[frame.Pts].Type, frame.Type);
             if (frame.Damaged)
             {
                 Assert.True(Psnr(expected, frame.Data) > PsnrFloor, $"frame {frame.Pts}: {Psnr(expected, frame.Data):F1} dB");
@@ -60,7 +63,7 @@ public class H264ConcealmentTests
         // Frame threading (with random delays, so that pictures overtake each other) gives the same frames and flags:
         // a picture's flag depends on its references' being final first.
         var threaded = Decode(video, packets, damaged, conceal: true, threads: 3, rowDelay: 2);
-        Assert.Equal(concealed.Select(f => (f.Pts, f.Damaged, FrameMd5.Hash(f.Data))), threaded.Select(f => (f.Pts, f.Damaged, FrameMd5.Hash(f.Data))));
+        Assert.Equal(concealed.Select(f => (f.Pts, f.Damaged, f.Type, FrameMd5.Hash(f.Data))), threaded.Select(f => (f.Pts, f.Damaged, f.Type, FrameMd5.Hash(f.Data))));
     }
 
     /// <summary>
@@ -189,7 +192,7 @@ public class H264ConcealmentTests
         }
 
         var threaded = Decode(video, kept, damaged: -1, conceal: true, threads: 3, rowDelay: 2);
-        Assert.Equal(concealed.Select(f => (f.Pts, f.Damaged, FrameMd5.Hash(f.Data))), threaded.Select(f => (f.Pts, f.Damaged, FrameMd5.Hash(f.Data))));
+        Assert.Equal(concealed.Select(f => (f.Pts, f.Damaged, f.Type, FrameMd5.Hash(f.Data))), threaded.Select(f => (f.Pts, f.Damaged, f.Type, FrameMd5.Hash(f.Data))));
     }
 
     /// <summary>
@@ -224,18 +227,18 @@ public class H264ConcealmentTests
     }
 
     // Decodes every packet, packet `damaged` with its last NAL unit cut to half; what fails is skipped, as a player would.
-    private static List<(long Pts, byte[] Data, bool Damaged)> Decode(VideoStreamInfo video, List<(byte[] Data, long Pts)> packets, int damaged, bool conceal, int threads, int rowDelay = 0)
+    private static List<(long Pts, byte[] Data, bool Damaged, PictureType Type)> Decode(VideoStreamInfo video, List<(byte[] Data, long Pts)> packets, int damaged, bool conceal, int threads, int rowDelay = 0)
     {
         int lengthSize = (video.CodecPrivate.Span[4] & 3) + 1;
         var decoder = new H264Decoder(video) { ConcealErrors = conceal, Threads = threads, RowDelay = rowDelay };
-        var frames = new List<(long, byte[], bool)>();
+        var frames = new List<(long, byte[], bool, PictureType)>();
         void Take(IReadOnlyList<VideoFrame> output)
         {
             foreach (var frame in output)
             {
                 var data = new MemoryStream();
                 frame.WritePacked(data);
-                frames.Add((frame.Pts, data.ToArray(), frame.IsDamaged));
+                frames.Add((frame.Pts, data.ToArray(), frame.IsDamaged, frame.PictureType));
                 frame.Dispose();
             }
         }

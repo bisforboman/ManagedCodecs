@@ -13,6 +13,7 @@ samples/*.mp4
 samples/*.aac
 samples/*.mjpeg
 samples/*.framemd5
+samples/*.picttypes
 samples/*.flags
 samples/*.csv
 samples/*.f32

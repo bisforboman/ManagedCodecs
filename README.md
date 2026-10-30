@@ -145,6 +145,10 @@ foreach (var frame in decoder.Flush())
 }
 ```
 
+Each frame says how it was coded in `PictureType` (I, P or B), the `pict_type` that `ffprobe -show_frames` prints: in
+H.264 the type of the picture's first slice, of its first field for a frame of two field pictures; I for every MJPEG
+frame. Whether a frame is a keyframe is the packet's `IsKeyFrame`.
+
 The same asynchronously, for servers and UI threads: `ReadPacketsAsync`, `DecodeAsync` and `FlushAsync` are on the
 interfaces (with defaults, so other implementations keep working). With `Threads` above 1, `H264Decoder.DecodeAsync`
 awaits the pictures being decoded where `Decode` would block the calling thread; a cancelled token stops the waiting,

@@ -91,6 +91,22 @@ public class H264ConcealmentTests
         Assert.True(mean > floor, $"mean PSNR {mean:F2} dB over {concealed.Count} frames");
     }
 
+    // SCRATCH (never merged): prints concealed frames' MD5s and the cleanly decoded ones', to compare x64 with ARM64.
+    [Theory]
+    [InlineData("jm/jm-paff-mbaff.mp4", 4)]
+    [InlineData("jm-planes-mbaff.mp4", 5)]
+    [InlineData("h264-mbaff-p-motion.mp4", -1)]
+    [InlineData("h264-422-mbaff-p-motion.mp4", -1)]
+    [InlineData("h264-main-slices.mp4", -1)]
+    public void ScratchProbe(string sampleName, int damaged)
+    {
+        var (video, packets) = Read(sampleName);
+        var clean = Decode(video, packets, damaged: -1, conceal: false, threads: 1);
+        var concealed = Decode(video, packets, damaged >= 0 ? damaged : packets.Count / 2, conceal: true, threads: 1).Where(f => f.Damaged);
+        string Hash(IEnumerable<byte[]> frames) => FrameMd5.Hash(frames.SelectMany(d => d).ToArray());
+        Assert.Fail($"PROBE {sampleName} clean {Hash(clean.Select(f => f.Data))} concealed {Hash(concealed.Select(f => f.Data))}");
+    }
+
     /// <summary>Without concealment the damaged picture fails, and so do the pictures predicted from it: no frame that comes out is wrong.</summary>
     [Theory]
     [InlineData("h264-main-slices.mp4", 1)]

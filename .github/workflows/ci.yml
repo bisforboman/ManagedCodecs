@@ -67,6 +67,9 @@ jobs:
       - name: Generate samples
         run: tools/make-samples.sh
 
+      - name: SCRATCH sample hashes
+        run: sha256sum samples/h264-mbaff-p-motion.mp4 samples/h264-422-mbaff-p-motion.mp4 samples/h264-main-slices.mp4 samples/h264-high-b.mp4
+
       - name: Build
         run: dotnet build ManagedCodecs.slnx -c Release -warnaserror
 
@@ -145,6 +148,9 @@ jobs:
 
       - name: Generate samples
         run: tools/make-samples.sh
+
+      - name: SCRATCH sample hashes
+        run: sha256sum samples/h264-mbaff-p-motion.mp4 samples/h264-422-mbaff-p-motion.mp4 samples/h264-main-slices.mp4 samples/h264-high-b.mp4
 
       - name: Build
         run: dotnet build ManagedCodecs.slnx -c Release -warnaserror

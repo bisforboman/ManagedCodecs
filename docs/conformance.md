@@ -496,7 +496,11 @@ FFmpeg's does, for coefficients under 2^11, from which every sum fits 16 bits; l
 transform: 8.5.12 bounds a conforming 8-bit stream's values to 2^15, but JM's encoder with scaling matrices exceeds it
 (`jm-planes-qm` failed with 16 bits throughout). `Dequantize` multiplies four coefficients a vector. The transforms
 took 4.4 to 4.5% of `h264-bench-720p.mp4` afterwards against 5.0 to 5.25% (the 4x4 add alone about 1.0 against
-2.4%), about 0.7% of the frame; on `h264-high-b.mp4` within the runs' spread.
+2.4%), about 0.7% of the frame; on `h264-high-b.mp4` within the runs' spread. The CAVLC residual reader (`ReadResidualBlock`, 15% of
+that stream) spends its time evenly (perf's annotation of the jitted code: no instruction over 4%), much of it
+reloading the bit reader's position, a field of the reader, after every store; it now reads through a cursor whose
+data, length and position are locals (`BitReader.Cursor`), the position written back once a block: 15.4 against
+16.0% on average over five pairs of back-to-back profiles, lower in every pair, about 0.6% of the frame.
 
 ## AAC
 

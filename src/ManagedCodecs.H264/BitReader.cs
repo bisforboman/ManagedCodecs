@@ -71,20 +71,88 @@ internal sealed class BitReader
     }
 
     /// <summary>The 64 bits at <paramref name="bytePos"/> when fewer than 8 bytes of RBSP remain; padding reads as zero.</summary>
-    private ulong PeekNearEnd(int bytePos)
+    private ulong PeekNearEnd(int bytePos) => PeekNearEnd(_data, _length, bytePos);
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static ulong PeekNearEnd(byte[] data, int length, int bytePos)
     {
-        int valid = _length - bytePos;
+        int valid = length - bytePos;
         if (valid <= 0)
         {
             return 0;
         }
 
-        ulong word = BinaryPrimitives.ReadUInt64BigEndian(_data.AsSpan(bytePos));
+        ulong word = BinaryPrimitives.ReadUInt64BigEndian(data.AsSpan(bytePos));
         return word & (ulong.MaxValue << (64 - (valid * 8)));
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void Skip(int count) => _position += count;
+
+    /// <summary>
+    /// A cursor over this reader for a run of reads in one method: the data, length and position in locals, where the
+    /// JIT keeps them in registers (a field of the reader is reloaded after every store). <see cref="Commit"/> writes
+    /// the position back; reads through the reader meanwhile would see the old one.
+    /// </summary>
+    public Cursor Begin() => new(_data, _length, _position);
+
+    /// <summary>Takes the position a <see cref="Cursor"/> from <see cref="Begin"/> reached.</summary>
+    public void Commit(in Cursor cursor) => _position = cursor.Position;
+
+    /// <summary>The reads of <see cref="BitReader"/> on locals (<see cref="Begin"/>).</summary>
+    public ref struct Cursor
+    {
+        private readonly ref byte _data;
+        private readonly byte[] _array;
+        private readonly int _length;
+
+        public Cursor(byte[] data, int length, long position)
+        {
+            _array = data;
+            _data = ref MemoryMarshal.GetArrayDataReference(data);
+            _length = length;
+            Position = position;
+        }
+
+        public long Position { readonly get; private set; }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public readonly uint Peek(int count)
+        {
+            int bytePos = (int)(Position >> 3);
+            ulong word = (uint)bytePos + 8 <= (uint)_length
+                ? BinaryPrimitives.ReverseEndianness(Unsafe.ReadUnaligned<ulong>(ref Unsafe.Add(ref _data, bytePos)))
+                : PeekNearEnd(_array, _length, bytePos);
+            return (uint)((word << (int)(Position & 7)) >> (64 - count));
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void Skip(int count) => Position += count;
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public uint ReadBits(int count)
+        {
+            if (count == 0)
+            {
+                return 0;
+            }
+
+            uint value = Peek(count);
+            Position += count;
+            return value;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public bool ReadFlag() => ReadBits(1) != 0;
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public int Read(Vlc vlc)
+        {
+            int value = vlc.Lookup(Peek(vlc.MaxLength), out int length);
+            Position += length;
+            return value;
+        }
+    }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public uint ReadBits(int count)

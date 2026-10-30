@@ -21,7 +21,7 @@ public class TransformTests
             var expected = (byte[])prediction.Clone();
             var block = new int[16];
             block[0] = dc;
-            Transform.InverseTransformAdd(block, expected.AsSpan(), Stride, bitDepth: 8);
+            Transform.InverseTransformAddScalar(block, expected.AsSpan(), Stride, bitDepth: 8);
 
             var actual = (byte[])prediction.Clone();
             Transform.AddDc(dc, actual.AsSpan(), Stride, bitDepth: 8);
@@ -31,8 +31,49 @@ public class TransformTests
     }
 
     /// <summary>
-    /// The 8-bit vector add (the columns' transform four columns at a time, added and clipped a row at a time) against
-    /// the scalar transform, on random coefficients small and large, and samples near both ends of the range.
+    /// The vector <see cref="Transform.Dequantize"/> against <see cref="Transform.DequantizeScalar"/>: random levels
+    /// (large ones too), every QP, flat and random scaling lists, with and without the DC left alone.
+    /// </summary>
+    [Fact]
+    public void Dequantize_MatchesScalar()
+    {
+        var random = new Random(53);
+        var list = new byte[16];
+        for (int n = 0; n < 20_000; n++)
+        {
+            if (n % 2 == 0)
+            {
+                list.AsSpan().Fill(16);
+            }
+            else
+            {
+                for (int i = 0; i < 16; i++)
+                {
+                    list[i] = (byte)random.Next(1, 256);
+                }
+            }
+
+            var levelScale = Transform.LevelScale4x4Table(list);
+            int qp = random.Next(0, 52);
+            bool skipDc = random.Next(2) == 0;
+            var levels = new int[16];
+            for (int i = 0; i < 16; i++)
+            {
+                levels[i] = random.Next(4) == 0 ? random.Next(-2048, 2049) : random.Next(-8, 9);
+            }
+
+            var expected = (int[])levels.Clone();
+            var actual = (int[])levels.Clone();
+            Transform.DequantizeScalar(expected, qp, skipDc, levelScale);
+            Transform.Dequantize(actual, qp, skipDc, levelScale);
+            Assert.True(expected.AsSpan().SequenceEqual(actual), $"Case {n}: QP {qp}, skipDc {skipDc}");
+        }
+    }
+
+    /// <summary>
+    /// The 8-bit vector add (with SSE2 both passes in 16-bit lanes for coefficients under 2^11, else the columns'
+    /// transform four columns at a time) against the scalar transform, on random coefficients small and large (either
+    /// side of that bound), and samples near both ends of the range.
     /// </summary>
     [Fact]
     public void InverseTransformAdd_MatchesScalar()
@@ -41,7 +82,7 @@ public class TransformTests
         var random = new Random(23);
         for (int n = 0; n < 20_000; n++)
         {
-            int range = random.Next(3) switch { 0 => 64, 1 => 4096, _ => 1 << 20 };
+            int range = random.Next(4) switch { 0 => 64, 1 => 2047, 2 => 4096, _ => 1 << 20 };
             var coefficients = new int[16];
             for (int i = 0; i < 16; i++)
             {
@@ -73,7 +114,7 @@ public class TransformTests
         var random = new Random(29);
         for (int n = 0; n < 10_000; n++)
         {
-            int range = random.Next(3) switch { 0 => 64, 1 => 4096, _ => 1 << 20 };
+            int range = random.Next(4) switch { 0 => 64, 1 => 2047, 2 => 4096, _ => 1 << 20 };
             var coefficients = new int[64];
             for (int i = 0; i < 64; i++)
             {

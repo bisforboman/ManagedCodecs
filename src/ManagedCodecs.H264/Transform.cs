@@ -2,6 +2,7 @@ using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics;
+using System.Runtime.Intrinsics.X86;
 
 namespace ManagedCodecs.H264;
 
@@ -63,6 +64,49 @@ internal static class Transform
     /// produced by a DC transform.
     /// </summary>
     public static void Dequantize(Span<int> block, int qp, bool skipDc, ReadOnlySpan<int> levelScale)
+    {
+        if (!Vector128.IsHardwareAccelerated)
+        {
+            DequantizeScalar(block, qp, skipDc, levelScale);
+            return;
+        }
+
+        // The same arithmetic four coefficients at a time (32-bit lanes, so the same result for every input), the DC
+        // put back where a DC transform made it.
+        _ = block[15];
+        var scale = levelScale.Slice((qp % 6) * 16, 16);
+        int qpDiv = qp / 6;
+        int dc = block[0];
+        ref int values = ref MemoryMarshal.GetReference(block);
+        ref int factors = ref MemoryMarshal.GetReference(scale);
+        if (qp >= 24)
+        {
+            int shift = qpDiv - 4;
+            for (int i = 0; i < 16; i += 4)
+            {
+                var product = Vector128.LoadUnsafe(ref values, (nuint)i) * Vector128.LoadUnsafe(ref factors, (nuint)i);
+                (product << shift).StoreUnsafe(ref values, (nuint)i);
+            }
+        }
+        else
+        {
+            int shift = 4 - qpDiv;
+            var round = Vector128.Create(1 << (3 - qpDiv));
+            for (int i = 0; i < 16; i += 4)
+            {
+                var product = Vector128.LoadUnsafe(ref values, (nuint)i) * Vector128.LoadUnsafe(ref factors, (nuint)i);
+                ((product + round) >> shift).StoreUnsafe(ref values, (nuint)i);
+            }
+        }
+
+        if (skipDc)
+        {
+            block[0] = dc;
+        }
+    }
+
+    /// <summary>The scalar <see cref="Dequantize"/>: without vector hardware, and the vector one's reference.</summary>
+    internal static void DequantizeScalar(Span<int> block, int qp, bool skipDc, ReadOnlySpan<int> levelScale)
     {
         int qpDiv = qp / 6;
         var scale = levelScale.Slice((qp % 6) * 16, 16);
@@ -416,6 +460,11 @@ internal static class Transform
     {
         _ = d[15];
         _ = dest[(3 * stride) + 3];
+        if (Sse2.IsSupported && InverseTransformAdd16(d, dest, stride))
+        {
+            return;
+        }
+
         Span<int> f = stackalloc int[16];
         for (int i = 0; i < 4; i++)
         {
@@ -448,6 +497,79 @@ internal static class Transform
         AddRow(ref Unsafe.Add(ref target, stride), (g1 + g2 + round) >> 6);
         AddRow(ref Unsafe.Add(ref target, 2 * stride), (g1 - g2 + round) >> 6);
         AddRow(ref Unsafe.Add(ref target, 3 * stride), (g0 - g3 + round) >> 6);
+    }
+
+    /// <summary>
+    /// <see cref="InverseTransformAdd(Span{int}, Span{byte}, int)"/> in 16-bit lanes, two rows (or columns) a vector, as
+    /// FFmpeg's 8-bit transform, for coefficients under 2^11 in magnitude (false, and nothing written, for others): from
+    /// those, every intermediate value is under 12.25 (2^11 + 32), within 16 bits, so the sums are the scalar ones.
+    /// (8.5.12 bounds a conforming 8-bit stream's to 2^15, but JM's encoder, with scaling matrices, exceeds it:
+    /// `jm-planes-qm`.) Transposed, each lane is a row for the rows' pass; transposed back, a column for the columns'.
+    /// The rounding is 32 added to the DC, which reaches every output once, and the clip to 8 bits the saturating pack.
+    /// </summary>
+    private static bool InverseTransformAdd16(Span<int> d, Span<byte> dest, int stride)
+    {
+        ref int coefficients = ref MemoryMarshal.GetReference(d);
+        var rows0 = Vector128.LoadUnsafe(ref coefficients);
+        var rows1 = Vector128.LoadUnsafe(ref coefficients, 4);
+        var rows2 = Vector128.LoadUnsafe(ref coefficients, 8);
+        var rows3 = Vector128.LoadUnsafe(ref coefficients, 12);
+        var magnitudes = Vector128.Abs(rows0) | Vector128.Abs(rows1) | Vector128.Abs(rows2) | Vector128.Abs(rows3);
+        if ((magnitudes & Vector128.Create(~2047)) != Vector128<int>.Zero)
+        {
+            return false;
+        }
+
+        var rows01 = Sse2.PackSignedSaturate(rows0 + Vector128.CreateScalar(32), rows1);
+        var rows23 = Sse2.PackSignedSaturate(rows2, rows3);
+        var (columns01, columns23) = Transpose4x4(rows01, rows23);
+        var (f01, f32) = Transform4Lanes(columns01, columns23); // f0 | f1 and f3 | f2, a lane a row
+        var (g01, g23) = Transpose4x4(f01, Sse2.Shuffle(f32.AsInt32(), 0b01_00_11_10).AsInt16());
+        var (h01, h32) = Transform4Lanes(g01, g23); // rows 0 | 1 and 3 | 2 of the result
+        h01 = Sse2.ShiftRightArithmetic(h01, 6);
+        h32 = Sse2.ShiftRightArithmetic(h32, 6);
+
+        ref byte target = ref MemoryMarshal.GetReference(dest);
+        ref byte row1 = ref Unsafe.Add(ref target, stride);
+        ref byte row2 = ref Unsafe.Add(ref target, 2 * stride);
+        ref byte row3 = ref Unsafe.Add(ref target, 3 * stride);
+        var prediction01 = Vector128.Create(Unsafe.ReadUnaligned<uint>(ref target), Unsafe.ReadUnaligned<uint>(ref row1), 0, 0).AsByte();
+        var prediction32 = Vector128.Create(Unsafe.ReadUnaligned<uint>(ref row3), Unsafe.ReadUnaligned<uint>(ref row2), 0, 0).AsByte();
+        var sum01 = Sse2.Add(Sse2.UnpackLow(prediction01, Vector128<byte>.Zero).AsInt16(), h01);
+        var sum32 = Sse2.Add(Sse2.UnpackLow(prediction32, Vector128<byte>.Zero).AsInt16(), h32);
+        var samples = Sse2.PackUnsignedSaturate(sum01, sum32).AsUInt32();
+        Unsafe.WriteUnaligned(ref target, samples.GetElement(0));
+        Unsafe.WriteUnaligned(ref row1, samples.GetElement(1));
+        Unsafe.WriteUnaligned(ref row3, samples.GetElement(2));
+        Unsafe.WriteUnaligned(ref row2, samples.GetElement(3));
+        return true;
+    }
+
+    /// <summary>Transposes a 4x4 matrix of shorts held as rows 0 | 1 and rows 2 | 3.</summary>
+    private static (Vector128<short> Columns01, Vector128<short> Columns23) Transpose4x4(Vector128<short> rows01, Vector128<short> rows23)
+    {
+        var low = Sse2.UnpackLow(rows01, rows23); // r0c0 r2c0 r0c1 r2c1 r0c2 r2c2 r0c3 r2c3
+        var high = Sse2.UnpackHigh(rows01, rows23); // r1c0 r3c0 r1c1 r3c1 ...
+        var mixed0 = Sse2.UnpackLow(low, high); // r0c0 r1c0 r2c0 r3c0 r0c1 r1c1 r2c1 r3c1
+        var mixed1 = Sse2.UnpackHigh(low, high); // columns 2 and 3
+        return (mixed0, mixed1);
+    }
+
+    /// <summary>
+    /// The 4-point transform of 8.5.12.2 lane by lane, its inputs as x0 | x1 and x2 | x3 (four lanes each): returns
+    /// y0 | y1 and y3 | y2.
+    /// </summary>
+    private static (Vector128<short> Y01, Vector128<short> Y32) Transform4Lanes(Vector128<short> x01, Vector128<short> x23)
+    {
+        // The high halves (x1 and x3) are the ones halved: x0 + x2 | x1 + (x3 >> 1) and x0 - x2 | (x1 >> 1) - x3.
+        var high = Vector128.Create(0, 0, 0, 0, -1, -1, -1, -1).AsInt16();
+        var x01Half = Vector128.ConditionalSelect(high, Sse2.ShiftRightArithmetic(x01, 1), x01);
+        var x23Half = Vector128.ConditionalSelect(high, Sse2.ShiftRightArithmetic(x23, 1), x23);
+        var e03 = Sse2.Add(x01, x23Half); // e0 | e3
+        var e12 = Sse2.Subtract(x01Half, x23); // e1 | e2
+        var e01 = Sse2.UnpackLow(e03.AsInt64(), e12.AsInt64()).AsInt16();
+        var e32 = Sse2.UnpackHigh(e03.AsInt64(), e12.AsInt64()).AsInt16();
+        return (Sse2.Add(e01, e32), Sse2.Subtract(e01, e32));
     }
 
     /// <summary>The scalar <see cref="InverseTransformAdd{TPixel}"/>: for deeper samples, and the 8-bit one's reference.</summary>

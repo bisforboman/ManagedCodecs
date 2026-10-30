@@ -490,7 +490,13 @@ a shuffle pairing every sample with its right-hand neighbour and one multiply-ad
 without SSSE3 (ARM64) the two widened multiplies stay. Chroma motion compensation and the block copies took 12.5
 to 13.2% of `h264-bench-720p.mp4` afterwards against 14.5 to 15.0% (two pairs of back-to-back profiles, the filter
 itself 2.9% against 3.6 to 4.1%), about 1.5 to 2% of the frame; `h264-high-b.mp4`, where chroma is under 3%, did not
-move.
+move. The 8-bit 4x4 inverse transform now runs both passes in 16-bit lanes with SSE2 (two rows or
+columns a vector, transposed by unpacks, the rounding as 32 added to the DC, the clip the saturating pack), as
+FFmpeg's does, for coefficients under 2^11, from which every sum fits 16 bits; larger ones take the 32-bit
+transform: 8.5.12 bounds a conforming 8-bit stream's values to 2^15, but JM's encoder with scaling matrices exceeds it
+(`jm-planes-qm` failed with 16 bits throughout). `Dequantize` multiplies four coefficients a vector. The transforms
+took 4.4 to 4.5% of `h264-bench-720p.mp4` afterwards against 5.0 to 5.25% (the 4x4 add alone about 1.0 against
+2.4%), about 0.7% of the frame; on `h264-high-b.mp4` within the runs' spread.
 
 ## AAC
 

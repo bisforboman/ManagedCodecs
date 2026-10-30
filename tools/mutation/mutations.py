@@ -207,6 +207,13 @@ MUTATIONS = [
          find="7 => [1, 2, 0, 7, 5, 6, 3, 4],", replace="7 => [1, 2, 0, 7, 3, 4, 5, 6],",
          tests="FullyQualifiedName~AacConformanceTests"),
 
+    # ---- H.264 transforms
+    # The 16-bit 4x4 transform takes only coefficients under 2^11, whose sums fit 16 bits; JM's encoder with scaling
+    # matrices writes larger ones (jm-planes-qm), which go to the 32-bit transform.
+    dict(file="src/ManagedCodecs.H264/Transform.cs",
+         find="(magnitudes & Vector128.Create(~2047))", replace="(magnitudes & Vector128.Create(int.MinValue))",
+         tests="DisplayName~jm-planes-qm"),
+
     # ---- MJPEG
     # FFmpeg takes an image of less than 3/4 of the stream's height (integer division) as a field.
     dict(file="src/ManagedCodecs.Mjpeg/MjpegDecoder.cs",

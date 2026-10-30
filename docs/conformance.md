@@ -500,7 +500,11 @@ took 4.4 to 4.5% of `h264-bench-720p.mp4` afterwards against 5.0 to 5.25% (the 4
 that stream) spends its time evenly (perf's annotation of the jitted code: no instruction over 4%), much of it
 reloading the bit reader's position, a field of the reader, after every store; it now reads through a cursor whose
 data, length and position are locals (`BitReader.Cursor`), the position written back once a block: 15.4 against
-16.0% on average over five pairs of back-to-back profiles, lower in every pair, about 0.6% of the frame.
+16.0% on average over five pairs of back-to-back profiles, lower in every pair, about 0.6% of the frame. A P_Skip
+macroblock's motion vector prediction read neighbours A and B twice, once for the skip test of 8.4.1.1 and again in
+the prediction; it now hands them over: motion vector prediction and `DecodeSkip` took 4.1 against 4.8% (five pairs,
+lower in each), about 0.6% of the frame. A per-macroblock cache of the neighbours' motion, as FFmpeg's
+`fill_decode_caches`, would cost more to fill than it saves where 84% of macroblocks are one partition.
 
 ## AAC
 

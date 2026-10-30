@@ -276,50 +276,55 @@ internal static class Transform
             return false;
         }
 
-        Span<Vector128<short>> v = stackalloc Vector128<short>[8];
-        for (int r = 0; r < 8; r++)
-        {
-            var low = Vector128.LoadUnsafe(ref coefficients, (nuint)(r * 8));
-            if (r == 0)
-            {
-                low += Vector128.CreateScalar(32);
-            }
-
-            v[r] = Sse2.PackSignedSaturate(low, Vector128.LoadUnsafe(ref coefficients, (nuint)((r * 8) + 4)));
-        }
-
-        Transpose8x8(v);
-        Transform8Lanes(v);
-        Transpose8x8(v);
-        Transform8Lanes(v);
+        var v0 = Pack(ref coefficients, 0) + Vector128.CreateScalar((short)32);
+        var v1 = Pack(ref coefficients, 8);
+        var v2 = Pack(ref coefficients, 16);
+        var v3 = Pack(ref coefficients, 24);
+        var v4 = Pack(ref coefficients, 32);
+        var v5 = Pack(ref coefficients, 40);
+        var v6 = Pack(ref coefficients, 48);
+        var v7 = Pack(ref coefficients, 56);
+        Transpose8x8(ref v0, ref v1, ref v2, ref v3, ref v4, ref v5, ref v6, ref v7);
+        Transform8Lanes(ref v0, ref v1, ref v2, ref v3, ref v4, ref v5, ref v6, ref v7);
+        Transpose8x8(ref v0, ref v1, ref v2, ref v3, ref v4, ref v5, ref v6, ref v7);
+        Transform8Lanes(ref v0, ref v1, ref v2, ref v3, ref v4, ref v5, ref v6, ref v7);
 
         ref byte target = ref MemoryMarshal.GetReference(dest);
-        for (int r = 0; r < 8; r += 2)
-        {
-            ref byte row0 = ref Unsafe.Add(ref target, r * stride);
-            ref byte row1 = ref Unsafe.Add(ref target, (r + 1) * stride);
-            var prediction = Vector128.Create(Unsafe.ReadUnaligned<ulong>(ref row0), Unsafe.ReadUnaligned<ulong>(ref row1)).AsByte();
-            var sum0 = Sse2.Add(Sse2.UnpackLow(prediction, Vector128<byte>.Zero).AsInt16(), Sse2.ShiftRightArithmetic(v[r], 6));
-            var sum1 = Sse2.Add(Sse2.UnpackHigh(prediction, Vector128<byte>.Zero).AsInt16(), Sse2.ShiftRightArithmetic(v[r + 1], 6));
-            var samples = Sse2.PackUnsignedSaturate(sum0, sum1).AsUInt64();
-            Unsafe.WriteUnaligned(ref row0, samples.GetElement(0));
-            Unsafe.WriteUnaligned(ref row1, samples.GetElement(1));
-        }
-
+        AddRows(ref target, stride, v0, v1);
+        AddRows(ref Unsafe.Add(ref target, 2 * stride), stride, v2, v3);
+        AddRows(ref Unsafe.Add(ref target, 4 * stride), stride, v4, v5);
+        AddRows(ref Unsafe.Add(ref target, 6 * stride), stride, v6, v7);
         return true;
+
+        static Vector128<short> Pack(ref int row, int offset) =>
+            Sse2.PackSignedSaturate(Vector128.LoadUnsafe(ref row, (nuint)offset), Vector128.LoadUnsafe(ref row, (nuint)(offset + 4)));
+    }
+
+    /// <summary>Two rows of residuals, each shifted down 6, added to their 8 samples and clipped to 8 bits.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void AddRows(ref byte row0, int stride, Vector128<short> residual0, Vector128<short> residual1)
+    {
+        ref byte row1 = ref Unsafe.Add(ref row0, stride);
+        var prediction = Vector128.Create(Unsafe.ReadUnaligned<ulong>(ref row0), Unsafe.ReadUnaligned<ulong>(ref row1)).AsByte();
+        var sum0 = Sse2.Add(Sse2.UnpackLow(prediction, Vector128<byte>.Zero).AsInt16(), Sse2.ShiftRightArithmetic(residual0, 6));
+        var sum1 = Sse2.Add(Sse2.UnpackHigh(prediction, Vector128<byte>.Zero).AsInt16(), Sse2.ShiftRightArithmetic(residual1, 6));
+        var samples = Sse2.PackUnsignedSaturate(sum0, sum1).AsUInt64();
+        Unsafe.WriteUnaligned(ref row0, samples.GetElement(0));
+        Unsafe.WriteUnaligned(ref row1, samples.GetElement(1));
     }
 
     /// <summary>Transposes an 8x8 matrix of shorts held a row a vector.</summary>
-    private static void Transpose8x8(Span<Vector128<short>> v)
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void Transpose8x8(ref Vector128<short> v0, ref Vector128<short> v1, ref Vector128<short> v2, ref Vector128<short> v3, ref Vector128<short> v4, ref Vector128<short> v5, ref Vector128<short> v6, ref Vector128<short> v7)
     {
-        var t0 = Sse2.UnpackLow(v[0], v[1]);
-        var t1 = Sse2.UnpackHigh(v[0], v[1]);
-        var t2 = Sse2.UnpackLow(v[2], v[3]);
-        var t3 = Sse2.UnpackHigh(v[2], v[3]);
-        var t4 = Sse2.UnpackLow(v[4], v[5]);
-        var t5 = Sse2.UnpackHigh(v[4], v[5]);
-        var t6 = Sse2.UnpackLow(v[6], v[7]);
-        var t7 = Sse2.UnpackHigh(v[6], v[7]);
+        var t0 = Sse2.UnpackLow(v0, v1);
+        var t1 = Sse2.UnpackHigh(v0, v1);
+        var t2 = Sse2.UnpackLow(v2, v3);
+        var t3 = Sse2.UnpackHigh(v2, v3);
+        var t4 = Sse2.UnpackLow(v4, v5);
+        var t5 = Sse2.UnpackHigh(v4, v5);
+        var t6 = Sse2.UnpackLow(v6, v7);
+        var t7 = Sse2.UnpackHigh(v6, v7);
         var u0 = Sse2.UnpackLow(t0.AsInt32(), t2.AsInt32());
         var u1 = Sse2.UnpackHigh(t0.AsInt32(), t2.AsInt32());
         var u2 = Sse2.UnpackLow(t1.AsInt32(), t3.AsInt32());
@@ -328,27 +333,28 @@ internal static class Transform
         var u5 = Sse2.UnpackHigh(t4.AsInt32(), t6.AsInt32());
         var u6 = Sse2.UnpackLow(t5.AsInt32(), t7.AsInt32());
         var u7 = Sse2.UnpackHigh(t5.AsInt32(), t7.AsInt32());
-        v[0] = Sse2.UnpackLow(u0.AsInt64(), u4.AsInt64()).AsInt16();
-        v[1] = Sse2.UnpackHigh(u0.AsInt64(), u4.AsInt64()).AsInt16();
-        v[2] = Sse2.UnpackLow(u1.AsInt64(), u5.AsInt64()).AsInt16();
-        v[3] = Sse2.UnpackHigh(u1.AsInt64(), u5.AsInt64()).AsInt16();
-        v[4] = Sse2.UnpackLow(u2.AsInt64(), u6.AsInt64()).AsInt16();
-        v[5] = Sse2.UnpackHigh(u2.AsInt64(), u6.AsInt64()).AsInt16();
-        v[6] = Sse2.UnpackLow(u3.AsInt64(), u7.AsInt64()).AsInt16();
-        v[7] = Sse2.UnpackHigh(u3.AsInt64(), u7.AsInt64()).AsInt16();
+        v0 = Sse2.UnpackLow(u0.AsInt64(), u4.AsInt64()).AsInt16();
+        v1 = Sse2.UnpackHigh(u0.AsInt64(), u4.AsInt64()).AsInt16();
+        v2 = Sse2.UnpackLow(u1.AsInt64(), u5.AsInt64()).AsInt16();
+        v3 = Sse2.UnpackHigh(u1.AsInt64(), u5.AsInt64()).AsInt16();
+        v4 = Sse2.UnpackLow(u2.AsInt64(), u6.AsInt64()).AsInt16();
+        v5 = Sse2.UnpackHigh(u2.AsInt64(), u6.AsInt64()).AsInt16();
+        v6 = Sse2.UnpackLow(u3.AsInt64(), u7.AsInt64()).AsInt16();
+        v7 = Sse2.UnpackHigh(u3.AsInt64(), u7.AsInt64()).AsInt16();
     }
 
-    /// <summary>The 8-point transform of 8.5.13.2 lane by lane: input k in <paramref name="v"/>[k], output k back there.</summary>
-    private static void Transform8Lanes(Span<Vector128<short>> v)
+    /// <summary>The 8-point transform of 8.5.13.2 lane by lane: input k in vk, output k back there.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void Transform8Lanes(ref Vector128<short> v0, ref Vector128<short> v1, ref Vector128<short> v2, ref Vector128<short> v3, ref Vector128<short> v4, ref Vector128<short> v5, ref Vector128<short> v6, ref Vector128<short> v7)
     {
-        var d0 = v[0];
-        var d1 = v[1];
-        var d2 = v[2];
-        var d3 = v[3];
-        var d4 = v[4];
-        var d5 = v[5];
-        var d6 = v[6];
-        var d7 = v[7];
+        var d0 = v0;
+        var d1 = v1;
+        var d2 = v2;
+        var d3 = v3;
+        var d4 = v4;
+        var d5 = v5;
+        var d6 = v6;
+        var d7 = v7;
 
         var e0 = d0 + d4;
         var e1 = d5 - d3 - d7 - (d7 >> 1);
@@ -368,14 +374,14 @@ internal static class Transform
         var f6 = e0 - e6;
         var f7 = e7 - (e1 >> 2);
 
-        v[0] = f0 + f7;
-        v[1] = f2 + f5;
-        v[2] = f4 + f3;
-        v[3] = f6 + f1;
-        v[4] = f6 - f1;
-        v[5] = f4 - f3;
-        v[6] = f2 - f5;
-        v[7] = f0 - f7;
+        v0 = f0 + f7;
+        v1 = f2 + f5;
+        v2 = f4 + f3;
+        v3 = f6 + f1;
+        v4 = f6 - f1;
+        v5 = f4 - f3;
+        v6 = f2 - f5;
+        v7 = f0 - f7;
     }
 
     /// <summary>

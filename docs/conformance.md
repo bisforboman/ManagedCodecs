@@ -373,8 +373,10 @@ against the clean decode, in dB; 2026-10-29):
 
 In MBAFF frames (2026-10-30) the guess gains less, and loses on two streams cut in packet after packet. Cut once, one
 packet at a time over the whole stream, its mean over all cuts is 1.0 to 2.4 dB above zero motion on `p-motion`,
-`b-temporal` and `p`, and within 0.2 dB on `b-pyramid` and `default`. Cut in the middle (the test), `p-motion` gains
-5.4 dB in 4:2:0 and 6.1 dB in 4:2:2.
+`b-temporal` and `p`, and within 0.2 dB on `b-pyramid` and `default`. Cut in the middle, `p-motion` gains 5.4 dB in
+4:2:0 and 6.1 dB in 4:2:2 on x64, less on ARM64, whose libx264 encodes these streams differently; the test takes cuts of
+JM's committed streams instead (`jm-paff-mbaff` 20.1 to 24.0 dB, `jm-planes-mbaff` 23.3 to 27.5 dB, the first only
+with the motion converted between field and frame macroblocks).
 
 `H264ConcealmentTests.CutPacket_MotionGuessed` keeps four streams (two of them MBAFF) above floors that zero motion falls below. Damage that still parses is not detected and spreads unflagged: with 8 bytes flipped in one of 6
 packets of each of 21 samples, 13 samples had at least one such packet (CAVLC and CABAC alike). Cut slice data was detected in every case: a conforming

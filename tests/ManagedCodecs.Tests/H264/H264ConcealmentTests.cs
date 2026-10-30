@@ -67,16 +67,17 @@ public class H264ConcealmentTests
     /// The quality of the guess: a missing macroblock takes the motion of a neighbour that matches its edges best, which
     /// for these streams (camera-like motion) comes far closer to the clean decode than zero motion from one reference.
     /// The floors are the mean PSNR of the flagged frames with the guess, rounded down (zero motion gave 29.7, 21.9,
-    /// 30.1 and 28.3 dB): docs/conformance.md has the comparison with FFmpeg's. In MBAFF frames the macroblocks around
-    /// a missing frame pair are field pairs, so these rows hold only if their motion is converted to frame units (their
-    /// cuts conceal a few field macroblocks too).
+    /// 20.1 and 23.3 dB): docs/conformance.md has the comparison with FFmpeg's. The damaged packet is the middle one,
+    /// or the one given. In MBAFF frames the macroblocks around a missing frame pair are field pairs, so the MBAFF rows
+    /// hold only if their motion is converted to frame units; they are JM's committed streams, the same on every
+    /// platform (libx264's encodes differ between x64 and ARM64, and so do their concealed frames).
     /// </summary>
     [Theory]
     [InlineData("h264-main-slices.mp4", 33)]
     [InlineData("h264-high-b.mp4", 25)]
-    [InlineData("h264-mbaff-p-motion.mp4", 35)]
-    [InlineData("h264-422-mbaff-p-motion.mp4", 34)]
-    public void CutPacket_MotionGuessed(string sampleName, double floor)
+    [InlineData("jm/jm-paff-mbaff.mp4", 23, 4)]
+    [InlineData("jm-planes-mbaff.mp4", 27, 5)]
+    public void CutPacket_MotionGuessed(string sampleName, double floor, int damaged = -1)
     {
         if (!ParameterSetRewriter.Exists(sampleName))
         {
@@ -85,7 +86,7 @@ public class H264ConcealmentTests
 
         var (video, packets) = Read(sampleName);
         var clean = Decode(video, packets, damaged: -1, conceal: false, threads: 1).ToDictionary(f => f.Pts);
-        var concealed = Decode(video, packets, packets.Count / 2, conceal: true, threads: 1).Where(f => f.Damaged).ToList();
+        var concealed = Decode(video, packets, damaged >= 0 ? damaged : packets.Count / 2, conceal: true, threads: 1).Where(f => f.Damaged).ToList();
         double mean = concealed.Average(f => Math.Min(Psnr(clean[f.Pts].Data, f.Data), 99));
         Assert.True(mean > floor, $"mean PSNR {mean:F2} dB over {concealed.Count} frames");
     }

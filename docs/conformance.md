@@ -378,7 +378,9 @@ packet at a time over the whole stream, its mean over all cuts is 1.0 to 2.4 dB 
 JM's committed streams instead (`jm-paff-mbaff` 20.1 to 24.0 dB, `jm-planes-mbaff` 23.3 to 27.5 dB, the first only
 with the motion converted between field and frame macroblocks).
 
-`H264ConcealmentTests.CutPacket_MotionGuessed` keeps four streams (two of them MBAFF) above floors that zero motion falls below. Damage that still parses is not detected and spreads unflagged: with 8 bytes flipped in one of 6
+`H264ConcealmentTests.CutPacket_MotionGuessed` keeps one cut of each of four committed streams (OpenH264's slices, JM's
+CABAC, two of JM's MBAFF) above floors that zero motion falls 3 to 13 dB below; libx264's samples, encoded on each
+machine, differ between machines, so no floor rests on them. Damage that still parses is not detected and spreads unflagged: with 8 bytes flipped in one of 6
 packets of each of 21 samples, 13 samples had at least one such packet (CAVLC and CABAC alike). Cut slice data was detected in every case: a conforming
 CABAC slice ends inside its data (9.3.4.5 writes the stop bit last), so consuming bits past it is damage.
 

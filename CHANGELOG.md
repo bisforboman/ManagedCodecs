@@ -13,6 +13,13 @@ run time.
 
 ## Unreleased
 
+### Changed
+
+- H.264 decodes CAVLC streams faster, bit for bit as before: 3.2% off the 720p benchmark stream's steady frame
+  (`h264-bench-720p.mp4`, Constrained Baseline) on GitHub's x64 runner, 1.8% off `h264-p-refs.mp4`, the CABAC
+  samples unchanged (`compare.yml` against main). The residual reader takes the trailing ones' signs in one read and
+  run_before from one lookup.
+
 ### Fixed
 
 - `AviDemuxer`: an empty video chunk (a dropped frame) now takes its frame's tick, as in FFmpeg, so the packets after

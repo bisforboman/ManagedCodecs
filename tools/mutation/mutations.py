@@ -60,7 +60,7 @@ MUTATIONS = [
     # A frame of two field pictures takes its first field's picture type, as FFmpeg does (h264_frame_start), not its
     # second's: JM's PAFF samples pair an I field with a P one.
     dict(file="src/ManagedCodecs.H264/H264Decoder.cs",
-         find="PictureType = _firstField.PictureType }", replace="PictureType = ToPictureType(header.Type) }",
+         find="PictureType = _firstField.PictureType, Interlacing", replace="PictureType = ToPictureType(header.Type), Interlacing",
          tests="FullyQualifiedName~H264ConformanceTests.MatchesFfmpegFrameByFrame&DisplayName~jm-paff.mp4"),
     # Interlacing (VideoFrame.IsInterlaced, IsTopFieldFirst, FieldOrder; H264Decoder.FieldOrder), FFmpeg's rules
     # (h264_export_frame_props, h264_parser.c), each reached by some streams only.
@@ -151,7 +151,7 @@ MUTATIONS = [
     # Memory management operation 5 in a field picture: the field's order count rebased to 0 (a unit test), and its
     # second field paired with frame_num 0.
     dict(file="src/ManagedCodecs.H264/PictureOrder.cs",
-         find="int field = mmco5 ? 0 : header.BottomField ? bottom : top;", replace="int field = header.BottomField ? bottom : top;",
+         find="int field = mmco5 ? 0 : decoded;", replace="int field = decoded;",
          tests="FullyQualifiedName~PictureOrderTests"),
     dict(file="src/ManagedCodecs.H264/H264Decoder.cs",
          find="&& FrameNumAfter(first.Header) == header.FrameNum", replace="&& first.Header.FrameNum == header.FrameNum",

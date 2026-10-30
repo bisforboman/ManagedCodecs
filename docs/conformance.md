@@ -508,7 +508,12 @@ lower in each), about 0.6% of the frame. A per-macroblock cache of the neighbour
 macroblock layer's header fields (mb_skip_run, mb_type, coded_block_pattern, mb_qp_delta, ref_idx, mvd) are read
 one or two a method, too few for a cursor to pay; `ReadUe` and `ReadSe` were calls, their throw and long-code branch
 keeping the JIT from inlining them, and are now inlined with codes of 16 or more leading zeros out of line: the
-parse functions with the bit reader took 5.5 against 6.15% (five pairs, lower in each), about 0.6% of the frame.
+parse functions with the bit reader took 5.5 against 6.15% (five pairs, lower in each), about 0.6% of the frame. The
+8-bit 8x8 inverse transform runs in 16-bit lanes too, a row a vector, for coefficients under 2^9 (one pass of the
+8-point transform multiplies the largest magnitude by at most 7.375, both by 54.4; 90 to 96% of the 8x8 blocks of
+`h264-high-b`, `-default` and `-p` are under it, the rest take the 32-bit transform): the transforms took 2.7 against
+3.1% of `h264-high-default.mp4` (four pairs, lower in each), about 0.4% of the frame. The first version, its eight
+vectors in a stack span, gained half that: the vectors belong in locals the JIT keeps in registers.
 
 ## AAC
 

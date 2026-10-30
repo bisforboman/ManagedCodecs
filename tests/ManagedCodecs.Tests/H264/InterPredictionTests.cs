@@ -52,6 +52,21 @@ public class InterPredictionTests
                 InterPrediction.PredictChroma(reference, c, actual.Plane(c), actual.ChromaStride, x / 2, cy, w / 2, ch, mvX, cmvY);
                 Assert.True(expected.Plane(c).AsSpan().SequenceEqual(actual.Plane(c)), $"Chroma {c} {w}x{h} at ({x},{y}) mv ({mvX},{mvY})");
             }
+
+            // Both components at once, as bi-prediction writes them: side by side in one 16-wide block.
+            if (!tall)
+            {
+                var pair = new byte[16 * 8];
+                InterPrediction.PredictChromaPair(reference, x / 2, cy, w / 2, ch, mvX, cmvY, pair, pair.AsSpan(8), 16);
+                for (int c = 1; c <= 2; c++)
+                {
+                    for (int row = 0; row < ch; row++)
+                    {
+                        var want = expected.Plane(c).AsSpan(((cy + row) * expected.ChromaStride) + (x / 2), w / 2);
+                        Assert.True(want.SequenceEqual(pair.AsSpan((row * 16) + ((c - 1) * 8), w / 2)), $"Pair {c} {w}x{h} at ({x},{y}) mv ({mvX},{mvY})");
+                    }
+                }
+            }
         }
     }
 

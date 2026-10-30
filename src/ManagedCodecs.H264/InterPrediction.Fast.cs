@@ -192,46 +192,93 @@ internal static partial class InterPrediction
     [SkipLocalsInit]
     public static void PredictChroma(Picture reference, int component, int x, int y, int width, int height, int mvX, int mvY, Span<byte> output, int outputStride)
     {
-        int stride = reference.ChromaStride;
-        int maxY = (reference.HeightInMbs * reference.MbHeightC) - 1;
-        ReadOnlySpan<byte> plane = reference.Plane(component);
-        if (reference.Parity >= 0)
-        {
-            plane = plane[(reference.Parity * stride)..];
-            stride *= 2;
-            maxY = (reference.HeightInMbs * reference.MbHeightC / 2) - 1;
-        }
-
-        int xFrac = mvX & 7;
-        int yFrac = mvY & 7;
-        int left = x + (mvX >> 3);
-        int top = y + (mvY >> 3);
-        int maxX = (reference.WidthInMbs * 8) - 1;
-        if (xFrac == 0 && yFrac == 0 && CopyInside(plane, stride, maxX, maxY, left, top, width, height, output, outputStride))
-        {
-            return;
-        }
-
-        // As for luma: read the reference directly when the (width + 1) x (height + 1) area is
-        // inside it with room for 16-byte loads, else a clamped copy.
+        var block = new ChromaBlock(reference, x, y, width, height, mvX, mvY);
         Span<byte> copy = stackalloc byte[(9 * 17) + 32]; // up to 8x16 (4:2:2)
-        ReadOnlySpan<byte> window = copy;
-        int windowStride = 9;
-        int origin = 0;
+        block.Predict(block.Plane(reference, component), copy, output, outputStride);
+    }
 
-        // The last row is read as 16 bytes from left + 1 (the right-hand neighbours).
-        if (left >= 0 && top >= 0 && left + width <= maxX && top + height <= maxY && ((top + height) * stride) + left + 17 <= plane.Length)
+    /// <summary>
+    /// <see cref="PredictChroma(Picture, int, int, int, int, int, int, int, Span{byte}, int)"/> of both chroma components
+    /// of one block, sharing the block's position, fractions and bounds.
+    /// </summary>
+    [SkipLocalsInit]
+    public static void PredictChromaPair(Picture reference, int x, int y, int width, int height, int mvX, int mvY, Span<byte> cb, Span<byte> cr, int outputStride)
+    {
+        var block = new ChromaBlock(reference, x, y, width, height, mvX, mvY);
+        Span<byte> copy = stackalloc byte[(9 * 17) + 32];
+        block.Predict(block.Plane(reference, 1), copy, cb, outputStride);
+        block.Predict(block.Plane(reference, 2), copy, cr, outputStride);
+    }
+
+    /// <summary>Where a chroma block reads its reference, the same for Cb and Cr.</summary>
+    private readonly ref struct ChromaBlock
+    {
+        private readonly int _stride;
+        private readonly int _maxX;
+        private readonly int _maxY;
+        private readonly int _parity;
+        private readonly int _left;
+        private readonly int _top;
+        private readonly int _width;
+        private readonly int _height;
+        private readonly int _xFrac;
+        private readonly int _yFrac;
+
+        public ChromaBlock(Picture reference, int x, int y, int width, int height, int mvX, int mvY)
         {
-            window = plane;
-            windowStride = stride;
-            origin = (top * stride) + left;
-        }
-        else
-        {
-            FetchWindow(plane, stride, maxX, maxY, left, top, width + 1, height + 1, copy, windowStride);
+            _stride = reference.ChromaStride;
+            _maxY = (reference.HeightInMbs * reference.MbHeightC) - 1;
+            _parity = reference.Parity;
+            if (_parity >= 0)
+            {
+                _stride *= 2;
+                _maxY = (reference.HeightInMbs * reference.MbHeightC / 2) - 1;
+            }
+
+            _maxX = (reference.WidthInMbs * 8) - 1;
+            _xFrac = mvX & 7;
+            _yFrac = mvY & 7;
+            _left = x + (mvX >> 3);
+            _top = y + (mvY >> 3);
+            _width = width;
+            _height = height;
         }
 
-        Bilinear(window, windowStride, origin, width, height, xFrac, yFrac, output, outputStride);
+        /// <summary>The component's plane as this block reads it: a field's from its first row.</summary>
+        public ReadOnlySpan<byte> Plane(Picture reference, int component)
+        {
+            ReadOnlySpan<byte> plane = reference.Plane(component);
+            return _parity >= 0 ? plane[(_parity * reference.ChromaStride)..] : plane;
+        }
+
+        public void Predict(ReadOnlySpan<byte> plane, Span<byte> copy, Span<byte> output, int outputStride)
+        {
+            int stride = _stride;
+            if (_xFrac == 0 && _yFrac == 0 && CopyInside(plane, stride, _maxX, _maxY, _left, _top, _width, _height, output, outputStride))
+            {
+                return;
+            }
+
+            // As for luma: read the reference directly when the (width + 1) x (height + 1) area is
+            // inside it with room for 16-byte loads, else a clamped copy.
+            ReadOnlySpan<byte> window = copy;
+            int windowStride = 9;
+            int origin = 0;
+
+            // The last row is read as 16 bytes from left + 1 (the right-hand neighbours).
+            if (_left >= 0 && _top >= 0 && _left + _width <= _maxX && _top + _height <= _maxY && ((_top + _height) * stride) + _left + 17 <= plane.Length)
+            {
+                window = plane;
+                windowStride = stride;
+                origin = (_top * stride) + _left;
+            }
+            else
+            {
+                FetchWindow(plane, stride, _maxX, _maxY, _left, _top, _width + 1, _height + 1, copy, windowStride);
+            }
+
+            Bilinear(window, windowStride, origin, _width, _height, _xFrac, _yFrac, output, outputStride);
+        }
     }
 
     /// <summary>
@@ -253,10 +300,11 @@ internal static partial class InterPrediction
         var right = Vector128.Create((short)xFrac);
         var upper = Vector128.Create((short)(8 - yFrac));
         var lower = Vector128.Create((short)yFrac);
-        var above = Across(ref source, origin, left, right);
+        var pairWeights = Vector128.Create((ushort)((8 - xFrac) | (xFrac << 8))).AsSByte();
+        var above = Across(ref source, origin, left, right, pairWeights);
         for (int j = 0; j < height; j++)
         {
-            var below = Across(ref source, origin + ((j + 1) * ws), left, right);
+            var below = Across(ref source, origin + ((j + 1) * ws), left, right, pairWeights);
             var sum = (above * upper) + (below * lower);
             var rounded = ((sum + Vector128.Create((short)32)) >> 6).AsUInt16();
             StorePartial(Vector128.Narrow(rounded, rounded), ref Unsafe.Add(ref dest, j * outputStride), width);
@@ -264,9 +312,21 @@ internal static partial class InterPrediction
         }
     }
 
-    /// <summary>A row filtered across, (8 - xFrac) A + xFrac B, for its first eight samples.</summary>
-    private static Vector128<short> Across(ref byte source, int offset, Vector128<short> left, Vector128<short> right) =>
-        (Lower(Load(ref source, offset)) * left) + (Lower(Load(ref source, offset + 1)) * right);
+    /// <summary>
+    /// A row filtered across, (8 - xFrac) A + xFrac B, for its first eight samples: with SSSE3 one load, its samples
+    /// paired with their right-hand neighbours by a shuffle, and one multiply-add of the pairs with the weights
+    /// (<paramref name="pairWeights"/>: 8 - xFrac and xFrac in turn); else both samples widened and multiplied.
+    /// </summary>
+    private static Vector128<short> Across(ref byte source, int offset, Vector128<short> left, Vector128<short> right, Vector128<sbyte> pairWeights)
+    {
+        if (Ssse3.IsSupported)
+        {
+            var pairs = Ssse3.Shuffle(Load(ref source, offset), Vector128.Create((byte)0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8));
+            return Ssse3.MultiplyAddAdjacent(pairs, pairWeights);
+        }
+
+        return (Lower(Load(ref source, offset)) * left) + (Lower(Load(ref source, offset + 1)) * right);
+    }
 
     /// <summary>Writes the first <paramref name="count"/> (2, 4, 8 or 16) bytes of a vector, unchecked.</summary>
     private static void StorePartial(Vector128<byte> value, ref byte destination, int count)

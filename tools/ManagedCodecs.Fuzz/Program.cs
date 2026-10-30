@@ -65,7 +65,10 @@ static void WriteSeeds(string samples, string output)
     foreach (var path in files.Where(f => f.EndsWith(".avi") || f.EndsWith(".mp4") || f.EndsWith(".aac")).Order())
     {
         string stem = Path.GetFileNameWithoutExtension(path);
-        if (new FileInfo(path).Length <= 64 * 1024)
+
+        // A worktree's samples are links (CLAUDE.md), whose own length is the target path's.
+        var info = new FileInfo(path);
+        if ((info.ResolveLinkTarget(true) ?? info) is FileInfo { Length: <= 64 * 1024 })
         {
             File.Copy(path, Path.Combine(output, "file", Path.GetFileName(path)), true);
         }

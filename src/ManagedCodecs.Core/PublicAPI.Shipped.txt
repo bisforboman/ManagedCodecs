@@ -27,6 +27,13 @@ ManagedCodecs.AudioStreamInfo.StreamIndex.init -> void
 ManagedCodecs.AudioStreamInfo.TimeBase.get -> ManagedCodecs.Rational
 ManagedCodecs.AudioStreamInfo.TimeBase.init -> void
 ManagedCodecs.CodecIds
+ManagedCodecs.FieldOrder
+ManagedCodecs.FieldOrder.BB = 3 -> ManagedCodecs.FieldOrder
+ManagedCodecs.FieldOrder.BT = 5 -> ManagedCodecs.FieldOrder
+ManagedCodecs.FieldOrder.Progressive = 1 -> ManagedCodecs.FieldOrder
+ManagedCodecs.FieldOrder.TB = 4 -> ManagedCodecs.FieldOrder
+ManagedCodecs.FieldOrder.TT = 2 -> ManagedCodecs.FieldOrder
+ManagedCodecs.FieldOrder.Unknown = 0 -> ManagedCodecs.FieldOrder
 ManagedCodecs.IAudioDecoder
 ManagedCodecs.IAudioDecoder.Decode(ManagedCodecs.Packet packet) -> ManagedCodecs.AudioFrame!
 ManagedCodecs.IAudioDecoder.Decode(System.ReadOnlySpan<byte> packet) -> ManagedCodecs.AudioFrame!
@@ -40,6 +47,11 @@ ManagedCodecs.IVideoDecoder.Decode(ManagedCodecs.Packet packet) -> System.Collec
 ManagedCodecs.IVideoDecoder.DecodeAsync(ManagedCodecs.Packet packet, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<System.Collections.Generic.IReadOnlyList<ManagedCodecs.VideoFrame!>!>
 ManagedCodecs.IVideoDecoder.Flush() -> System.Collections.Generic.IReadOnlyList<ManagedCodecs.VideoFrame!>!
 ManagedCodecs.IVideoDecoder.FlushAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<System.Collections.Generic.IReadOnlyList<ManagedCodecs.VideoFrame!>!>
+ManagedCodecs.MediaTypes
+ManagedCodecs.MediaTypes.All = ManagedCodecs.MediaTypes.Video | ManagedCodecs.MediaTypes.Audio -> ManagedCodecs.MediaTypes
+ManagedCodecs.MediaTypes.Audio = 2 -> ManagedCodecs.MediaTypes
+ManagedCodecs.MediaTypes.None = 0 -> ManagedCodecs.MediaTypes
+ManagedCodecs.MediaTypes.Video = 1 -> ManagedCodecs.MediaTypes
 ManagedCodecs.Packet
 ManagedCodecs.Packet.Data.get -> System.ReadOnlyMemory<byte>
 ManagedCodecs.Packet.Data.init -> void
@@ -63,6 +75,29 @@ ManagedCodecs.Packet.SkipSamples.get -> int
 ManagedCodecs.Packet.SkipSamples.init -> void
 ManagedCodecs.Packet.StreamIndex.get -> int
 ManagedCodecs.Packet.StreamIndex.init -> void
+ManagedCodecs.PacketInfo
+ManagedCodecs.PacketInfo.Deconstruct(out int StreamIndex, out long Sequence, out int Size, out bool IsKeyframe, out long Dts, out long Pts, out long Duration, out int SkipSamples, out bool Discard) -> void
+ManagedCodecs.PacketInfo.Discard.get -> bool
+ManagedCodecs.PacketInfo.Discard.init -> void
+ManagedCodecs.PacketInfo.Dts.get -> long
+ManagedCodecs.PacketInfo.Dts.init -> void
+ManagedCodecs.PacketInfo.Duration.get -> long
+ManagedCodecs.PacketInfo.Duration.init -> void
+ManagedCodecs.PacketInfo.Equals(ManagedCodecs.PacketInfo other) -> bool
+ManagedCodecs.PacketInfo.IsKeyframe.get -> bool
+ManagedCodecs.PacketInfo.IsKeyframe.init -> void
+ManagedCodecs.PacketInfo.PacketInfo() -> void
+ManagedCodecs.PacketInfo.PacketInfo(int StreamIndex, long Sequence, int Size, bool IsKeyframe, long Dts, long Pts, long Duration, int SkipSamples = 0, bool Discard = false) -> void
+ManagedCodecs.PacketInfo.Pts.get -> long
+ManagedCodecs.PacketInfo.Pts.init -> void
+ManagedCodecs.PacketInfo.Sequence.get -> long
+ManagedCodecs.PacketInfo.Sequence.init -> void
+ManagedCodecs.PacketInfo.Size.get -> int
+ManagedCodecs.PacketInfo.Size.init -> void
+ManagedCodecs.PacketInfo.SkipSamples.get -> int
+ManagedCodecs.PacketInfo.SkipSamples.init -> void
+ManagedCodecs.PacketInfo.StreamIndex.get -> int
+ManagedCodecs.PacketInfo.StreamIndex.init -> void
 ManagedCodecs.PictureType
 ManagedCodecs.PictureType.B = 3 -> ManagedCodecs.PictureType
 ManagedCodecs.PictureType.BI = 7 -> ManagedCodecs.PictureType
@@ -106,10 +141,14 @@ ManagedCodecs.Rational.Rational(int Numerator, int Denominator) -> void
 ManagedCodecs.Rational.ToDouble() -> double
 ManagedCodecs.VideoFrame
 ManagedCodecs.VideoFrame.Dispose() -> void
+ManagedCodecs.VideoFrame.FieldOrder.get -> ManagedCodecs.FieldOrder
 ManagedCodecs.VideoFrame.Format.get -> ManagedCodecs.PixelFormat
 ManagedCodecs.VideoFrame.GetRow(int plane, int y) -> System.Span<byte>
 ManagedCodecs.VideoFrame.Height.get -> int
+ManagedCodecs.VideoFrame.IsCodedAsFields.get -> bool
 ManagedCodecs.VideoFrame.IsDamaged.get -> bool
+ManagedCodecs.VideoFrame.IsInterlaced.get -> bool
+ManagedCodecs.VideoFrame.IsTopFieldFirst.get -> bool
 ManagedCodecs.VideoFrame.Offsets.get -> int[]!
 ManagedCodecs.VideoFrame.PictureType.get -> ManagedCodecs.PictureType
 ManagedCodecs.VideoFrame.Planes.get -> byte[]![]!
@@ -149,6 +188,7 @@ override ManagedCodecs.AudioStreamInfo.Equals(object? obj) -> bool
 override ManagedCodecs.AudioStreamInfo.GetHashCode() -> int
 override ManagedCodecs.AudioStreamInfo.ToString() -> string!
 override ManagedCodecs.Packet.GetHashCode() -> int
+override ManagedCodecs.PacketInfo.GetHashCode() -> int
 override ManagedCodecs.Rational.GetHashCode() -> int
 override ManagedCodecs.Rational.ToString() -> string!
 override ManagedCodecs.VideoStreamInfo.Equals(object? obj) -> bool
@@ -158,6 +198,8 @@ static ManagedCodecs.AudioStreamInfo.operator !=(ManagedCodecs.AudioStreamInfo? 
 static ManagedCodecs.AudioStreamInfo.operator ==(ManagedCodecs.AudioStreamInfo? left, ManagedCodecs.AudioStreamInfo? right) -> bool
 static ManagedCodecs.Packet.operator !=(ManagedCodecs.Packet left, ManagedCodecs.Packet right) -> bool
 static ManagedCodecs.Packet.operator ==(ManagedCodecs.Packet left, ManagedCodecs.Packet right) -> bool
+static ManagedCodecs.PacketInfo.operator !=(ManagedCodecs.PacketInfo left, ManagedCodecs.PacketInfo right) -> bool
+static ManagedCodecs.PacketInfo.operator ==(ManagedCodecs.PacketInfo left, ManagedCodecs.PacketInfo right) -> bool
 static ManagedCodecs.PixelFormatExtensions.BitDepth(this ManagedCodecs.PixelFormat format) -> int
 static ManagedCodecs.PixelFormatExtensions.BytesPerSample(this ManagedCodecs.PixelFormat format) -> int
 static ManagedCodecs.PixelFormatExtensions.PlaneCount(this ManagedCodecs.PixelFormat format) -> int
@@ -169,4 +211,6 @@ static ManagedCodecs.VideoStreamInfo.operator !=(ManagedCodecs.VideoStreamInfo? 
 static ManagedCodecs.VideoStreamInfo.operator ==(ManagedCodecs.VideoStreamInfo? left, ManagedCodecs.VideoStreamInfo? right) -> bool
 ~override ManagedCodecs.Packet.Equals(object obj) -> bool
 ~override ManagedCodecs.Packet.ToString() -> string
+~override ManagedCodecs.PacketInfo.Equals(object obj) -> bool
+~override ManagedCodecs.PacketInfo.ToString() -> string
 ~override ManagedCodecs.Rational.Equals(object obj) -> bool

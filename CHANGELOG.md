@@ -11,9 +11,11 @@ share internals, so each depends on the others at exactly its own version (`[X]`
 then reports a mix of versions (NU1107, or NU1608 for a newer one referenced directly) rather than letting it fail at
 run time.
 
-## Unreleased
+## 0.4.0 – 2026-10-30
 
-A new public API: the next release is a minor version, 0.4.0.
+Each decoded frame's interlacing as FFmpeg reports it, and an MP4 demuxer that reads one track at a time and lists
+packets without their data; CAVLC decoding is faster. New public API, hence a minor version; code built against 0.3
+keeps working.
 
 ### Added
 

@@ -301,6 +301,35 @@ ff -f lavfi -i testsrc2=size=320x256:rate=50 -t 1 "${I[@]}" -bf 2 -refs 2 -x264-
 ff -f lavfi -i testsrc2=size=320x240:rate=50,fade=in:0:40 -t 2 "${I[@]}" samples/h264-mbaff-default.mp4
 # Interlaced-capable parameter sets (frame_mbs_only_flag 0) on progressive frames, with P and B frames.
 ff -f lavfi -i "testsrc2=size=320x240:rate=25,scroll=h=0.01" -t 1 "${H[@]}" -bf 2 -x264-params fake-interlaced=1 samples/h264-fake-interlaced.mp4
+# Interlacing as FFmpeg reports it (VideoFrame.IsInterlaced, IsTopFieldFirst; H264Decoder.FieldOrder; name.interlacing).
+# Bottom field first, for which libx264 still writes pic_struct 3 (top field first) in its picture timing SEI: the
+# parser's field order follows pic_struct (tt), each frame's top_field_first the field order counts (bottom first).
+ff -f lavfi -i testsrc2=size=320x240:rate=50 -t 0.6 -vf "tinterlace=interleave_bottom,setfield=bff" "${I[@]:2}" -bf 2 samples/h264-mbaff-bff.mp4
+# With HRD parameters (nal-hrd): the picture timing SEI starts with the CPB and DPB delays (13 bits here), read with
+# the SPS's lengths before pic_struct.
+ff -f lavfi -i testsrc2=size=320x240:rate=50 -t 0.6 -vf "tinterlace=interleave_bottom,setfield=bff" "${I[@]:2}" -bf 2 \
+  -b:v 500k -maxrate 500k -bufsize 1000k -x264-params nal-hrd=vbr samples/h264-mbaff-hrd.mp4
+# Without the SEI (pic_struct_present_flag still set), bottom and top field first: the order counts alone, bb and tt,
+# and interlaced because the frames are MBAFF frames.
+ff -i samples/h264-mbaff-bff.mp4 -c copy -bsf:v filter_units=remove_types=6 samples/h264-mbaff-bff-nosei.mp4
+ff -i samples/h264-mbaff-p.mp4 -c copy -bsf:v filter_units=remove_types=6 samples/h264-mbaff-nosei.mp4
+# Every pic_struct, and ct_type overriding it, which libx264 writes none of beyond pic_struct 0 and 3
+# (tools/h264-set-pic-struct.py): on MBAFF frames, whose order counts say top field first (the first, 4, makes the
+# stream bb); and on progressive frames, where pic_struct 3 and 4 keep the previous frame's flag (soft telecine) and
+# equal order counts leave top_field_first to pic_struct.
+picstruct=$(mktemp -d)
+ff -f lavfi -i testsrc2=size=320x240:rate=50 -t 0.64 "${I[@]}" -bf 0 -f h264 "$picstruct/mbaff.264"
+python3 tools/h264-set-pic-struct.py "$picstruct/mbaff.264" "$picstruct/mbaff-set.264" 4 0 1 2 3 5 6 7 8 0:1 3:0 4:2 5:1 1:0 2:1 6
+ff -r 25 -i "$picstruct/mbaff-set.264" -c copy samples/h264-mbaff-pic-struct.mp4
+ff -f lavfi -i testsrc2=size=320x240:rate=25 -t 0.8 "${H[@]}" -bf 0 -x264-params pic-struct=1 -f h264 "$picstruct/frames.264"
+python3 tools/h264-set-pic-struct.py "$picstruct/frames.264" "$picstruct/frames-set.264" 1 3 0 3 4 2 4 5 6 0 3:1 4 7 8 3 6:1
+ff -r 25 -i "$picstruct/frames-set.264" -c copy samples/h264-pic-struct.mp4
+# Smaller, pic_struct 3, 0, 3: decoded after h264-pic-struct by one decoder, its first frame is interlaced again, the
+# previous frame's flag starting over at a new picture size (H264InterlacingTests).
+ff -f lavfi -i testsrc2=size=160x128:rate=25 -t 0.12 "${H[@]}" -bf 0 -x264-params pic-struct=1 -f h264 "$picstruct/small.264"
+python3 tools/h264-set-pic-struct.py "$picstruct/small.264" "$picstruct/small-set.264" 3 0 3
+ff -r 25 -i "$picstruct/small-set.264" -c copy samples/h264-pic-struct-small.mp4
+rm -rf "$picstruct"
 # MBAFF in 4:2:2: field and frame pairs with 16 chroma rows a macroblock, so intra prediction gathers 16 rows of
 # neighbours, and chroma deblocking meets the left and upper pairs line by line as luma does (each chroma line takes
 # its luma line's bS) and filters the upper edge twice under a field pair. Intra with CABAC (cropped), CAVLC and 4x4
@@ -551,6 +580,14 @@ rm samples/h264-negative-ctts-last.framemd5
 for f in samples/*.avi samples/*.mp4; do
   t=$(ffprobe -v error -select_streams v:0 -show_entries frame=pict_type -of csv=p=0 "$f" | cut -d, -f1)
   if [ -n "$t" ]; then echo "$t" > "${f%.*}.picttypes"; fi
+done
+# name.interlacing: each decoded video frame's interlaced_frame and top_field_first as ffprobe lists them ("frame,1,1"),
+# in output order, and the stream's field_order ("stream,tt"), for VideoFrame.IsInterlaced, IsTopFieldFirst and
+# H264Decoder.FieldOrder.
+for f in samples/*.avi samples/*.mp4; do
+  t=$(ffprobe -v error -select_streams v:0 -show_entries stream=field_order:frame=interlaced_frame,top_field_first -of csv "$f" \
+    | cut -d, -f1-3)
+  if [ -n "$t" ]; then echo "$t" > "${f%.*}.interlacing"; fi
 done
 for f in samples/*.mp4; do
   ff -copyts -i "$f" -c copy -f framemd5 "${f%.mp4}.packets.framemd5"

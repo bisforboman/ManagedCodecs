@@ -1,1 +1,12 @@
 #nullable enable
+ManagedCodecs.FieldOrder
+ManagedCodecs.FieldOrder.BB = 3 -> ManagedCodecs.FieldOrder
+ManagedCodecs.FieldOrder.BT = 5 -> ManagedCodecs.FieldOrder
+ManagedCodecs.FieldOrder.Progressive = 1 -> ManagedCodecs.FieldOrder
+ManagedCodecs.FieldOrder.TB = 4 -> ManagedCodecs.FieldOrder
+ManagedCodecs.FieldOrder.TT = 2 -> ManagedCodecs.FieldOrder
+ManagedCodecs.FieldOrder.Unknown = 0 -> ManagedCodecs.FieldOrder
+ManagedCodecs.VideoFrame.FieldOrder.get -> ManagedCodecs.FieldOrder
+ManagedCodecs.VideoFrame.IsCodedAsFields.get -> bool
+ManagedCodecs.VideoFrame.IsInterlaced.get -> bool
+ManagedCodecs.VideoFrame.IsTopFieldFirst.get -> bool

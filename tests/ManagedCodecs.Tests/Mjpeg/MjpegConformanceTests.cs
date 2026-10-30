@@ -44,6 +44,7 @@ public class MjpegConformanceTests
         var video = demuxer.Video!;
         var decoder = new MjpegDecoder(video) { ZeroCopy = zeroCopy }; // the stream's height tells interlaced packets (two fields) apart
         var types = PictureTypes.Read(sampleName);
+        var interlacing = Interlacings.Read(sampleName);
 
         int index = 0;
         foreach (var packet in demuxer.ReadPackets().Where(p => p.StreamIndex == video.StreamIndex))
@@ -55,6 +56,8 @@ public class MjpegConformanceTests
                 FrameMd5.SameTime(expected[index].Pts, timeBase, packet.Pts, video.TimeBase),
                 $"Frame {index}: pts {packet.Pts} ({video.TimeBase}) is not FFmpeg's {expected[index].Pts} ({timeBase}).");
             Assert.True(types is null || types[index] == frame.PictureType, $"Frame {index}: picture type {frame.PictureType} is not FFmpeg's {types?[index]}.");
+            interlacing?.Check(index, frame);
+            Assert.Equal(FieldOrder.Unknown, frame.FieldOrder);
             index++;
             if (dispose)
             {

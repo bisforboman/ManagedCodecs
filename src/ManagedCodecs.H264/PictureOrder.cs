@@ -86,18 +86,27 @@ internal sealed class PictureOrder
         {
             // Type 1 gives a bottom field its offset from the top (8-10); the others the same value. After
             // memory_management_control_operation 5 the field's order count is rebased to 0, as a frame's smaller one.
-            int field = mmco5 ? 0 : header.BottomField ? bottom : top;
+            int decoded = header.BottomField ? bottom : top;
+            int field = mmco5 ? 0 : decoded;
             Fields = (field, field);
+            DecodedFields = (decoded, decoded);
             return field;
         }
 
         int poc = Math.Min(top, bottom);
         Fields = mmco5 ? (top - poc, bottom - poc) : (top, bottom);
+        DecodedFields = (top, bottom);
         return mmco5 ? poc - Math.Min(top, bottom) : poc;
     }
 
     /// <summary>TopFieldOrderCnt and BottomFieldOrderCnt of the frame <see cref="Next"/> last returned PicOrderCnt for.</summary>
     public (int Top, int Bottom) Fields { get; private set; }
+
+    /// <summary>
+    /// <see cref="Fields"/> before memory_management_control_operation 5 rebased them: FFmpeg keeps these in its pictures'
+    /// <c>field_poc</c>, which its field order flags compare.
+    /// </summary>
+    public (int Top, int Bottom) DecodedFields { get; private set; }
 
     /// <summary>
     /// PicOrderCnt of a frame inferred for a gap in frame_num (8.2.5.2), a reference frame without

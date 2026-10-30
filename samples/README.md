@@ -25,6 +25,9 @@ references:
 - `name.framemd5`: MD5 of every decoded frame, for MJPEG and H.264, which must be bit-exact.
 - `name.picttypes` (`ffprobe -show_frames`, `pict_type`): every decoded video frame's picture type (I, P, B), in output
   order, for `VideoFrame.PictureType`.
+- `name.interlacing` (`ffprobe -show_frames -show_streams`, `interlaced_frame`, `top_field_first`, `field_order`): every
+  decoded video frame's interlacing flags, in output order, and the stream's field order, for `VideoFrame.IsInterlaced`,
+  `IsTopFieldFirst` and `H264Decoder.FieldOrder`.
 - `name.packets.csv` (`ffprobe -show_packets -show_data_hash MD5`): every demuxed MP4 packet with the demuxer's own
   timestamps, its keyframe and discard flags and the MD5 of its data. `name.packets.framemd5` (with `-copyts`) for the
   codec private data, and for raw AAC (`.aac`, ADTS) the packets.

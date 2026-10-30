@@ -62,6 +62,54 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.H264/H264Decoder.cs",
          find="PictureType = _firstField.PictureType }", replace="PictureType = ToPictureType(header.Type) }",
          tests="FullyQualifiedName~H264ConformanceTests.MatchesFfmpegFrameByFrame&DisplayName~jm-paff.mp4"),
+    # Interlacing (VideoFrame.IsInterlaced, IsTopFieldFirst, FieldOrder; H264Decoder.FieldOrder), FFmpeg's rules
+    # (h264_export_frame_props, h264_parser.c), each reached by some streams only.
+    # The picture timing SEI of a first field's packet holds until its second field, where the frame's flags are set.
+    dict(file="src/ManagedCodecs.H264/H264Decoder.cs",
+         find="        if (_firstField is null)\n        {\n            _timing = null;\n        }",
+         replace="        _timing = null;",
+         tests="FullyQualifiedName~H264InterlacingTests.FirstFieldsSei"),
+    # A first field's order count is compared as decoded, before memory_management_control_operation 5 rebased it.
+    dict(file="src/ManagedCodecs.H264/H264Decoder.cs",
+         find="int decodedPoc = header.BottomField ? _order.DecodedFields.Bottom : _order.DecodedFields.Top;",
+         replace="int decodedPoc = header.BottomField ? _order.Fields.Bottom : _order.Fields.Top;",
+         tests="FullyQualifiedName~H264ConformanceTests.MatchesFfmpegFrameByFrame&DisplayName~jm-paff-mmco5"),
+    # The stream's field order is its first picture's, not the first known one (a field pair's second field's).
+    dict(file="src/ManagedCodecs.H264/H264Decoder.cs",
+         find="if (!_started)", replace="if (!_started || order != FieldOrder.Unknown)",
+         tests="FullyQualifiedName~H264ConformanceTests.MatchesFfmpegFrameByFrame&DisplayName~jm-paff.mp4"),
+    # The previous frame's flag starts over at a new picture size.
+    dict(file="src/ManagedCodecs.H264/H264Decoder.cs",
+         find="            _decoders.Clear();\n            _previousInterlaced = true;", replace="            _decoders.Clear();",
+         tests="FullyQualifiedName~H264InterlacingTests.PreviousFlag"),
+    # Without the SEI, an MBAFF frame is interlaced (as a field pair is).
+    dict(file="src/ManagedCodecs.H264/H264Decoder.cs",
+         find="header.FieldPic || sps.MbAdaptiveFrameField, _previousInterlaced", replace="header.FieldPic, _previousInterlaced",
+         tests="FullyQualifiedName~H264ConformanceTests.MatchesFfmpegFrameByFrame&DisplayName~nosei"),
+    # pic_struct 3 and 4 on a progressive frame keep the previous frame's flag (soft telecine).
+    dict(file="src/ManagedCodecs.H264/Interlacing.cs",
+         find="3 or 4 => fieldOrMbaff || previousInterlaced,", replace="3 or 4 => fieldOrMbaff,",
+         tests="FullyQualifiedName~H264ConformanceTests.MatchesFfmpegFrameByFrame&DisplayName~h264-pic-struct"),
+    # A clock timestamp's ct_type 0 or 1 overrides pic_struct, only up to pic_struct 4.
+    dict(file="src/ManagedCodecs.H264/Interlacing.cs",
+         find="if ((t.CtTypes & 3) != 0 && t.PicStruct <= 4)", replace="if ((t.CtTypes & 3) != 0 && t.PicStruct < 0)",
+         tests="FullyQualifiedName~H264ConformanceTests.MatchesFfmpegFrameByFrame&DisplayName~pic-struct"),
+    dict(file="src/ManagedCodecs.H264/Interlacing.cs",
+         find="if ((t.CtTypes & 3) != 0 && t.PicStruct <= 4)", replace="if ((t.CtTypes & 3) != 0)",
+         tests="FullyQualifiedName~H264ConformanceTests.MatchesFfmpegFrameByFrame&DisplayName~pic-struct"),
+    # With equal order counts, pic_struct 3 and 5 say top field first.
+    dict(file="src/ManagedCodecs.H264/Interlacing.cs",
+         find="u.PicStruct is 3 or 5", replace="u.PicStruct is 3",
+         tests="FullyQualifiedName~H264ConformanceTests.MatchesFfmpegFrameByFrame&DisplayName~h264-pic-struct"),
+    # The parser's field order follows pic_struct, not the order counts, where the SEI is there.
+    dict(file="src/ManagedCodecs.H264/Interlacing.cs",
+         find="        if (timing is { } t)\n        {\n            return t.PicStruct switch",
+         replace="        if (timing is { } t && t.PicStruct < 0)\n        {\n            return t.PicStruct switch",
+         tests="FullyQualifiedName~H264ConformanceTests.MatchesFfmpegFrameByFrame&DisplayName~h264-mbaff-bff.mp4"),
+    # The picture timing SEI starts with the HRD delays where the SPS has HRD parameters.
+    dict(file="src/ManagedCodecs.H264/Interlacing.cs",
+         find="if (layout.HasDelays)", replace="if (false)",
+         tests="FullyQualifiedName~H264ConformanceTests.MatchesFfmpegFrameByFrame&DisplayName~hrd"),
     # Concealment guesses a missing macroblock's motion from its neighbours (boundary matching), not zero motion.
     dict(file="src/ManagedCodecs.H264/PictureDecoder.Conceal.cs",
          find="        if (count == 1)\n        {\n            return candidates[0];\n        }\n\n        var (origin",

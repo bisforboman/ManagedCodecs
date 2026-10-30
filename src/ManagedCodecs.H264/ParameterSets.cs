@@ -73,6 +73,12 @@ internal sealed class SequenceParameterSet
     /// <summary>max_dec_frame_buffering from the VUI's bitstream restriction, if it has one.</summary>
     public int? MaxDecFrameBuffering { get; internal init; }
 
+    /// <summary>
+    /// The VUI's pic_struct_present_flag and what the picture timing SEI's layout (D.1.3) takes from the HRD
+    /// parameters; null without the flag (or a VUI), when the SEI says nothing of interlacing.
+    /// </summary>
+    public PictureTimingLayout? PictureTiming { get; internal init; }
+
     /// <summary>Crop offsets in luma samples (already scaled by CropUnitX/Y).</summary>
     public (int Left, int Right, int Top, int Bottom) Crop { get; internal init; }
 
@@ -158,8 +164,9 @@ internal sealed class SequenceParameterSet
                 r.ReadUe(maxCrop, "frame_crop_top_offset") * unitY, r.ReadUe(maxCrop, "frame_crop_bottom_offset") * unitY);
         }
 
-        // Of the VUI, only the bitstream restriction matters: it says how far output is reordered.
-        (int Reorder, int Buffering)? restriction = r.ReadFlag() ? ReadVuiBitstreamRestriction(r) : null;
+        // Of the VUI, the bitstream restriction says how far output is reordered, and pic_struct_present_flag with the
+        // HRD parameters how to read the picture timing SEI.
+        var (restriction, timing) = r.ReadFlag() ? ReadVui(r) : (null, null);
 
         var sps = new SequenceParameterSet
         {
@@ -190,6 +197,7 @@ internal sealed class SequenceParameterSet
             Crop = crop,
             MaxNumReorderFrames = restriction?.Reorder,
             MaxDecFrameBuffering = restriction?.Buffering,
+            PictureTiming = timing,
         };
 
         if (sps.Width <= 0 || sps.Height <= 0)
@@ -200,8 +208,8 @@ internal sealed class SequenceParameterSet
         return sps;
     }
 
-    /// <summary>vui_parameters (E.1.1), read up to and including bitstream_restriction; null when absent.</summary>
-    private static (int Reorder, int Buffering)? ReadVuiBitstreamRestriction(BitReader r)
+    /// <summary>vui_parameters (E.1.1), read up to and including bitstream_restriction; each null when absent.</summary>
+    private static ((int Reorder, int Buffering)? Restriction, PictureTimingLayout? Timing) ReadVui(BitReader r)
     {
         if (r.ReadFlag() && r.ReadBits(8) == 255)
         {
@@ -235,16 +243,19 @@ internal sealed class SequenceParameterSet
             r.ReadFlag(); // fixed_frame_rate_flag
         }
 
+        // The lengths are the last hrd_parameters' (the same in both, by E.2.2), as FFmpeg reads them; without any, 24
+        // (E.2.2's inferred time_offset_length; the delays are then absent).
+        var lengths = (Cpb: 24, Dpb: 24, TimeOffset: 24);
         bool nalHrd = r.ReadFlag();
         if (nalHrd)
         {
-            SkipHrdParameters(r);
+            lengths = ReadHrdParameters(r);
         }
 
         bool vclHrd = r.ReadFlag();
         if (vclHrd)
         {
-            SkipHrdParameters(r);
+            lengths = ReadHrdParameters(r);
         }
 
         if (nalHrd || vclHrd)
@@ -252,10 +263,12 @@ internal sealed class SequenceParameterSet
             r.ReadFlag(); // low_delay_hrd_flag
         }
 
-        r.ReadFlag(); // pic_struct_present_flag
+        var timing = r.ReadFlag() // pic_struct_present_flag
+            ? new PictureTimingLayout(nalHrd || vclHrd, lengths.Cpb, lengths.Dpb, lengths.TimeOffset)
+            : null;
         if (!r.ReadFlag())
         {
-            return null;
+            return (null, timing);
         }
 
         r.ReadFlag(); // motion_vectors_over_pic_boundaries_flag
@@ -265,11 +278,11 @@ internal sealed class SequenceParameterSet
         r.ReadUe(); // log2_max_mv_length_vertical
         int reorder = r.ReadUe(16, "max_num_reorder_frames");
         int buffering = r.ReadUe(16, "max_dec_frame_buffering");
-        return (reorder, buffering);
+        return ((reorder, buffering), timing);
     }
 
-    /// <summary>hrd_parameters (E.1.2).</summary>
-    private static void SkipHrdParameters(BitReader r)
+    /// <summary>hrd_parameters (E.1.2): the lengths of cpb_removal_delay, dpb_output_delay and time_offset.</summary>
+    private static (int Cpb, int Dpb, int TimeOffset) ReadHrdParameters(BitReader r)
     {
         int cpbCount = 1 + r.ReadUe(31, "cpb_cnt_minus1");
         r.ReadBits(8); // bit_rate_scale, cpb_size_scale
@@ -280,7 +293,10 @@ internal sealed class SequenceParameterSet
             r.ReadFlag(); // cbr_flag
         }
 
-        r.ReadBits(20); // initial_cpb_removal_delay_length_minus1 .. time_offset_length
+        r.ReadBits(5); // initial_cpb_removal_delay_length_minus1
+        int cpb = 1 + (int)r.ReadBits(5); // cpb_removal_delay_length_minus1
+        int dpb = 1 + (int)r.ReadBits(5); // dpb_output_delay_length_minus1
+        return (cpb, dpb, (int)r.ReadBits(5)); // time_offset_length
     }
 }
 

@@ -123,6 +123,38 @@ public sealed class VideoFrame : IDisposable
     /// </summary>
     public PictureType PictureType { get; internal set; }
 
+    /// <summary>
+    /// Whether the frame is interlaced, as FFmpeg's <c>interlaced_frame</c> (<c>AV_FRAME_FLAG_INTERLACED</c>). H.264 takes
+    /// the picture timing SEI's pic_struct where the SPS has one and it came, else whether the frame was coded interlaced
+    /// (two field pictures, or an MBAFF frame); false for every MJPEG frame, as in FFmpeg.
+    /// </summary>
+    public bool IsInterlaced { get; internal set; }
+
+    /// <summary>
+    /// Whether the frame's top field comes first, as FFmpeg's <c>top_field_first</c> (<c>AV_FRAME_FLAG_TOP_FIELD_FIRST</c>):
+    /// in H.264 the top field's order count below the bottom's where they differ, else pic_struct 3 or 5 where the SPS
+    /// has the picture timing SEI and it came, else whether the frame is <see cref="IsInterlaced"/>. False for every
+    /// MJPEG frame.
+    /// </summary>
+    public bool IsTopFieldFirst { get; internal set; }
+
+    /// <summary>
+    /// The field order FFmpeg's H.264 parser gives the frame's picture (its second field's, for a frame of two field
+    /// pictures): pic_struct 3 or 5 <see cref="FieldOrder.TT"/>, 4 or 6 <see cref="FieldOrder.BB"/> and any other
+    /// <see cref="FieldOrder.Progressive"/> where the SPS has the picture timing SEI and it came with the picture; else
+    /// the top and bottom field order counts' order, <see cref="FieldOrder.Progressive"/> where they are equal; for a
+    /// field, the order of its frame's fields. <see cref="FieldOrder.Unknown"/> for MJPEG, and for a frame whose field
+    /// came alone. A stream's order, as <c>ffprobe -show_streams</c> prints it, is that of its first picture:
+    /// <c>H264Decoder.FieldOrder</c>.
+    /// </summary>
+    public FieldOrder FieldOrder { get; internal set; }
+
+    /// <summary>
+    /// Whether the frame was coded as two field pictures (field_pic_flag, PAFF), not as one frame picture (progressive,
+    /// or MBAFF). Also true for a frame made from one field whose second field was lost (H.264's <c>ConcealErrors</c>).
+    /// </summary>
+    public bool IsCodedAsFields { get; internal set; }
+
     /// <summary>The visible samples of one row in one plane, as bytes (two a sample in the formats deeper than 8 bits).</summary>
     public Span<byte> GetRow(int plane, int y)
     {

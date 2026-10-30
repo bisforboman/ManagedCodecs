@@ -104,6 +104,43 @@ slices differ in type has its first slice's: no encoder used here mixes them, so
 stream (ffprobe gives it I, I, P too). SI and SP, which FFmpeg reports too, would come from the Extended profile's
 switching slices, which the decoder rejects. A concealed frame has the type of the slices that arrived.
 
+### Interlacing
+
+Each frame's `VideoFrame.IsInterlaced` and `IsTopFieldFirst` are FFmpeg's `interlaced_frame` and `top_field_first`,
+compared with `ffprobe -show_frames` frame by frame on every sample FFmpeg decodes (`name.interlacing`, in the
+conformance tests, with threads too), and `H264Decoder.FieldOrder` with the stream's `field_order`. The spec leaves
+both to the application, so these are FFmpeg's rules (`h264_export_frame_props` in h264_slice.c and `parse_nal_units`
+in h264_parser.c, the same in 6.1.1, which CI runs, and 8.1.3 on every sample):
+
+- Interlaced: where the SPS has pic_struct_present_flag and the picture timing SEI came, pic_struct 1 and 2 (a field)
+  are, 3 and 4 are for a field pair or an MBAFF frame and otherwise keep the previous frame's flag (soft telecine; true
+  at the start and after a change of picture size), and 0 and 5 to 8 are not; a clock timestamp's ct_type 0 or 1
+  (progressive, interlaced) overrides that for pic_struct up to 4. Without the SEI, a field pair or an MBAFF frame is
+  interlaced, whatever its macroblock pairs are.
+- Top field first: the top field's order count below the bottom's where they differ, else pic_struct 3 or 5 where the
+  SEI came, else whether the frame is interlaced. FFmpeg compares a first field's order count as decoded, before
+  memory_management_control_operation 5 rebases it to 0, so a frame whose first (top) field has that operation is
+  bottom field first (`jm-paff-mmco5`).
+- The SEI is the last one of the picture's packet; a first field's holds for its second field, where FFmpeg sets the
+  frame's flags (no sample's field pictures carry one: `H264InterlacingTests` adds it to JM's, as ffprobe reads that
+  stream too).
+- `VideoFrame.FieldOrder` is the parser's: tt for pic_struct 3 or 5, bb for 4 or 6, progressive for any other where
+  the SEI came, whatever the order counts say (libx264 writes pic_struct 3 for bottom field first frames: tt to the
+  parser, `top_field_first` 0 to the decoder; `h264-mbaff-bff`); else the order counts' order, progressive where they
+  are equal. A field picture right after the other field of the same frame_num gets that one's order, any other field
+  unknown; a frame of two field pictures takes its second field's. ffprobe prints only the stream's, which for an MP4
+  file is its first picture's: FFmpeg's stream analysis reads one packet there, so a stream that starts with a field
+  picture (JM's) is unknown (a raw H.264 file, which FFmpeg reads on, gives the second field's). The frames' orders are
+  checked against a build of FFmpeg's parser printing every packet's (`H264InterlacingTests`). The parser forgets the
+  SEI at each packet: after a field whose second field was lost, a frame picture without an SEI of its own would get
+  the field's here, and none from FFmpeg's parser.
+
+libx264 writes pic_struct 0 and 3 and no clock timestamps, so `tools/h264-set-pic-struct.py` rewrites its SEI with every
+pic_struct and some ct_type values, on MBAFF and on progressive frames (`h264-mbaff-pic-struct`, `h264-pic-struct`);
+`h264-mbaff-hrd` has the HRD delays ahead of pic_struct, and the `-nosei` samples have the SEI removed. MJPEG frames
+are never interlaced or top field first, as ffprobe reports for every MJPEG sample, the interlaced AVI1 ones too, and
+their field order is unknown.
+
 ### The container's picture size
 
 FFmpeg's decoder crops a frame further to the size the container gives (MP4's sample entry), where that only takes

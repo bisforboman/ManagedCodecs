@@ -13,6 +13,17 @@ run time.
 
 ## Unreleased
 
+A new public API: the next release is a minor version, 0.4.0.
+
+### Added
+
+- Each decoded frame's interlacing as FFmpeg reports it: `VideoFrame.IsInterlaced` and `IsTopFieldFirst` (ffprobe's
+  `interlaced_frame` and `top_field_first`), `FieldOrder` (the order FFmpeg's H.264 parser gives the picture, a new
+  `FieldOrder` enum with `AVFieldOrder`'s values) and `IsCodedAsFields` (two field pictures), and
+  `H264Decoder.FieldOrder`, the stream's as ffprobe prints it for MP4. H.264 follows the picture timing SEI's
+  pic_struct and ct_type where there is one, else MBAFF or field coding and the field order counts; MJPEG frames are
+  not flagged, as in FFmpeg (#225).
+
 ### Fixed
 
 - `AviDemuxer`: an empty video chunk (a dropped frame) now takes its frame's tick, as in FFmpeg, so the packets after

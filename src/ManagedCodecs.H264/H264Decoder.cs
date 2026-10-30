@@ -58,6 +58,17 @@ public sealed class H264Decoder : IVideoDecoder
     // Whether the packet being parsed is to be decoded and not shown (Packet.Discard).
     private bool _discard;
 
+    // The picture timing SEI's payload as FFmpeg's decoder holds it: the last one of the packet, or of the packets
+    // since a first field's, as a frame's two fields share it. Interlacing reads it with the picture's SPS, at the
+    // picture's first slice (so an SEI after it counts for a second field only).
+    private byte[]? _timing;
+
+    // The last frame's IsInterlaced (true at the start, and after a change of picture size or format, as in FFmpeg),
+    // the last field picture FFmpeg's parser saw (parity, -1 for none, and frame_num), and whether a picture came yet.
+    private bool _previousInterlaced = true;
+    private (int Parity, int FrameNum) _parserLastField = (-1, 0);
+    private bool _started;
+
     // The container's picture size (VideoStreamInfo), cropping the frames further as FFmpeg does (OutputSize); 0 when
     // there is none, or once a picture's SPS did not allow it.
     private int _containerWidth;
@@ -118,6 +129,15 @@ public sealed class H264Decoder : IVideoDecoder
         get => _threads;
         init => _threads = value >= 1 ? value : throw new ArgumentOutOfRangeException(nameof(value), value, "At least one thread is needed.");
     }
+
+    /// <summary>
+    /// The stream's field order as <c>ffprobe -show_streams</c> prints it for an MP4 file: the one FFmpeg's parser gives
+    /// the first picture decoded (see <see cref="VideoFrame.FieldOrder"/>), as FFmpeg's stream analysis reads only the
+    /// first packet of an MP4 stream before it has all it needs. <see cref="ManagedCodecs.FieldOrder.Unknown"/> before the
+    /// first picture, and for a stream whose first picture is a field picture (for a raw H.264 file FFmpeg reads on, to
+    /// the second field, whose frame's <see cref="VideoFrame.FieldOrder"/> it then takes).
+    /// </summary>
+    public FieldOrder FieldOrder { get; private set; }
 
     /// <summary>For tests of frame threading: sleep up to this many milliseconds before each picture and after each macroblock row, at random.</summary>
     internal int RowDelay { get; init; }
@@ -477,6 +497,10 @@ public sealed class H264Decoder : IVideoDecoder
         frame.Pts = job.Pts;
         frame.IsDamaged = picture.Damaged;
         frame.PictureType = job.PictureType;
+        frame.IsInterlaced = job.Interlacing.Interlaced;
+        frame.IsTopFieldFirst = job.Interlacing.TopFieldFirst;
+        frame.FieldOrder = job.Interlacing.Order;
+        frame.IsCodedAsFields = job.Interlacing.CodedAsFields;
         frames.AddRange(_output.Add(frame, picture.Poc, job.Restart, ReorderDepth(state.Sps), borrow ? picture : null));
     }
 
@@ -524,6 +548,12 @@ public sealed class H264Decoder : IVideoDecoder
     /// <summary>Parses a packet's NAL units: parameter sets, and the slices of its picture with their reference lists.</summary>
     private PictureJob ParsePicture(ReadOnlySpan<byte> packet, long pts, List<VideoFrame> frames)
     {
+        // FFmpeg's decoder forgets the SEI at each packet but between a frame's fields.
+        if (_firstField is null)
+        {
+            _timing = null;
+        }
+
         PictureJob? current = null;
         int pos = 0;
         while (pos < packet.Length)
@@ -618,8 +648,16 @@ public sealed class H264Decoder : IVideoDecoder
             case >= NalUnitType.SliceDataPartitionA and <= (NalUnitType)4:
                 throw new NotSupportedException("Data partitioning is not supported.");
 
+            case NalUnitType.Sei:
+                if (PictureTiming.FindPayload(nal) is { } timing)
+                {
+                    _timing = timing;
+                }
+
+                break;
+
             default:
-                break; // SEI, access unit delimiters, filler data and the like carry no picture data
+                break; // access unit delimiters, filler data and the like carry no picture data
         }
 
         return current;
@@ -695,9 +733,11 @@ public sealed class H264Decoder : IVideoDecoder
 
         // A second field's frame is the first one's: its timestamp, and whether it starts a new sequence.
         var state = new PictureState(header, sps, decoder, picture, poc, OutputSize(sps), secondField);
+        int decodedPoc = header.BottomField ? _order.DecodedFields.Bottom : _order.DecodedFields.Top;
+        var interlacing = InterlacingOf(header, sps, decodedPoc, secondField);
         var job = secondField
-            ? new PictureJob(state, _firstField!.Pts, _firstField.Restart, _firstField.Discard) { FirstField = _firstField, PictureType = _firstField.PictureType }
-            : new PictureJob(state, pts, header.IsIdr || header.MemoryManagement.Any(op => op.Op == 5), _discard) { PictureType = ToPictureType(header.Type) };
+            ? new PictureJob(state, _firstField!.Pts, _firstField.Restart, _firstField.Discard) { FirstField = _firstField, PictureType = _firstField.PictureType, Interlacing = interlacing }
+            : new PictureJob(state, pts, header.IsIdr || header.MemoryManagement.Any(op => op.Op == 5), _discard) { PictureType = ToPictureType(header.Type), Interlacing = interlacing, DecodedPoc = decodedPoc };
         decoder.ConcealErrors = ConcealErrors;
         if (ConcealErrors && _lastReference is { IsNonExisting: false } latest && _references.Contains(latest) && latest != picture)
         {
@@ -707,6 +747,39 @@ public sealed class H264Decoder : IVideoDecoder
         }
 
         return job;
+    }
+
+    /// <summary>
+    /// A picture's interlacing, as FFmpeg exports it at a frame picture or a second field (from both fields' order counts),
+    /// and its parser's field order; <paramref name="decoded"/> is a field's order count before
+    /// memory_management_control_operation 5. A first field's stands for a frame whose second field is lost, the missing
+    /// field's order count taken as the largest (FFmpeg's INT_MAX), and leaves the previous frame's flag as it was.
+    /// </summary>
+    private Interlacing InterlacingOf(SliceHeader header, SequenceParameterSet sps, int decoded, bool secondField)
+    {
+        // The parser forgets the SEI at each packet, which only a frame picture right after an unpaired field (with the
+        // field's SEI and none of its own) would show: taken as the decoder holds it.
+        var timing = _timing is { } payload && sps.PictureTiming is { } layout ? PictureTiming.Read(payload, layout) : null;
+
+        // The order counts as decoded, not rebased by memory_management_control_operation 5 (FFmpeg's field_poc): a first
+        // field's that took it stays above its second field's.
+        var (top, bottom) = !header.FieldPic ? _order.DecodedFields
+            : secondField ? (header.BottomField ? (_firstField!.DecodedPoc, decoded) : (decoded, _firstField!.DecodedPoc))
+            : header.BottomField ? (int.MaxValue, decoded) : (decoded, int.MaxValue);
+        var order = Interlacing.ParserOrder(header, timing, top, bottom, ref _parserLastField);
+        if (!_started)
+        {
+            FieldOrder = order;
+            _started = true;
+        }
+
+        var (interlaced, topFieldFirst) = Interlacing.Flags(timing, header.FieldPic || sps.MbAdaptiveFrameField, _previousInterlaced, top, bottom);
+        if (!header.FieldPic || secondField)
+        {
+            _previousInterlaced = interlaced;
+        }
+
+        return new Interlacing(interlaced, topFieldFirst, order, header.FieldPic);
     }
 
     /// <summary>A slice type as FFmpeg's <c>pict_type</c> (its <c>ff_h264_golomb_to_pict_type</c>).</summary>
@@ -733,6 +806,7 @@ public sealed class H264Decoder : IVideoDecoder
             Drain(frames, all: true);
             StopThreads();
             _decoders.Clear();
+            _previousInterlaced = true;
         }
 
         while (true)
@@ -1023,6 +1097,12 @@ public sealed class H264Decoder : IVideoDecoder
         /// so a frame of two fields is typed by the first.
         /// </summary>
         public PictureType PictureType { get; init; }
+
+        /// <summary>Its frame's interlacing: a frame picture's or second field's own, a first field's for a frame without its second field.</summary>
+        public Interlacing Interlacing { get; init; }
+
+        /// <summary>A field's order count as decoded, before memory_management_control_operation 5 rebased it (<see cref="PictureOrder.DecodedFields"/>).</summary>
+        public int DecodedPoc { get; init; }
 
         /// <summary>With threads, the frame its thread copied out of the picture once decoded.</summary>
         public VideoFrame? Frame { get; set; }

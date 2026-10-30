@@ -28,8 +28,17 @@ internal static class Cavlc
     /// <paramref name="block"/>[<paramref name="scan"/>[position]] for scan positions
     /// 0..maxNumCoeff-1; the caller clears the block first.
     /// </summary>
-    [SkipLocalsInit]
     public static int ReadResidualBlock(BitReader r, int nC, int maxNumCoeff, Span<int> block, ReadOnlySpan<byte> scan)
+    {
+        // The reads on a cursor in locals (BitReader.Begin), the position written back once.
+        var bits = r.Begin();
+        int totalCoeff = ReadResidualBlock(ref bits, nC, maxNumCoeff, block, scan);
+        r.Commit(bits);
+        return totalCoeff;
+    }
+
+    [SkipLocalsInit]
+    private static int ReadResidualBlock(ref BitReader.Cursor r, int nC, int maxNumCoeff, Span<int> block, ReadOnlySpan<byte> scan)
     {
         var coeffTokenTable = nC switch
         {
@@ -64,7 +73,7 @@ internal static class Cavlc
                 continue;
             }
 
-            int levelPrefix = ReadLevelPrefix(r);
+            int levelPrefix = ReadLevelPrefix(ref r);
             int levelCode = Math.Min(15, levelPrefix) << suffixLength;
             if (suffixLength > 0 || levelPrefix >= 14)
             {
@@ -143,7 +152,8 @@ internal static class Cavlc
     }
 
     /// <summary>level_prefix (9.2.2.1): the number of leading zero bits before a one.</summary>
-    private static int ReadLevelPrefix(BitReader r)
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static int ReadLevelPrefix(ref BitReader.Cursor r)
     {
         uint peek = r.Peek(32);
         if (peek == 0)

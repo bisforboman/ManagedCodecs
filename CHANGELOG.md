@@ -11,6 +11,18 @@ share internals, so each depends on the others at exactly its own version (`[X]`
 then reports a mix of versions (NU1107, or NU1608 for a newer one referenced directly) rather than letting it fail at
 run time.
 
+## 0.2.5 – 2026-10-30
+
+Faster H.264 decoding, the same output. The public API is that of 0.2.0, unchanged.
+
+### Changed
+
+- H.264 decodes about 4.5% faster on one thread on the 720p benchmark stream (`h264-bench-720p.mp4`), bit for bit as
+  before: each partition's reference picture is a byte handle rather than an object reference, Cb and Cr share one
+  setup with a multiply-add chroma filter (SSSE3), 8-bit 4x4 and 8x8 inverse transforms run in 16-bit lanes (SSE2;
+  32-bit for coefficients too large for them), CAVLC residual blocks read through a bit cursor in locals, `ReadUe`
+  is inlined and a P_Skip macroblock no longer reads its neighbours twice (docs/conformance.md, Performance notes).
+
 ## 0.2.4 – 2026-10-30
 
 H.264 concealment guesses motion in MBAFF frames too. The public API is that of 0.2.0, unchanged.

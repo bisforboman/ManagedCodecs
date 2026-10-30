@@ -72,7 +72,7 @@ and code that reproduces FFmpeg's reading where it differs from the spec), and n
   API); without concealment, a
   lost reference fails pictures up to the next IDR picture, not an MMCO 5 one (by design: the MMCO 5 picture itself
   would have to be decoded from lists that can no longer be trusted, so its marking never applies).
-- H.264 speed: 1.85 to 3.29 times FFmpeg's time on one thread, interlaced video included (Benchmarking); at 720p
+- H.264 speed: 1.4 to 2.6 times FFmpeg's time on one thread in the steady state, interlaced video included (Benchmarking); at 720p
   every class sits at 2.2 to 2.8 times (CAVLC and CABAC, P and intra-only, High), so the gap is general rather than
   one class's (the CAVLC residual reader's compiled code is clean). MBAFF frames still look neighbours up through
   Table 6-4 call by call (about 9% of their time, field pictures 7%), where progressive pictures read a table made
@@ -319,15 +319,17 @@ The samples: MJPEG `testsrc-420.avi`, `testsrc-444.avi` and `noise-q1.avi`; H.26
 `h264-high-default.mp4` (libx264's Main and High defaults), `h264-high-b.mp4`, `h264-10bit-b.mp4`,
 `h264-high-motion.mp4`, `h264-10bit-motion.mp4`, `h264-mbaff-default.mp4` and `jm/jm-paff-b.mp4` (field pictures);
 AAC `aac-stereo-48k.mp4` and `aac-5.1.mp4`, HE-AAC `heaac/heaac-5.1.mp4` and `heaac/heaacv2-stereo.mp4`. On GitHub's
-4-core runners (the benchmark's third 2026-10-29 run, after #200 and #201; FFmpeg 6.1.1), each sample comes out two ways: mcdec's whole
+4-core runners (the benchmark run of 2026-10-30, at 0.2.5; FFmpeg 6.1.1), each sample comes out two ways: mcdec's whole
 process over FFmpeg's, .NET's startup and JIT included, and its last loop alone (steady state, what a long file costs a
 frame) over FFmpeg's, whose startup is a few percent. The short samples' whole-process ratios are mostly startup: on
-the 50-frame H.264 clips it is about 45% of mcdec's time. Whole process, then steady state, x64 and ARM64: MJPEG 0.78
-to 0.97 and 1.05 to 1.37, then 0.74 to 0.87 and 1.01 to 1.25; AAC 0.7 to 1.0 (stereo) and 1.4 to 1.9 (5.1), then 0.4
-to 0.6 and 0.9 to 1.4; HE-AAC 1.6 to 2.1, then 1.1 to 1.8; H.264 1.5 to 3.3, then 1.4 to 2.8 (the 720p sample 2.2
-and 2.1, libx264's default streams 2.1 to 2.2, high motion 1.4 to 1.8, 10 bits with B frames 2.8 on x64 and 2.1 on
-ARM64, MBAFF and field pictures 2.0 to 2.4). Four threads take the 720p sample to 0.50 of one thread's time on x64
-and 0.38 on ARM64.
+the 50-frame H.264 clips it is about 45% of mcdec's time. Whole process, then steady state, x64 and ARM64: MJPEG 0.75
+to 0.94 and 1.06 to 1.39, then 0.72 to 0.83 and 1.02 to 1.26; AAC 0.8 to 1.0 (stereo) and 1.6 to 1.9 (5.1), then 0.4
+to 0.6 and 1.0 to 1.4; HE-AAC 1.7 to 2.1, then 1.3 to 1.7; H.264 1.5 to 3.3, then 1.4 to 2.6 (the 720p sample 2.0
+and 2.1, libx264's default streams 1.9 to 2.1, high motion 1.4 to 1.7, 10 bits with B frames 2.6 on x64 and 2.1 on
+ARM64, MBAFF and field pictures 2.1 to 2.4). Four threads take the 720p sample to 0.56 of one thread's time on x64
+and 0.38 on ARM64. The H.264 work of 0.2.5 (#216 to #223), timed against 0.2.4 in one `compare.yml` run: 2.7% off the
+720p sample's steady frame on x64 and 0.8% on ARM64 (whose SSE paths it does not reach), the other samples within
+about 1.5% either way.
 
 On ARM64 (128-bit vectors) the gaps that were this code's own are closed: the MJPEG IDCT's 128-bit butterflies are
 inlined (#200, about 3%), and SBR's and parametric stereo's last 256-bit-only loops have 128-bit paths (#201, about
@@ -338,7 +340,7 @@ confirmed; fusing two FFT stages a pass gained only 1 to 2% and was dropped). H.
 x64's. The QMF banks' real-input transforms (2026-10-28) took 14 to 16% off 5.1 HE-AAC and 8 to 10% off
 HE-AAC v2 on both runners (`compare.yml` against the code before them). The runners' CPUs differ from run to run (an
 EPYC 7763 on 2026-10-25 and in the first run of 2026-10-29, a 9V74 on 2026-10-28, a 9V45 in the second run of
-2026-10-29, a Xeon 6973P-C in its third run, which moved the x64 ratios by up to a third with the code unchanged): a ratio is a snapshot, and only builds timed against each other in one run
+2026-10-29 and on 2026-10-30, a Xeon 6973P-C in the third run of 2026-10-29, which moved the x64 ratios by up to a third with the code unchanged): a ratio is a snapshot, and only builds timed against each other in one run
 (`compare.yml`) show a change. A VM's speed
 moves from hour to hour, and FFmpeg's and ours do not move together (unchanged code's ratios once moved by -14 to +16%
 between two snapshots of a day): only comparisons made on one machine at one time count.

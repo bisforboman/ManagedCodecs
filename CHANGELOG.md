@@ -27,8 +27,10 @@ Faster H.264 decoding, the same output. The public API is that of 0.2.0, unchang
 
 ### Changed
 
-- H.264 decodes about 4.5% faster on one thread on the 720p benchmark stream (`h264-bench-720p.mp4`), bit for bit as
-  before: each partition's reference picture is a byte handle rather than an object reference, Cb and Cr share one
+- H.264 decodes faster on one thread, bit for bit as before: 2.7% on the 720p benchmark stream
+  (`h264-bench-720p.mp4`) on GitHub's x64 runner and 0.8% on its ARM64 runner, the other H.264 samples within about
+  1.5% either way (`compare.yml` against 0.2.4; the 4.5% first given here added up per-change profile estimates that
+  overstated the whole). Each partition's reference picture is a byte handle rather than an object reference, Cb and Cr share one
   setup with a multiply-add chroma filter (SSSE3), 8-bit 4x4 and 8x8 inverse transforms run in 16-bit lanes (SSE2;
   32-bit for coefficients too large for them), CAVLC residual blocks read through a bit cursor in locals, `ReadUe`
   is inlined and a P_Skip macroblock no longer reads its neighbours twice (docs/conformance.md, Performance notes).

@@ -521,7 +521,11 @@ parse functions with the bit reader took 5.5 against 6.15% (five pairs, lower in
 8-point transform multiplies the largest magnitude by at most 7.375, both by 54.4; 90 to 96% of the 8x8 blocks of
 `h264-high-b`, `-default` and `-p` are under it, the rest take the 32-bit transform): the transforms took 2.7 against
 3.1% of `h264-high-default.mp4` (four pairs, lower in each), about 0.4% of the frame. The first version, its eight
-vectors in a stack span, gained half that: the vectors belong in locals the JIT keeps in registers.
+vectors in a stack span, gained half that: the vectors belong in locals the JIT keeps in registers. Timed together
+against 0.2.4 on GitHub's runners (`compare.yml`, medians of 7 interleaved runs), these eight changes took 2.7% off
+the 720p sample's steady frame on x64 and 0.8% on ARM64, the other samples within about 1.5% either way: the
+per-change perf shares above, added up, promised about 4.5%. A share that falls in one function is not all saved
+time (part moves to the memory system or the next function), and a cloud VM's profile is not a runner's.
 
 ## AAC
 

@@ -171,6 +171,8 @@ internal sealed class BitReader
     public bool ReadFlag() => ReadBits(1) != 0;
 
     /// <summary>ue(v): unsigned Exp-Golomb (9.1).</summary>
+    /// <remarks>Inlined into the macroblock layer's every header field; codes of 16 or more leading zeros go out of line.</remarks>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public uint ReadUe()
     {
         uint peek = Peek(32);
@@ -183,6 +185,13 @@ internal sealed class BitReader
             return (peek >> (32 - length)) - 1;
         }
 
+        return ReadLongUe(leadingZeros);
+    }
+
+    /// <summary><see cref="ReadUe"/> for a code of 16 or more leading zeros.</summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private uint ReadLongUe(int leadingZeros)
+    {
         if (leadingZeros > 31)
         {
             throw new InvalidDataException("Exp-Golomb code too long.");
@@ -193,6 +202,7 @@ internal sealed class BitReader
     }
 
     /// <summary>se(v): signed Exp-Golomb (9.1.1): 1, -1, 2, -2, ...</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public int ReadSe()
     {
         uint k = ReadUe();

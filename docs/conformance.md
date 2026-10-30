@@ -504,7 +504,11 @@ data, length and position are locals (`BitReader.Cursor`), the position written 
 macroblock's motion vector prediction read neighbours A and B twice, once for the skip test of 8.4.1.1 and again in
 the prediction; it now hands them over: motion vector prediction and `DecodeSkip` took 4.1 against 4.8% (five pairs,
 lower in each), about 0.6% of the frame. A per-macroblock cache of the neighbours' motion, as FFmpeg's
-`fill_decode_caches`, would cost more to fill than it saves where 84% of macroblocks are one partition.
+`fill_decode_caches`, would cost more to fill than it saves where 84% of macroblocks are one partition. The
+macroblock layer's header fields (mb_skip_run, mb_type, coded_block_pattern, mb_qp_delta, ref_idx, mvd) are read
+one or two a method, too few for a cursor to pay; `ReadUe` and `ReadSe` were calls, their throw and long-code branch
+keeping the JIT from inlining them, and are now inlined with codes of 16 or more leading zeros out of line: the
+parse functions with the bit reader took 5.5 against 6.15% (five pairs, lower in each), about 0.6% of the frame.
 
 ## AAC
 

@@ -19,6 +19,9 @@ run time.
   `testsrc-444.avi` and 2.4% off `noise-q1.avi` on GitHub's ARM64 runner (`compare.yml` against main; x64 runs the
   same code as before). The transposes' interleaves are ARM64's zip1 and zip2 there, where they were two table
   lookups and a select; the H.264 deblocking transposes take them too, within 1% on its samples.
+- HE-AAC decodes faster, bit for bit as before: 5.9% off `heaac/heaac-5.1.mp4`'s steady frame on GitHub's x64
+  runner and 4.9% on its ARM64 runner, 3.3% and 3.0% off `heaac/heaacv2-stereo.mp4` (`compare.yml` against main).
+  The QMF banks sum their windows' terms in registers, four vectors at a time, in the same order as before.
 
 ## 0.4.0 – 2026-10-30
 

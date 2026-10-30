@@ -65,7 +65,6 @@ internal sealed partial class PictureDecoder<TPixel>
     // Every one is in the reference lists, so the decoded picture buffer bounds them (16 frames, 3 views each).
     private readonly Picture?[] _handlePictures = new Picture?[256];
     private int _handleCount = 1;
-    private byte _lastHandle; // the one HandleOf returned last (0, never a picture's, after a reset)
 
     // The Id of the picture whose decoding gave the handles out (Picture objects are reused, Ids are not): a second
     // field decoded here after its first keeps them.
@@ -135,24 +134,20 @@ internal sealed partial class PictureDecoder<TPixel>
     {
         _handlePictures.AsSpan(1, _handleCount - 1).Clear();
         _handleCount = 1;
-        _lastHandle = 0;
         _handlesOf = picture.Id;
     }
 
-    /// <summary>The handle of <paramref name="picture"/> in <see cref="_refHandle"/>, given one if it has none.</summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private byte HandleOf(Picture picture) => _handlePictures[_lastHandle] == picture ? _lastHandle : FindHandle(picture);
-
-    /// <summary><see cref="HandleOf"/> for a picture other than the last one's.</summary>
-    [MethodImpl(MethodImplOptions.NoInlining)]
-    private byte FindHandle(Picture picture)
+    /// <summary>
+    /// The handle of <paramref name="picture"/> in <see cref="_refHandle"/>, given one if it has none; partitions
+    /// read their slice's (<see cref="SliceState.Handles"/>), so this runs about once a reference picture a slice.
+    /// </summary>
+    private byte HandleOf(Picture picture)
     {
         for (int i = 1; i < _handleCount; i++)
         {
             if (_handlePictures[i] == picture)
             {
-                _lastHandle = (byte)i;
-                return _lastHandle;
+                return (byte)i;
             }
         }
 
@@ -162,8 +157,7 @@ internal sealed partial class PictureDecoder<TPixel>
         }
 
         _handlePictures[_handleCount] = picture;
-        _lastHandle = (byte)_handleCount++;
-        return _lastHandle;
+        return (byte)_handleCount++;
     }
 
     /// <summary>The picture a handle of <see cref="_refHandle"/> stands for; null for 0.</summary>
@@ -518,10 +512,12 @@ internal sealed partial class PictureDecoder<TPixel>
         }
 
         long referenceId = reference.Id;
+        int handleSlot = frameIdx;
         if (field)
         {
             reference = reference.Field((mbAddr & 1) ^ (refIdx & 1));
             Statistics.OppositeParity += refIdx & 1;
+            handleSlot = 32 + (frameIdx * 2) + (refIdx & 1);
         }
 
         if (_fieldParity >= 0)
@@ -554,7 +550,12 @@ internal sealed partial class PictureDecoder<TPixel>
         var refIds = _refId[list].AsSpan(mbAddr * 4, 4);
         var refParities = _refParity[list].AsSpan(mbAddr * 4, 4);
         var refHandles = _refHandle[list].AsSpan(mbAddr * 4, 4);
-        byte handle = HandleOf(reference);
+        ref byte handle = ref slice.Handles[list][handleSlot];
+        if (handle == 0)
+        {
+            handle = HandleOf(reference);
+        }
+
         for (int py = y / 8; py <= (y + h - 1) / 8; py++)
         {
             for (int px = x / 8; px <= (x + w - 1) / 8; px++)

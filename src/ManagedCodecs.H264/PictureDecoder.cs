@@ -401,6 +401,12 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
 
         public Picture[] RefList(int list) => list == 0 ? RefList0 : RefList1;
 
+        /// <summary>
+        /// Per list, the handles (<see cref="HandleOf"/>) of the list's pictures, 0 until first used: a frame's at its
+        /// index, and from 32 an MBAFF field macroblock's fields, two a frame (same parity, then opposite).
+        /// </summary>
+        public byte[][] Handles { get; } = [new byte[32 + 64], new byte[32 + 64]];
+
         /// <summary>The scaling matrix of the slice's SPS and PPS.</summary>
         public ScalingMatrix Scaling { get; init; } = ScalingMatrix.Flat;
 

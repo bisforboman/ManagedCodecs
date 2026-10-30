@@ -117,7 +117,7 @@ internal sealed partial class PictureDecoder<TPixel>
             _mvY[list].AsSpan(mbAddr * 16, 16).Clear();
             _refIdx[list].AsSpan(mbAddr * 4, 4).Fill(-1);
             _refId[list].AsSpan(mbAddr * 4, 4).Clear();
-            _refPic[list].AsSpan(mbAddr * 4, 4).Clear();
+            _refHandle[list].AsSpan(mbAddr * 4, 4).Clear();
             _absMvd[list][0].AsSpan(mbAddr * 16, 16).Clear();
             _absMvd[list][1].AsSpan(mbAddr * 16, 16).Clear();
         }
@@ -137,7 +137,7 @@ internal sealed partial class PictureDecoder<TPixel>
         _refIdx[guessList].AsSpan(mbAddr * 4, 4).Fill(guess.RefIdx);
         _refId[guessList].AsSpan(mbAddr * 4, 4).Fill(guess.RefId);
         _refParity[guessList].AsSpan(mbAddr * 4, 4).Fill(guess.RefParity);
-        _refPic[guessList].AsSpan(mbAddr * 4, 4).Fill(guess.Reference);
+        _refHandle[guessList].AsSpan(mbAddr * 4, 4).Fill(HandleOf(guess.Reference));
         _mvX[guessList].AsSpan(mbAddr * 16, 16).Fill(guess.MvX);
         _mvY[guessList].AsSpan(mbAddr * 16, 16).Fill(guess.MvY);
         for (int c = 0; c < (_monochrome ? 1 : 3); c++)
@@ -221,7 +221,7 @@ internal sealed partial class PictureDecoder<TPixel>
                 int block = first + (k * stepBlocks);
                 int part = (neighbour * 4) + ((block >> 3) * 2) + ((block & 3) >> 1);
                 int list = _refIdx[0][part] >= 0 ? 0 : _refIdx[1][part] >= 0 ? 1 : -1;
-                var reference = list >= 0 ? _refPic[list][part] : null;
+                var reference = list >= 0 ? PictureOf(_refHandle[list][part]) : null;
                 if (reference is null)
                 {
                     continue;
@@ -317,7 +317,7 @@ internal sealed partial class PictureDecoder<TPixel>
             int block = ((row >> 2) * 4) + (column >> 2);
             int part = (neighbour * 4) + ((row >> 3) * 2) + (column >> 3);
             int list = _refIdx[0][part] >= 0 ? 0 : _refIdx[1][part] >= 0 ? 1 : -1;
-            var reference = list >= 0 ? _refPic[list][part] : null;
+            var reference = list >= 0 ? PictureOf(_refHandle[list][part]) : null;
             if (reference is null)
             {
                 return;

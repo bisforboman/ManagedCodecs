@@ -357,14 +357,14 @@ public class DeblockingTests
     public void TwoListStrengths_MatchTheDefinition()
     {
         var random = new Random(37);
-        object[] pictures = [new(), new()];
+        byte[] pictures = [1, 2];
         var mvX0 = new short[16];
         var mvY0 = new short[16];
         var mvX1 = new short[16];
         var mvY1 = new short[16];
         var coefficients = new byte[16];
-        var refs0 = new object?[4];
-        var refs1 = new object?[4];
+        var refs0 = new byte[4];
+        var refs1 = new byte[4];
         var vertical = new byte[16];
         var horizontal = new byte[16];
         var expectedVertical = new byte[16];
@@ -390,10 +390,10 @@ public class DeblockingTests
             {
                 do
                 {
-                    refs0[k] = random.Next(3) == 0 ? null : pictures[random.Next(2)];
-                    refs1[k] = random.Next(3) == 0 ? null : pictures[random.Next(2)];
+                    refs0[k] = random.Next(3) == 0 ? (byte)0 : pictures[random.Next(2)];
+                    refs1[k] = random.Next(3) == 0 ? (byte)0 : pictures[random.Next(2)];
                 }
-                while (refs0[k] is null && refs1[k] is null && random.Next(8) != 0);
+                while (refs0[k] == 0 && refs1[k] == 0 && random.Next(8) != 0);
             }
 
             limitY = random.Next(2) == 0 ? 4 : 2;
@@ -429,10 +429,10 @@ public class DeblockingTests
             bool Far(short[] xa, short[] ya, int a, short[] xb, short[] yb, int b) => Math.Abs(xa[a] - xb[b]) >= 4 || Math.Abs(ya[a] - yb[b]) >= limitY;
 
             // Different reference pictures, or a different number of motion vectors.
-            int countP = (p0 is null ? 0 : 1) + (p1 is null ? 0 : 1);
-            int countQ = (q0 is null ? 0 : 1) + (q1 is null ? 0 : 1);
-            var picturesP = new[] { p0, p1 }.Where(r => r is not null).OrderBy(r => Array.IndexOf(pictures, r)).ToArray();
-            var picturesQ = new[] { q0, q1 }.Where(r => r is not null).OrderBy(r => Array.IndexOf(pictures, r)).ToArray();
+            int countP = (p0 == 0 ? 0 : 1) + (p1 == 0 ? 0 : 1);
+            int countQ = (q0 == 0 ? 0 : 1) + (q1 == 0 ? 0 : 1);
+            var picturesP = new[] { p0, p1 }.Where(r => r != 0).OrderBy(r => Array.IndexOf(pictures, r)).ToArray();
+            var picturesQ = new[] { q0, q1 }.Where(r => r != 0).OrderBy(r => Array.IndexOf(pictures, r)).ToArray();
             if (countP != countQ || !picturesP.SequenceEqual(picturesQ))
             {
                 return 1;
@@ -441,28 +441,28 @@ public class DeblockingTests
             // The vectors that refer to the same picture, in some pairing.
             var vectorsP = new List<(short[] X, short[] Y)>();
             var vectorsQ = new List<(short[] X, short[] Y)>();
-            if (p0 is not null)
+            if (p0 != 0)
             {
                 vectorsP.Add((mvX0, mvY0));
             }
 
-            if (p1 is not null)
+            if (p1 != 0)
             {
                 vectorsP.Add((mvX1, mvY1));
             }
 
-            if (q0 is not null)
+            if (q0 != 0)
             {
                 vectorsQ.Add((mvX0, mvY0));
             }
 
-            if (q1 is not null)
+            if (q1 != 0)
             {
                 vectorsQ.Add((mvX1, mvY1));
             }
 
-            var listsP = new[] { p0, p1 }.Where(r => r is not null).ToArray();
-            var listsQ = new[] { q0, q1 }.Where(r => r is not null).ToArray();
+            var listsP = new[] { p0, p1 }.Where(r => r != 0).ToArray();
+            var listsQ = new[] { q0, q1 }.Where(r => r != 0).ToArray();
             if (countP == 0)
             {
                 return (byte)(Far(mvX0, mvY0, p, mvX0, mvY0, q) ? 1 : 0);

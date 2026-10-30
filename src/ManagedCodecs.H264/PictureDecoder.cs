@@ -203,6 +203,7 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
         if (secondField)
         {
             (_mvX, _mvY, _refIdx, _refId, _refParity) = (picture.MvX, picture.MvY, picture.RefIdx, picture.RefId, picture.RefParity);
+            ContinueHandles(picture);
             ClearSlots(fieldParity);
             return;
         }
@@ -246,7 +247,7 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
                 _mvY[list].AsSpan(mb * 16, 16).Clear();
                 _refIdx[list].AsSpan(mb * 4, 4).Fill(-1);
                 _refId[list].AsSpan(mb * 4, 4).Clear();
-                _refPic[list].AsSpan(mb * 4, 4).Clear();
+                _refHandle[list].AsSpan(mb * 4, 4).Clear();
                 _absMvd[list][0].AsSpan(mb * 16, 16).Clear();
                 _absMvd[list][1].AsSpan(mb * 16, 16).Clear();
             }

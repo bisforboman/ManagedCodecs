@@ -68,7 +68,8 @@ public class H264ConcealmentTests
     /// for these streams (camera-like motion) comes far closer to the clean decode than zero motion from one reference.
     /// The floors are the mean PSNR of the flagged frames with the guess, rounded down (zero motion gave 29.7, 21.9,
     /// 30.1 and 28.3 dB): docs/conformance.md has the comparison with FFmpeg's. In MBAFF frames the macroblocks around
-    /// a missing frame pair are field pairs, so these rows hold only if their motion is converted to frame units.
+    /// a missing frame pair are field pairs, so these rows hold only if their motion is converted to frame units (their
+    /// cuts conceal a few field macroblocks too).
     /// </summary>
     [Theory]
     [InlineData("h264-main-slices.mp4", 33)]

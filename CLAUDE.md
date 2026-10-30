@@ -201,6 +201,11 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
   level_prefix 16), segfaults with `EnableIPCM=0`, and writes 4:0:0 with 8-bit chroma, which FFmpeg refuses ("Different
   chroma and luma bit depth"; it cannot even mux the stream): `tools/h264-chroma-depth.py` sets the unused chroma depth
   to the luma's, and FFmpeg then decodes 4:0:0 at 12 and 14 bits. 16-bit SIMD lanes hold sums of eight 12-bit samples, not 14-bit ones.
+- Generated samples are not the same bytes everywhere: libx264 encodes `h264-mbaff-p-motion` differently on CI's
+  ARM64 runner than on x64, and `h264-main-slices` even between two x64 machines (sha256 compared in a scratch CI
+  run). Bit-exact checks don't notice (each runner makes its own references), but a test with a floor on the content
+  (a concealment PSNR) does: give it a committed sample (`samples/jm/`, `samples/openh264/`), which decodes and conceals
+  to the same MD5 on both architectures.
 - ARM64 (CI's `build-arm64`): FFmpeg's default JPEG IDCT there is NEON, which rounds unlike its C one; references
   take `-idct simple` (the same as the default on x64). An `Sse2.`/`Avx2.` call reached behind only
   `Vector128.IsHardwareAccelerated` throws PlatformNotSupportedException on ARM64: dispatch inside the function.

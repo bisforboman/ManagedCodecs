@@ -527,9 +527,9 @@ public class DeblockingTests
     }
 
     /// <summary>
-    /// The Vector128 transposes of vertical edges (what ARM64 runs; x64 takes SSE2's) against their definition on
-    /// random planes: tap k, lane i is byte k of row i (rows 0-7 from the top start, 8-15 from the bottom one), and
-    /// writing the taps back changes those 8 bytes of 16 rows and nothing else.
+    /// The Vector128 transposes of vertical edges (what WebAssembly runs; x64 and ARM64 take their own interleaves)
+    /// against their definition on random planes: tap k, lane i is byte k of row i (rows 0-7 from the top start, 8-15
+    /// from the bottom one), and writing the taps back changes those 8 bytes of 16 rows and nothing else.
     /// </summary>
     [Fact]
     public void VectorTransposes_MatchTheirDefinition()

@@ -11,6 +11,15 @@ share internals, so each depends on the others at exactly its own version (`[X]`
 then reports a mix of versions (NU1107, or NU1608 for a newer one referenced directly) rather than letting it fail at
 run time.
 
+## Unreleased
+
+### Changed
+
+- MJPEG decodes faster on ARM64, bit for bit as before: 2.9% off `testsrc-420.avi`'s steady frame, 3.4% off
+  `testsrc-444.avi` and 2.4% off `noise-q1.avi` on GitHub's ARM64 runner (`compare.yml` against main; x64 runs the
+  same code as before). The transposes' interleaves are ARM64's zip1 and zip2 there, where they were two table
+  lookups and a select; the H.264 deblocking transposes take them too, within 1% on its samples.
+
 ## 0.4.0 – 2026-10-30
 
 Each decoded frame's interlacing as FFmpeg reports it, and an MP4 demuxer that reads one track at a time and lists

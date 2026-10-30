@@ -1442,20 +1442,13 @@ internal sealed partial class PictureDecoder<TPixel>
 
         ref byte upper = ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(top), start);
         ref byte lower = ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(bottom), bottomStart);
-        var taps = Sse2.IsSupported ? Columns<Sse2Zip>(ref upper, ref lower, stride) : Columns<PortableZip>(ref upper, ref lower, stride);
+        var taps = Columns<NativeZip>(ref upper, ref lower, stride);
         if (!FilterBytes(ref taps, bs, low, high, chroma))
         {
             return;
         }
 
-        if (Sse2.IsSupported)
-        {
-            WriteColumns<Sse2Zip>(in taps, ref upper, ref lower, stride);
-        }
-        else
-        {
-            WriteColumns<PortableZip>(in taps, ref upper, ref lower, stride);
-        }
+        WriteColumns<NativeZip>(in taps, ref upper, ref lower, stride);
     }
 
     /// <summary>The 4:2:0 chroma edge of 8 rows or columns of Cb (lanes 0-7) and Cr (lanes 8-15), filtered in place.</summary>
@@ -1658,8 +1651,8 @@ internal sealed partial class PictureDecoder<TPixel>
     }
 
     /// <summary>
-    /// The interleaves of the transposes, as SSE2's unpacks: SSE2 itself (<see cref="Sse2Zip"/>) or
-    /// <see cref="VectorZip"/>'s portable operations (<see cref="PortableZip"/>, what ARM64 runs).
+    /// The interleaves of the transposes, as SSE2's unpacks: the machine's own (<see cref="NativeZip"/>) or
+    /// <see cref="VectorZip"/>'s portable operations (<see cref="PortableZip"/>, what WebAssembly runs).
     /// </summary>
     internal interface IZip
     {
@@ -1680,31 +1673,32 @@ internal sealed partial class PictureDecoder<TPixel>
         static abstract Vector128<ulong> High(Vector128<ulong> a, Vector128<ulong> b);
     }
 
-    internal readonly struct Sse2Zip : IZip
+    /// <summary><see cref="VectorZip"/>'s dispatching interleaves: SSE2's unpacks on x64, zip1 and zip2 on ARM64.</summary>
+    internal readonly struct NativeZip : IZip
     {
         /// <inheritdoc/>
-        public static Vector128<byte> Low(Vector128<byte> a, Vector128<byte> b) => Sse2.UnpackLow(a, b);
+        public static Vector128<byte> Low(Vector128<byte> a, Vector128<byte> b) => VectorZip.Low(a, b);
 
         /// <inheritdoc/>
-        public static Vector128<byte> High(Vector128<byte> a, Vector128<byte> b) => Sse2.UnpackHigh(a, b);
+        public static Vector128<byte> High(Vector128<byte> a, Vector128<byte> b) => VectorZip.High(a, b);
 
         /// <inheritdoc/>
-        public static Vector128<ushort> Low(Vector128<ushort> a, Vector128<ushort> b) => Sse2.UnpackLow(a, b);
+        public static Vector128<ushort> Low(Vector128<ushort> a, Vector128<ushort> b) => VectorZip.Low(a, b);
 
         /// <inheritdoc/>
-        public static Vector128<ushort> High(Vector128<ushort> a, Vector128<ushort> b) => Sse2.UnpackHigh(a, b);
+        public static Vector128<ushort> High(Vector128<ushort> a, Vector128<ushort> b) => VectorZip.High(a, b);
 
         /// <inheritdoc/>
-        public static Vector128<uint> Low(Vector128<uint> a, Vector128<uint> b) => Sse2.UnpackLow(a, b);
+        public static Vector128<uint> Low(Vector128<uint> a, Vector128<uint> b) => VectorZip.Low(a, b);
 
         /// <inheritdoc/>
-        public static Vector128<uint> High(Vector128<uint> a, Vector128<uint> b) => Sse2.UnpackHigh(a, b);
+        public static Vector128<uint> High(Vector128<uint> a, Vector128<uint> b) => VectorZip.High(a, b);
 
         /// <inheritdoc/>
-        public static Vector128<ulong> Low(Vector128<ulong> a, Vector128<ulong> b) => Sse2.UnpackLow(a, b);
+        public static Vector128<ulong> Low(Vector128<ulong> a, Vector128<ulong> b) => Sse2.IsSupported ? Sse2.UnpackLow(a, b) : VectorZip.Low(a, b);
 
         /// <inheritdoc/>
-        public static Vector128<ulong> High(Vector128<ulong> a, Vector128<ulong> b) => Sse2.UnpackHigh(a, b);
+        public static Vector128<ulong> High(Vector128<ulong> a, Vector128<ulong> b) => Sse2.IsSupported ? Sse2.UnpackHigh(a, b) : VectorZip.High(a, b);
     }
 
     internal readonly struct PortableZip : IZip
@@ -1736,7 +1730,7 @@ internal sealed partial class PictureDecoder<TPixel>
 
     /// <summary>
     /// <see cref="Columns"/> with <see cref="PortableZip"/>, into <paramref name="taps"/> (tap k at
-    /// k * 16): the transpose ARM64 runs, tested against its definition on x64 too.
+    /// k * 16): the transpose WebAssembly runs, tested against its definition on x64 and ARM64 too.
     /// </summary>
     internal static void TransposeInVector128(byte[] top, int topStart, byte[] bottom, int bottomStart, int stride, Span<byte> taps)
     {

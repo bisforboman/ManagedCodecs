@@ -705,8 +705,7 @@ internal sealed partial class PictureDecoder<TPixel>
 
         if (weights.IsDefault)
         {
-            InterPrediction.PredictChroma(reference, 1, chromaX, chromaY, w >> 1, h >> 1, mvX, mvY, picture.Cb.AsSpan(chromaOut), chromaStride);
-            InterPrediction.PredictChroma(reference, 2, chromaX, chromaY, w >> 1, h >> 1, mvX, mvY, picture.Cr.AsSpan(chromaOut), chromaStride);
+            InterPrediction.PredictChromaPair(reference, chromaX, chromaY, w >> 1, h >> 1, mvX, mvY, picture.Cb.AsSpan(chromaOut), picture.Cr.AsSpan(chromaOut), chromaStride);
         }
     }
 
@@ -750,22 +749,23 @@ internal sealed partial class PictureDecoder<TPixel>
         int chromaY = lumaY >> 1;
         int chromaStride = picture.ChromaStride;
         int chromaOut = (chromaY * chromaStride) + chromaX;
-        for (int c = 1; c <= 2; c++)
-        {
-            InterPrediction.PredictChroma(ref0, c, chromaX, chromaY, w >> 1, h >> 1, mvX0, mvY0, prediction0, 16);
-            InterPrediction.PredictChroma(ref1, c, chromaX, chromaY, w >> 1, h >> 1, mvX1, mvY1, prediction1, 16);
-            Combine((c == 1 ? picture.Cb : picture.Cr).AsSpan(chromaOut), chromaStride, w >> 1, h >> 1, c);
-        }
+
+        // Each list's Cb and Cr side by side in its scratch block (columns 0 and 8: chroma blocks are at most 8 wide here).
+        InterPrediction.PredictChromaPair(ref0, chromaX, chromaY, w >> 1, h >> 1, mvX0, mvY0, prediction0, prediction0.AsSpan(8), 16);
+        InterPrediction.PredictChromaPair(ref1, chromaX, chromaY, w >> 1, h >> 1, mvX1, mvY1, prediction1, prediction1.AsSpan(8), 16);
+        Combine(picture.Cb.AsSpan(chromaOut), chromaStride, w >> 1, h >> 1, 1);
+        Combine(picture.Cr.AsSpan(chromaOut), chromaStride, w >> 1, h >> 1, 2);
 
         void Combine(Span<byte> output, int outputStride, int width, int height, int component)
         {
+            int column = component == 2 ? 8 : 0;
             if (weighting.IsDefault)
             {
-                InterPrediction.Average(prediction0, prediction1, 16, width, height, output, outputStride);
+                InterPrediction.Average(prediction0.AsSpan(column), prediction1.AsSpan(column), 16, width, height, output, outputStride);
             }
             else
             {
-                WeightBoth(_predictionL0, _predictionL1, 16, width, height, MemoryMarshal.Cast<byte, TPixel>(output), outputStride, weighting, component);
+                WeightBoth(_predictionL0.AsSpan(column), _predictionL1.AsSpan(column), 16, width, height, MemoryMarshal.Cast<byte, TPixel>(output), outputStride, weighting, component);
             }
         }
     }

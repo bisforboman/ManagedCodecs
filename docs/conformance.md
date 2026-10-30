@@ -483,7 +483,14 @@ compensation (Cb and Cr each repeat the block's setup, and the filter takes two 
 reference picture was a `Picture` reference stored in an array, a write barrier each (0.7 to 0.8% by perf): it is now
 a byte, an index into a table of the pictures the current picture refers to, each slice keeping its reference lists'
 indices, and a macroblock's four compare as one `uint` in the bS derivation; the barrier's share fell to about 0.13%
-and nothing rose in its place (two pairs of back-to-back profiles), about 0.7% of the frame.
+and nothing rose in its place (two pairs of back-to-back profiles), about 0.7% of the frame. Cb and Cr of a block
+now share its setup (`PredictChromaPair`: position, fractions, bounds, the choice of window; a bi-predicted block's
+two components side by side in each list's scratch block), and with SSSE3 each row is filtered across by one load,
+a shuffle pairing every sample with its right-hand neighbour and one multiply-add (`pmaddubsw`), as FFmpeg's does;
+without SSSE3 (ARM64) the two widened multiplies stay. Chroma motion compensation and the block copies took 12.5
+to 13.2% of `h264-bench-720p.mp4` afterwards against 14.5 to 15.0% (two pairs of back-to-back profiles, the filter
+itself 2.9% against 3.6 to 4.1%), about 1.5 to 2% of the frame; `h264-high-b.mp4`, where chroma is under 3%, did not
+move.
 
 ## AAC
 

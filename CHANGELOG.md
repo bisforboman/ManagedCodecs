@@ -11,6 +11,16 @@ share internals, so each depends on the others at exactly its own version (`[X]`
 then reports a mix of versions (NU1107, or NU1608 for a newer one referenced directly) rather than letting it fail at
 run time.
 
+## Unreleased
+
+A new public API (`VideoFrame.PictureType`): the next release is a minor version, 0.3.0.
+
+### Added
+
+- `VideoFrame.PictureType` and the `PictureType` enum (FFmpeg's `AVPictureType`, the same values): how each decoded
+  frame was coded, as `ffprobe -show_frames` prints its `pict_type`. H.264 gives the type of the picture's first slice
+  (of its first field, for a frame of two field pictures), MJPEG gives I, and a frame no decoder made None (#221).
+
 ## 0.2.5 – 2026-10-30
 
 Faster H.264 decoding, the same output. The public API is that of 0.2.0, unchanged.

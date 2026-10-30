@@ -545,6 +545,13 @@ for f in samples/*gray*.mp4; do ff -i "$f" -vf extractplanes=y -f framemd5 "${f%
 # h264-negative-ctts-last is for the demuxer alone: FFmpeg drops the frame whose pts goes back, which the decoder,
 # outputting by picture order, keeps.
 rm samples/h264-negative-ctts-last.framemd5
+# name.picttypes: each decoded video frame's pict_type as ffprobe lists them, in output order (I, P or B; i and p for SI
+# and SP; a frame of two field pictures takes its first field's), for VideoFrame.PictureType. The first field alone:
+# side data (x264's SEI) follows it on the first frame.
+for f in samples/*.avi samples/*.mp4; do
+  t=$(ffprobe -v error -select_streams v:0 -show_entries frame=pict_type -of csv=p=0 "$f" | cut -d, -f1)
+  if [ -n "$t" ]; then echo "$t" > "${f%.*}.picttypes"; fi
+done
 for f in samples/*.mp4; do
   ff -copyts -i "$f" -c copy -f framemd5 "${f%.mp4}.packets.framemd5"
   ffprobe -v error -show_packets -show_data_hash MD5 -show_entries packet=stream_index,pts,dts,duration,size,flags,data_hash \

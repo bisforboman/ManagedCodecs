@@ -5,7 +5,7 @@ namespace ManagedCodecs.Tests.H264;
 
 /// <summary>
 /// Decodes every Constrained Baseline, Main and High profile H.264 sample (samples/*.mp4 with a .framemd5)
-/// and compares each frame's MD5 and timestamp, in output order, with FFmpeg's. See samples/README.md.
+/// and compares each frame's MD5, timestamp and picture type, in output order, with FFmpeg's. See samples/README.md.
 /// Timestamps are compared from the first frame's, as FFmpeg's framemd5 moves them to start at 0.
 /// </summary>
 public class H264ConformanceTests
@@ -72,6 +72,8 @@ public class H264ConformanceTests
         var lines = File.ReadAllLines(TestSamples.ReferenceOf(sampleName, ".framemd5"));
         var expected = FrameMd5.Parse(lines).Where(e => e.StreamIndex == 0).ToList(); // FFmpeg lists video first
         var timeBase = FrameMd5.ParseTimeBase(lines);
+        var types = PictureTypes.Read(sampleName);
+        Assert.True(types is null || types.Count == expected.Count, $"ffprobe lists {types?.Count} frames, framemd5 {expected.Count}.");
 
         using var demuxer = Mp4Demuxer.Open(TestSamples.PathOf(sampleName));
         var video = demuxer.Video!;
@@ -91,6 +93,7 @@ public class H264ConformanceTests
             Assert.True(
                 FrameMd5.SameTime(expected[index].Pts - expected[0].Pts, timeBase, frame.Pts - firstPts, video.TimeBase),
                 $"Frame {index}: pts {frame.Pts} ({video.TimeBase}) is not FFmpeg's {expected[index].Pts} ({timeBase}).");
+            Assert.True(types is null || types[index] == frame.PictureType, $"Frame {index}: picture type {frame.PictureType} is not FFmpeg's {types?[index]}.");
             index++;
             if (dispose)
             {

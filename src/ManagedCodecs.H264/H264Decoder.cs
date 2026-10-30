@@ -476,6 +476,7 @@ public sealed class H264Decoder : IVideoDecoder
         var frame = job.Frame ?? (borrow ? Borrow(picture, state.Sps, state.Size) : Crop(picture, state.Sps, state.Size));
         frame.Pts = job.Pts;
         frame.IsDamaged = picture.Damaged;
+        frame.PictureType = job.PictureType;
         frames.AddRange(_output.Add(frame, picture.Poc, job.Restart, ReorderDepth(state.Sps), borrow ? picture : null));
     }
 
@@ -695,8 +696,8 @@ public sealed class H264Decoder : IVideoDecoder
         // A second field's frame is the first one's: its timestamp, and whether it starts a new sequence.
         var state = new PictureState(header, sps, decoder, picture, poc, OutputSize(sps), secondField);
         var job = secondField
-            ? new PictureJob(state, _firstField!.Pts, _firstField.Restart, _firstField.Discard) { FirstField = _firstField }
-            : new PictureJob(state, pts, header.IsIdr || header.MemoryManagement.Any(op => op.Op == 5), _discard);
+            ? new PictureJob(state, _firstField!.Pts, _firstField.Restart, _firstField.Discard) { FirstField = _firstField, PictureType = _firstField.PictureType }
+            : new PictureJob(state, pts, header.IsIdr || header.MemoryManagement.Any(op => op.Op == 5), _discard) { PictureType = ToPictureType(header.Type) };
         decoder.ConcealErrors = ConcealErrors;
         if (ConcealErrors && _lastReference is { IsNonExisting: false } latest && _references.Contains(latest) && latest != picture)
         {
@@ -707,6 +708,16 @@ public sealed class H264Decoder : IVideoDecoder
 
         return job;
     }
+
+    /// <summary>A slice type as FFmpeg's <c>pict_type</c> (its <c>ff_h264_golomb_to_pict_type</c>).</summary>
+    private static PictureType ToPictureType(SliceType type) => type switch
+    {
+        SliceType.P => PictureType.P,
+        SliceType.B => PictureType.B,
+        SliceType.I => PictureType.I,
+        SliceType.SP => PictureType.SP,
+        _ => PictureType.SI,
+    };
 
     /// <summary>
     /// A decoder for pictures of the stream's size and format that no picture being decoded uses: a free one, a new one
@@ -1006,6 +1017,12 @@ public sealed class H264Decoder : IVideoDecoder
         public bool Restart { get; } = restart;
 
         public bool Discard { get; } = discard;
+
+        /// <summary>
+        /// Its frame's type: its first slice's (FFmpeg's <c>h264_frame_start</c>), for a second field the first field's,
+        /// so a frame of two fields is typed by the first.
+        /// </summary>
+        public PictureType PictureType { get; init; }
 
         /// <summary>With threads, the frame its thread copied out of the picture once decoded.</summary>
         public VideoFrame? Frame { get; set; }

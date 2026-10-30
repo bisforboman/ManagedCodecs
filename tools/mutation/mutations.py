@@ -57,6 +57,11 @@ MUTATIONS = [
          tests="FullyQualifiedName~H264ConcealmentTests", repeat=3),
 
     # ---- H.264
+    # A frame of two field pictures takes its first field's picture type, as FFmpeg does (h264_frame_start), not its
+    # second's: JM's PAFF samples pair an I field with a P one.
+    dict(file="src/ManagedCodecs.H264/H264Decoder.cs",
+         find="PictureType = _firstField.PictureType }", replace="PictureType = ToPictureType(header.Type) }",
+         tests="FullyQualifiedName~H264ConformanceTests.MatchesFfmpegFrameByFrame&DisplayName~jm-paff.mp4"),
     # Concealment guesses a missing macroblock's motion from its neighbours (boundary matching), not zero motion.
     dict(file="src/ManagedCodecs.H264/PictureDecoder.Conceal.cs",
          find="        if (count == 1)\n        {\n            return candidates[0];\n        }\n\n        var (origin",

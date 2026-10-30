@@ -1,1 +1,11 @@
 #nullable enable
+ManagedCodecs.PictureType
+ManagedCodecs.PictureType.B = 3 -> ManagedCodecs.PictureType
+ManagedCodecs.PictureType.BI = 7 -> ManagedCodecs.PictureType
+ManagedCodecs.PictureType.I = 1 -> ManagedCodecs.PictureType
+ManagedCodecs.PictureType.None = 0 -> ManagedCodecs.PictureType
+ManagedCodecs.PictureType.P = 2 -> ManagedCodecs.PictureType
+ManagedCodecs.PictureType.S = 4 -> ManagedCodecs.PictureType
+ManagedCodecs.PictureType.SI = 5 -> ManagedCodecs.PictureType
+ManagedCodecs.PictureType.SP = 6 -> ManagedCodecs.PictureType
+ManagedCodecs.VideoFrame.PictureType.get -> ManagedCodecs.PictureType

@@ -116,6 +116,13 @@ public sealed class VideoFrame : IDisposable
     /// </summary>
     public bool IsDamaged { get; internal set; }
 
+    /// <summary>
+    /// How the frame was coded, as FFmpeg's <c>pict_type</c>: in H.264 the type of the picture's first slice (of its first
+    /// field, for a frame of two field pictures), I for every MJPEG frame; <see cref="PictureType.None"/> for a frame no
+    /// decoder made.
+    /// </summary>
+    public PictureType PictureType { get; internal set; }
+
     /// <summary>The visible samples of one row in one plane, as bytes (two a sample in the formats deeper than 8 bits).</summary>
     public Span<byte> GetRow(int plane, int y)
     {

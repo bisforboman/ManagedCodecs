@@ -23,6 +23,13 @@ A new public API: the next release is a minor version, 0.4.0.
   `H264Decoder.FieldOrder`, the stream's as ffprobe prints it for MP4. H.264 follows the picture timing SEI's
   pic_struct and ct_type where there is one, else MBAFF or field coding and the field order counts; MJPEG frames are
   not flagged, as in FFmpeg (#225).
+- `Mp4Demuxer`: a file's tracks can be read one at a time, `new Mp4Demuxer(stream, MediaTypes.Video)` (a new
+  `MediaTypes` flags enum); the other track is left out as if the file had none, and builds no sample table and gives
+  no packets. And `ReadPacketInfo()`, the packets `ReadPackets` gives without their data (a new `PacketInfo`: the
+  size, flags and timestamps), from the sample tables alone, without reading the file or allocating an array a packet,
+  for a duration pass, a packet list or a bitrate graph (#211). `Mp4Demuxer(Stream, bool leaveOpen = false)` becomes
+  two constructors, `(Stream)` and `(Stream, bool)`, so that the new one can take `leaveOpen` as an optional
+  parameter; calls compile and run as before.
 
 ### Fixed
 

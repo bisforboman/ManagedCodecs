@@ -50,13 +50,42 @@ public sealed class Mp4Demuxer : IDemuxer
     private readonly SampleTable _audio;
 
     /// <summary>Reads the file's headers ('moov' and, in fragmented files, every 'moof'); packets are read from the stream later, by <see cref="ReadPackets"/>.</summary>
-    /// <param name="stream">A seekable stream holding the file.</param>
-    /// <param name="leaveOpen">Whether <see cref="Dispose"/> leaves <paramref name="stream"/> open.</param>
+    /// <param name="stream">A seekable stream holding the file, which <see cref="Dispose"/> disposes.</param>
     /// <exception cref="ArgumentException">The stream is not seekable.</exception>
     /// <exception cref="InvalidDataException">The file is not MP4 or QuickTime, or is malformed.</exception>
-    public Mp4Demuxer(Stream stream, bool leaveOpen = false)
+    public Mp4Demuxer(Stream stream)
+        : this(stream, MediaTypes.All, leaveOpen: false)
+    {
+    }
+
+    /// <inheritdoc cref="Mp4Demuxer(Stream)"/>
+    /// <param name="stream">A seekable stream holding the file.</param>
+    /// <param name="leaveOpen">Whether <see cref="Dispose"/> leaves <paramref name="stream"/> open.</param>
+    // Two overloads rather than an optional leaveOpen, so that the one taking the tracks can have it (RS0026, RS0027).
+    public Mp4Demuxer(Stream stream, bool leaveOpen)
+        : this(stream, MediaTypes.All, leaveOpen)
+    {
+    }
+
+    /// <summary>
+    /// Reads the file's headers, for the tracks of <paramref name="tracks"/> only: a track not asked for is left out as
+    /// if the file had none (its <see cref="Video"/> or <see cref="Audio"/> null, no packets, no sample table built),
+    /// though its packets keep their <see cref="Packet.Sequence"/> and the other track its <see cref="Packet.StreamIndex"/>.
+    /// </summary>
+    /// <param name="stream">A seekable stream holding the file.</param>
+    /// <param name="tracks">The tracks to read: <see cref="MediaTypes.Video"/>, <see cref="MediaTypes.Audio"/> or both.</param>
+    /// <param name="leaveOpen">Whether <see cref="Dispose"/> leaves <paramref name="stream"/> open.</param>
+    /// <exception cref="ArgumentException">The stream is not seekable.</exception>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="tracks"/> names no track, or other bits.</exception>
+    /// <exception cref="InvalidDataException">The file is not MP4 or QuickTime, or is malformed.</exception>
+    public Mp4Demuxer(Stream stream, MediaTypes tracks, bool leaveOpen = false)
     {
         ArgumentNullException.ThrowIfNull(stream);
+        if (tracks == MediaTypes.None || (tracks & ~MediaTypes.All) != 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(tracks), tracks, "Name the video track, the audio track or both.");
+        }
+
         if (!stream.CanSeek)
         {
             throw new ArgumentException("The stream must be seekable.", nameof(stream));
@@ -113,14 +142,16 @@ public sealed class Mp4Demuxer : IDemuxer
 
             if (hasFragments)
             {
-                Track?[] tracks = [video, audio];
-                ReadTrackExtends(mvex, tracks);
-                ReadFragments(stream, tracks);
+                Track?[] fragmentTracks = [video, audio];
+                ReadTrackExtends(mvex, fragmentTracks);
+                ReadFragments(stream, fragmentTracks);
             }
 
+            // A track not asked for is still read as far as its fragments go (where a later fragment's data starts can
+            // depend on its), but builds no sample table.
             _video = new SampleTable(0, 0);
             _audio = new SampleTable(0, 0);
-            if (video is not null)
+            if (video is not null && tracks.HasFlag(MediaTypes.Video))
             {
                 var samples = video.BuildSamples(movieTimescale);
                 _video = samples;
@@ -145,7 +176,7 @@ public sealed class Mp4Demuxer : IDemuxer
                     video.StreamIndex);
             }
 
-            if (audio is not null)
+            if (audio is not null && tracks.HasFlag(MediaTypes.Audio))
             {
                 var samples = audio.BuildSamples(movieTimescale);
                 if (priming > 0 && !audio.HasEditList && samples.Count > 0)
@@ -220,10 +251,29 @@ public sealed class Mp4Demuxer : IDemuxer
     /// <inheritdoc cref="AviDemuxer.ReadPacketsAsync"/>
     public IAsyncEnumerable<Packet> ReadPacketsAsync(CancellationToken cancellationToken = default) => ReadSteps.RunAsync(_stream, Steps(), "MP4", cancellationToken);
 
-    // Each sample's read, then its packet: the two tracks' samples in file order, which is how they are interleaved on
-    // disk, each track's in its own order (the next sample is whichever track's next one lies first in the file; an
-    // edit can go back to earlier samples).
+    /// <summary>
+    /// The packets <see cref="ReadPackets"/> gives, in its order and with its values, without their data: from the sample
+    /// tables alone, with no read of the file and nothing allocated a packet.
+    /// </summary>
+    /// <exception cref="InvalidDataException">A sample lies outside the file.</exception>
+    public IEnumerable<PacketInfo> ReadPacketInfo() => Malformed.Guard(Samples().Select(s => Info(s.Track, s.Index, s.Sequence)), "MP4");
+
+    // Each sample's read, then its packet.
     private IEnumerable<ReadStep> Steps()
+    {
+        foreach (var (track, index, sequence) in Samples())
+        {
+            var info = Info(track, index, sequence);
+            var data = new byte[info.Size];
+            yield return ReadStep.Read(track.Offsets[index], data);
+            yield return ReadStep.Yield(new Packet(info.StreamIndex, info.Sequence, data, info.IsKeyframe, info.Dts, info.Pts, info.Duration, info.SkipSamples, info.Discard));
+        }
+    }
+
+    // The two tracks' samples in file order, which is how they are interleaved on disk, each track's in its own order
+    // (the next sample is whichever track's next one lies first in the file; an edit can go back to earlier samples),
+    // with each track's packet sequence number; empty samples are left out.
+    private IEnumerable<(SampleTable Track, int Index, long Sequence)> Samples()
     {
         int v = 0;
         int a = 0;
@@ -246,21 +296,20 @@ public sealed class Mp4Demuxer : IDemuxer
                 throw new InvalidDataException($"Sample {i} lies outside the file.");
             }
 
-            var data = new byte[size];
-            yield return ReadStep.Read(offset, data);
-            long sequence = fromVideo ? videoPackets++ : audioPackets++;
-            yield return ReadStep.Yield(new Packet(
-                track.StreamIndex,
-                sequence,
-                data,
-                track.IsKeyframe(index),
-                track.Dts[index],
-                track.Pts(index),
-                track.Durations[index],
-                track.SkipSamples.GetValueOrDefault(index),
-                (track.Flags[index] & SampleTable.Discard) != 0));
+            yield return (track, index, fromVideo ? videoPackets++ : audioPackets++);
         }
     }
+
+    private static PacketInfo Info(SampleTable track, int index, long sequence) => new(
+        track.StreamIndex,
+        sequence,
+        track.Sizes[index],
+        track.IsKeyframe(index),
+        track.Dts[index],
+        track.Pts(index),
+        track.Durations[index],
+        track.SkipSamples.GetValueOrDefault(index),
+        (track.Flags[index] & SampleTable.Discard) != 0);
 
     /// <summary>Disposes the stream, unless the demuxer was made to leave it open.</summary>
     public void Dispose()

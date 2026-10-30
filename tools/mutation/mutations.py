@@ -278,6 +278,12 @@ MUTATIONS = [
          find="(magnitudes & Vector128.Create(~511))", replace="(magnitudes & Vector128.Create(int.MinValue))",
          tests="FullyQualifiedName~TransformTests"),
 
+    # run_before's codes longer than 3 bits (runs of 7 to 14, only with more than 6 zeros left) come from their
+    # leading zeros, not the table.
+    dict(file="src/ManagedCodecs.H264/Cavlc.cs",
+         find="return zeros + 4;", replace="return zeros + 3;",
+         tests="FullyQualifiedName~H264"),
+
     # ---- MJPEG
     # FFmpeg takes an image of less than 3/4 of the stream's height (integer division) as a field.
     dict(file="src/ManagedCodecs.Mjpeg/MjpegDecoder.cs",

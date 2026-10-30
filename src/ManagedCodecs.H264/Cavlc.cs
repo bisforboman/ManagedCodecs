@@ -15,7 +15,7 @@ internal static class Cavlc
     private static readonly Vlc[] TotalZeros4x4 = [.. CavlcTables.TotalZeros4x4.Select(t => t.Length == 0 ? null! : new Vlc(t))];
     private static readonly Vlc[] TotalZerosChromaDc = [.. CavlcTables.TotalZerosChromaDc.Select(t => t.Length == 0 ? null! : new Vlc(t))];
     private static readonly Vlc[] TotalZerosChromaDc422 = [.. CavlcTables.TotalZerosChromaDc422.Select(t => t.Length == 0 ? null! : new Vlc(t))];
-    private static readonly Vlc[] RunBefore = [.. CavlcTables.RunBefore.Select(t => t.Length == 0 ? null! : new Vlc(t))];
+    private static readonly byte[] RunBefore = BuildRunBefore();
 
     /// <summary>nC value that selects the chroma DC table (4:2:0).</summary>
     public const int ChromaDcNc = -1;
@@ -63,16 +63,18 @@ internal static class Cavlc
             throw new InvalidDataException($"TotalCoeff {totalCoeff} exceeds the block size {maxNumCoeff}.");
         }
 
-        Span<int> levelVal = stackalloc int[16];
-        int suffixLength = totalCoeff > 10 && trailingOnes < 3 ? 1 : 0;
-        for (int i = 0; i < totalCoeff; i++)
+        // The trailing ones' signs in one read, then the other levels from the next coefficient on.
+        Unsafe.SkipInit(out Levels levelVal);
+        uint signs = r.Peek(3);
+        r.Skip(trailingOnes);
+        for (int i = 0; i < trailingOnes; i++)
         {
-            if (i < trailingOnes)
-            {
-                levelVal[i] = r.ReadFlag() ? -1 : 1;
-                continue;
-            }
+            levelVal[i] = 1 - (int)(((signs << i) >> 1) & 2);
+        }
 
+        int suffixLength = totalCoeff > 10 && trailingOnes < 3 ? 1 : 0;
+        for (int i = trailingOnes; i < totalCoeff; i++)
+        {
             int levelPrefix = ReadLevelPrefix(ref r);
             int levelCode = Math.Min(15, levelPrefix) << suffixLength;
             if (suffixLength > 0 || levelPrefix >= 14)
@@ -136,7 +138,7 @@ internal static class Cavlc
             int run = 0;
             if (i < totalCoeff - 1 && zerosLeft > 0)
             {
-                run = r.Read(RunBefore[Math.Min(zerosLeft, 7)]);
+                run = ReadRunBefore(ref r, zerosLeft);
                 if (run > zerosLeft)
                 {
                     throw new InvalidDataException("run_before exceeds the zeros left.");
@@ -149,6 +151,69 @@ internal static class Cavlc
         }
 
         return totalCoeff;
+    }
+
+    /// <summary>
+    /// run_before (Table 9-10) for <paramref name="zerosLeft"/> zeros left: the codes of up to 3 bits from one
+    /// lookup, the longer ones (zerosLeft above 6, runs above 6) from their leading zeros.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static int ReadRunBefore(ref BitReader.Cursor r, int zerosLeft)
+    {
+        uint peek = r.Peek(32);
+        int entry = RunBefore[(Math.Min(zerosLeft, 7) << 3) | (int)(peek >> 29)];
+        if (entry != 0)
+        {
+            r.Skip(entry & 3);
+            return entry >> 2;
+        }
+
+        // 000 1 is a run of 7, each zero more one more, up to 0000 0000 001 (14).
+        int zeros = BitOperations.LeadingZeroCount(peek);
+        if (zeros > 10)
+        {
+            throw new InvalidDataException("Invalid run_before.");
+        }
+
+        r.Skip(zeros + 1);
+        return zeros + 4;
+    }
+
+    /// <summary>
+    /// The codes of Table 9-10 of up to 3 bits as (run &lt;&lt; 2) | length, at (min(zerosLeft, 7) &lt;&lt; 3) | the
+    /// next 3 bits; 0 for none (the longer codes).
+    /// </summary>
+    private static byte[] BuildRunBefore()
+    {
+        var table = new byte[64];
+        for (int zerosLeft = 1; zerosLeft <= 7; zerosLeft++)
+        {
+            string[] codes = CavlcTables.RunBefore[zerosLeft];
+            for (int run = 0; run < codes.Length; run++)
+            {
+                string code = codes[run].Replace(" ", "", StringComparison.Ordinal);
+                if (code.Length > 3)
+                {
+                    continue;
+                }
+
+                int shift = 3 - code.Length;
+                int first = Convert.ToInt32(code, 2) << shift;
+                for (int bits = first; bits < first + (1 << shift); bits++)
+                {
+                    table[(zerosLeft << 3) | bits] = (byte)((run << 2) | code.Length);
+                }
+            }
+        }
+
+        return table;
+    }
+
+    /// <summary>The levels of one block, on the stack without a stack allocation's probe.</summary>
+    [InlineArray(16)]
+    private struct Levels
+    {
+        private int _element;
     }
 
     /// <summary>level_prefix (9.2.2.1): the number of leading zero bits before a one.</summary>

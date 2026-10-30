@@ -32,6 +32,29 @@ public class ImdctTests
         }
     }
 
+    /// <summary>The vector pre-twiddle and fold do the scalar arithmetic in its order: the same doubles, to the bit.</summary>
+    [Theory]
+    [InlineData(1024)]
+    [InlineData(128)]
+    public void VectorImdct_MatchesScalarExactly(int coefficients)
+    {
+        var random = new Random(coefficients + 1);
+        var spec = new double[coefficients];
+        var expected = new double[2 * coefficients];
+        var actual = new double[2 * coefficients];
+        for (int trial = 0; trial < 50; trial++)
+        {
+            for (int k = 0; k < coefficients; k++)
+            {
+                spec[k] = (random.NextDouble() - 0.5) * Math.Pow(10, random.Next(0, 6));
+            }
+
+            Imdct.InverseScalar(spec, expected);
+            Imdct.Inverse(spec, actual);
+            Assert.Equal(expected.Select(BitConverter.DoubleToInt64Bits), actual.Select(BitConverter.DoubleToInt64Bits));
+        }
+    }
+
     /// <summary>The vector FFT does each butterfly's arithmetic in the scalar order: the same doubles, to the bit.</summary>
     [Theory]
     [InlineData(512)]

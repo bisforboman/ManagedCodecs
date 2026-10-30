@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics;
+using ManagedCodecs.Aac.Sbr;
 
 namespace ManagedCodecs.Aac;
 
@@ -160,6 +161,78 @@ internal static class Imdct
     /// for n = 0 .. N - 1, where N = 2 * spec.Length (2048 or 256).
     /// </summary>
     public static void Inverse(ReadOnlySpan<double> spec, Span<double> output)
+    {
+        if (!Vector128.IsHardwareAccelerated)
+        {
+            InverseScalar(spec, output);
+            return;
+        }
+
+        var plan = spec.Length == 1024 ? Long : Short;
+        int m = plan.Size;
+        int quarter = m / 2;
+        if (spec.Length < m || output.Length < 2 * m)
+        {
+            throw new ArgumentException("The spectrum and the output are too short for the transform.");
+        }
+
+        Span<double> re = stackalloc double[quarter];
+        Span<double> im = stackalloc double[quarter];
+
+        // The pre-twiddle two j at a time, X[2j] and X[M-1-2j] gathered by zips: the scalar arithmetic in its order.
+        ref double x = ref MemoryMarshal.GetReference(spec);
+        ref double preCos = ref MemoryMarshal.GetArrayDataReference(plan.PreCos);
+        ref double preSin = ref MemoryMarshal.GetArrayDataReference(plan.PreSin);
+        ref double reRef = ref MemoryMarshal.GetReference(re);
+        ref double imRef = ref MemoryMarshal.GetReference(im);
+        for (int j = 0; j < quarter; j += 2)
+        {
+            var a = QmfState.Zip(Vector128.LoadUnsafe(ref x, (nuint)(2 * j)), Vector128.LoadUnsafe(ref x, (nuint)((2 * j) + 2))).Low;
+            var b = QmfState.Zip(Vector128.LoadUnsafe(ref x, (nuint)(m - 2 - (2 * j))), Vector128.LoadUnsafe(ref x, (nuint)(m - 4 - (2 * j)))).High;
+            var c = Vector128.LoadUnsafe(ref preCos, (nuint)j);
+            var sn = Vector128.LoadUnsafe(ref preSin, (nuint)j);
+            ((a * c) + (b * sn)).StoreUnsafe(ref reRef, (nuint)j);
+            ((b * c) - (a * sn)).StoreUnsafe(ref imRef, (nuint)j);
+        }
+
+        plan.Fft(re, im);
+
+        // Post-twiddle by e^(-i pi l / M), giving the DCT-IV u[2l] = Re, u[M-1-2l] = -Im; then
+        // fold out: x[n] = u[n + M/2], -u[3M/2 - 1 - n], -u[n - 3M/2] over the three ranges.
+        Span<double> u = stackalloc double[m];
+        for (int l = 0; l < quarter; l++)
+        {
+            double c = plan.PostCos[l];
+            double s = plan.PostSin[l];
+            u[2 * l] = (re[l] * c) + (im[l] * s);
+            u[m - 1 - (2 * l)] = -((im[l] * c) - (re[l] * s));
+        }
+
+        // The fold, two samples a vector: the same products as the scalar loops, the reversed range read backwards.
+        var scale = Vector128.Create(1.0 / m);
+        int half = m / 2;
+        ref double uRef = ref MemoryMarshal.GetReference(u);
+        ref double y = ref MemoryMarshal.GetReference(output);
+        for (int n = 0; n < half; n += 2)
+        {
+            (Vector128.LoadUnsafe(ref uRef, (nuint)(n + half)) * scale).StoreUnsafe(ref y, (nuint)n);
+        }
+
+        for (int n = half; n < 3 * half; n += 2)
+        {
+            // output[n] and output[n + 1] are -u[3M/2 - 1 - n] and -u[3M/2 - 2 - n].
+            var v = Vector128.LoadUnsafe(ref uRef, (nuint)((3 * half) - 2 - n));
+            ((-QmfState.Reverse(v)) * scale).StoreUnsafe(ref y, (nuint)n);
+        }
+
+        for (int n = 3 * half; n < 2 * m; n += 2)
+        {
+            ((-Vector128.LoadUnsafe(ref uRef, (nuint)(n - (3 * half)))) * scale).StoreUnsafe(ref y, (nuint)n);
+        }
+    }
+
+    /// <summary>The scalar <see cref="Inverse"/>: without vector hardware, and the vector one's reference.</summary>
+    internal static void InverseScalar(ReadOnlySpan<double> spec, Span<double> output)
     {
         var plan = spec.Length == 1024 ? Long : Short;
         int m = plan.Size;

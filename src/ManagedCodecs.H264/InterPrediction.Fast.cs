@@ -224,6 +224,7 @@ internal static partial class InterPrediction
         private readonly int _xFrac;
         private readonly int _yFrac;
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public ChromaBlock(Picture reference, int x, int y, int width, int height, int mvX, int mvY)
         {
             _stride = reference.ChromaStride;

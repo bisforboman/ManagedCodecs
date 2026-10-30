@@ -106,19 +106,25 @@ public class TransformTests
         }
     }
 
-    /// <summary>The 8-bit 8x8 vector add against the scalar transform, on random coefficients and samples.</summary>
+    /// <summary>
+    /// The 8-bit 8x8 vector add (with SSE2 in 16-bit lanes for coefficients under 2^9, else the columns' transform four
+    /// columns at a time) against the scalar transform, on random coefficients either side of that bound, blocks of
+    /// nothing but +-511 (the 16-bit path's largest values) and random samples.
+    /// </summary>
     [Fact]
     public void InverseTransform8x8Add_MatchesScalar()
     {
         const int Stride = 13;
         var random = new Random(29);
-        for (int n = 0; n < 10_000; n++)
+        for (int n = 0; n < 20_000; n++)
         {
-            int range = random.Next(4) switch { 0 => 64, 1 => 2047, 2 => 4096, _ => 1 << 20 };
+            int kind = random.Next(6);
+            int range = kind switch { 0 => 64, 1 => 300, 2 => 511, 3 => 2047, _ => 1 << 20 };
             var coefficients = new int[64];
             for (int i = 0; i < 64; i++)
             {
-                coefficients[i] = random.Next(3) == 0 ? 0 : random.Next(-range, range + 1);
+                coefficients[i] = kind == 5 ? (random.Next(2) == 0 ? 511 : -511)
+                    : random.Next(3) == 0 ? 0 : random.Next(-range, range + 1);
             }
 
             var prediction = new byte[(7 * Stride) + 8];

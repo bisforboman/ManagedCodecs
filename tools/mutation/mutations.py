@@ -213,6 +213,11 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.H264/Transform.cs",
          find="(magnitudes & Vector128.Create(~2047))", replace="(magnitudes & Vector128.Create(int.MinValue))",
          tests="DisplayName~jm-planes-qm"),
+    # The 16-bit 8x8 transform takes only coefficients under 2^9, whose sums fit 16 bits (the random test's larger
+    # ones overflow without it).
+    dict(file="src/ManagedCodecs.H264/Transform.cs",
+         find="(magnitudes & Vector128.Create(~511))", replace="(magnitudes & Vector128.Create(int.MinValue))",
+         tests="FullyQualifiedName~TransformTests"),
 
     # ---- MJPEG
     # FFmpeg takes an image of less than 3/4 of the stream's height (integer division) as a field.

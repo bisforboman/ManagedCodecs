@@ -228,6 +228,11 @@ internal static class Transform
     {
         _ = d[63];
         _ = dest[(7 * stride) + 7];
+        if (Sse2.IsSupported && InverseTransform8x8Add16(d, dest, stride))
+        {
+            return;
+        }
+
         Span<int> g = stackalloc int[64];
         for (int i = 0; i < 8; i++)
         {
@@ -246,6 +251,137 @@ internal static class Transform
             AddRow(ref Unsafe.Add(ref target, i * stride), (left[i] + round) >> 6);
             AddRow(ref Unsafe.Add(ref target, (i * stride) + 4), (right[i] + round) >> 6);
         }
+    }
+
+    /// <summary>
+    /// <see cref="InverseTransform8x8Add(Span{int}, Span{byte}, int)"/> in 16-bit lanes, a row (or column) a vector, as
+    /// FFmpeg's 8-bit transform, for coefficients under 2^9 in magnitude (false, and nothing written, for others): one
+    /// pass of the 8-point transform multiplies the largest magnitude by at most 7.375 (its intermediate values too),
+    /// both by 54.4, so from those every value is under 54.4 (2^9 + 32) and a few for the shifts' floors, within 16
+    /// bits. Transposed, each lane is a row for the rows' pass; transposed back, a column for the columns'. The rounding
+    /// is 32 added to the DC, which reaches every output once, and the clip to 8 bits the saturating pack.
+    /// </summary>
+    [SkipLocalsInit]
+    private static bool InverseTransform8x8Add16(Span<int> d, Span<byte> dest, int stride)
+    {
+        ref int coefficients = ref MemoryMarshal.GetReference(d);
+        var magnitudes = Vector128<int>.Zero;
+        for (int i = 0; i < 64; i += 4)
+        {
+            magnitudes |= Vector128.Abs(Vector128.LoadUnsafe(ref coefficients, (nuint)i));
+        }
+
+        if ((magnitudes & Vector128.Create(~511)) != Vector128<int>.Zero)
+        {
+            return false;
+        }
+
+        var v0 = Pack(ref coefficients, 0) + Vector128.CreateScalar((short)32);
+        var v1 = Pack(ref coefficients, 8);
+        var v2 = Pack(ref coefficients, 16);
+        var v3 = Pack(ref coefficients, 24);
+        var v4 = Pack(ref coefficients, 32);
+        var v5 = Pack(ref coefficients, 40);
+        var v6 = Pack(ref coefficients, 48);
+        var v7 = Pack(ref coefficients, 56);
+        Transpose8x8(ref v0, ref v1, ref v2, ref v3, ref v4, ref v5, ref v6, ref v7);
+        Transform8Lanes(ref v0, ref v1, ref v2, ref v3, ref v4, ref v5, ref v6, ref v7);
+        Transpose8x8(ref v0, ref v1, ref v2, ref v3, ref v4, ref v5, ref v6, ref v7);
+        Transform8Lanes(ref v0, ref v1, ref v2, ref v3, ref v4, ref v5, ref v6, ref v7);
+
+        ref byte target = ref MemoryMarshal.GetReference(dest);
+        AddRows(ref target, stride, v0, v1);
+        AddRows(ref Unsafe.Add(ref target, 2 * stride), stride, v2, v3);
+        AddRows(ref Unsafe.Add(ref target, 4 * stride), stride, v4, v5);
+        AddRows(ref Unsafe.Add(ref target, 6 * stride), stride, v6, v7);
+        return true;
+
+        static Vector128<short> Pack(ref int row, int offset) =>
+            Sse2.PackSignedSaturate(Vector128.LoadUnsafe(ref row, (nuint)offset), Vector128.LoadUnsafe(ref row, (nuint)(offset + 4)));
+    }
+
+    /// <summary>Two rows of residuals, each shifted down 6, added to their 8 samples and clipped to 8 bits.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void AddRows(ref byte row0, int stride, Vector128<short> residual0, Vector128<short> residual1)
+    {
+        ref byte row1 = ref Unsafe.Add(ref row0, stride);
+        var prediction = Vector128.Create(Unsafe.ReadUnaligned<ulong>(ref row0), Unsafe.ReadUnaligned<ulong>(ref row1)).AsByte();
+        var sum0 = Sse2.Add(Sse2.UnpackLow(prediction, Vector128<byte>.Zero).AsInt16(), Sse2.ShiftRightArithmetic(residual0, 6));
+        var sum1 = Sse2.Add(Sse2.UnpackHigh(prediction, Vector128<byte>.Zero).AsInt16(), Sse2.ShiftRightArithmetic(residual1, 6));
+        var samples = Sse2.PackUnsignedSaturate(sum0, sum1).AsUInt64();
+        Unsafe.WriteUnaligned(ref row0, samples.GetElement(0));
+        Unsafe.WriteUnaligned(ref row1, samples.GetElement(1));
+    }
+
+    /// <summary>Transposes an 8x8 matrix of shorts held a row a vector.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void Transpose8x8(ref Vector128<short> v0, ref Vector128<short> v1, ref Vector128<short> v2, ref Vector128<short> v3, ref Vector128<short> v4, ref Vector128<short> v5, ref Vector128<short> v6, ref Vector128<short> v7)
+    {
+        var t0 = Sse2.UnpackLow(v0, v1);
+        var t1 = Sse2.UnpackHigh(v0, v1);
+        var t2 = Sse2.UnpackLow(v2, v3);
+        var t3 = Sse2.UnpackHigh(v2, v3);
+        var t4 = Sse2.UnpackLow(v4, v5);
+        var t5 = Sse2.UnpackHigh(v4, v5);
+        var t6 = Sse2.UnpackLow(v6, v7);
+        var t7 = Sse2.UnpackHigh(v6, v7);
+        var u0 = Sse2.UnpackLow(t0.AsInt32(), t2.AsInt32());
+        var u1 = Sse2.UnpackHigh(t0.AsInt32(), t2.AsInt32());
+        var u2 = Sse2.UnpackLow(t1.AsInt32(), t3.AsInt32());
+        var u3 = Sse2.UnpackHigh(t1.AsInt32(), t3.AsInt32());
+        var u4 = Sse2.UnpackLow(t4.AsInt32(), t6.AsInt32());
+        var u5 = Sse2.UnpackHigh(t4.AsInt32(), t6.AsInt32());
+        var u6 = Sse2.UnpackLow(t5.AsInt32(), t7.AsInt32());
+        var u7 = Sse2.UnpackHigh(t5.AsInt32(), t7.AsInt32());
+        v0 = Sse2.UnpackLow(u0.AsInt64(), u4.AsInt64()).AsInt16();
+        v1 = Sse2.UnpackHigh(u0.AsInt64(), u4.AsInt64()).AsInt16();
+        v2 = Sse2.UnpackLow(u1.AsInt64(), u5.AsInt64()).AsInt16();
+        v3 = Sse2.UnpackHigh(u1.AsInt64(), u5.AsInt64()).AsInt16();
+        v4 = Sse2.UnpackLow(u2.AsInt64(), u6.AsInt64()).AsInt16();
+        v5 = Sse2.UnpackHigh(u2.AsInt64(), u6.AsInt64()).AsInt16();
+        v6 = Sse2.UnpackLow(u3.AsInt64(), u7.AsInt64()).AsInt16();
+        v7 = Sse2.UnpackHigh(u3.AsInt64(), u7.AsInt64()).AsInt16();
+    }
+
+    /// <summary>The 8-point transform of 8.5.13.2 lane by lane: input k in vk, output k back there.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void Transform8Lanes(ref Vector128<short> v0, ref Vector128<short> v1, ref Vector128<short> v2, ref Vector128<short> v3, ref Vector128<short> v4, ref Vector128<short> v5, ref Vector128<short> v6, ref Vector128<short> v7)
+    {
+        var d0 = v0;
+        var d1 = v1;
+        var d2 = v2;
+        var d3 = v3;
+        var d4 = v4;
+        var d5 = v5;
+        var d6 = v6;
+        var d7 = v7;
+
+        var e0 = d0 + d4;
+        var e1 = d5 - d3 - d7 - (d7 >> 1);
+        var e2 = d0 - d4;
+        var e3 = d1 + d7 - d3 - (d3 >> 1);
+        var e4 = (d2 >> 1) - d6;
+        var e5 = d7 - d1 + d5 + (d5 >> 1);
+        var e6 = d2 + (d6 >> 1);
+        var e7 = d3 + d5 + d1 + (d1 >> 1);
+
+        var f0 = e0 + e6;
+        var f1 = e1 + (e7 >> 2);
+        var f2 = e2 + e4;
+        var f3 = e3 + (e5 >> 2);
+        var f4 = e2 - e4;
+        var f5 = (e3 >> 2) - e5;
+        var f6 = e0 - e6;
+        var f7 = e7 - (e1 >> 2);
+
+        v0 = f0 + f7;
+        v1 = f2 + f5;
+        v2 = f4 + f3;
+        v3 = f6 + f1;
+        v4 = f6 - f1;
+        v5 = f4 - f3;
+        v6 = f2 - f5;
+        v7 = f0 - f7;
     }
 
     /// <summary>

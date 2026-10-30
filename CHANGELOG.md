@@ -24,6 +24,11 @@ A new public API: the next release is a minor version, 0.4.0.
   pic_struct and ct_type where there is one, else MBAFF or field coding and the field order counts; MJPEG frames are
   not flagged, as in FFmpeg (#225).
 
+### Fixed
+
+- `AviDemuxer`: an empty video chunk (a dropped frame) now takes its frame's tick, as in FFmpeg, so the packets after
+  it have FFmpeg's pts rather than coming a frame early; it still gives no packet (#226).
+
 ## 0.3.0 – 2026-10-30
 
 Each decoded frame's picture type (I, P, B), as FFmpeg reports it. A new public API, hence a minor version; nothing

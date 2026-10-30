@@ -27,6 +27,41 @@ public class AviDemuxerTests
         Assert.Equal(new long[] { 0, 1 }, packets.Select(p => p.Pts).ToArray());
     }
 
+    /// <summary>
+    /// An empty video chunk is a dropped frame: no packet comes out for it, but it takes its tick, as in FFmpeg, so the
+    /// packets after it are a frame later.
+    /// </summary>
+    [Fact]
+    public void CountsAnEmptyChunkAsADroppedFrame()
+    {
+        using var demuxer = new AviDemuxer(new MemoryStream(TinyAvi(dropFrame: true)));
+
+        var packets = demuxer.ReadPackets().ToList();
+
+        Assert.Equal(2, packets.Count);
+        Assert.Equal(new long[] { 0, 1 }, packets.Select(p => p.Sequence).ToArray());
+        Assert.Equal(new long[] { 0, 2 }, packets.Select(p => p.Pts).ToArray());
+        Assert.Equal(new long[] { 0, 2 }, packets.Select(p => p.Dts).ToArray());
+    }
+
+    /// <summary>
+    /// The sample for it really has the empty chunk (its pts, against FFmpeg's, are checked by the MJPEG conformance
+    /// tests): a muxer that stops writing one would leave them nothing to catch.
+    /// </summary>
+    [Fact]
+    public void DroppedFrameSampleHasAGap()
+    {
+        if (TestSamples.Directory is null || !File.Exists(TestSamples.PathOf("avi-dropped-frame.avi")))
+        {
+            return;
+        }
+
+        using var demuxer = AviDemuxer.Open(TestSamples.PathOf("avi-dropped-frame.avi"));
+        var pts = demuxer.ReadPackets().Select(p => p.Pts).ToList();
+
+        Assert.True(pts.Count < pts[^1] + 1, $"No pts gap in {pts.Count} packets.");
+    }
+
     [Fact]
     public void RejectsNonAvi()
     {
@@ -35,8 +70,9 @@ public class AviDemuxerTests
         Assert.Throws<InvalidDataException>(() => new AviDemuxer(new MemoryStream(data)));
     }
 
-    // AVI with one MJPEG video stream (index 0) and one audio stream (index 1).
-    private static byte[] TinyAvi()
+    // AVI with one MJPEG video stream (index 0) and one audio stream (index 1); with an empty video chunk (a dropped
+    // frame) between the two packets if asked.
+    private static byte[] TinyAvi(bool dropFrame = false)
     {
         var avih = new byte[56];
         BinaryPrimitives.WriteUInt32LittleEndian(avih.AsSpan(0), 40_000); // microseconds per frame = 25 fps
@@ -65,6 +101,7 @@ public class AviDemuxerTests
             List("movi",
                 Chunk("00dc", [1, 2, 3]),
                 Chunk("01wb", [9, 9]),
+                dropFrame ? Chunk("00dc", []) : [],
                 List("rec ", Chunk("00dc", [4, 5, 6, 7]))));
     }
 

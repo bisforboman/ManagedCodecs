@@ -92,7 +92,7 @@ public sealed class AviDemuxer : IDemuxer
             _videoStreamIndex = header.VideoStreamIndex;
 
             // Like FFmpeg, take the time base from the stream header (dwScale / dwRate) and fall
-            // back to the main header's frame duration. Each chunk is one tick.
+            // back to the main header's frame duration. Each chunk is one tick, an empty one too.
             var timeBase = header.Scale > 0 && header.Rate > 0
                 ? Rational.Reduce(header.Scale, header.Rate)
                 : Rational.Reduce(header.MicrosecondsPerFrame, 1_000_000);
@@ -133,6 +133,7 @@ public sealed class AviDemuxer : IDemuxer
     {
         string prefix = _videoStreamIndex.ToString("00", CultureInfo.InvariantCulture);
         long sequence = 0;
+        long frame = 0;
         var header = new byte[8];
 
         // Explicit stack instead of recursion so nested 'rec ' lists work inside an iterator.
@@ -159,7 +160,13 @@ public sealed class AviDemuxer : IDemuxer
                 bool isVideoChunk = id.StartsWith(prefix, StringComparison.Ordinal)
                     && (id.EndsWith("dc", StringComparison.Ordinal) || id.EndsWith("db", StringComparison.Ordinal));
 
-                if (isVideoChunk && size > 0)
+                // An empty chunk is a dropped frame: no packet, but like FFmpeg it takes its tick, so the next
+                // packet's pts is one later.
+                if (isVideoChunk && size == 0)
+                {
+                    frame++;
+                }
+                else if (isVideoChunk)
                 {
                     if (pos + 8 + size > _stream.Length)
                     {
@@ -168,8 +175,9 @@ public sealed class AviDemuxer : IDemuxer
 
                     var data = new byte[size];
                     yield return ReadStep.Read(pos + 8, data);
-                    yield return ReadStep.Yield(new Packet(_videoStreamIndex, sequence, data, IsKeyframe: true, Dts: sequence, Pts: sequence, Duration: 1));
+                    yield return ReadStep.Yield(new Packet(_videoStreamIndex, sequence, data, IsKeyframe: true, Dts: frame, Pts: frame, Duration: 1));
                     sequence++;
+                    frame++;
                 }
 
                 pos = next;

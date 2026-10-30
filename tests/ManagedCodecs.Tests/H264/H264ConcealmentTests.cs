@@ -65,19 +65,20 @@ public class H264ConcealmentTests
 
     /// <summary>
     /// The quality of the guess: a missing macroblock takes the motion of a neighbour that matches its edges best, which
-    /// for these streams (camera-like motion) comes far closer to the clean decode than zero motion from one reference.
-    /// The floors are the mean PSNR of the flagged frames with the guess, rounded down (zero motion gave 29.7, 21.9,
-    /// 20.1 and 23.3 dB): docs/conformance.md has the comparison with FFmpeg's. The damaged packet is the middle one,
-    /// or the one given. In MBAFF frames the macroblocks around a missing frame pair are field pairs, so the MBAFF rows
-    /// hold only if their motion is converted to frame units; they are JM's committed streams, the same on every
-    /// platform (libx264's encodes differ between x64 and ARM64, and so do their concealed frames).
+    /// for these streams comes far closer to the clean decode than zero motion from one reference. The floors are the
+    /// mean PSNR of the flagged frames with the guess, rounded down (zero motion gave 22.5, 20.8, 20.1 and 23.3 dB):
+    /// docs/conformance.md has the comparison with FFmpeg's. The damaged packet is the one given. Every stream is a
+    /// committed one (OpenH264's CAVLC slices, JM's CABAC with cabac_init_idc 1, then JM's MBAFF frames), the same on
+    /// every platform: libx264's encodes differ between machines, and so do their concealed frames. In MBAFF frames the
+    /// macroblocks around a missing frame pair are field pairs, so those rows hold only if their motion is converted to
+    /// frame units.
     /// </summary>
     [Theory]
-    [InlineData("h264-main-slices.mp4", 33)]
-    [InlineData("h264-high-b.mp4", 25)]
+    [InlineData("openh264/oh-slices-num.mp4", 34, 7)]
+    [InlineData("jm/jm-cabac-init1.mp4", 26, 4)]
     [InlineData("jm/jm-paff-mbaff.mp4", 23, 4)]
     [InlineData("jm-planes-mbaff.mp4", 27, 5)]
-    public void CutPacket_MotionGuessed(string sampleName, double floor, int damaged = -1)
+    public void CutPacket_MotionGuessed(string sampleName, double floor, int damaged)
     {
         if (!ParameterSetRewriter.Exists(sampleName))
         {
@@ -86,7 +87,7 @@ public class H264ConcealmentTests
 
         var (video, packets) = Read(sampleName);
         var clean = Decode(video, packets, damaged: -1, conceal: false, threads: 1).ToDictionary(f => f.Pts);
-        var concealed = Decode(video, packets, damaged >= 0 ? damaged : packets.Count / 2, conceal: true, threads: 1).Where(f => f.Damaged).ToList();
+        var concealed = Decode(video, packets, damaged, conceal: true, threads: 1).Where(f => f.Damaged).ToList();
         double mean = concealed.Average(f => Math.Min(Psnr(clean[f.Pts].Data, f.Data), 99));
         Assert.True(mean > floor, $"mean PSNR {mean:F2} dB over {concealed.Count} frames");
     }

@@ -11,9 +11,10 @@ share internals, so each depends on the others at exactly its own version (`[X]`
 then reports a mix of versions (NU1107, or NU1608 for a newer one referenced directly) rather than letting it fail at
 run time.
 
-## Unreleased
+## 0.3.0 – 2026-10-30
 
-A new public API (`VideoFrame.PictureType`): the next release is a minor version, 0.3.0.
+Each decoded frame's picture type (I, P, B), as FFmpeg reports it. A new public API, hence a minor version; nothing
+is removed or changed, so code built against 0.2 keeps working.
 
 ### Added
 

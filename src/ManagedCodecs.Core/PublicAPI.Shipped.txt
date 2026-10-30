@@ -63,6 +63,15 @@ ManagedCodecs.Packet.SkipSamples.get -> int
 ManagedCodecs.Packet.SkipSamples.init -> void
 ManagedCodecs.Packet.StreamIndex.get -> int
 ManagedCodecs.Packet.StreamIndex.init -> void
+ManagedCodecs.PictureType
+ManagedCodecs.PictureType.B = 3 -> ManagedCodecs.PictureType
+ManagedCodecs.PictureType.BI = 7 -> ManagedCodecs.PictureType
+ManagedCodecs.PictureType.I = 1 -> ManagedCodecs.PictureType
+ManagedCodecs.PictureType.None = 0 -> ManagedCodecs.PictureType
+ManagedCodecs.PictureType.P = 2 -> ManagedCodecs.PictureType
+ManagedCodecs.PictureType.S = 4 -> ManagedCodecs.PictureType
+ManagedCodecs.PictureType.SI = 5 -> ManagedCodecs.PictureType
+ManagedCodecs.PictureType.SP = 6 -> ManagedCodecs.PictureType
 ManagedCodecs.PixelFormat
 ManagedCodecs.PixelFormat.Gray10 = 7 -> ManagedCodecs.PixelFormat
 ManagedCodecs.PixelFormat.Gray12 = 12 -> ManagedCodecs.PixelFormat
@@ -102,6 +111,7 @@ ManagedCodecs.VideoFrame.GetRow(int plane, int y) -> System.Span<byte>
 ManagedCodecs.VideoFrame.Height.get -> int
 ManagedCodecs.VideoFrame.IsDamaged.get -> bool
 ManagedCodecs.VideoFrame.Offsets.get -> int[]!
+ManagedCodecs.VideoFrame.PictureType.get -> ManagedCodecs.PictureType
 ManagedCodecs.VideoFrame.Planes.get -> byte[]![]!
 ManagedCodecs.VideoFrame.Pts.get -> long
 ManagedCodecs.VideoFrame.Pts.set -> void

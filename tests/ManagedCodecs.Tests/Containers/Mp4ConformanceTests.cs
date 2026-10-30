@@ -73,6 +73,72 @@ public class Mp4ConformanceTests
         }
     }
 
+    /// <summary>
+    /// <see cref="Mp4Demuxer.ReadPacketInfo"/> gives <see cref="Mp4Demuxer.ReadPackets"/>'s packets (checked against
+    /// FFmpeg's above) without their data, in the same order, and reads nothing from the file to do it.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(Samples))]
+    public void PacketInfo_IsThePacketsWithoutData(string sampleName)
+    {
+        var bytes = File.ReadAllBytes(TestSamples.PathOf(sampleName));
+        using var stream = new ReadCountingStream(bytes);
+        using var demuxer = new Mp4Demuxer(stream);
+        var expected = demuxer.ReadPackets().Select(p => new PacketInfo(p.StreamIndex, p.Sequence, p.Data.Length, p.IsKeyframe, p.Dts, p.Pts, p.Duration, p.SkipSamples, p.Discard)).ToList();
+
+        stream.Reads = 0;
+        Assert.Equal(expected, demuxer.ReadPacketInfo());
+        Assert.Equal(0, stream.Reads);
+    }
+
+    /// <summary>
+    /// A demuxer asked for one track describes and gives that track's packets as one reading both does, and leaves the
+    /// other out as if the file had none, in fragmented files too (whose fragments it still reads past).
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(Samples))]
+    public void OneTrack_IsThatTrackOfBoth(string sampleName)
+    {
+        using var both = Mp4Demuxer.Open(TestSamples.PathOf(sampleName));
+        var packets = both.ReadPackets().Select(p => (p.StreamIndex, p.Sequence, FrameMd5.Hash(p.Data.Span), p.IsKeyframe, p.Dts, p.Pts, p.Duration, p.SkipSamples, p.Discard)).ToList();
+        foreach (var tracks in new[] { MediaTypes.Video, MediaTypes.Audio })
+        {
+            using var one = new Mp4Demuxer(File.OpenRead(TestSamples.PathOf(sampleName)), tracks);
+            var video = tracks == MediaTypes.Video ? both.Video : null;
+            var audio = tracks == MediaTypes.Audio ? both.Audio : null;
+            Assert.Equal(Described(video), Described(one.Video));
+            Assert.Equal(Described(audio), Described(one.Audio));
+
+            int?[] kept = [video?.StreamIndex, audio?.StreamIndex];
+            Assert.Equal(
+                packets.Where(p => kept.Contains(p.StreamIndex)),
+                one.ReadPackets().Select(p => (p.StreamIndex, p.Sequence, FrameMd5.Hash(p.Data.Span), p.IsKeyframe, p.Dts, p.Pts, p.Duration, p.SkipSamples, p.Discard)));
+        }
+    }
+
+    // A stream's description to compare: the records compare CodecPrivate by reference, so its bytes as a string.
+    private static string? Described(VideoStreamInfo? info) => info is null ? null : $"{info with { CodecPrivate = default }} {Convert.ToHexString(info.CodecPrivate.Span)}";
+
+    private static string? Described(AudioStreamInfo? info) => info is null ? null : $"{info with { CodecPrivate = default }} {Convert.ToHexString(info.CodecPrivate.Span)}";
+
+    // Counts the synchronous reads, after the headers are read.
+    private sealed class ReadCountingStream(byte[] data) : MemoryStream(data, writable: false)
+    {
+        public int Reads { get; set; }
+
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            Reads++;
+            return base.Read(buffer, offset, count);
+        }
+
+        public override int Read(Span<byte> buffer)
+        {
+            Reads++;
+            return base.Read(buffer);
+        }
+    }
+
     /// <summary>Whether the file has a top-level 'moof' box.</summary>
     private static bool HasMovieFragments(string path)
     {

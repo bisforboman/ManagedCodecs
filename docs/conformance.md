@@ -50,7 +50,9 @@ Decoding straight into the output frame: opt-in, `MjpegDecoder.ZeroCopy` (6% few
 ## MP4 demuxing
 
 ISO BMFF (`moov`, `trak`, `stbl` sample tables): packets, timestamps and
-codec private data match FFmpeg, for video and audio tracks, fragmented files (moof) included. Audio is trimmed by the edit list as FFmpeg trims it: priming
+codec private data match FFmpeg, for video and audio tracks, fragmented files (moof) included. On every MP4 sample,
+`ReadPacketInfo` is checked to be `ReadPackets`'s packets without their data, with no read of the file, and a demuxer of
+one track (`MediaTypes.Video` or `Audio`) to give that track's description and packets as one of both does. Audio is trimmed by the edit list as FFmpeg trims it: priming
 skipped sample by sample, packets after the edit's end left out.
 
 Edit lists of several edits, which FFmpeg's muxer never writes, come from rewritten samples (`tools/mp4-edit-list.py`,

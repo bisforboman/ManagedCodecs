@@ -65,6 +65,22 @@ public readonly record struct Packet(
     int SkipSamples = 0,
     bool Discard = false);
 
+/// <summary>
+/// A <see cref="Packet"/> without its data: what a demuxer knows of it from the container's index alone, for a caller that
+/// needs only the timing and sizes (a duration, a packet list, a bitrate graph).
+/// </summary>
+/// <param name="Size">The packet's <see cref="Packet.Data"/> length in bytes.</param>
+public readonly record struct PacketInfo(
+    int StreamIndex,
+    long Sequence,
+    int Size,
+    bool IsKeyframe,
+    long Dts,
+    long Pts,
+    long Duration,
+    int SkipSamples = 0,
+    bool Discard = false);
+
 /// <summary>Basic facts about a container's video stream.</summary>
 /// <param name="Codec">
 /// One of <see cref="CodecIds"/> when the codec is recognized, otherwise the container's own

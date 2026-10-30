@@ -147,7 +147,7 @@ foreach (var frame in decoder.Flush())
 
 Each frame says how it was coded in `PictureType` (I, P or B), the `pict_type` that `ffprobe -show_frames` prints: in
 H.264 the type of the picture's first slice, of its first field for a frame of two field pictures; I for every MJPEG
-frame. Whether a frame is a keyframe is the packet's `IsKeyFrame`.
+frame. Whether a frame is a keyframe is the packet's `IsKeyframe`.
 
 Interlacing as FFmpeg reports it, for a deinterlacer to go by: `IsInterlaced` and `IsTopFieldFirst` are each frame's
 `interlaced_frame` and `top_field_first` (`ffprobe -show_frames`), `IsCodedAsFields` says it was two field pictures
@@ -155,6 +155,16 @@ Interlacing as FFmpeg reports it, for a deinterlacer to go by: `IsInterlaced` an
 is the stream's, as `ffprobe -show_streams` prints it for an MP4 file (its first picture's). In H.264 they follow the
 picture timing SEI where the stream has one, else how the frame was coded and its fields' order counts
 (docs/conformance.md, Interlacing); MJPEG frames are never flagged, as in FFmpeg.
+
+An MP4 file's tracks can be read one at a time: `new Mp4Demuxer(stream, MediaTypes.Video)` leaves the audio track out
+(no sample table, no packets, `Audio` null). `ReadPacketInfo()` lists the packets without their data, each one's
+size, keyframe and discard flags and timestamps from the sample tables, without reading the file: a duration, a packet
+list or a bitrate graph needs nothing more.
+
+```csharp
+using var demuxer = new Mp4Demuxer(File.OpenRead("video.mp4"), MediaTypes.Video);
+long bytes = demuxer.ReadPacketInfo().Sum(p => (long)p.Size);
+```
 
 The same asynchronously, for servers and UI threads: `ReadPacketsAsync`, `DecodeAsync` and `FlushAsync` are on the
 interfaces (with defaults, so other implementations keep working). With `Threads` above 1, `H264Decoder.DecodeAsync`

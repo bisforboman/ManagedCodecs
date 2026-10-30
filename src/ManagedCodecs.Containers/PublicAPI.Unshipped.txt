@@ -1,1 +1,6 @@
 #nullable enable
+ManagedCodecs.Containers.Mp4Demuxer.Mp4Demuxer(System.IO.Stream! stream) -> void
+ManagedCodecs.Containers.Mp4Demuxer.Mp4Demuxer(System.IO.Stream! stream, bool leaveOpen) -> void
+ManagedCodecs.Containers.Mp4Demuxer.Mp4Demuxer(System.IO.Stream! stream, ManagedCodecs.MediaTypes tracks, bool leaveOpen = false) -> void
+ManagedCodecs.Containers.Mp4Demuxer.ReadPacketInfo() -> System.Collections.Generic.IEnumerable<ManagedCodecs.PacketInfo>!
+*REMOVED*ManagedCodecs.Containers.Mp4Demuxer.Mp4Demuxer(System.IO.Stream! stream, bool leaveOpen = false) -> void

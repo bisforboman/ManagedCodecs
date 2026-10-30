@@ -199,6 +199,28 @@ public class Mp4DemuxerTests
     private static byte[] Flagged(string type, byte version, uint flags, params byte[][] parts) =>
         Box(type, [[version, (byte)(flags >> 16), (byte)(flags >> 8), (byte)flags], .. parts]);
 
+    /// <summary>The tracks to read must name at least one of the two, and nothing else.</summary>
+    [Theory]
+    [InlineData(MediaTypes.None)]
+    [InlineData((MediaTypes)4)]
+    [InlineData(MediaTypes.Video | (MediaTypes)8)]
+    public void RejectsTracksNamingNoTrack(MediaTypes tracks)
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() => new Mp4Demuxer(new MemoryStream(TinyMp4()), tracks));
+    }
+
+    /// <summary>The audio track alone, from a file whose audio track comes first: its stream index stays the file's.</summary>
+    [Fact]
+    public void ReadsAudioTrackAlone()
+    {
+        using var demuxer = new Mp4Demuxer(new MemoryStream(TinyMp4()), MediaTypes.Audio);
+        Assert.Null(demuxer.Video);
+        var packet = Assert.Single(demuxer.ReadPackets());
+        Assert.Equal(demuxer.Audio!.StreamIndex, packet.StreamIndex);
+        Assert.Equal(0, packet.StreamIndex);
+        Assert.Equal(AudioData, packet.Data.ToArray());
+    }
+
     [Fact]
     public void RejectsFileWithoutMoov()
     {

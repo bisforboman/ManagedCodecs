@@ -11,6 +11,13 @@ share internals, so each depends on the others at exactly its own version (`[X]`
 then reports a mix of versions (NU1107, or NU1608 for a newer one referenced directly) rather than letting it fail at
 run time.
 
+## Unreleased
+
+### Fixed
+
+- `AviDemuxer`: an empty video chunk (a dropped frame) now takes its frame's tick, as in FFmpeg, so the packets after
+  it have FFmpeg's pts rather than coming a frame early; it still gives no packet (#226).
+
 ## 0.3.0 – 2026-10-30
 
 Each decoded frame's picture type (I, P, B), as FFmpeg reports it. A new public API, hence a minor version; nothing

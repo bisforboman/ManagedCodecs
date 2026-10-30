@@ -109,6 +109,12 @@ MUTATIONS = [
          find="&& FrameNumAfter(first.Header) == header.FrameNum", replace="&& first.Header.FrameNum == header.FrameNum",
          tests="DisplayName~paff-mmco5"),
 
+    # ---- AVI (as FFmpeg reads it)
+    # An empty video chunk (a dropped frame) gives no packet but takes its tick.
+    dict(file="src/ManagedCodecs.Containers/Avi/AviDemuxer.cs",
+         find="if (isVideoChunk && size == 0)\n                {\n                    frame++;\n                }\n                else ",
+         replace="", tests="FullyQualifiedName~Avi|DisplayName~avi-dropped-frame"),
+
     # ---- MP4 (as FFmpeg reads it)
     # Negative composition offsets in 'ctts': FFmpeg leaves the last two entries out of the shift.
     dict(file="src/ManagedCodecs.Containers/Mp4/Mp4Demuxer.cs",

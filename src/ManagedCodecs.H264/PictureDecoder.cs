@@ -203,6 +203,7 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
         if (secondField)
         {
             (_mvX, _mvY, _refIdx, _refId, _refParity) = (picture.MvX, picture.MvY, picture.RefIdx, picture.RefId, picture.RefParity);
+            ContinueHandles(picture);
             ClearSlots(fieldParity);
             return;
         }
@@ -246,7 +247,7 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
                 _mvY[list].AsSpan(mb * 16, 16).Clear();
                 _refIdx[list].AsSpan(mb * 4, 4).Fill(-1);
                 _refId[list].AsSpan(mb * 4, 4).Clear();
-                _refPic[list].AsSpan(mb * 4, 4).Clear();
+                _refHandle[list].AsSpan(mb * 4, 4).Clear();
                 _absMvd[list][0].AsSpan(mb * 16, 16).Clear();
                 _absMvd[list][1].AsSpan(mb * 16, 16).Clear();
             }
@@ -399,6 +400,12 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
         public int Qp { get; set; }
 
         public Picture[] RefList(int list) => list == 0 ? RefList0 : RefList1;
+
+        /// <summary>
+        /// Per list, the handles (<see cref="HandleOf"/>) of the list's pictures, 0 until first used: a frame's at its
+        /// index, and from 32 the fields an MBAFF field macroblock reads, two a frame (top, then bottom).
+        /// </summary>
+        public byte[][] Handles { get; } = [new byte[32 + 64], new byte[32 + 64]];
 
         /// <summary>The scaling matrix of the slice's SPS and PPS.</summary>
         public ScalingMatrix Scaling { get; init; } = ScalingMatrix.Flat;

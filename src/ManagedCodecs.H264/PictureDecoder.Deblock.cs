@@ -452,15 +452,14 @@ internal sealed partial class PictureDecoder<TPixel>
             return;
         }
 
-        var secondP = _refPic[1].AsSpan(mbP * 4, 4);
-        var secondQ = _refPic[1].AsSpan(mbQ * 4, 4);
-        if (secondP[0] is not null || secondP[1] is not null || secondP[2] is not null || secondP[3] is not null
-            || secondQ[0] is not null || secondQ[1] is not null || secondQ[2] is not null || secondQ[3] is not null)
+        var secondP = _refHandle[1].AsSpan(mbP * 4, 4);
+        var secondQ = _refHandle[1].AsSpan(mbQ * 4, 4);
+        if ((MemoryMarshal.Read<uint>(secondP) | MemoryMarshal.Read<uint>(secondQ)) != 0)
         {
             // Either list or both: segments 0 and 1, and 2 and 3, each lie between one pair of partitions, whose
             // reference pictures decide which motion vectors to compare (MotionRule).
-            var firstP0 = _refPic[0].AsSpan(mbP * 4, 4);
-            var firstQ0 = _refPic[0].AsSpan(mbQ * 4, 4);
+            var firstP0 = _refHandle[0].AsSpan(mbP * 4, 4);
+            var firstQ0 = _refHandle[0].AsSpan(mbQ * 4, 4);
             int halfP = PartitionOf(firstP);
             int halfQ = 0;
             int nextP = PartitionOf(firstP + (2 * step));
@@ -480,8 +479,8 @@ internal sealed partial class PictureDecoder<TPixel>
         }
 
         // Motion from list 0 alone on both sides: MotionStrength's first case, without its tests of the lists.
-        var refsP = _refPic[0].AsSpan(mbP * 4, 4);
-        var refsQ = _refPic[0].AsSpan(mbQ * 4, 4);
+        var refsP = _refHandle[0].AsSpan(mbP * 4, 4);
+        var refsQ = _refHandle[0].AsSpan(mbQ * 4, 4);
         var mvXP = _mvX[0].AsSpan(mbP * 16, 16);
         var mvYP = _mvY[0].AsSpan(mbP * 16, 16);
         var mvXQ = _mvX[0].AsSpan(mbQ * 16, 16);
@@ -523,22 +522,22 @@ internal sealed partial class PictureDecoder<TPixel>
     {
         int partP = ((p >> 4) * 4) + ((p & 15) >> 3 << 1) + ((p & 3) >> 1);
         int partQ = ((q >> 4) * 4) + ((q & 15) >> 3 << 1) + ((q & 3) >> 1);
-        var p0 = _refPic[0][partP];
-        var p1 = _refPic[1][partP];
-        var q0 = _refPic[0][partQ];
-        var q1 = _refPic[1][partQ];
+        int p0 = _refHandle[0][partP];
+        int p1 = _refHandle[1][partP];
+        int q0 = _refHandle[0][partQ];
+        int q1 = _refHandle[1][partQ];
 
         bool Far(int listA, int a, int listB, int b) =>
             Math.Abs(_mvX[listA][a] - _mvX[listB][b]) >= 4 || Math.Abs(_mvY[listA][a] - _mvY[listB][b]) >= limitY;
 
-        if (p1 is null && q1 is null)
+        if ((p1 | q1) == 0)
         {
             // One motion vector each from list 0 (all of P slices).
             return p0 != q0 || Far(0, p, 0, q) ? 1 : 0;
         }
 
-        int countP = (p0 is null ? 0 : 1) + (p1 is null ? 0 : 1);
-        int countQ = (q0 is null ? 0 : 1) + (q1 is null ? 0 : 1);
+        int countP = (p0 == 0 ? 0 : 1) + (p1 == 0 ? 0 : 1);
+        int countQ = (q0 == 0 ? 0 : 1) + (q1 == 0 ? 0 : 1);
         if (countP != countQ)
         {
             return 1;
@@ -546,9 +545,9 @@ internal sealed partial class PictureDecoder<TPixel>
 
         if (countP == 1)
         {
-            int listP = p0 is null ? 1 : 0;
-            int listQ = q0 is null ? 1 : 0;
-            return (p0 ?? p1) != (q0 ?? q1) || Far(listP, p, listQ, q) ? 1 : 0;
+            int listP = p0 == 0 ? 1 : 0;
+            int listQ = q0 == 0 ? 1 : 0;
+            return (p0 | p1) != (q0 | q1) || Far(listP, p, listQ, q) ? 1 : 0;
         }
 
         if (!((p0 == q0 && p1 == q1) || (p0 == q1 && p1 == q0)))
@@ -591,12 +590,11 @@ internal sealed partial class PictureDecoder<TPixel>
         }
 
         int base4x4 = mbAddr * 16;
-        var secondRefs = _refPic[1].AsSpan(mbAddr * 4, 4);
-        if (Vector128.IsHardwareAccelerated && secondRefs[0] is null && secondRefs[1] is null && secondRefs[2] is null && secondRefs[3] is null)
+        if (Vector128.IsHardwareAccelerated && MemoryMarshal.Read<uint>(_refHandle[1].AsSpan(mbAddr * 4, 4)) == 0)
         {
             // Motion from list 0 alone (P macroblocks): every segment at once. Edges 1 and 3 lie inside an 8x8
             // partition, so only edge 2 can have different reference pictures on its two sides.
-            var refs = _refPic[0].AsSpan(mbAddr * 4, 4);
+            var refs = _refHandle[0].AsSpan(mbAddr * 4, 4);
             int differ = (refs[0] != refs[1] ? 1 : 0) | (refs[2] != refs[3] ? 2 : 0) | (refs[0] != refs[2] ? 4 : 0) | (refs[1] != refs[3] ? 8 : 0);
             OneListStrengths(_mvX[0].AsSpan(base4x4, 16), _mvY[0].AsSpan(base4x4, 16), coefficients, differ, limitY, vertical, horizontal);
             return;
@@ -605,7 +603,7 @@ internal sealed partial class PictureDecoder<TPixel>
         if (Vector128.IsHardwareAccelerated)
         {
             // Either list, or both: each pair of partitions' rule from its reference pictures, the motion compared in vectors.
-            TwoListStrengths(_mvX[0].AsSpan(base4x4, 16), _mvY[0].AsSpan(base4x4, 16), _mvX[1].AsSpan(base4x4, 16), _mvY[1].AsSpan(base4x4, 16), coefficients, new ReadOnlySpan<object?>(_refPic[0], mbAddr * 4, 4), new ReadOnlySpan<object?>(_refPic[1], mbAddr * 4, 4), limitY, vertical, horizontal);
+            TwoListStrengths(_mvX[0].AsSpan(base4x4, 16), _mvY[0].AsSpan(base4x4, 16), _mvX[1].AsSpan(base4x4, 16), _mvY[1].AsSpan(base4x4, 16), coefficients, _refHandle[0].AsSpan(mbAddr * 4, 4), _refHandle[1].AsSpan(mbAddr * 4, 4), limitY, vertical, horizontal);
             return;
         }
 
@@ -692,9 +690,9 @@ internal sealed partial class PictureDecoder<TPixel>
     /// between two partitions compares follows from their reference pictures alone (<see cref="MotionRule"/>), so each
     /// pair of partitions takes one rule, and every lane computes the four distances (list 0 or 1 on either side) and
     /// takes its pair's rule. The partitions' reference pictures of list 0 and 1 in <paramref name="refs0"/> and
-    /// <paramref name="refs1"/> (null where a list is unused), compared by identity.
+    /// <paramref name="refs1"/> (their handles, 0 where a list is unused), compared by identity.
     /// </summary>
-    internal static void TwoListStrengths(ReadOnlySpan<short> mvX0, ReadOnlySpan<short> mvY0, ReadOnlySpan<short> mvX1, ReadOnlySpan<short> mvY1, ReadOnlySpan<byte> coefficients, ReadOnlySpan<object?> refs0, ReadOnlySpan<object?> refs1, int limitY, Span<byte> vertical, Span<byte> horizontal)
+    internal static void TwoListStrengths(ReadOnlySpan<short> mvX0, ReadOnlySpan<short> mvY0, ReadOnlySpan<short> mvX1, ReadOnlySpan<short> mvY1, ReadOnlySpan<byte> coefficients, ReadOnlySpan<byte> refs0, ReadOnlySpan<byte> refs1, int limitY, Span<byte> vertical, Span<byte> horizontal)
     {
         // Rules by pair: partitions 0 to 3 with themselves, then the two pairs an edge 2 crosses.
         Span<byte> rules = stackalloc byte[16];
@@ -799,15 +797,15 @@ internal sealed partial class PictureDecoder<TPixel>
     /// 7, both pairings far (each block's two vectors refer to one picture, so either pairing may match).
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal static byte MotionRule(object? p0, object? p1, object? q0, object? q1)
+    internal static byte MotionRule(byte p0, byte p1, byte q0, byte q1)
     {
-        if (p1 is null && q1 is null)
+        if ((p1 | q1) == 0)
         {
             return p0 != q0 ? (byte)0 : (byte)1;
         }
 
-        int countP = (p0 is null ? 0 : 1) + (p1 is null ? 0 : 1);
-        int countQ = (q0 is null ? 0 : 1) + (q1 is null ? 0 : 1);
+        int countP = (p0 == 0 ? 0 : 1) + (p1 == 0 ? 0 : 1);
+        int countQ = (q0 == 0 ? 0 : 1) + (q1 == 0 ? 0 : 1);
         if (countP != countQ)
         {
             return 0;
@@ -815,7 +813,7 @@ internal sealed partial class PictureDecoder<TPixel>
 
         if (countP == 1)
         {
-            return (p0 ?? p1) != (q0 ?? q1) ? (byte)0 : (byte)(p0 is null ? (q0 is null ? 2 : 4) : (q0 is null ? 3 : 1));
+            return (p0 | p1) != (q0 | q1) ? (byte)0 : (byte)(p0 == 0 ? (q0 == 0 ? 2 : 4) : (q0 == 0 ? 3 : 1));
         }
 
         if (!((p0 == q0 && p1 == q1) || (p0 == q1 && p1 == q0)))
@@ -847,8 +845,8 @@ internal sealed partial class PictureDecoder<TPixel>
 
         for (int list = 0; list < 2; list++)
         {
-            var refs = _refPic[list].AsSpan(mbAddr * 4, 4);
-            if (refs[1] != refs[0] || refs[2] != refs[0] || refs[3] != refs[0])
+            var refs = _refHandle[list].AsSpan(mbAddr * 4, 4);
+            if (MemoryMarshal.Read<uint>(refs) != refs[0] * 0x01010101u)
             {
                 return false;
             }

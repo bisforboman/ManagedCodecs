@@ -462,6 +462,29 @@ fallback under valgrind (CLAUDE.md, Timing); by wall clock the conclusion holds:
 8x8 blocks a frame of `h264-high-b.mp4`, and 4625 and 11 of `h264-bench-720p.mp4`, that is about 1.5% of a frame,
 below what interleaved runs resolve.
 
+Against FFmpeg stage by stage (2026-10-30): perf profiles of mcdec and of an FFmpeg 6.1.1 built with only its H.264
+decoder and its symbols (`--disable-stripping --enable-debug=2`), one thread, 30 loops of `h264-bench-720p.mp4`, each
+decoder's functions put into the same stages. mcdec took about 2.5 times FFmpeg's time; by stage, as shares of each
+decoder's own decoding time (the last column is mcdec's time over FFmpeg's for that stage):
+
+| Stage | mcdec | FFmpeg | Time ratio |
+|---|---|---|---|
+| Macroblock layer (CAVLC parsing, motion vector prediction and storage) | 39% | 37% | 2.6 |
+| Deblocking, bS included | 18% | 19% | 2.4 |
+| Luma motion compensation | 20% | 23% | 2.1 |
+| Chroma motion compensation | 9% | 6% | 3.5 |
+| Inverse transforms and reconstruction | 10% | 7% | 3.3 |
+| Clearing (memset) | 3% | 1% | about 10 |
+
+(FFmpeg inlines its motion vector prediction into `ff_h264_decode_mb_cavlc`, so parsing and the macroblock's motion are
+one row.) The gap is general: no stage holds a large part of it. The two above the average are chroma motion
+compensation (Cb and Cr each repeat the block's setup, and the filter takes two multiplies a row where FFmpeg's
+`pmaddubsw` takes one) and the transforms (32-bit coefficients where FFmpeg's 8-bit path uses 16). Each partition's
+reference picture was a `Picture` reference stored in an array, a write barrier each (0.7 to 0.8% by perf): it is now
+a byte, an index into a table of the pictures the current picture refers to, each slice keeping its reference lists'
+indices, and a macroblock's four compare as one `uint` in the bS derivation; the barrier's share fell to about 0.13%
+and nothing rose in its place (two pairs of back-to-back profiles), about 0.7% of the frame.
+
 ## AAC
 
 AAC LC: channel configurations 1 to 7 and program config elements (1 to 8

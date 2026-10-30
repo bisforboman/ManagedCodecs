@@ -56,8 +56,19 @@ internal sealed partial class PictureDecoder<TPixel>
     private long[][] _refId = [[], []];
     private sbyte[][] _refParity = [[], []];
 
-    // Per list and 8x8 block: the referenced picture, for motion compensation and deblocking.
-    private Picture?[][] _refPic = [[], []];
+    // Per list and 8x8 block: the referenced picture, for motion compensation and deblocking, as its index in
+    // _handlePictures (0: the list is unused). Bytes rather than references: no write barrier a partition, a quarter
+    // of the memory to clear a picture, and a macroblock's four compared as one uint.
+    private byte[][] _refHandle = [[], []];
+
+    // The pictures the current picture's partitions refer to (each view, frame or field, its own entry), from 1.
+    // Every one is in the reference lists, so the decoded picture buffer bounds them (16 frames, 3 views each).
+    private readonly Picture?[] _handlePictures = new Picture?[256];
+    private int _handleCount = 1;
+
+    // The Id of the picture whose decoding gave the handles out (Picture objects are reused, Ids are not): a second
+    // field decoded here after its first keeps them.
+    private long _handlesOf = -1;
 
     // Per 8x8 block: predicted in direct mode (B_Skip, B_Direct_16x16, B_Direct_8x8).
     private bool[] _direct = [];
@@ -75,7 +86,7 @@ internal sealed partial class PictureDecoder<TPixel>
 
     private void InitInter()
     {
-        _refPic = [new Picture?[_mbCount * 4], new Picture?[_mbCount * 4]];
+        _refHandle = [new byte[_mbCount * 4], new byte[_mbCount * 4]];
         _direct = new bool[_mbCount * 4];
     }
 
@@ -97,11 +108,60 @@ internal sealed partial class PictureDecoder<TPixel>
             Array.Clear(_mvY[list]);
             Array.Fill(_refIdx[list], (sbyte)-1);
             Array.Clear(_refId[list]);
-            Array.Clear(_refPic[list]);
+            Array.Clear(_refHandle[list]);
         }
 
         Array.Clear(_direct);
+        ResetHandles(picture);
     }
+
+    /// <summary>
+    /// For a second field: keeps the handles if this decoder gave them out for the first field, else (the second field
+    /// on a decoder of its own) forgets them, with every partition's.
+    /// </summary>
+    private void ContinueHandles(Picture picture)
+    {
+        if (_handlesOf != picture.Id)
+        {
+            Array.Clear(_refHandle[0]);
+            Array.Clear(_refHandle[1]);
+            ResetHandles(picture);
+        }
+    }
+
+    /// <summary>Forgets the pictures of <see cref="_refHandle"/>'s handles.</summary>
+    private void ResetHandles(Picture picture)
+    {
+        _handlePictures.AsSpan(1, _handleCount - 1).Clear();
+        _handleCount = 1;
+        _handlesOf = picture.Id;
+    }
+
+    /// <summary>
+    /// The handle of <paramref name="picture"/> in <see cref="_refHandle"/>, given one if it has none; partitions
+    /// read their slice's (<see cref="SliceState.Handles"/>), so this runs about once a reference picture a slice.
+    /// </summary>
+    private byte HandleOf(Picture picture)
+    {
+        for (int i = 1; i < _handleCount; i++)
+        {
+            if (_handlePictures[i] == picture)
+            {
+                return (byte)i;
+            }
+        }
+
+        if (_handleCount == _handlePictures.Length)
+        {
+            throw new InvalidDataException("A picture refers to more pictures than the decoded picture buffer holds.");
+        }
+
+        _handlePictures[_handleCount] = picture;
+        return (byte)_handleCount++;
+    }
+
+    /// <summary>The picture a handle of <see cref="_refHandle"/> stands for; null for 0.</summary>
+    private Picture? PictureOf(byte handle) => _handlePictures[handle];
 
     /// <summary>P_Skip (8.4.1.1: reference 0, predicted motion) or B_Skip (direct prediction); no residual.</summary>
     private void DecodeSkip(SliceState slice, int mbAddr)
@@ -452,10 +512,13 @@ internal sealed partial class PictureDecoder<TPixel>
         }
 
         long referenceId = reference.Id;
+        int handleSlot = frameIdx;
         if (field)
         {
-            reference = reference.Field((mbAddr & 1) ^ (refIdx & 1));
+            int parity = (mbAddr & 1) ^ (refIdx & 1);
+            reference = reference.Field(parity);
             Statistics.OppositeParity += refIdx & 1;
+            handleSlot = 32 + (frameIdx * 2) + parity;
         }
 
         if (_fieldParity >= 0)
@@ -487,7 +550,13 @@ internal sealed partial class PictureDecoder<TPixel>
         var refIdxs = _refIdx[list].AsSpan(mbAddr * 4, 4);
         var refIds = _refId[list].AsSpan(mbAddr * 4, 4);
         var refParities = _refParity[list].AsSpan(mbAddr * 4, 4);
-        var refPics = _refPic[list].AsSpan(mbAddr * 4, 4);
+        var refHandles = _refHandle[list].AsSpan(mbAddr * 4, 4);
+        ref byte handle = ref slice.Handles[list][handleSlot];
+        if (handle == 0)
+        {
+            handle = HandleOf(reference);
+        }
+
         for (int py = y / 8; py <= (y + h - 1) / 8; py++)
         {
             for (int px = x / 8; px <= (x + w - 1) / 8; px++)
@@ -496,7 +565,7 @@ internal sealed partial class PictureDecoder<TPixel>
                 refIdxs[part] = (sbyte)refIdx;
                 refIds[part] = referenceId;
                 refParities[part] = (sbyte)reference.Parity;
-                refPics[part] = reference;
+                refHandles[part] = handle;
             }
         }
     }
@@ -512,8 +581,8 @@ internal sealed partial class PictureDecoder<TPixel>
     {
         int part = (mbAddr * 4) + ((y >> 3) * 2) + (x >> 3);
         int block = (mbAddr * 16) + ((y >> 2) * 4) + (x >> 2);
-        var ref0 = _refPic[0][part];
-        var ref1 = _refPic[1][part];
+        var ref0 = PictureOf(_refHandle[0][part]);
+        var ref1 = PictureOf(_refHandle[1][part]);
         if (typeof(TPixel) == typeof(byte) && _mbWidthC == 8 && _mbHeightC == 8 && !_pairSlots)
         {
             if ((ref0 is null) != (ref1 is null))

@@ -11,6 +11,14 @@ share internals, so each depends on the others at exactly its own version (`[X]`
 then reports a mix of versions (NU1107, or NU1608 for a newer one referenced directly) rather than letting it fail at
 run time.
 
+## Unreleased
+
+### Changed
+
+- H.264 concealment (`ConcealErrors`) guesses the motion of missing macroblocks in MBAFF frames too, converting a
+  neighbour's motion between field and frame macroblocks, where they copied their place in a reference
+  (docs/conformance.md has what it gains and where it does not).
+
 ## 0.2.3 – 2026-10-29
 
 H.264 right again under the WebAssembly interpreter (wrong from 0.2.0), a better guess for concealed macroblocks, and

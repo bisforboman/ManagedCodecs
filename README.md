@@ -69,8 +69,7 @@ and code that reproduces FFmpeg's reading where it differs from the spec), and n
 - MJPEG: files from real cameras (the samples are all FFmpeg's), and packets holding one field (FFmpeg decodes none).
 - H.264: luma and chroma bit depths that differ are rejected on purpose (no mainstream
   encoder or decoder, FFmpeg included, handles them, and they would need a bit depth for each plane in the frame
-  API); guessing motion for concealed macroblocks in MBAFF frames (they copy their place in a reference; elsewhere the
-  motion is guessed from the neighbours); without concealment, a
+  API); without concealment, a
   lost reference fails pictures up to the next IDR picture, not an MMCO 5 one (by design: the MMCO 5 picture itself
   would have to be decoded from lists that can no longer be trusted, so its marking never applies).
 - H.264 speed: 1.85 to 3.29 times FFmpeg's time on one thread, interlaced video included (Benchmarking); at 720p
@@ -231,8 +230,8 @@ lost picture's reference marking went with it. Slice data that ends inside a mac
 CABAC would otherwise decode the zeros past its end.
 
 With `H264Decoder.ConcealErrors` the decoder conceals damaged slice data instead: what a slice decoded before the
-damage stays, the picture's other slices are decoded, and each missing macroblock copies its place in a reference,
-with zero motion; a lost picture's frame copies the latest reference. Every frame that arrives comes out; the damaged
+damage stays, the picture's other slices are decoded, and each missing macroblock is predicted from a reference with
+the motion of the neighbour whose prediction matches its edges best; a lost picture's frame copies the latest reference. Every frame that arrives comes out; the damaged
 ones, and the ones predicted from them until an IDR picture, have `VideoFrame.IsDamaged` set (docs/conformance.md,
 Error concealment). Damage that still parses is not detected, as in any decoder; damaged slice headers and parameter
 sets still throw (the picture is then lost, which the next one conceals).

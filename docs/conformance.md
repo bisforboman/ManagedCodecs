@@ -317,8 +317,13 @@ intra second field, whose latest reference is its own frame: mid-grey, and no gu
 an available inter neighbour (left, above, right, below; decoded, or concealed before it) along their shared edge, list
 0's or else list 1's; each predicts the macroblock's luma, and the one whose outer samples differ least from the
 neighbours' samples next to them is taken (the earlier on a tie, zero motion first). Missing macroblocks are filled in
-address order, so the guess does not depend on threads. MBAFF frames keep zero motion (a neighbouring pair of the other
-kind would need its motion converted between frame and field units). Deblocking, co-located motion and later direct
+address order, so the guess does not depend on threads. In MBAFF frames the edges are the frame samples next to the
+macroblock (a field macroblock's own field above and below it), each owned by the macroblock that holds it, and a
+neighbour of the other kind has its motion converted as motion vector prediction converts it (8.4.1.3.1: a field's
+vertical vector doubled for a frame macroblock, a frame's halved towards zero for a field macroblock, which takes the
+reference frame's field of its own parity). A missing pair is a frame pair: inferring field pairs from the neighbours
+was worse on the test streams (progressive sources, of which one field holds half the rows), and adding the line
+between the fields to a vector from the other parity changed nothing measurable. Deblocking, co-located motion and later direct
 prediction then read it as any other. A lost picture (a frame_num gap; its packet missing, or its slice headers
 damaged) is the frame inferred for the
 gap (8.2.5.2), which then copies the latest reference once that is done, with no motion; a slice whose reference lists
@@ -360,8 +365,20 @@ against the clean decode, in dB; 2026-10-29):
 | `h264-main-slices.mp4`, 10 | 22.3, 20.1 | 37.0, 25.2 | 31.1, 27.4 |
 | `h264-b-pyramid.mp4`, 6 | 20.9, 14.3 | 27.4, 21.1 | 18.9, 15.4 |
 | `h264-p-refs.mp4`, 6 | 26.9, 20.5 | 27.4, 19.7 | 25.0, 19.1 |
+| `h264-mbaff-p-motion.mp4`, 10 | 29.8, 27.1 | 29.2, 26.2 | 28.1, 22.9 |
+| `h264-mbaff-p-motion.mp4`, 4 | 26.6, 24.3 | 26.2, 22.0 | 24.7, 22.3 |
+| `h264-mbaff-b-pyramid.mp4`, 6 | 25.2, 20.0 | 26.1, 19.3 | 23.5, 18.0 |
+| `h264-mbaff-b-temporal.mp4`, 6 | 25.9, 21.8 | 26.3, 22.1 | 21.3, 17.9 |
+| `h264-mbaff-default.mp4`, 10 | 26.7, 21.3 | 24.8, 21.3 | 22.6, 19.7 |
 
-`H264ConcealmentTests.CutPacket_MotionGuessed` keeps two of them above floors that zero motion falls below. Damage that still parses is not detected and spreads unflagged: with 8 bytes flipped in one of 6
+In MBAFF frames (2026-10-30) the guess gains less, and loses on two streams cut in packet after packet. Cut once, one
+packet at a time over the whole stream, its mean over all cuts is 1.0 to 2.4 dB above zero motion on `p-motion`,
+`b-temporal` and `p`, and within 0.2 dB on `b-pyramid` and `default`. Cut in the middle, `p-motion` gains 5.4 dB in
+4:2:0 and 6.1 dB in 4:2:2 on x64, less on ARM64, whose libx264 encodes these streams differently; the test takes cuts of
+JM's committed streams instead (`jm-paff-mbaff` 20.1 to 24.0 dB, `jm-planes-mbaff` 23.3 to 27.5 dB, the first only
+with the motion converted between field and frame macroblocks).
+
+`H264ConcealmentTests.CutPacket_MotionGuessed` keeps four streams (two of them MBAFF) above floors that zero motion falls below. Damage that still parses is not detected and spreads unflagged: with 8 bytes flipped in one of 6
 packets of each of 21 samples, 13 samples had at least one such packet (CAVLC and CABAC alike). Cut slice data was detected in every case: a conforming
 CABAC slice ends inside its data (9.3.4.5 writes the stop bit last), so consuming bits past it is damage.
 

@@ -59,8 +59,14 @@ MUTATIONS = [
     # ---- H.264
     # Concealment guesses a missing macroblock's motion from its neighbours (boundary matching), not zero motion.
     dict(file="src/ManagedCodecs.H264/PictureDecoder.Conceal.cs",
-         find="        if (count == 1)", replace="        if (count >= 1)",
+         find="        if (count == 1)\n        {\n            return candidates[0];\n        }\n\n        var (origin",
+         replace="        if (count >= 1)\n        {\n            return candidates[0];\n        }\n\n        var (origin",
          tests="FullyQualifiedName~CutPacket_MotionGuessed"),
+    # The same in MBAFF frames, whose neighbours' motion is converted between field and frame macroblocks.
+    dict(file="src/ManagedCodecs.H264/PictureDecoder.Conceal.cs",
+         find="        if (count == 1)\n        {\n            return candidates[0];\n        }\n\n        var plane",
+         replace="        if (count >= 1)\n        {\n            return candidates[0];\n        }\n\n        var plane",
+         tests="FullyQualifiedName~CutPacket_MotionGuessed&DisplayName~mbaff"),
     # MBAFF: frame-to-field vertical motion halves with truncation towards zero.
     dict(file="src/ManagedCodecs.H264/PictureDecoder.Direct.cs",
          find="VerticalScale.FrameToField => col.MvY / 2,", replace="VerticalScale.FrameToField => col.MvY >> 1,",

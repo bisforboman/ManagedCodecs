@@ -625,7 +625,8 @@ internal sealed partial class PictureDecoder<TPixel>
     /// <summary>
     /// Two vectors of 16-bit lane masks (all ones or zero) as one of 8-bit masks. Narrowed as signed lanes, -1 and 0:
     /// Mono's WebAssembly interpreter narrows with the saturating instructions, which turn an unsigned 0xFFFF into
-    /// 0 rather than truncating it to 0xFF (issue #206), and agree with truncation only on values the narrower type holds.
+    /// 0 rather than truncating it to 0xFF (issue #206, reported as dotnet/runtime#136688), and agree with truncation
+    /// only on values the narrower type holds.
     /// </summary>
     private static Vector128<byte> NarrowMasks(Vector128<short> low, Vector128<short> high) => Vector128.Narrow(low, high).AsByte();
 

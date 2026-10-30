@@ -183,7 +183,7 @@ internal sealed partial class PictureDecoder<TPixel>
         (int X, int Y) mv = (0, 0);
         if (a.Available && b.Available && !(a.RefIdx == 0 && a.MvX == 0 && a.MvY == 0) && !(b.RefIdx == 0 && b.MvX == 0 && b.MvY == 0))
         {
-            mv = PredictMv(0, mbAddr, 0, 0, 16, 16, 0, PartitionShape.Other);
+            mv = PredictMv(0, mbAddr, 0, 0, 16, 0, PartitionShape.Other, a, b);
         }
 
         StoreMotion(slice, 0, mbAddr, 0, 0, 16, 16, 0, mv.X, mv.Y);
@@ -1014,6 +1014,13 @@ internal sealed partial class PictureDecoder<TPixel>
         int current = BlockIndex(x / 4, y / 4);
         var a = MotionNeighbor(list, mbAddr, x - 1, y, current);
         var b = MotionNeighbor(list, mbAddr, x, y - 1, current);
+        return PredictMv(list, mbAddr, x, y, w, refIdx, shape, a, b);
+    }
+
+    /// <summary><see cref="PredictMv(int, int, int, int, int, int, int, PartitionShape)"/> with neighbours A and B already read (P_Skip reads them first).</summary>
+    private (int X, int Y) PredictMv(int list, int mbAddr, int x, int y, int w, int refIdx, PartitionShape shape, Motion a, Motion b)
+    {
+        int current = BlockIndex(x / 4, y / 4);
         var c = MotionNeighbor(list, mbAddr, x + w, y - 1, current);
         if (!c.Available)
         {

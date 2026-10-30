@@ -7,6 +7,8 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 mkdir -p samples
+# A previous run's copies of samples/jm-ref (below), which FFmpeg's references for every sample would fail on.
+for f in samples/jm-ref/*; do rm -f "samples/${f##*/}"; done
 ff() { ffmpeg -hide_banner -loglevel error -y "$@"; }
 magick_cmd=$(command -v magick || command -v convert)
 

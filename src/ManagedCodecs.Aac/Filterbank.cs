@@ -529,6 +529,118 @@ internal static class Vectors
         }
     }
 
+    /// <summary>
+    /// a[n] = the sum over the terms t, in their order and from zero, of b[bOffsets[t] + n] * w[wOffsets[t] + n]: the
+    /// same values as <see cref="MultiplyAdd"/> once a term on a cleared <paramref name="a"/>, with each sum kept in a
+    /// register rather than stored and loaded again a term (the QMF banks' windows, ten terms of 32 or 64 values).
+    /// </summary>
+    public static void SumOfProducts(Span<double> a, ReadOnlySpan<double> b, ReadOnlySpan<int> bOffsets, ReadOnlySpan<double> w, ReadOnlySpan<int> wOffsets)
+    {
+        if (bOffsets.Length != wOffsets.Length)
+        {
+            throw new ArgumentException("Every term takes an offset into both inputs.");
+        }
+
+        for (int t = 0; t < bOffsets.Length; t++)
+        {
+            if ((uint)bOffsets[t] > (uint)(b.Length - a.Length) || (uint)wOffsets[t] > (uint)(w.Length - a.Length))
+            {
+                throw new ArgumentOutOfRangeException(nameof(bOffsets), "A term reaches past its input.");
+            }
+        }
+
+        ref double x = ref MemoryMarshal.GetReference(a);
+        ref double u = ref MemoryMarshal.GetReference(b);
+        ref double y = ref MemoryMarshal.GetReference(w);
+        int terms = bOffsets.Length;
+        int n = 0;
+
+        // Four vectors' sums at once: each is a chain of one add a term, so one alone would wait on the adds' latency.
+        if (Vector256.IsHardwareAccelerated)
+        {
+            int count = Vector256<double>.Count;
+            for (; n <= a.Length - (4 * count); n += 4 * count)
+            {
+                var sum0 = Vector256<double>.Zero;
+                var sum1 = Vector256<double>.Zero;
+                var sum2 = Vector256<double>.Zero;
+                var sum3 = Vector256<double>.Zero;
+                for (int t = 0; t < terms; t++)
+                {
+                    ref double bt = ref Unsafe.Add(ref u, bOffsets[t] + n);
+                    ref double wt = ref Unsafe.Add(ref y, wOffsets[t] + n);
+                    sum0 += Vector256.LoadUnsafe(ref bt) * Vector256.LoadUnsafe(ref wt);
+                    sum1 += Vector256.LoadUnsafe(ref bt, (nuint)count) * Vector256.LoadUnsafe(ref wt, (nuint)count);
+                    sum2 += Vector256.LoadUnsafe(ref bt, (nuint)(2 * count)) * Vector256.LoadUnsafe(ref wt, (nuint)(2 * count));
+                    sum3 += Vector256.LoadUnsafe(ref bt, (nuint)(3 * count)) * Vector256.LoadUnsafe(ref wt, (nuint)(3 * count));
+                }
+
+                sum0.StoreUnsafe(ref x, (nuint)n);
+                sum1.StoreUnsafe(ref x, (nuint)(n + count));
+                sum2.StoreUnsafe(ref x, (nuint)(n + (2 * count)));
+                sum3.StoreUnsafe(ref x, (nuint)(n + (3 * count)));
+            }
+
+            for (; n <= a.Length - count; n += count)
+            {
+                var sum = Vector256<double>.Zero;
+                for (int t = 0; t < terms; t++)
+                {
+                    sum += Vector256.LoadUnsafe(ref u, (nuint)(bOffsets[t] + n)) * Vector256.LoadUnsafe(ref y, (nuint)(wOffsets[t] + n));
+                }
+
+                sum.StoreUnsafe(ref x, (nuint)n);
+            }
+        }
+        else if (Vector128.IsHardwareAccelerated)
+        {
+            int count = Vector128<double>.Count;
+            for (; n <= a.Length - (4 * count); n += 4 * count)
+            {
+                var sum0 = Vector128<double>.Zero;
+                var sum1 = Vector128<double>.Zero;
+                var sum2 = Vector128<double>.Zero;
+                var sum3 = Vector128<double>.Zero;
+                for (int t = 0; t < terms; t++)
+                {
+                    ref double bt = ref Unsafe.Add(ref u, bOffsets[t] + n);
+                    ref double wt = ref Unsafe.Add(ref y, wOffsets[t] + n);
+                    sum0 += Vector128.LoadUnsafe(ref bt) * Vector128.LoadUnsafe(ref wt);
+                    sum1 += Vector128.LoadUnsafe(ref bt, (nuint)count) * Vector128.LoadUnsafe(ref wt, (nuint)count);
+                    sum2 += Vector128.LoadUnsafe(ref bt, (nuint)(2 * count)) * Vector128.LoadUnsafe(ref wt, (nuint)(2 * count));
+                    sum3 += Vector128.LoadUnsafe(ref bt, (nuint)(3 * count)) * Vector128.LoadUnsafe(ref wt, (nuint)(3 * count));
+                }
+
+                sum0.StoreUnsafe(ref x, (nuint)n);
+                sum1.StoreUnsafe(ref x, (nuint)(n + count));
+                sum2.StoreUnsafe(ref x, (nuint)(n + (2 * count)));
+                sum3.StoreUnsafe(ref x, (nuint)(n + (3 * count)));
+            }
+
+            for (; n <= a.Length - count; n += count)
+            {
+                var sum = Vector128<double>.Zero;
+                for (int t = 0; t < terms; t++)
+                {
+                    sum += Vector128.LoadUnsafe(ref u, (nuint)(bOffsets[t] + n)) * Vector128.LoadUnsafe(ref y, (nuint)(wOffsets[t] + n));
+                }
+
+                sum.StoreUnsafe(ref x, (nuint)n);
+            }
+        }
+
+        for (; n < a.Length; n++)
+        {
+            double sum = 0;
+            for (int t = 0; t < terms; t++)
+            {
+                sum += b[bOffsets[t] + n] * w[wOffsets[t] + n];
+            }
+
+            a[n] = sum;
+        }
+    }
+
     /// <summary>sum[n] += (re[n] * re[n]) + (im[n] * im[n]).</summary>
     public static void AddMagnitudes(Span<double> sum, ReadOnlySpan<double> re, ReadOnlySpan<double> im)
     {

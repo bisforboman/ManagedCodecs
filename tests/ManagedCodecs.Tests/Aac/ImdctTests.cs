@@ -86,4 +86,43 @@ public class ImdctTests
             Assert.Equal(a.Select((x, n) => (float)((x + b[n]) * (1.0 / 32768))), output);
         }
     }
+
+    /// <summary>
+    /// The fused windows' sums give what clearing and one <see cref="Vectors.MultiplyAdd"/> a term give, bit for bit:
+    /// the terms in their order from zero, tails included, at the QMF banks' offsets and at scattered ones.
+    /// </summary>
+    [Fact]
+    public void SumOfProducts_MatchesMultiplyAddATerm()
+    {
+        var random = new Random(11);
+        for (int length = 0; length < 70; length++)
+        {
+            int terms = random.Next(0, 11);
+            int[] bOffsets = [.. Enumerable.Range(0, terms).Select(_ => random.Next(0, 100))];
+            int[] wOffsets = [.. Enumerable.Range(0, terms).Select(_ => random.Next(0, 100))];
+            double[] b = [.. Enumerable.Range(0, length + 100).Select(_ => (random.NextDouble() - 0.5) * 1e5)];
+            double[] w = [.. Enumerable.Range(0, length + 100).Select(_ => random.NextDouble() - 0.5)];
+
+            var expected = new double[length];
+            for (int t = 0; t < terms; t++)
+            {
+                Vectors.MultiplyAdd(expected, b.AsSpan(bOffsets[t], length), w.AsSpan(wOffsets[t], length));
+            }
+
+            var sum = new double[length];
+            Array.Fill(sum, double.NaN);
+            Vectors.SumOfProducts(sum, b, bOffsets, w, wOffsets);
+            Assert.Equal(expected.Select(BitConverter.DoubleToInt64Bits), sum.Select(BitConverter.DoubleToInt64Bits));
+        }
+    }
+
+    /// <summary>A term that would read past its input is refused, before anything is written.</summary>
+    [Fact]
+    public void SumOfProducts_RejectsATermPastItsInput()
+    {
+        var sum = new double[8];
+        Assert.Throws<ArgumentOutOfRangeException>(() => Vectors.SumOfProducts(sum, new double[16], [9], new double[16], [0]));
+        Assert.Throws<ArgumentOutOfRangeException>(() => Vectors.SumOfProducts(sum, new double[16], [0], new double[16], [-1]));
+        Assert.Throws<ArgumentException>(() => Vectors.SumOfProducts(sum, new double[16], [0, 1], new double[16], [0]));
+    }
 }

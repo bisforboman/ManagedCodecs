@@ -70,13 +70,9 @@ internal sealed class QmfAnalysis
         // u(n) = the sum of x(n + 64 j) c(2(n + 64 j)) over j in 0..4, at even and at odd n.
         Span<double> uEven = stackalloc double[32];
         Span<double> uOdd = stackalloc double[32];
-        uEven.Clear();
-        uOdd.Clear();
-        for (int j = 0; j < 5; j++)
-        {
-            Vectors.MultiplyAdd(uEven, even.Slice(32 * j, 32), EvenWindow.AsSpan(32 * j, 32));
-            Vectors.MultiplyAdd(uOdd, odd.Slice(32 * j, 32), OddWindow.AsSpan(32 * j, 32));
-        }
+        ReadOnlySpan<int> terms = [0, 32, 64, 96, 128];
+        Vectors.SumOfProducts(uEven, even, terms, EvenWindow, terms);
+        Vectors.SumOfProducts(uOdd, odd, terms, OddWindow, terms);
 
         Span<double> re = stackalloc double[32];
         Span<double> im = stackalloc double[32];
@@ -212,12 +208,17 @@ internal sealed class QmfSynthesis
         // ten of w, in the order of n.
         var window = t.Window.AsSpan();
         output = output[..bands];
-        output.Clear();
+        Span<int> vTerms = stackalloc int[10];
+        Span<int> windowTerms = stackalloc int[10];
         for (int i = 0; i < 5; i++)
         {
-            Vectors.MultiplyAdd(output, v.Slice(4 * bands * i, bands), window.Slice(2 * bands * i, bands));
-            Vectors.MultiplyAdd(output, v.Slice((4 * bands * i) + (3 * bands), bands), window.Slice((2 * bands * i) + bands, bands));
+            vTerms[2 * i] = 4 * bands * i;
+            vTerms[(2 * i) + 1] = (4 * bands * i) + (3 * bands);
+            windowTerms[2 * i] = 2 * bands * i;
+            windowTerms[(2 * i) + 1] = (2 * bands * i) + bands;
         }
+
+        Vectors.SumOfProducts(output, v, vTerms, window, windowTerms);
     }
 
     /// <summary>

@@ -188,7 +188,7 @@ internal sealed class BitReader
         return ReadLongUe(leadingZeros);
     }
 
-    /// <summary><see cref="ReadUe"/> for a code of 16 or more leading zeros.</summary>
+    /// <summary><see cref="ReadUe()"/> for a code of 16 or more leading zeros.</summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
     private uint ReadLongUe(int leadingZeros)
     {

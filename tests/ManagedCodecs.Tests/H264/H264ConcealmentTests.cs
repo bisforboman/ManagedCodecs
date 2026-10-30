@@ -66,12 +66,15 @@ public class H264ConcealmentTests
     /// <summary>
     /// The quality of the guess: a missing macroblock takes the motion of a neighbour that matches its edges best, which
     /// for these streams (camera-like motion) comes far closer to the clean decode than zero motion from one reference.
-    /// The floors are the mean PSNR of the flagged frames with the guess, rounded down (zero motion gave 29.7 and
-    /// 21.9 dB): docs/conformance.md has the comparison with FFmpeg's.
+    /// The floors are the mean PSNR of the flagged frames with the guess, rounded down (zero motion gave 29.7, 21.9,
+    /// 30.1 and 28.3 dB): docs/conformance.md has the comparison with FFmpeg's. In MBAFF frames the macroblocks around
+    /// a missing frame pair are field pairs, so these rows hold only if their motion is converted to frame units.
     /// </summary>
     [Theory]
     [InlineData("h264-main-slices.mp4", 33)]
     [InlineData("h264-high-b.mp4", 25)]
+    [InlineData("h264-mbaff-p-motion.mp4", 35)]
+    [InlineData("h264-422-mbaff-p-motion.mp4", 34)]
     public void CutPacket_MotionGuessed(string sampleName, double floor)
     {
         if (!ParameterSetRewriter.Exists(sampleName))

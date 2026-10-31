@@ -911,6 +911,24 @@ public sealed class Mp4Demuxer : IDemuxer
                 }
             }
 
+            // As FFmpeg's mov_fix_index: where the first pts shown (discarded samples don't count), less the empty edits
+            // before the first real one, comes after 0 (an edit whose media time is before the first composition offset,
+            // which FFmpeg's muxer never writes), every time of the track moves back so that it is 0.
+            long firstShown = long.MaxValue;
+            for (int i = 0; i < samples.Count; i++)
+            {
+                if ((samples.Flags[i] & SampleTable.Discard) == 0)
+                {
+                    firstShown = Math.Min(firstShown, samples.Pts(i));
+                }
+            }
+
+            long late = firstShown == long.MaxValue ? 0 : firstShown - edits[0].Start;
+            for (int i = 0; late > 0 && i < samples.Count; i++)
+            {
+                samples.Dts[i] -= late;
+            }
+
             return samples;
         }
 

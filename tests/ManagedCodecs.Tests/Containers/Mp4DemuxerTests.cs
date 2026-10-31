@@ -34,9 +34,10 @@ public class Mp4DemuxerTests
 
         // Raw dts 0, 3000, 6000 and pts 3000, 6000, 6000. The edit list starts with 500 ms of
         // nothing (45000 ticks) and then plays from media time 200, so everything moves by
-        // 45000 - 200 = 44800.
-        Assert.Equal([44_800L, 47_800, 50_800], packets.Select(p => p.Dts));
-        Assert.Equal([47_800L, 50_800, 50_800], packets.Select(p => p.Pts));
+        // 45000 - 200 = 44800; the first pts, 47800, then comes 2800 after the empty edit, and
+        // as FFmpeg (mov_fix_index; ffprobe shows these times) everything moves back by that.
+        Assert.Equal([42_000L, 45_000, 48_000], packets.Select(p => p.Dts));
+        Assert.Equal([45_000L, 48_000, 48_000], packets.Select(p => p.Pts));
     }
 
     [Fact]

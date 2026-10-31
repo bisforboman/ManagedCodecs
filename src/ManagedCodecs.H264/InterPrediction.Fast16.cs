@@ -158,19 +158,45 @@ internal static partial class InterPrediction
             int sy = Math.Clamp(y + j, 0, maxY) * stride;
             if (inside)
             {
-                var source = plane.Slice(sy + x, width);
-                for (int i = 0; i < width; i++)
-                {
-                    row[i] = source[i];
-                }
-
+                CopyWidened(plane, sy + x, width, window[(j * Window16Stride)..]);
                 continue;
             }
 
-            for (int i = 0; i < width; i++)
+            // Left of the picture its first sample, right of it its last, the rest as it is.
+            int left = Math.Clamp(-x, 0, width);
+            int right = Math.Clamp(maxX + 1 - x, left, width);
+            row[..left].Fill(plane[sy]);
+            CopyWidened(plane, sy + x + left, right - left, window[((j * Window16Stride) + left)..]);
+            row[right..].Fill(plane[sy + maxX]);
+        }
+    }
+
+    /// <summary>
+    /// Widens <paramref name="width"/> samples from <paramref name="start"/> into <paramref name="row"/>: 8 a step where
+    /// the plane holds 24 samples from there and the row 24 ints (writing up to 7 past the width, which the window's
+    /// later fills and rows overwrite), else one by one.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static void CopyWidened(ReadOnlySpan<ushort> plane, int start, int width, Span<int> row)
+    {
+        int i = 0;
+        if (Vector128.IsHardwareAccelerated && start + 24 <= plane.Length && row.Length >= 24)
+        {
+            ref ushort source = ref Unsafe.Add(ref MemoryMarshal.GetReference(plane), start);
+            ref int target = ref MemoryMarshal.GetReference(row);
+            for (; i < width; i += 8)
             {
-                row[i] = plane[sy + Math.Clamp(x + i, 0, maxX)];
+                var samples = Vector128.LoadUnsafe(ref source, (nuint)i);
+                Vector128.WidenLower(samples).AsInt32().StoreUnsafe(ref target, (nuint)i);
+                Vector128.WidenUpper(samples).AsInt32().StoreUnsafe(ref target, (nuint)(i + 4));
             }
+
+            return;
+        }
+
+        for (; i < width; i++)
+        {
+            row[i] = plane[start + i];
         }
     }
 

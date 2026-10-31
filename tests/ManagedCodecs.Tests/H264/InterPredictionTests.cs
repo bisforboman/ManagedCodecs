@@ -255,4 +255,32 @@ public class InterPredictionTests
             Assert.Equal(expected, actual);
         }
     }
+
+    /// <summary>
+    /// The deep-sample window copy widens 8 samples a step: every width a window row takes, from starts where the
+    /// plane holds a whole vector and from ones near its end where only the scalar tail may read.
+    /// </summary>
+    [Fact]
+    public void CopyWidened_MatchesDefinition()
+    {
+        var random = new Random(16);
+        var plane = new ushort[200];
+        for (int i = 0; i < plane.Length; i++)
+        {
+            plane[i] = (ushort)random.Next(1 << 14);
+        }
+
+        for (int width = 1; width <= 21; width++)
+        {
+            foreach (int start in new[] { 0, 3, 100, plane.Length - width - 7, plane.Length - width - 1, plane.Length - width })
+            {
+                var row = new int[24];
+                InterPrediction.CopyWidened(plane, start, width, row);
+                for (int i = 0; i < width; i++)
+                {
+                    Assert.Equal(plane[start + i], row[i]);
+                }
+            }
+        }
+    }
 }

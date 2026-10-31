@@ -108,6 +108,7 @@ ManagedCodecs.Containers.AdtsDemuxer
 ManagedCodecs.Containers.AdtsDemuxer.AdtsDemuxer(System.IO.Stream! stream, bool leaveOpen = false) -> void
 ManagedCodecs.Containers.AdtsDemuxer.Audio.get -> ManagedCodecs.AudioStreamInfo!
 ManagedCodecs.Containers.AdtsDemuxer.Dispose() -> void
+ManagedCodecs.Containers.AdtsDemuxer.ReadPacketInfo() -> System.Collections.Generic.IEnumerable<ManagedCodecs.PacketInfo>!
 ManagedCodecs.Containers.AdtsDemuxer.ReadPackets() -> System.Collections.Generic.IEnumerable<ManagedCodecs.Packet>!
 ManagedCodecs.Containers.AdtsDemuxer.ReadPacketsAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerable<ManagedCodecs.Packet>!
 ManagedCodecs.Containers.AdtsDemuxer.Video.get -> ManagedCodecs.VideoStreamInfo?
@@ -115,6 +116,7 @@ ManagedCodecs.Containers.AviDemuxer
 ManagedCodecs.Containers.AviDemuxer.Audio.get -> ManagedCodecs.AudioStreamInfo?
 ManagedCodecs.Containers.AviDemuxer.AviDemuxer(System.IO.Stream! stream, bool leaveOpen = false) -> void
 ManagedCodecs.Containers.AviDemuxer.Dispose() -> void
+ManagedCodecs.Containers.AviDemuxer.ReadPacketInfo() -> System.Collections.Generic.IEnumerable<ManagedCodecs.PacketInfo>!
 ManagedCodecs.Containers.AviDemuxer.ReadPackets() -> System.Collections.Generic.IEnumerable<ManagedCodecs.Packet>!
 ManagedCodecs.Containers.AviDemuxer.ReadPacketsAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerable<ManagedCodecs.Packet>!
 ManagedCodecs.Containers.AviDemuxer.Video.get -> ManagedCodecs.VideoStreamInfo!

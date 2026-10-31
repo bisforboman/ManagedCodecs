@@ -7,7 +7,8 @@ using ManagedCodecs.Mjpeg;
 namespace ManagedCodecs.MonoGame;
 
 /// <summary>A decoded video frame as RGBA and when to show it, in seconds from the start.</summary>
-internal sealed record RgbaFrame(double Time, int Width, int Height, byte[] Pixels);
+/// <param name="AspectRatio">The width of a sample over its height (1 when unknown): the frame is shown this much wider.</param>
+internal sealed record RgbaFrame(double Time, int Width, int Height, byte[] Pixels, double AspectRatio);
 
 /// <summary>
 /// Demuxes and decodes a file on a thread of its own, ahead of playback: video frames converted to RGBA, audio as
@@ -19,7 +20,6 @@ internal sealed class MediaSource : IDisposable
     private readonly IDemuxer _demuxer;
     private readonly IVideoDecoder _video;
     private readonly IAudioDecoder? _audio;
-    private readonly YuvToRgba _converter;
     private readonly Thread _thread;
     private readonly CancellationTokenSource _stop = new();
     private long _decoded;
@@ -40,10 +40,6 @@ internal sealed class MediaSource : IDisposable
         _audio = audio?.Codec == CodecIds.Aac ? new AacDecoder(audio) : null;
         VideoStream = video;
         AudioStream = _audio is null ? null : audio;
-
-        // No colour metadata yet: H.264 as limited range (BT.709 from 720 lines), JPEG as full range BT.601.
-        bool jpeg = video.Codec == CodecIds.Mjpeg;
-        _converter = new YuvToRgba(bt709: !jpeg && video.Height >= 720, fullRange: jpeg);
         _thread = new Thread(Run) { IsBackground = true, Name = "mcplay decode" };
     }
 
@@ -111,12 +107,14 @@ internal sealed class MediaSource : IDisposable
             long start = System.Diagnostics.Stopwatch.GetTimestamp();
             var (width, height) = (frame.Width, frame.Height);
             var pixels = new byte[width * height * 4];
-            _converter.Convert(frame, pixels);
+            YuvToRgba.For(frame).Convert(frame, pixels);
             double time = frame.Pts * (double)timeBase.Numerator / timeBase.Denominator;
+            var sar = frame.SampleAspectRatio;
+            double aspect = sar.Numerator > 0 ? sar.Numerator / (double)sar.Denominator : 1;
             frame.Dispose();
             _decodeTicks += System.Diagnostics.Stopwatch.GetTimestamp() - start;
             _decoded++;
-            Frames.Add(new RgbaFrame(time, width, height, pixels), token);
+            Frames.Add(new RgbaFrame(time, width, height, pixels, aspect), token);
         }
     }
 

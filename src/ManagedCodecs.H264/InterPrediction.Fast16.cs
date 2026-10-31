@@ -35,6 +35,10 @@ internal static partial class InterPrediction
         int yFrac = mvY & 3;
         int maxX = (reference.WidthInMbs * 16) - 1;
         var max = Vector128.Create((1 << reference.BitDepth) - 1);
+        if (xFrac == 0 && yFrac == 0 && CopyInside(plane, stride, maxX, maxY, x + (mvX >> 2), y + (mvY >> 2), width, height, output, outputStride))
+        {
+            return;
+        }
 
         // Samples -2 .. size + 2 around the integer position; G of output (0, 0) at window (2, 2).
         Span<int> window = stackalloc int[(Window16Stride * 21) + 4];
@@ -123,6 +127,12 @@ internal static partial class InterPrediction
         int yFrac = mvY & 7;
         int maxX = (reference.WidthInMbs * 8) - 1;
 
+        // Weights (64, 0, 0, 0): (64 * A + 32) >> 6 is A.
+        if (xFrac == 0 && yFrac == 0 && CopyInside(plane, stride, maxX, maxY, x + (mvX >> 3), y + (mvY >> 3), width, height, output, outputStride))
+        {
+            return;
+        }
+
         // Up to 9 x 17 samples (an 8x16 block of 4:2:2 and its right and lower neighbours).
         Span<int> window = stackalloc int[(Window16Stride * 17) + 4];
         FetchWindow16(plane, stride, maxX, maxY, x + (mvX >> 3), y + (mvY >> 3), width + 1, height + 1, window);
@@ -163,6 +173,26 @@ internal static partial class InterPrediction
                 StoreLanes16((sum + round) >> 6, output[((j * outputStride) + i)..], Math.Min(4, width - i));
             }
         }
+    }
+
+    /// <summary>
+    /// A full-sample prediction is the reference's samples: copies the <paramref name="width"/> x
+    /// <paramref name="height"/> area at (<paramref name="x"/>, <paramref name="y"/>) straight to the output when it
+    /// lies inside the picture (false otherwise, for the clamping window path).
+    /// </summary>
+    private static bool CopyInside(ReadOnlySpan<ushort> plane, int stride, int maxX, int maxY, int x, int y, int width, int height, Span<ushort> output, int outputStride)
+    {
+        if (x < 0 || y < 0 || x + width - 1 > maxX || y + height - 1 > maxY)
+        {
+            return false;
+        }
+
+        for (int j = 0; j < height; j++)
+        {
+            plane.Slice(((y + j) * stride) + x, width).CopyTo(output[(j * outputStride)..]);
+        }
+
+        return true;
     }
 
     /// <summary>

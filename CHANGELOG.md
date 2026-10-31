@@ -43,6 +43,10 @@ run time.
 - H.264 deeper than 8 bits deblocks faster again, bit for bit as before: 3.2 to 4.3% off `h264-10bit-b.mp4`'s
   steady frame and 2.3 to 2.8% off `h264-10bit-motion.mp4` on GitHub's x64 and ARM64 runners in two `compare.yml` runs
   against main. An edge's samples and filter parameters stay in vectors, where they went through buffers on the stack.
+- H.264 deeper than 8 bits decodes faster on full-sample motion, bit for bit as before: 4.6 to 5.1% off
+  `h264-10bit-b.mp4`'s steady frame on GitHub's x64 runner and 8.1 to 8.6% on its ARM64 runner in two `compare.yml`
+  runs against main (`h264-10bit-motion.mp4`, with few full-sample vectors, unchanged). A block whose vector points at
+  whole samples inside the picture copies the reference's rows, where it went through the interpolation's window.
 
 ### Fixed
 

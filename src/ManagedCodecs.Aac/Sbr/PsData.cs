@@ -163,6 +163,12 @@ internal sealed class PsData
             _lastIidBands = IidBands;
             _lastIccBands = IccBands;
         }
+        else if (EnableIid && _lastIid.AsSpan(0, _lastIidBands).ContainsAnyExceptInRange(FineIid ? -15 : -7, FineIid ? 15 : 7))
+        {
+            // No envelopes keep the last frame's values (8.6.4.4): fine IID indices beyond a coarse header's range have no
+            // value there, and FFmpeg rejects them too ("iid_par invalid").
+            throw new InvalidDataException("Parametric stereo keeps IID indices outside its header's quantization.");
+        }
 
         EnableIpdOpd = false;
         if (EnableExtension)

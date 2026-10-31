@@ -26,6 +26,10 @@ first frame 80 ms, the frame at 1 s 245 ms (24 frames decoded). Missing:
   reads the audio stream's description, no samples). The codec packages stay what they are; a consumer who only
   decodes doesn't take on image code. The same version as every other package (one version for all, CLAUDE.md).
 - **API**, small and synchronous with async twins, as the demuxers have:
+  - Both take a seekable stream: an MP4 whose 'moov' comes after its 'mdat' (most camera and phone files) can't be
+    read front to back, and `Mp4Demuxer` needs `CanSeek`. An ASP.NET request body or a serverless upload usually isn't
+    seekable, so callers buffer it (a `MemoryStream`, or a temporary file for large uploads) or pass a path; the
+    package's readme says so first.
   - `VideoProbe.Read(Stream)` → `VideoInfo`: duration (from the edited track, as ffprobe's `format=duration`
     reports it), width and height as displayed (after rotation and sample aspect ratio), codec, frame rate, rotation,
     whether there is audio and its codec, sample rate and channels. It throws `NotSupportedException` for what the
@@ -36,8 +40,12 @@ first frame 80 ms, the frame at 1 s 245 ms (24 frames decoded). Missing:
     mean luma is below a threshold, up to a limit).
 - **Seeking in the core packages**: `IDemuxer.Seek(long pts, int streamIndex)` with a default implementation that
   throws `NotSupportedException` (adding a defaulted interface member breaks no implementer), implemented by
-  `Mp4Demuxer` and `AviDemuxer`: the next `ReadPackets` starts at the keyframe at or before `pts`, and the decoder is
-  told to drop frames shown before it (or the thumbnail code skips them). Useful beyond thumbnails (ShotDetector's
+  `Mp4Demuxer` and `AviDemuxer`: the next `ReadPackets` starts at the keyframe at or before `pts`. Decoding then
+  starts afresh (a new decoder, or a flushed one) and drops the frames shown before `pts`, as FFmpeg's `-ss` does. A
+  sync sample in 'stss' need not be IDR: in an open GOP, the B frames after a recovery-point I frame refer to
+  pictures before the seek, which the decoder refuses (`InvalidDataException`) unless `ConcealErrors` is on. The
+  thumbnail path takes the first frame at or after `pts` that decodes without a missing reference (with an open GOP,
+  the I frame itself or a picture after the leading B frames), and the seek check below says what FFmpeg gives there. Useful beyond thumbnails (ShotDetector's
   ranges, players), so it belongs in Core, in the minor version with the colour metadata.
 - **Conversion**: YUV 4:2:0/4:2:2/4:4:4 at any bit depth to 8-bit RGBA by the frame's matrix and range, with
   rotation, then an area (box) downscale. An unspecified matrix converts as BT.601 and an unspecified range as limited,
@@ -52,7 +60,8 @@ first frame 80 ms, the frame at 1 s 245 ms (24 frames decoded). Missing:
   setup), ImageSharp's Six Labors Split License is not plain Apache-2.0. Adapter packages can come later if asked.
 - **Untrusted input**: the point of the package is uploads nobody vetted, so it gets the same treatment as the
   decoders: a fuzz target for the whole path (`tools/fuzz.sh thumbnail`: open, probe, seek, decode one frame, scale),
-  limits a caller can set (largest picture accepted, default 8192x8192; a `CancellationToken` through every call), and
+  limits a caller can set (a pixel cap below the decoders' own, which already refuse an H.264 frame over 139,264
+  macroblocks; a `CancellationToken` through every call), and
   a README line on why managed code matters here (no memory corruption class of bugs; FFmpeg's parsers keep yielding
   them) without overstating it (a managed decoder can still be slow or wrong on hostile input: the limits are for that).
 - **Not in scope**: other codecs (HEVC from iPhones is the obvious gap: the README says so plainly), audio waveforms,
@@ -66,7 +75,8 @@ first frame 80 ms, the frame at 1 s 245 ms (24 frames decoded). Missing:
   (including edited, fragmented and B-frame ones); the frame decoded at a time matches `ffmpeg -ss <t> -i ... -frames:v 1
   -f framemd5` (FFmpeg's accurate seek: decode from the keyframe before, drop until the time).
 - Conversion: scalar reference against vector path (bit-exact), and against FFmpeg's scaler within the tolerance above
-  on every sample's frame and phone-style rotated samples (`ffmpeg -display_rotation` writes a 'tkhd' matrix).
+  on every sample's frame and phone-style rotated samples (`ffmpeg -display_rotation 90 -i in.mp4 -c copy out.mp4`:
+  the input option reaches the output's 'tkhd' matrix through the copy).
 - Fuzzing: the new target in `tools/fuzz.sh`, and its seeds in CI's fuzz smoke test.
 
 ## Work, one pull request each (after the colour metadata)
@@ -88,6 +98,8 @@ Open, for the owner (recommendation first):
 - **Image encoder by default.** Recommended: PNG written here plus raw RGBA, no image library dependency. Alternatives:
   a SkiaSharp adapter in the box (JPEG and WebP, but native code), or ImageSharp (licence).
 - **Seek in Core.** Recommended: `IDemuxer.Seek` as a defaulted interface member in 0.5.0 with the colour metadata.
-  Alternative: seeking only inside the thumbnail package (no public API in Core, but nobody else gets it).
+  Alternative: seeking only inside the thumbnail package (no public API in Core, but nobody else gets it). Package
+  validation may flag the new interface member even with a default body; the 0.5.0 PR's `dotnet pack` shows it, and
+  the suppression file covers a deliberate change in a minor version.
 - **When.** Recommended: after the colour metadata lands (it is the thumbnails' prerequisite), so 0.5.0 carries
   colour, seek and the first thumbnail package together.

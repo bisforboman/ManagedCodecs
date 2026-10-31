@@ -119,7 +119,25 @@ public static class VideoProbe
             end = Math.Max(end, (duration > 0 ? first + duration : last) * timeBase.ToDouble());
         }
 
-        return end > start ? (TimeSpan.FromSeconds(end - start), start) : (TimeSpan.Zero, double.IsFinite(start) ? start : 0);
+        return end > start ? (Time(end - start), start) : (TimeSpan.Zero, double.IsFinite(start) ? start : 0);
+    }
+
+    /// <summary>
+    /// <paramref name="seconds"/> as a <see cref="TimeSpan"/>, the ticks truncated as .NET's
+    /// <see cref="TimeSpan.FromSeconds(double)"/> does them. Not that method itself: .NET Standard's (Mono's, in the Unity
+    /// build) rounds to the millisecond, so a time 0.2002 s in would read 0.2 s there and 8 s, as a double just under it,
+    /// 7.9999999 s here (tools/unity-check.sh compares the two).
+    /// </summary>
+    /// <exception cref="OverflowException">The time is longer than a <see cref="TimeSpan"/> holds.</exception>
+    internal static TimeSpan Time(double seconds)
+    {
+        double ticks = seconds * TimeSpan.TicksPerSecond;
+        if (!(ticks >= long.MinValue && ticks < long.MaxValue))
+        {
+            throw new OverflowException("The time is longer than a TimeSpan holds.");
+        }
+
+        return TimeSpan.FromTicks((long)ticks);
     }
 }
 

@@ -290,7 +290,7 @@ public static class VideoThumbnail
             var (width, height) = Fit(frame.Width, frame.Height, aspect, _video.Rotation, _options.MaxWidth, _options.MaxHeight);
             var converter = RgbaConverter.For(frame, _video.Codec, _options.Matrix, _options.Range);
             byte[] pixels = RgbaImage.Render(frame, width, height, _video.Rotation, converter);
-            var time = TimeSpan.FromSeconds(Math.Max(0, (frame.Pts * _video.TimeBase.ToDouble()) - _start));
+            var time = VideoProbe.Time(Math.Max(0, (frame.Pts * _video.TimeBase.ToDouble()) - _start));
             return new Thumbnail(width, height, pixels, time);
         }
 

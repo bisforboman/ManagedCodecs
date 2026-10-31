@@ -11,6 +11,26 @@ namespace ManagedCodecs.Tests.Thumbnails;
 /// </summary>
 public class VideoProbeTests
 {
+    [Theory]
+    [InlineData(0.2002, 2_002_000)] // Mono's TimeSpan.FromSeconds: 2_000_000, rounded to the millisecond
+    [InlineData(7.999999999999999, 79_999_999)] // truncated, as on .NET; Mono's: 80_000_000
+    [InlineData(0.0, 0)]
+    [InlineData(-1.5, -15_000_000)]
+    public void TimeTruncatesTicksOnEveryRuntime(double seconds, long ticks)
+    {
+        Assert.Equal(ticks, VideoProbe.Time(seconds).Ticks);
+        Assert.Equal(TimeSpan.FromSeconds(seconds), VideoProbe.Time(seconds)); // .NET 10's own, which the tests run on
+    }
+
+    [Theory]
+    [InlineData(double.PositiveInfinity)]
+    [InlineData(1e300)]
+    public void TimeOverflowsAsTimeSpanDoes(double seconds)
+    {
+        Assert.Throws<OverflowException>(() => VideoProbe.Time(seconds));
+        Assert.Throws<OverflowException>(() => TimeSpan.FromSeconds(seconds));
+    }
+
     public static TheoryData<string> Files()
     {
         var files = new TheoryData<string>();

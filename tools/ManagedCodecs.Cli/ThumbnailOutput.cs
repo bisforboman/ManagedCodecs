@@ -32,8 +32,10 @@ public static class ThumbnailOutput
         {
             var info = VideoProbe.Read(new MemoryStream(file));
             var thumbnail = VideoThumbnail.Create(new MemoryStream(file), Options);
+
+            // The frame rate to 15 digits: "R" gives Mono 17 where .NET gives the shortest that round-trips.
             result = FormattableString.Invariant(
-                $"probe {info.Duration.Ticks} {info.DisplayWidth}x{info.DisplayHeight} {info.Codec} {info.FramesPerSecond:R} {info.Rotation}, thumbnail {thumbnail.Width}x{thumbnail.Height} at {thumbnail.Time.Ticks} {Hash(thumbnail)}");
+                $"probe {info.Duration.Ticks} {info.DisplayWidth}x{info.DisplayHeight} {info.Codec} {info.FramesPerSecond:G15} {info.Rotation}, thumbnail {thumbnail.Width}x{thumbnail.Height} at {thumbnail.Time.Ticks} {Hash(thumbnail)}");
         }
         catch (Exception e)
         {

@@ -147,6 +147,30 @@ namespace ManagedCodecs
                     throw new ArgumentOutOfRangeException(name, value, $"Must be below {other}.");
                 }
             }
+
+            public static void ThrowIfLessThan(int value, int other, [CallerArgumentExpression(nameof(value))] string? name = null)
+            {
+                if (value < other)
+                {
+                    throw new ArgumentOutOfRangeException(name, value, $"Must be at least {other}.");
+                }
+            }
+
+            public static void ThrowIfLessThan(long value, long other, [CallerArgumentExpression(nameof(value))] string? name = null)
+            {
+                if (value < other)
+                {
+                    throw new ArgumentOutOfRangeException(name, value, $"Must be at least {other}.");
+                }
+            }
+
+            public static void ThrowIfNotEqual(int value, int other, [CallerArgumentExpression(nameof(value))] string? name = null)
+            {
+                if (value != other)
+                {
+                    throw new ArgumentOutOfRangeException(name, value, $"Must be {other}.");
+                }
+            }
         }
 
         extension(ArgumentNullException)

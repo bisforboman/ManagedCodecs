@@ -21,6 +21,19 @@ public class PngTests
     }
 
     [Fact]
+    public void Adler32IsZlibs()
+    {
+        // RFC 1950's checksum, which the Unity build (netstandard2.1, no ZLibStream) writes after its deflate data:
+        // Wikipedia's worked example, the empty input, and a long run that wraps both sums past the modulus (zlib's
+        // adler32 of 100000 bytes of 0xFF).
+        Assert.Equal(0x11E60398u, Png.Adler32("Wikipedia"u8));
+        Assert.Equal(1u, Png.Adler32([]));
+        var data = new byte[100_000];
+        Array.Fill(data, (byte)0xFF);
+        Assert.Equal(0x149A302Cu, Png.Adler32(data));
+    }
+
+    [Fact]
     public void PaethTiesGoToLeftThenUp()
     {
         Assert.Equal(10, Png.Paeth(10, 10, 10));

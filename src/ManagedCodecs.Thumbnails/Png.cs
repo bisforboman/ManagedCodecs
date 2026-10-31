@@ -109,12 +109,42 @@ internal static class Png
     private static byte[] Compress(byte[] data)
     {
         using var compressed = new MemoryStream();
+#if NET
         using (var zlib = new ZLibStream(compressed, CompressionLevel.Optimal, leaveOpen: true))
         {
             zlib.Write(data);
         }
+#else
+        // The Unity build (netstandard2.1, no ZLibStream): the zlib format around raw deflate itself (RFC 1950), a
+        // header (deflate, 32 KB window, default level, its check bits) and the data's Adler-32 after.
+        compressed.WriteByte(0x78);
+        compressed.WriteByte(0x9C);
+        using (var deflate = new DeflateStream(compressed, CompressionLevel.Optimal, leaveOpen: true))
+        {
+            deflate.Write(data, 0, data.Length);
+        }
+
+        Span<byte> adler = stackalloc byte[4];
+        BinaryPrimitives.WriteUInt32BigEndian(adler, Adler32(data));
+        compressed.Write(adler);
+#endif
 
         return compressed.ToArray();
+    }
+
+    /// <summary>The Adler-32 checksum of the bytes (RFC 1950, section 8), as the zlib format ends with it.</summary>
+    internal static uint Adler32(ReadOnlySpan<byte> data)
+    {
+        const uint Modulus = 65521;
+        uint a = 1;
+        uint b = 0;
+        foreach (byte value in data)
+        {
+            a = (a + value) % Modulus;
+            b = (b + a) % Modulus;
+        }
+
+        return (b << 16) | a;
     }
 
     private static void WriteChunk(Stream destination, ReadOnlySpan<byte> type, ReadOnlySpan<byte> data)

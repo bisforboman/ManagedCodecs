@@ -29,8 +29,6 @@
 
   <ItemGroup Condition="'$(UnityBuild)' == 'true'">
     <Compile Remove="**\VectorZipTests.cs" />
-    <!-- ManagedCodecs.Thumbnails is not part of the Unity build. -->
-    <Compile Remove="Thumbnails\**" />
     <ProjectReference Include="..\..\src\ManagedCodecs.Unity\ManagedCodecs.Unity.csproj" />
   </ItemGroup>
 

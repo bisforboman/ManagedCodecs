@@ -10,8 +10,8 @@ namespace ManagedCodecs.Cli;
 /// The Thumbnails package's results for a file as one line: <see cref="VideoProbe"/>'s facts and a small
 /// <see cref="VideoThumbnail"/>'s size, time and pixels (SHA-256 of the RGBA, not of the PNG, whose deflated bytes
 /// are the runtime's zlib's). `mcdec --thumbnail-hash` and the WebAssembly check (tools/ManagedCodecs.Wasm) both print
-/// it, so browser-wasm's thumbnails are compared with the native ones, which the tests compare with FFmpeg. Not in the
-/// Unity build of mcdec, whose package has no Thumbnails (the THUMBNAILS symbol, set by the projects that have it).
+/// it, so browser-wasm's thumbnails are compared with the native ones, which the tests compare with FFmpeg, and so does
+/// tools/unity-check.sh for the Unity build on Mono (the THUMBNAILS symbol, set by the projects that have the package).
 /// </summary>
 public static class ThumbnailOutput
 {
@@ -32,8 +32,7 @@ public static class ThumbnailOutput
         {
             var info = VideoProbe.Read(new MemoryStream(file));
             var thumbnail = VideoThumbnail.Create(new MemoryStream(file), Options);
-            result = string.Create(
-                CultureInfo.InvariantCulture,
+            result = FormattableString.Invariant(
                 $"probe {info.Duration.Ticks} {info.DisplayWidth}x{info.DisplayHeight} {info.Codec} {info.FramesPerSecond:R} {info.Rotation}, thumbnail {thumbnail.Width}x{thumbnail.Height} at {thumbnail.Time.Ticks} {Hash(thumbnail)}");
         }
         catch (Exception e)
@@ -59,8 +58,7 @@ public static class ThumbnailOutput
         var info = VideoProbe.Read(path);
         var thumbnail = VideoThumbnail.Create(path, new ThumbnailOptions { MaxWidth = 480, MaxHeight = 480 });
         File.WriteAllBytes(output, thumbnail.Pixels);
-        return string.Create(
-            CultureInfo.InvariantCulture,
+        return FormattableString.Invariant(
             $"thumbnail {thumbnail.Width}x{thumbnail.Height} at {thumbnail.Time.Ticks}, probe {info.Duration.Ticks} {info.Width}x{info.Height} rotation {info.Rotation} fps {info.FramesPerSecond:R} audio {info.Audio?.SampleRate ?? 0} {info.Audio?.Channels ?? 0}");
     }
 

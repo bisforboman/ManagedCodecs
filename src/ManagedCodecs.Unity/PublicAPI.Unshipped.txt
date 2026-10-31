@@ -371,3 +371,87 @@ static ManagedCodecs.VideoStreamInfo.operator ==(ManagedCodecs.VideoStreamInfo? 
 ~override ManagedCodecs.PacketInfo.Equals(object obj) -> bool
 ~override ManagedCodecs.PacketInfo.ToString() -> string
 ~override ManagedCodecs.Rational.Equals(object obj) -> bool
+ManagedCodecs.Thumbnails.AudioInfo
+ManagedCodecs.Thumbnails.AudioInfo.<Clone>$() -> ManagedCodecs.Thumbnails.AudioInfo!
+ManagedCodecs.Thumbnails.AudioInfo.AudioInfo(string! Codec, int SampleRate, int Channels) -> void
+ManagedCodecs.Thumbnails.AudioInfo.Channels.get -> int
+ManagedCodecs.Thumbnails.AudioInfo.Channels.init -> void
+ManagedCodecs.Thumbnails.AudioInfo.Codec.get -> string!
+ManagedCodecs.Thumbnails.AudioInfo.Codec.init -> void
+ManagedCodecs.Thumbnails.AudioInfo.Deconstruct(out string! Codec, out int SampleRate, out int Channels) -> void
+ManagedCodecs.Thumbnails.AudioInfo.Equals(ManagedCodecs.Thumbnails.AudioInfo? other) -> bool
+ManagedCodecs.Thumbnails.AudioInfo.SampleRate.get -> int
+ManagedCodecs.Thumbnails.AudioInfo.SampleRate.init -> void
+ManagedCodecs.Thumbnails.Thumbnail
+ManagedCodecs.Thumbnails.Thumbnail.Height.get -> int
+ManagedCodecs.Thumbnails.Thumbnail.Pixels.get -> byte[]!
+ManagedCodecs.Thumbnails.Thumbnail.SavePng(System.IO.Stream! destination) -> void
+ManagedCodecs.Thumbnails.Thumbnail.Time.get -> System.TimeSpan
+ManagedCodecs.Thumbnails.Thumbnail.ToPng() -> byte[]!
+ManagedCodecs.Thumbnails.Thumbnail.Width.get -> int
+ManagedCodecs.Thumbnails.ThumbnailOptions
+ManagedCodecs.Thumbnails.ThumbnailOptions.<Clone>$() -> ManagedCodecs.Thumbnails.ThumbnailOptions!
+ManagedCodecs.Thumbnails.ThumbnailOptions.At.get -> System.TimeSpan?
+ManagedCodecs.Thumbnails.ThumbnailOptions.At.init -> void
+ManagedCodecs.Thumbnails.ThumbnailOptions.Equals(ManagedCodecs.Thumbnails.ThumbnailOptions? other) -> bool
+ManagedCodecs.Thumbnails.ThumbnailOptions.Matrix.get -> ManagedCodecs.ColorMatrix?
+ManagedCodecs.Thumbnails.ThumbnailOptions.Matrix.init -> void
+ManagedCodecs.Thumbnails.ThumbnailOptions.MaxHeight.get -> int
+ManagedCodecs.Thumbnails.ThumbnailOptions.MaxHeight.init -> void
+ManagedCodecs.Thumbnails.ThumbnailOptions.MaxPixels.get -> long
+ManagedCodecs.Thumbnails.ThumbnailOptions.MaxPixels.init -> void
+ManagedCodecs.Thumbnails.ThumbnailOptions.MaxWidth.get -> int
+ManagedCodecs.Thumbnails.ThumbnailOptions.MaxWidth.init -> void
+ManagedCodecs.Thumbnails.ThumbnailOptions.Range.get -> ManagedCodecs.ColorRange?
+ManagedCodecs.Thumbnails.ThumbnailOptions.Range.init -> void
+ManagedCodecs.Thumbnails.ThumbnailOptions.SkipDark.get -> bool
+ManagedCodecs.Thumbnails.ThumbnailOptions.SkipDark.init -> void
+ManagedCodecs.Thumbnails.ThumbnailOptions.ThumbnailOptions() -> void
+ManagedCodecs.Thumbnails.VideoInfo
+ManagedCodecs.Thumbnails.VideoInfo.<Clone>$() -> ManagedCodecs.Thumbnails.VideoInfo!
+ManagedCodecs.Thumbnails.VideoInfo.Audio.get -> ManagedCodecs.Thumbnails.AudioInfo?
+ManagedCodecs.Thumbnails.VideoInfo.Audio.init -> void
+ManagedCodecs.Thumbnails.VideoInfo.Codec.get -> string!
+ManagedCodecs.Thumbnails.VideoInfo.Codec.init -> void
+ManagedCodecs.Thumbnails.VideoInfo.Deconstruct(out System.TimeSpan Duration, out string! Codec, out int Width, out int Height, out int DisplayWidth, out int DisplayHeight, out double FramesPerSecond, out int Rotation, out ManagedCodecs.Rational SampleAspectRatio, out ManagedCodecs.Thumbnails.AudioInfo? Audio) -> void
+ManagedCodecs.Thumbnails.VideoInfo.DisplayHeight.get -> int
+ManagedCodecs.Thumbnails.VideoInfo.DisplayHeight.init -> void
+ManagedCodecs.Thumbnails.VideoInfo.DisplayWidth.get -> int
+ManagedCodecs.Thumbnails.VideoInfo.DisplayWidth.init -> void
+ManagedCodecs.Thumbnails.VideoInfo.Duration.get -> System.TimeSpan
+ManagedCodecs.Thumbnails.VideoInfo.Duration.init -> void
+ManagedCodecs.Thumbnails.VideoInfo.Equals(ManagedCodecs.Thumbnails.VideoInfo? other) -> bool
+ManagedCodecs.Thumbnails.VideoInfo.FramesPerSecond.get -> double
+ManagedCodecs.Thumbnails.VideoInfo.FramesPerSecond.init -> void
+ManagedCodecs.Thumbnails.VideoInfo.Height.get -> int
+ManagedCodecs.Thumbnails.VideoInfo.Height.init -> void
+ManagedCodecs.Thumbnails.VideoInfo.Rotation.get -> int
+ManagedCodecs.Thumbnails.VideoInfo.Rotation.init -> void
+ManagedCodecs.Thumbnails.VideoInfo.SampleAspectRatio.get -> ManagedCodecs.Rational
+ManagedCodecs.Thumbnails.VideoInfo.SampleAspectRatio.init -> void
+ManagedCodecs.Thumbnails.VideoInfo.VideoInfo(System.TimeSpan Duration, string! Codec, int Width, int Height, int DisplayWidth, int DisplayHeight, double FramesPerSecond, int Rotation, ManagedCodecs.Rational SampleAspectRatio, ManagedCodecs.Thumbnails.AudioInfo? Audio) -> void
+ManagedCodecs.Thumbnails.VideoInfo.Width.get -> int
+ManagedCodecs.Thumbnails.VideoInfo.Width.init -> void
+ManagedCodecs.Thumbnails.VideoProbe
+ManagedCodecs.Thumbnails.VideoThumbnail
+override ManagedCodecs.Thumbnails.AudioInfo.Equals(object? obj) -> bool
+override ManagedCodecs.Thumbnails.AudioInfo.GetHashCode() -> int
+override ManagedCodecs.Thumbnails.AudioInfo.ToString() -> string!
+override ManagedCodecs.Thumbnails.ThumbnailOptions.Equals(object? obj) -> bool
+override ManagedCodecs.Thumbnails.ThumbnailOptions.GetHashCode() -> int
+override ManagedCodecs.Thumbnails.ThumbnailOptions.ToString() -> string!
+override ManagedCodecs.Thumbnails.VideoInfo.Equals(object? obj) -> bool
+override ManagedCodecs.Thumbnails.VideoInfo.GetHashCode() -> int
+override ManagedCodecs.Thumbnails.VideoInfo.ToString() -> string!
+static ManagedCodecs.Thumbnails.AudioInfo.operator !=(ManagedCodecs.Thumbnails.AudioInfo? left, ManagedCodecs.Thumbnails.AudioInfo? right) -> bool
+static ManagedCodecs.Thumbnails.AudioInfo.operator ==(ManagedCodecs.Thumbnails.AudioInfo? left, ManagedCodecs.Thumbnails.AudioInfo? right) -> bool
+static ManagedCodecs.Thumbnails.ThumbnailOptions.operator !=(ManagedCodecs.Thumbnails.ThumbnailOptions? left, ManagedCodecs.Thumbnails.ThumbnailOptions? right) -> bool
+static ManagedCodecs.Thumbnails.ThumbnailOptions.operator ==(ManagedCodecs.Thumbnails.ThumbnailOptions? left, ManagedCodecs.Thumbnails.ThumbnailOptions? right) -> bool
+static ManagedCodecs.Thumbnails.VideoInfo.operator !=(ManagedCodecs.Thumbnails.VideoInfo? left, ManagedCodecs.Thumbnails.VideoInfo? right) -> bool
+static ManagedCodecs.Thumbnails.VideoInfo.operator ==(ManagedCodecs.Thumbnails.VideoInfo? left, ManagedCodecs.Thumbnails.VideoInfo? right) -> bool
+static ManagedCodecs.Thumbnails.VideoProbe.Read(string! path) -> ManagedCodecs.Thumbnails.VideoInfo!
+static ManagedCodecs.Thumbnails.VideoProbe.Read(System.IO.Stream! stream) -> ManagedCodecs.Thumbnails.VideoInfo!
+static ManagedCodecs.Thumbnails.VideoThumbnail.Create(string! path) -> ManagedCodecs.Thumbnails.Thumbnail!
+static ManagedCodecs.Thumbnails.VideoThumbnail.Create(string! path, ManagedCodecs.Thumbnails.ThumbnailOptions? options) -> ManagedCodecs.Thumbnails.Thumbnail!
+static ManagedCodecs.Thumbnails.VideoThumbnail.Create(System.IO.Stream! stream, ManagedCodecs.Thumbnails.ThumbnailOptions? options = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> ManagedCodecs.Thumbnails.Thumbnail!
+static ManagedCodecs.Thumbnails.VideoThumbnail.CreateAsync(System.IO.Stream! stream, ManagedCodecs.Thumbnails.ThumbnailOptions? options = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<ManagedCodecs.Thumbnails.Thumbnail!>!

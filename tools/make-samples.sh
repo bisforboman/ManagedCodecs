@@ -653,6 +653,28 @@ for f in samples/*.mp4 samples/*.avi; do
   ffprobe -v error -of json -show_entries format=duration,start_time:stream=index,codec_type,codec_name,width,height,sample_aspect_ratio,r_frame_rate,avg_frame_rate,sample_rate,channels,duration:stream_side_data=rotation \
     "$f" > "${f%.*}.probe.json"
 done
+# name.thumb.rgba: the first video frame as FFmpeg's scaler turns it into a thumbnail (RGBA, 3/8 of the size as shown,
+# by area), for the Thumbnails package's conversion, scaling and rotation: autorotate on (not -noautorotate as above),
+# converted to RGB at full size first and scaled after (format=rgba before scale, the order RgbaImage follows), only
+# where the video is H.264 or MJPEG (not the separate colour planes, jm-planes*, which FFmpeg doesn't decode).
+# - The scaler's flags: without accurate_rnd and full chroma, swscale takes RGB through 4:2:0 YUV of its own to scale
+#   it, which put it up to 10 levels from the exact area mean at colour edges; with them, 1.
+# - Deeper than 8 bits, FFmpeg first reduces the samples to 8 (the same chroma format): its direct conversion from 9 to
+#   14 bits to RGBA was up to 87 levels from the definition (and from its own 8-bit route), the 8-bit route within 3.
+# - Not an odd width or height (the container crops): there swscale leaves its fast path, which takes the nearest
+#   chroma sample as RgbaConverter does, for its general one, which interpolates chroma (up to 194 levels apart at a
+#   colour edge). RgbaImageTests checks odd sizes against the definition instead.
+for f in samples/*.mp4 samples/*.avi; do
+  case $f in samples/jm-planes*) continue ;; esac
+  IFS=, read -r codec width height pix <<< \
+    "$(ffprobe -v error -select_streams v:0 -of csv=p=0 -show_entries stream=codec_name,width,height,pix_fmt "$f")"
+  case $codec in h264 | mjpeg) ;; *) continue ;; esac
+  if (( width % 2 || height % 2 )); then continue; fi
+  case $pix in yuv4[24][024]p[0-9]*) eight="format=${pix:0:7}," ;; gray[0-9]*) eight="format=gray," ;; *) eight="" ;; esac
+  ff -idct simple -i "$f" -map 0:v:0 -frames:v 1 \
+    -vf "${eight}format=rgba,scale=max(1\\,trunc(iw*3/8)):max(1\\,trunc(ih*3/8)):flags=area+accurate_rnd+full_chroma_int+full_chroma_inp,format=rgba" \
+    -f rawvideo "${f%.*}.thumb.rgba"
+done
 # name.color: each decoded video frame's colour properties and sample aspect ratio as ffprobe lists them, one a line in
 # output order ("color_range=tv|color_space=bt709|..."), for VideoFrame.ColorRange, ColorPrimaries, ColorTransfer,
 # ColorMatrix, ChromaLocation and SampleAspectRatio.

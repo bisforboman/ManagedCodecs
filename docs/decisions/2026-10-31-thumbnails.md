@@ -51,9 +51,14 @@ first frame 80 ms, the frame at 1 s 245 ms (24 frames decoded). Missing:
   rotation, then an area (box) downscale. An unspecified matrix converts as BT.601 and an unspecified range as limited,
   which is what FFmpeg's scaler does with them (it doesn't guess by picture size, nor does the colour-metadata design);
   `ThumbnailOptions` can say otherwise. A scalar reference by the definition in double precision, a vector path checked against it on
-  random input (the repository's rule for fast paths), and FFmpeg as the outside check within a stated tolerance (its
-  `swscale` rounds otherwise: compare with `-vf scale=w:h:flags=area,format=rgba` and the same matrix and range,
-  within 2 per channel, not bit-exact).
+  random input (the repository's rule for fast paths), and FFmpeg as the outside check within a stated tolerance.
+  *Built (pull request 3), as measured rather than as first assumed here:* the frame is converted at its own size
+  (nearest chroma sample, as FFmpeg's fast path), then scaled by area in RGB, then rotated, the order of FFmpeg's
+  `format=rgba,scale=W:H:flags=area+accurate_rnd+full_chroma_int+full_chroma_inp`; scaling the YUV planes first
+  blends chroma before the matrix. MJPEG's unspecified range is full (JPEG's). The fixed-point converter is within one
+  level of the definition, the scaling exact, FFmpeg 0 to 3 levels below and 1 above (docs/conformance.md, where its
+  exceptions are). No vector path yet: at 720p the scalar conversion and scaling take about 13 ms, against about 33 ms
+  to decode a frame on the same machine.
 - **Image output: PNG, written here**, with the BCL's `ZLibStream` (deflate is in .NET itself: no dependency, AOT and
   WebAssembly safe). Raw RGBA for callers who want JPEG or WebP through SkiaSharp or ImageSharp themselves. No image
   library as a dependency: SkiaSharp is native code (against the point of the library and not on every WebAssembly

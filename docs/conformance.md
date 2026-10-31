@@ -78,6 +78,21 @@ fragmented file's 'mdhd' counts only the samples in 'moov'); AVI's 'strh' length
 does not expose, is not counted (avi-dropped-frame's MP3 outlasts its video). H.264's size is the decoder's frame size
 from the SPS, which can crop the container's.
 
+The thumbnails' pixels (`RgbaImage`, ManagedCodecs.Thumbnails, not yet public) are each frame converted to RGBA at its
+own size (the matrix and range the frame says; none said, BT.601 and limited range, as FFmpeg's scaler takes them, but
+full range for MJPEG, as FFmpeg converts its grey frames; the nearest chroma sample), scaled down by area and rotated.
+`RgbaImageTests` checks the conversion within one level of its definition in double precision (every pixel format,
+random samples and matrices), the scaling exactly against the overlap mean summed pixel by pixel, the rotation against
+the turned coordinates, and the three together against FFmpeg's first frame of every sample at 3/8 of its size as shown
+(make-samples.sh's name.thumb.rgba: `-vf format=rgba,scale=W:H:flags=area+accurate_rnd+full_chroma_int+full_chroma_inp`,
+autorotate on). FFmpeg comes out 0 to 3 levels below ours and at most 1 above: its fast YUV to RGB path rounds down
+(green most), and its area scaler is within one level of the exact mean once its flags keep RGB from going through YUV
+of its own (without them, 10 levels at colour edges). It is not the reference everywhere: from 9 to 14 bits its direct
+conversion to RGBA was up to 87 levels from the definition and from its own 8-bit route, so those references reduce to
+8 bits first (within 3), and at an odd width or height it leaves the fast path for one that interpolates chroma (up to
+194 levels apart at an edge): those two samples, the container crops, have no FFmpeg reference, and the odd sizes are
+checked against the definition only.
+
 `VideoStreamInfo`'s colour properties, aspect ratio and rotation are the container's, as FFmpeg's mov demuxer reads
 them (6.1.1): the visual sample entry's 'colr' ('nclx', its full range flag clear meaning limited; QuickTime's 'nclc',
 without a range; ICC profiles ignored; a later 'colr' replacing an earlier one's values; code points FFmpeg does not

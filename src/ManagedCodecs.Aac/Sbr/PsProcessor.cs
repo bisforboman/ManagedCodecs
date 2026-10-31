@@ -68,7 +68,8 @@ internal sealed class PsProcessor
     ];
 
     // 34 bands' prototypes (8.6.4.3): of the 12-band filter on QMF band 0, the 8-band one on band 1 and the 4-band one
-    // on bands 2 to 4; equal to libxaac's (Apache-2.0) and FFmpeg's.
+    // on bands 2 to 4; the spec's values, transcribed from libxaac (Apache-2.0, THIRD-PARTY-NOTICES.md), equal to
+    // FFmpeg's.
     private static readonly double[] Prototype12 =
     [
         0.04081179924692, 0.03812810994926, 0.05144908135699, 0.06399831151592, 0.07428313801106, 0.08100347892914,

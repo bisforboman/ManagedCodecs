@@ -2,9 +2,10 @@ namespace ManagedCodecs.H264;
 
 /// <summary>Tables of the CABAC parsing process (H.264 clause 9.3).</summary>
 /// <remarks>
-/// The values are those of the specification; they were transcribed from OpenH264 (BSD-2-Clause) and checked
-/// against libavc (Apache-2.0), whose precomputed context states for every QP and initialization table match the
-/// initialization of 9.3.1.1 applied to <see cref="InitValues"/>. See README, license note.
+/// The values are those of the specification (Tables 9-12 to 9-33, 9-44 and 9-45), transcribed from OpenH264
+/// (BSD-2-Clause, THIRD-PARTY-NOTICES.md) and checked against libavc (Apache-2.0), whose precomputed context states
+/// for every QP and initialization table match the initialization of 9.3.1.1 applied to <see cref="InitValues"/>.
+/// See README, License.
 /// </remarks>
 internal static class CabacTables
 {

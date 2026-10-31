@@ -59,11 +59,13 @@
   </PropertyGroup>
 
   <!-- nuget.org's page for every package: PACKAGE.md, short and with absolute links (README's relative ones break
-       there). -->
+       there). And THIRD-PARTY-NOTICES.md beside it: the BSD and Apache notices of the tables transcribed from other
+       projects go wherever the code goes. -->
   <PropertyGroup Condition="$(MSBuildProjectDirectory.Replace('\', '/').Contains('/src/'))">
     <PackageReadmeFile>PACKAGE.md</PackageReadmeFile>
   </PropertyGroup>
   <ItemGroup Condition="$(MSBuildProjectDirectory.Replace('\', '/').Contains('/src/'))">
     <None Include="$(MSBuildThisFileDirectory)PACKAGE.md" Pack="true" PackagePath="\" Visible="false" />
+    <None Include="$(MSBuildThisFileDirectory)THIRD-PARTY-NOTICES.md" Pack="true" PackagePath="\" Visible="false" />
   </ItemGroup>
 </Project>

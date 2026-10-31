@@ -1,5 +1,9 @@
 # Parametric stereo beyond the baseline (2026-10-27)
 
+**Done, 2026-10-28.** All three pieces shipped in 0.2.0 (CHANGELOG): mixing procedure Rb, the phase parameters (IPD and
+OPD) and 34 bands, each checked against FFmpeg on a sample from the patched FDK encoder (docs/conformance.md, HE-AAC).
+"Where the decoder stands" below describes the decoder before them.
+
 The HE-AAC v2 decoder implements the baseline parametric stereo decoder of ISO/IEC 14496-3 8.6.4: 10 and 20
 bands, mixing procedure Ra, no inter-channel or overall phase differences (IPD, OPD). The rest of the tool is three pieces,
 listed in README's Open section as untested because no encoder at hand sends them. This record says what each piece

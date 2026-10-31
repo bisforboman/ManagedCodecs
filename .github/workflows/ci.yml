@@ -70,7 +70,8 @@ jobs:
       - name: Build
         run: dotnet build ManagedCodecs.slnx -c Release -warnaserror
 
-      # Package validation (Directory.Build.props): each package's public API against its 0.1.0 on nuget.org.
+      # Package validation (Directory.Build.props): each package's public API against its baseline version on nuget.org
+      # (PackageValidationBaselineVersion).
       - name: Pack
         run: dotnet pack ManagedCodecs.slnx -c Release --no-build -warnaserror -o artifacts
 

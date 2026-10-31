@@ -64,6 +64,10 @@ jobs:
           dotnet tool restore
           dotnet tool run bro format ManagedCodecs.slnx --verify-no-changes
 
+      # src/ManagedCodecs.Unity compiles every package's sources: its public API files must list the same API.
+      - name: Unity build's public API is the other packages'
+        run: tools/unity-public-api.py
+
       - name: Generate samples
         run: tools/make-samples.sh
 

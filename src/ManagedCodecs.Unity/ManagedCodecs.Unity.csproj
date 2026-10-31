@@ -2,17 +2,22 @@
 
   <!-- The decoders for Unity (Mono and IL2CPP, the .NET Standard 2.1 profile): every src/ project's sources in one
        assembly, without the vector paths (#if NET around them; their scalar references run), and Polyfills.cs for the
-       APIs netstandard2.1 lacks. docs/decisions/2026-10-31-unity-netstandard.md. Not packed yet (its third pull
-       request), so neither its public API files nor package validation apply yet. -->
+       APIs netstandard2.1 lacks. docs/decisions/2026-10-31-unity-netstandard.md. Packed as ManagedCodecs.Unity, with
+       its own PACKAGE.md and public API files (the same types as the other packages, in one assembly). -->
   <PropertyGroup>
     <TargetFramework>netstandard2.1</TargetFramework>
     <RootNamespace>ManagedCodecs</RootNamespace>
     <AssemblyName>ManagedCodecs.Unity</AssemblyName>
-    <IsPackable>false</IsPackable>
-    <EnablePackageValidation>false</EnablePackageValidation>
+    <PackageId>ManagedCodecs.Unity</PackageId>
+    <Description>The ManagedCodecs decoders (H.264, MJPEG, AAC LC and HE-AAC; AVI, MP4 and ADTS) for Unity and other .NET Standard 2.1 runtimes: one assembly, the scalar build, bit-exact with the other packages' output, in pure managed C#.</Description>
+    <PackageTags>$(PackageTags);unity;netstandard</PackageTags>
     <DefineConstants>$(DefineConstants);MANAGEDCODECS_H264</DefineConstants>
+    <!-- No release of this package on nuget.org yet, so package validation has no baseline to compare with (the
+         one in Directory.Build.props is the other packages'); the pull request that sets the baseline after its first
+         release removes this line. -->
+    <PackageValidationBaselineVersion></PackageValidationBaselineVersion>
     <!-- CS1574: doc comments of the shared sources name vector members and APIs this build leaves out. -->
-    <NoWarn>$(NoWarn);RS0016;RS0017;RS0026;RS0027;RS0036;RS0037;CS1574</NoWarn>
+    <NoWarn>$(NoWarn);CS1574</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
@@ -24,6 +29,12 @@
 
   <ItemGroup>
     <PackageReference Include="System.Runtime.CompilerServices.Unsafe" />
+  </ItemGroup>
+
+  <!-- Its own page on nuget.org in place of the shared PACKAGE.md (Directory.Build.props). -->
+  <ItemGroup>
+    <None Remove="$(MSBuildThisFileDirectory)..\..\PACKAGE.md" />
+    <None Include="PACKAGE.md" Pack="true" PackagePath="\" />
   </ItemGroup>
 
   <ItemGroup>

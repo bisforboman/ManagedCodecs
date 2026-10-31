@@ -1,7 +1,7 @@
 # Changelog
 
 Versions are git tags (`vX.Y.Z`); each one publishes every package (ManagedCodecs.Core, .Containers, .Mjpeg, .H264,
-.Aac and the ManagedCodecs meta-package) to nuget.org at that version, and a GitHub release with this file's section
+.Aac, .Unity and the ManagedCodecs meta-package) to nuget.org at that version, and a GitHub release with this file's section
 as its notes. `release.yml` releases on the push to main that brings a version heading not yet tagged, so a release
 is a pull request that turns "Unreleased" into "## X.Y.Z – date" and runs `tools/ship-public-api.py`. From 0.1.0 on, the
 public API changes only in a new minor version (0.2.0, 0.3.0, ...), with a "Breaking changes" entry; a patch version
@@ -15,6 +15,10 @@ run time.
 
 ### Added
 
+- `ManagedCodecs.Unity`, a new package: every decoder and demuxer in one assembly for .NET Standard 2.1, which Unity's
+  Mono and IL2CPP load. It is the scalar build (no `System.Runtime.Intrinsics` there), with the same output to the bit
+  and 1 to 3.4 times the other packages' time on CoreCLR. It holds the same types as the other packages, so reference
+  one or the other (README, Unity; docs/decisions/2026-10-31-unity-netstandard.md).
 - Every package carries THIRD-PARTY-NOTICES.md: the BSD-2-Clause and Apache-2.0 notices of OpenH264 and libxaac, from
   which some of the specifications' constant tables were transcribed (H.264's CABAC tables; HE-AAC's QMF window, SBR
   noise table and parametric stereo's 34-band tables). The code and its license are unchanged.

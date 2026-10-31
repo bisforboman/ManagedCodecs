@@ -84,11 +84,11 @@ public class Mp4ConformanceTests
         var bytes = File.ReadAllBytes(TestSamples.PathOf(sampleName));
         using var stream = new ReadCountingStream(bytes);
         using var demuxer = new Mp4Demuxer(stream);
-        var expected = demuxer.ReadPackets().Select(p => new PacketInfo(p.StreamIndex, p.Sequence, p.Data.Length, p.IsKeyframe, p.Dts, p.Pts, p.Duration, p.SkipSamples, p.Discard)).ToList();
+        var expected = demuxer.ReadPackets().Select(ReadCountingStream.InfoOf).ToList();
 
-        stream.Reads = 0;
+        stream.Reads.Clear();
         Assert.Equal(expected, demuxer.ReadPacketInfo());
-        Assert.Equal(0, stream.Reads);
+        Assert.Empty(stream.Reads);
     }
 
     /// <summary>
@@ -120,24 +120,6 @@ public class Mp4ConformanceTests
     private static string? Described(VideoStreamInfo? info) => info is null ? null : $"{info with { CodecPrivate = default }} {Convert.ToHexString(info.CodecPrivate.Span)}";
 
     private static string? Described(AudioStreamInfo? info) => info is null ? null : $"{info with { CodecPrivate = default }} {Convert.ToHexString(info.CodecPrivate.Span)}";
-
-    // Counts the synchronous reads, after the headers are read.
-    private sealed class ReadCountingStream(byte[] data) : MemoryStream(data, writable: false)
-    {
-        public int Reads { get; set; }
-
-        public override int Read(byte[] buffer, int offset, int count)
-        {
-            Reads++;
-            return base.Read(buffer, offset, count);
-        }
-
-        public override int Read(Span<byte> buffer)
-        {
-            Reads++;
-            return base.Read(buffer);
-        }
-    }
 
     /// <summary>Whether the file has a top-level 'moof' box.</summary>
     private static bool HasMovieFragments(string path)

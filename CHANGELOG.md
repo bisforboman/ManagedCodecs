@@ -28,6 +28,10 @@ run time.
   from the track and movie matrices), which a decoder made from the stream gives frames where the bitstream says
   nothing (the ratio wherever the container has one, as ffprobe shows frames), and AVI's `SampleAspectRatio` from
   'vprp' (docs/decisions/2026-10-31-colour-metadata.md).
+- `AviDemuxer.ReadPacketInfo()` and `AdtsDemuxer.ReadPacketInfo()`, as `Mp4Demuxer`'s (0.4.0): the packets
+  `ReadPackets` gives, without their data. ADTS's comes from the frames found when the file is opened, with no read;
+  AVI's walks the 'movi' list reading each chunk's 8-byte header and skipping its data. New public API: the next release
+  is a minor version.
 
 ### Changed
 

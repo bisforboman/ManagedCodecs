@@ -192,9 +192,10 @@ has one, as ffprobe shows FFmpeg's frames. An AVI file's has the sample aspect r
 properties, which FFmpeg's muxer writes), and nothing else of these.
 
 An MP4 file's tracks can be read one at a time: `new Mp4Demuxer(stream, MediaTypes.Video)` leaves the audio track out
-(no sample table, no packets, `Audio` null). `ReadPacketInfo()` lists the packets without their data, each one's
-size, keyframe and discard flags and timestamps from the sample tables, without reading the file: a duration, a packet
-list or a bitrate graph needs nothing more.
+(no sample table, no packets, `Audio` null). Every demuxer's `ReadPacketInfo()` lists the packets without their data,
+each one's size, keyframe and discard flags and timestamps: a duration, a packet list or a bitrate graph needs nothing
+more. MP4's comes from the sample tables and ADTS's from the frames found on opening, neither reading the file; AVI's
+walks the 'movi' list reading each chunk's 8-byte header and skipping its data.
 
 ```csharp
 using var demuxer = new Mp4Demuxer(File.OpenRead("video.mp4"), MediaTypes.Video);

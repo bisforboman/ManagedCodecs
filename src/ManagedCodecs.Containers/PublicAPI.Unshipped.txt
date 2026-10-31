@@ -1,1 +1,3 @@
 #nullable enable
+ManagedCodecs.Containers.AdtsDemuxer.ReadPacketInfo() -> System.Collections.Generic.IEnumerable<ManagedCodecs.PacketInfo>!
+ManagedCodecs.Containers.AviDemuxer.ReadPacketInfo() -> System.Collections.Generic.IEnumerable<ManagedCodecs.PacketInfo>!

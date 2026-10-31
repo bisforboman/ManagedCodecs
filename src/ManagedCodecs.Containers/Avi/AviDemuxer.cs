@@ -131,8 +131,16 @@ public sealed class AviDemuxer : IDemuxer
     /// </summary>
     public IAsyncEnumerable<Packet> ReadPacketsAsync(CancellationToken cancellationToken = default) => ReadSteps.RunAsync(_stream, Steps(), "AVI", cancellationToken);
 
-    // The walk through the movi list: each chunk header's read, and each video chunk's read and packet.
-    private IEnumerable<ReadStep> Steps()
+    /// <summary>
+    /// The packets <see cref="ReadPackets"/> gives, in its order and with its values, without their data: the walk
+    /// through the 'movi' list reads each chunk's 8-byte header and skips its data.
+    /// </summary>
+    /// <exception cref="InvalidDataException">A chunk runs past the end of the file (after the packets before it).</exception>
+    public IEnumerable<PacketInfo> ReadPacketInfo() => ReadSteps.RunInfo(_stream, Steps(withData: false), "AVI");
+
+    // The walk through the movi list: each chunk header's read, and each video chunk's read and packet (or, without
+    // the data, its description).
+    private IEnumerable<ReadStep> Steps(bool withData = true)
     {
         string prefix = _videoStreamIndex.ToString("00", CultureInfo.InvariantCulture);
         long sequence = 0;
@@ -176,9 +184,17 @@ public sealed class AviDemuxer : IDemuxer
                         throw new InvalidDataException($"The chunk at offset {pos} runs past the end of the file.");
                     }
 
-                    var data = new byte[size];
-                    yield return ReadStep.Read(pos + 8, data);
-                    yield return ReadStep.Yield(new Packet(_videoStreamIndex, sequence, data, IsKeyframe: true, Dts: frame, Pts: frame, Duration: 1));
+                    if (withData)
+                    {
+                        var data = new byte[size];
+                        yield return ReadStep.Read(pos + 8, data);
+                        yield return ReadStep.Yield(new Packet(_videoStreamIndex, sequence, data, IsKeyframe: true, Dts: frame, Pts: frame, Duration: 1));
+                    }
+                    else
+                    {
+                        yield return ReadStep.Describe(new PacketInfo(_videoStreamIndex, sequence, checked((int)size), IsKeyframe: true, Dts: frame, Pts: frame, Duration: 1));
+                    }
+
                     sequence++;
                     frame++;
                 }

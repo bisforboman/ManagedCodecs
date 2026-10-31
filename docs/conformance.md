@@ -86,7 +86,9 @@ decoders here do not.
 ISO BMFF (`moov`, `trak`, `stbl` sample tables): packets, timestamps and
 codec private data match FFmpeg, for video and audio tracks, fragmented files (moof) included. On every MP4 sample,
 `ReadPacketInfo` is checked to be `ReadPackets`'s packets without their data, with no read of the file, and a demuxer of
-one track (`MediaTypes.Video` or `Audio`) to give that track's description and packets as one of both does. Audio is trimmed by the edit list as FFmpeg trims it: priming
+one track (`MediaTypes.Video` or `Audio`) to give that track's description and packets as one of both does. AVI's
+and ADTS's `ReadPacketInfo` are checked the same way on their samples: ADTS's with no read of the file, AVI's reading
+only chunk headers, 8 bytes each. Audio is trimmed by the edit list as FFmpeg trims it: priming
 skipped sample by sample, packets after the edit's end left out.
 
 Edit lists of several edits, which FFmpeg's muxer never writes, come from rewritten samples (`tools/mp4-edit-list.py`,

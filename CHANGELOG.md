@@ -23,7 +23,10 @@ run time.
   `color_transfer`, `color_space` and `chroma_location`) and `SampleAspectRatio`, from H.264's VUI as FFmpeg reads it
   (compared with ffprobe on every H.264 sample). New public API: the next release is a minor version. MJPEG frames
   too, as FFmpeg gives them: BT.601, centred chroma, full range (limited after FFmpeg's encoder's "CS=ITU601"
-  comment), the JFIF density's aspect ratio. The MP4 container's values follow
+  comment), the JFIF density's aspect ratio. And the MP4 container's: `VideoStreamInfo.ColorRange`, `ColorPrimaries`,
+  `ColorTransfer` and `ColorMatrix` from 'colr', `SampleAspectRatio` from 'pasp' and `Rotation` (0, 90, 180 or 270,
+  from the track and movie matrices), which a decoder made from the stream gives frames where the bitstream says
+  nothing (the ratio wherever the container has one, as ffprobe shows frames)
   (docs/decisions/2026-10-31-colour-metadata.md).
 
 ### Changed

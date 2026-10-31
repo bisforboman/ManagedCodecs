@@ -16,6 +16,7 @@ samples/*.framemd5
 samples/*.picttypes
 samples/*.interlacing
 samples/*.color
+samples/*.display
 samples/*.flags
 samples/*.csv
 samples/*.f32

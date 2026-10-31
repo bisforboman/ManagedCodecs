@@ -148,6 +148,36 @@ pic_struct and some ct_type values, on MBAFF and on progressive frames (`h264-mb
 are never interlaced or top field first, as ffprobe reports for every MJPEG sample, the interlaced AVI1 ones too, and
 their field order is unknown.
 
+### Colour and aspect ratio
+
+Each frame's `ColorRange`, `ColorPrimaries`, `ColorTransfer`, `ColorMatrix`, `ChromaLocation` and `SampleAspectRatio`
+are compared with `ffprobe -show_frames`'s `color_range`, `color_primaries`, `color_transfer`, `color_space`,
+`chroma_location` and `sample_aspect_ratio` frame by frame on every H.264 sample FFmpeg decodes (`name.color`, in the
+conformance tests, with threads too). libx264 writes the colour description only when asked: `h264-color-bt709`
+(limited range), `h264-color-bt2020-pq` (full range, PQ, chroma_sample_loc_type 2), `h264-color-hlg-sar` (SMPTE 170M,
+HLG, Table E-1's 16:11) and `h264-sar-extended` (Extended_SAR 64:45), each checked with `trace_headers`; libx264's
+other streams send a VUI with a 1:1 ratio and nothing else, OpenH264's a VUI without a ratio, JM's none. What no
+encoder writes (reserved and undefined code points, an Extended_SAR of 0, a ratio that would show the frame as
+nothing) `VideoSignalTests` covers through the SPS parser. The spec (E.2.1) gives the meaning; FFmpeg's reading
+(`ff_h2645_decode_common_vui_params`, `ff_set_sar`, 6.1.1) adds:
+
+- A VUI without chroma_loc_info means left, whatever the chroma format; without a VUI the location is unspecified.
+- A code point FFmpeg does not name is unspecified (primaries above 12 but 22, transfer above 18, matrix above 14: 6.1
+  has no IPT-C2 or YCgCo-R); the reserved 0 and 3 it names are kept.
+- A ratio is checked against the frame (`av_image_check_sar`): one under which the shown width (or, above 1:1, height)
+  rounds down to nothing is unknown.
+
+ffprobe's `sample_aspect_ratio` for a frame is not quite the decoder's: it prints `av_guess_sample_aspect_ratio`,
+which takes the container's ratio ('pasp' in MP4) where there is one, else the frame's, either in lowest terms (an
+SPS patched to 128:90 under a 'pasp' of 3:2 printed 3:2; FFmpeg's decoder itself keeps 128:90). The frames here give
+the SPS's ratio in lowest terms; on every sample the container's agrees with it (FFmpeg's muxer writes it from the
+same source).
+
+Where this decoder departs from FFmpeg, untested by any sample: FFmpeg keeps the range and colour description of an
+earlier SPS when a later one leaves them out, and takes a container's values ('colr' in MP4) where the stream says
+nothing; here each frame has what its own SPS says (the spec's reading: the VUI describes its coded video sequence),
+and the container's values are not read yet.
+
 ### The container's picture size
 
 FFmpeg's decoder crops a frame further to the size the container gives (MP4's sample entry), where that only takes

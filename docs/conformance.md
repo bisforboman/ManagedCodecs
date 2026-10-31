@@ -85,7 +85,8 @@ full range for MJPEG, as FFmpeg converts its grey frames; the nearest chroma sam
 random samples and matrices), the scaling exactly against the overlap mean summed pixel by pixel, the rotation against
 the turned coordinates, and the three together against FFmpeg's first frame of every sample at 3/8 of its size as shown
 (make-samples.sh's name.thumb.rgba: `-vf format=rgba,scale=W:H:flags=area+accurate_rnd+full_chroma_int+full_chroma_inp`,
-autorotate on). FFmpeg comes out 0 to 3 levels below ours and at most 1 above: its fast YUV to RGB path rounds down
+autorotate on). FFmpeg comes out 0 to 3 levels below ours and at most 1 above (2 on ARM64, whose NEON code reduces
+the deep samples to 8 bits rounding up more often): its fast YUV to RGB path rounds down
 (green most), and its area scaler is within one level of the exact mean once its flags keep RGB from going through YUV
 of its own (without them, 10 levels at colour edges). It is not the reference everywhere: from 9 to 14 bits its direct
 conversion to RGBA was up to 87 levels from the definition and from its own 8-bit route, so those references reduce to

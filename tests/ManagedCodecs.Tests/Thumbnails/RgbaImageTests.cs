@@ -18,10 +18,14 @@ public class RgbaImageTests
     /// How far below ours FFmpeg's values may be, per channel: its fast YUV to RGB path rounds down, 0 to 3 levels under
     /// the definition at full size (green most), never over it; its area scaler then adds at most one either way.
     /// </summary>
-    private const int FfmpegBelow = 3;
+    internal const int FfmpegBelow = 3;
 
-    /// <summary>How far above ours FFmpeg's values may be: its area scaler's one level.</summary>
-    private const int FfmpegAbove = 1;
+    /// <summary>
+    /// How far above ours FFmpeg's values may be: its area scaler's one level, and on ARM64 two, where its NEON code
+    /// reduces 9 to 14 bits to 8 (the deep samples' references go through 8 bits) rounding up more often than x64's
+    /// (CI's build-arm64: 2 above in blue on the 10, 12 and 14-bit samples). Widened there rather than matched.
+    /// </summary>
+    internal static readonly int FfmpegAbove = System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture == System.Runtime.InteropServices.Architecture.Arm64 ? 2 : 1;
 
     private static readonly PixelFormat[] Formats = Enum.GetValues<PixelFormat>();
 
@@ -57,7 +61,7 @@ public class RgbaImageTests
         for (int i = 0; i < actual.Length; i++)
         {
             int below = actual[i] - expected[i];
-            if (below is > FfmpegBelow or < -FfmpegAbove)
+            if (below > FfmpegBelow || below < -FfmpegAbove)
             {
                 Assert.Fail($"FFmpeg's {expected[i]} against our {actual[i]} at pixel ({(i / 4) % width}, {i / 4 / width}) of {width}x{height}, channel {i % 4}.");
             }

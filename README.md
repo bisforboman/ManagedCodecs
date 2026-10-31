@@ -42,6 +42,7 @@ in between. That comparison is not measured here.
 | `tools/upstream-issue.sh` | Files `upstream.yml`'s weekly issues: a new StyleBro, or a new release of an encoder the committed samples come from |
 | `tools/ManagedCodecs.Fuzz`, `tools/fuzz.sh` | Fuzzing targets for SharpFuzz and AFL++ (see Malformed input) |
 | `tools/ManagedCodecs.Wasm`, `tools/wasm-check.sh` | The decoders on WebAssembly, checked against the native build (see WebAssembly) |
+| `tools/aot-check.sh` | mcdec published with Native AOT, checked against the JIT build on every sample (see Native AOT) |
 | `tests/ManagedCodecs.Tests` | Unit tests and FFmpeg conformance tests (framemd5 for frames and packets) |
 | `benchmarks/ManagedCodecs.Benchmarks` | BenchmarkDotNet decode benchmark |
 
@@ -78,7 +79,7 @@ and code that reproduces FFmpeg's reading where it differs from the spec), and n
 - **Containers**: AVI (video), MP4 (video and audio tracks, fragmented files too, edit lists of several edits)
   and raw AAC (ADTS), with packets and timestamps as FFmpeg's demuxers give them.
 - **Throughout**: an async API, malformed input that ends in `InvalidDataException` or `NotSupportedException`
-  (fuzzed), and the same output on x64, ARM64 and WebAssembly (CI checks all three).
+  (fuzzed), and the same output on x64, ARM64 and WebAssembly, and under Native AOT (CI checks all of them).
 
 ### Open
 
@@ -427,7 +428,9 @@ publishing project:
 <IlcInstructionSet>x86-64-v3</IlcInstructionSet>   <!-- AVX2: Intel since 2013 (Haswell), AMD since 2015 -->
 ```
 
-(`native` for the build machine's own). A v3 binary refuses to start on a CPU without AVX2. ARM64 needs nothing: its
+(`native` for the build machine's own). A v3 binary refuses to start on a CPU without AVX2. `tools/aot-check.sh
+[x86-64-v3]` publishes mcdec with Native AOT, warnings as errors, and fails unless it decodes every sample as the JIT
+build does; CI's `aot` job runs it for both targets on every pull request. ARM64 needs nothing: its
 vector instructions are part of the baseline. `mcdec` published both ways (2026-10-27, 4-core cloud VM, `last loop`
 per frame, medians of 5 interleaved runs, against the JIT build of the same code):
 

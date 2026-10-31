@@ -16,7 +16,8 @@ public static class Targets
     /// <summary>
     /// file: a container (AVI or MP4) demuxed and every stream decoded. h264: a 2-byte big-endian length, that many
     /// bytes of avcC, then packets of length-prefixed NAL units, each packet behind a 4-byte length. mjpeg: one JPEG
-    /// image. aac: a 1-byte length, that many bytes of AudioSpecificConfig, then one raw AAC frame.
+    /// image. aac: a 1-byte length, that many bytes of AudioSpecificConfig, then raw AAC frames, each behind a
+    /// 2-byte big-endian length (several, so SBR's and parametric stereo's state carries from frame to frame).
     /// </summary>
     public static readonly string[] Names = ["file", "h264", "mjpeg", "aac"];
 
@@ -150,7 +151,13 @@ public static class Targets
 
         int configLength = Math.Min(data[0], data.Length - 1);
         var decoder = new AacDecoder(data.Slice(1, configLength));
-        decoder.Decode(data[(1 + configLength)..]);
+        var rest = data[(1 + configLength)..];
+        while (rest.Length >= 2)
+        {
+            int length = Math.Min(BinaryPrimitives.ReadUInt16BigEndian(rest), rest.Length - 2);
+            decoder.Decode(rest.Slice(2, length));
+            rest = rest[(2 + length)..];
+        }
     }
 
     private static void Release(IReadOnlyList<VideoFrame> frames)

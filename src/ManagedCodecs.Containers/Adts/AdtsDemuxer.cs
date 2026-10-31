@@ -109,6 +109,13 @@ public sealed class AdtsDemuxer : IDemuxer
     /// <inheritdoc cref="AviDemuxer.ReadPacketsAsync"/>
     public IAsyncEnumerable<Packet> ReadPacketsAsync(CancellationToken cancellationToken = default) => ReadSteps.RunAsync(_stream, Steps(), "ADTS", cancellationToken);
 
+    /// <summary>
+    /// The packets <see cref="ReadPackets"/> gives, in its order and with its values, without their data: from the frames
+    /// found when the file was opened, with no read of the file.
+    /// </summary>
+    /// <exception cref="InvalidDataException">A frame runs past the end of the file (after the packets before it).</exception>
+    public IEnumerable<PacketInfo> ReadPacketInfo() => Frames().Select(f => f.Info);
+
     /// <summary>Disposes the stream, unless the demuxer was made to leave it open.</summary>
     public void Dispose()
     {
@@ -139,17 +146,26 @@ public sealed class AdtsDemuxer : IDemuxer
         }
     }
 
-    // Each frame's read and packet, then the error for a frame that runs past the end of the file.
+    // Each frame's read and packet.
     private IEnumerable<ReadStep> Steps()
+    {
+        foreach (var (position, info) in Frames())
+        {
+            var data = new byte[info.Size];
+            yield return ReadStep.Read(position, data);
+            yield return ReadStep.Yield(new Packet(info.StreamIndex, info.Sequence, data, info.IsKeyframe, info.Dts, info.Pts, info.Duration));
+        }
+    }
+
+    // Each frame's position and packet description, then the error for a frame that runs past the end of the file.
+    private IEnumerable<(long Position, PacketInfo Info)> Frames()
     {
         long sequence = 0;
         long time = 0;
         foreach (var (pos, length, blocks) in _frames)
         {
-            var data = new byte[length];
-            yield return ReadStep.Read(pos, data);
             long duration = (long)SamplesPerBlock * blocks;
-            yield return ReadStep.Yield(new Packet(0, sequence++, data, IsKeyframe: true, time, time, duration));
+            yield return (pos, new PacketInfo(0, sequence++, length, IsKeyframe: true, time, time, duration));
             time += duration;
         }
 

@@ -78,9 +78,10 @@ fragmented file's 'mdhd' counts only the samples in 'moov'); AVI's 'strh' length
 does not expose, is not counted (avi-dropped-frame's MP3 outlasts its video). H.264's size is the decoder's frame size
 from the SPS, which can crop the container's.
 
-The thumbnails' pixels (`RgbaImage`, ManagedCodecs.Thumbnails, not yet public) are each frame converted to RGBA at its
-own size (the matrix and range the frame says; none said, BT.601 and limited range, as FFmpeg's scaler takes them, but
-full range for MJPEG, as FFmpeg converts its grey frames; the nearest chroma sample), scaled down by area and rotated.
+The thumbnails' pixels (`RgbaImage`, ManagedCodecs.Thumbnails) are each frame converted to RGBA at its own size (the
+matrix and range the frame says; none said, BT.601 and limited range, as FFmpeg's scaler takes them, but full range for
+MJPEG, as FFmpeg converts its grey frames; the identity matrix as G, B and R planes, FFmpeg's `gbrp`, h264-444-gbr from
+libx264rgb; the nearest chroma sample), scaled down by area and rotated.
 `RgbaImageTests` checks the conversion within one level of its definition in double precision (every pixel format,
 random samples and matrices), the scaling exactly against the overlap mean summed pixel by pixel, the rotation against
 the turned coordinates, and the three together against FFmpeg's first frame of every sample at 3/8 of its size as shown
@@ -93,6 +94,15 @@ conversion to RGBA was up to 87 levels from the definition and from its own 8-bi
 8 bits first (within 3), and at an odd width or height it leaves the fast path for one that interpolates chroma (up to
 194 levels apart at an edge): those two samples, the container crops, have no FFmpeg reference, and the odd sizes are
 checked against the definition only.
+
+`VideoThumbnail.Create` is checked end to end against the same FFmpeg chain and band: at `At` zero on every sample
+whose pixels are square (FFmpeg's chain scales the coded size, `Create` the size as shown), and at times into six
+(name.atNNNN.thumb.rgba, `ffmpeg -ss <t> -i`, the first frame shown at or after the start time plus t: between
+keyframes, on one, a fragmented file that starts late, past an empty edit, MJPEG, a fade-in). `SkipDark` is checked on
+h264-fade-in (a keyframe every 0.2 s: the frame at 0.4 s is the first at 10% of white's mean luma). The PNG files are
+read back by a reader the tests have from the PNG spec (chunk CRCs bit by bit, inflate, the five filters undone) and,
+where ffmpeg is installed (CI), by FFmpeg's PNG decoder, to the byte. The fuzzer's `thumbnail` target probes and
+thumbnails whole files, and `MalformedInputTests` replays every container finding through it.
 
 `VideoStreamInfo`'s colour properties, aspect ratio and rotation are the container's, as FFmpeg's mov demuxer reads
 them (6.1.1): the visual sample entry's 'colr' ('nclx', its full range flag clear meaning limited; QuickTime's 'nclc',

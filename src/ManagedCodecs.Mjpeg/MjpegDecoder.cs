@@ -156,6 +156,36 @@ public sealed class MjpegDecoder : IVideoDecoder
         _aspectRatio = AspectRatioOf(x, y);
     }
 
+    /// <summary>
+    /// The size the first image of a JPEG packet declares in its SOF segment, read without decoding it (an interlaced
+    /// packet's first field is half its frame's height), or null where no SOF segment comes before the first scan:
+    /// for a caller that refuses large images before the decoder allocates their planes (the Thumbnails package).
+    /// </summary>
+    /// <exception cref="InvalidDataException">The packet's markers are malformed.</exception>
+    internal static (int Width, int Height)? ImageSize(ReadOnlySpan<byte> packet)
+    {
+        foreach (var segment in JpegMarkerReader.ReadSegments(packet))
+        {
+            if (segment.Marker == JpegMarker.Sos)
+            {
+                break;
+            }
+
+            if (segment.Marker is JpegMarker.Sof0 or JpegMarker.Sof1 || JpegMarker.IsUnsupportedFrame(segment.Marker))
+            {
+                var payload = packet.Slice(segment.PayloadOffset, segment.PayloadLength);
+                if (payload.Length < 5)
+                {
+                    throw new InvalidDataException("SOF segment too short.");
+                }
+
+                return ((payload[3] << 8) | payload[4], (payload[1] << 8) | payload[2]);
+            }
+        }
+
+        return null;
+    }
+
     /// <summary>Xdensity:Ydensity in lowest terms, 0:1 (unknown) if either is 0.</summary>
     internal static Rational AspectRatioOf(int x, int y) => ColorCodes.AspectRatio(x, y);
 

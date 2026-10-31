@@ -17,7 +17,10 @@ run time.
 
 - `ManagedCodecs.Thumbnails`, a new package: `VideoProbe.Read` gives an MP4 or AVI file's duration, displayed size,
   codecs, frame rate, rotation and audio facts as ffprobe reports them, without decoding (README, Probing a video;
-  docs/decisions/2026-10-31-thumbnails.md, pull request 2). Thumbnails themselves come later.
+  docs/decisions/2026-10-31-thumbnails.md, pull request 2).
+- `VideoThumbnail.Create` and `CreateAsync` (ManagedCodecs.Thumbnails): one frame of a video file as a small upright
+  RGBA `Thumbnail`, with `SavePng`; `ThumbnailOptions` sets the time, the largest size, skipping dark frames, a pixel
+  limit for untrusted uploads and the colour conversion (README, Thumbnails).
 - `VideoStreamInfo.Duration` and `AudioStreamInfo.Duration`: a stream's length as the container gives it, as FFmpeg's
   stream duration (MP4's edits, capped at the samples they take, else the track's; AVI's stream header length).
 - `ManagedCodecs.Unity`, a new package: every decoder and demuxer in one assembly for .NET Standard 2.1, which Unity's

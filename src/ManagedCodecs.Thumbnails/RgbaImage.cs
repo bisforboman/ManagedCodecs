@@ -204,8 +204,9 @@ internal sealed class AreaScaler
 /// Converts a frame's rows to 8-bit RGBA by a matrix and a range, any of the library's layouts (4:0:0, 4:2:0, 4:2:2,
 /// 4:4:4) at any depth, each pixel taking the chroma sample its position falls in (nearest neighbour, as FFmpeg's
 /// <c>format=rgba</c> does by default). Fixed point with 20 fractional bits on the raw samples: within one level of the
-/// definition in double precision (the tests' reference), rounded half up and clamped. The transfer and primaries are
-/// not converted: the RGB is the source's, as players show SDR video.
+/// definition in double precision (the tests' reference), rounded half up and clamped. The identity matrix (H.273's 0,
+/// 4:4:4 only) carries G, B and R in the three planes, each taken as luma is. The transfer and primaries are not
+/// converted: the RGB is the source's, as players show SDR video.
 /// </summary>
 internal sealed class RgbaConverter
 {
@@ -221,7 +222,7 @@ internal sealed class RgbaConverter
     private readonly int _crToG;
     private readonly int _cbToB;
 
-    private RgbaConverter(double kr, double kb, bool fullRange, int depth)
+    private RgbaConverter(double kr, double kb, bool fullRange, int depth, bool identity = false)
     {
         // R = Y + 2 (1 - Kr) Cr, B = Y + 2 (1 - Kb) Cb, and G from Y = Kr R + Kg G + Kb B (ITU-T H.273, equations 38 to
         // 40 solved for R, G and B), Y and C first brought to 0..255 and -128..127: limited range is 219 (luma) and 224
@@ -241,6 +242,7 @@ internal sealed class RgbaConverter
         Kr = kr;
         Kb = kb;
         FullRange = fullRange;
+        Identity = identity;
     }
 
     /// <summary>The matrix's Kr (ITU-T H.273 Table 4).</summary>
@@ -252,26 +254,34 @@ internal sealed class RgbaConverter
     /// <summary>Whether the samples are full range, else limited.</summary>
     public bool FullRange { get; }
 
+    /// <summary>Whether the planes are G, B and R (the identity matrix), not Y, Cb and Cr.</summary>
+    public bool Identity { get; }
+
     /// <summary>
     /// The converter for <paramref name="frame"/>, by its matrix and range unless <paramref name="matrix"/> or
     /// <paramref name="range"/> say otherwise. The matrices FFmpeg's scaler knows: BT.709, FCC, BT.601 (BT.470BG,
     /// SMPTE 170M), SMPTE 240M and BT.2020 (constant luminance converted as if it were not); any other, or none said,
     /// as BT.601, what FFmpeg's scaler does with them, not a guess by picture size. A range not said is limited, but
     /// full for MJPEG: JPEG's samples are full range (T.81 with JFIF), as FFmpeg converts its grey frames (the colour
-    /// ones say full themselves).
+    /// ones say full themselves). The identity matrix on a 4:4:4 frame takes the planes as G, B and R (FFmpeg's
+    /// <c>gbrp</c>); on subsampled chroma, which H.264 forbids it, it converts as BT.601.
     /// </summary>
     /// <param name="codec">The video's codec (<see cref="VideoStreamInfo.Codec"/>), for the range MJPEG doesn't say.</param>
     public static RgbaConverter For(VideoFrame frame, string codec, ColorMatrix? matrix = null, ColorRange? range = null)
     {
         ArgumentNullException.ThrowIfNull(frame);
-        var (kr, kb) = Coefficients(matrix ?? frame.ColorMatrix);
-        var said = range ?? frame.ColorRange;
-        bool full = said == ColorRange.Full || (said == ColorRange.Unspecified && codec == CodecIds.Mjpeg);
-        return new RgbaConverter(kr, kb, full, frame.Format.BitDepth());
+        var said = matrix ?? frame.ColorMatrix;
+        var (kr, kb) = Coefficients(said);
+        var saidRange = range ?? frame.ColorRange;
+        bool full = saidRange == ColorRange.Full || (saidRange == ColorRange.Unspecified && codec == CodecIds.Mjpeg);
+        bool identity = said == ColorMatrix.Identity && frame.Format.PlaneCount() == 3
+            && frame.Format.PlaneSize(1, frame.Width, frame.Height) == (frame.Width, frame.Height);
+        return new RgbaConverter(kr, kb, full, frame.Format.BitDepth(), identity);
     }
 
-    /// <summary>A converter by Kr and Kb themselves (the tests' random matrices).</summary>
-    internal static RgbaConverter Of(double kr, double kb, bool fullRange, int depth) => new(kr, kb, fullRange, depth);
+    /// <summary>A converter by Kr and Kb themselves (the tests' random matrices), or for G, B and R planes.</summary>
+    internal static RgbaConverter Of(double kr, double kb, bool fullRange, int depth, bool identity = false) =>
+        new(kr, kb, fullRange, depth, identity);
 
     /// <summary>Kr and Kb of <paramref name="matrix"/>, BT.601's for the matrices FFmpeg's scaler doesn't know.</summary>
     internal static (double Kr, double Kb) Coefficients(ColorMatrix matrix) => matrix switch
@@ -304,6 +314,21 @@ internal sealed class RgbaConverter
             else
             {
                 Grey(luma, rgba);
+            }
+
+            return;
+        }
+
+        if (Identity)
+        {
+            // G, B and R in the planes' order, written as R, G and B; For takes the identity only with full-size planes.
+            if (format.BytesPerSample() == 2)
+            {
+                Planes(MemoryMarshal.Cast<byte, ushort>(luma), MemoryMarshal.Cast<byte, ushort>(frame.GetRow(1, y)), MemoryMarshal.Cast<byte, ushort>(frame.GetRow(2, y)), rgba);
+            }
+            else
+            {
+                Planes(luma, frame.GetRow(1, y), frame.GetRow(2, y), rgba);
             }
 
             return;
@@ -348,6 +373,30 @@ internal sealed class RgbaConverter
             rgba[(x * 4) + 1] = value;
             rgba[(x * 4) + 2] = value;
             rgba[(x * 4) + 3] = 255;
+        }
+    }
+
+    private void Planes(ReadOnlySpan<byte> g, ReadOnlySpan<byte> b, ReadOnlySpan<byte> r, Span<byte> rgba)
+    {
+        for (int x = 0; x < g.Length; x++)
+        {
+            var pixel = rgba.Slice(x * 4, 4);
+            pixel[3] = 255;
+            pixel[0] = Clamp((_yScale * (r[x] - _yOffset)) + Half);
+            pixel[1] = Clamp((_yScale * (g[x] - _yOffset)) + Half);
+            pixel[2] = Clamp((_yScale * (b[x] - _yOffset)) + Half);
+        }
+    }
+
+    private void Planes(ReadOnlySpan<ushort> g, ReadOnlySpan<ushort> b, ReadOnlySpan<ushort> r, Span<byte> rgba)
+    {
+        for (int x = 0; x < g.Length; x++)
+        {
+            var pixel = rgba.Slice(x * 4, 4);
+            pixel[3] = 255;
+            pixel[0] = Clamp((_yScale * (r[x] - _yOffset)) + Half);
+            pixel[1] = Clamp((_yScale * (g[x] - _yOffset)) + Half);
+            pixel[2] = Clamp((_yScale * (b[x] - _yOffset)) + Half);
         }
     }
 

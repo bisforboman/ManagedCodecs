@@ -34,6 +34,25 @@ public class MalformedInputTests
         return data;
     }
 
+#if !UNITY_BUILD
+    /// <summary>
+    /// The container findings through the thumbnail path too (the fuzzer's thumbnail target): probing, seeking, decoding
+    /// with concealment, scaling and the PNG writer on files the demuxers and decoders once failed on.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(Findings))]
+    public async Task Finding_KeepsTheContractAsAThumbnail(string target, string name)
+    {
+        if (target != "file")
+        {
+            return;
+        }
+
+        var data = File.ReadAllBytes(Path.Combine(FindingsDirectory, target, name));
+        await Task.Run(() => Targets.Run("thumbnail", data)).WaitAsync(TimeSpan.FromSeconds(30));
+    }
+
+#endif
     [Theory]
     [MemberData(nameof(Findings))]
     public async Task Finding_KeepsTheContract(string target, string name)

@@ -15,6 +15,7 @@
     <ProjectReference Include="..\..\src\ManagedCodecs.Mjpeg\ManagedCodecs.Mjpeg.csproj" />
     <ProjectReference Include="..\..\src\ManagedCodecs.H264\ManagedCodecs.H264.csproj" />
     <ProjectReference Include="..\..\src\ManagedCodecs.Aac\ManagedCodecs.Aac.csproj" />
+    <ProjectReference Include="..\..\src\ManagedCodecs.Thumbnails\ManagedCodecs.Thumbnails.csproj" />
   </ItemGroup>
 
 </Project>

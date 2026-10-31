@@ -115,6 +115,18 @@ public class SeekTests
     }
 
     [Fact]
+    public void SeeksInATrackWithoutSamples()
+    {
+        // The fuzzer's (thumbnail target): an MP4 whose H.264 track has no samples. The stream is there, so the seek is
+        // no argument error; the read from it gives no packets of it, as one from the start does.
+        string path = Path.Combine(AppContext.BaseDirectory, "Fuzz", "Findings", "thumbnail", "mp4-seek-empty-video-track.mp4");
+        using var demuxer = Demuxer.Open(new MemoryStream(File.ReadAllBytes(path)));
+        var video = demuxer.Video!;
+        demuxer.Seek(1000, video.StreamIndex);
+        Assert.DoesNotContain(demuxer.ReadPackets(), p => p.StreamIndex == video.StreamIndex);
+    }
+
+    [Fact]
     public void AdtsCannotSeek()
     {
         using var adts = Demuxer.Open(TestSamples.PathOf("aac-pulse.aac"));

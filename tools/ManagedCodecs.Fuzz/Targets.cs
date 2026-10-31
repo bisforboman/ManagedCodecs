@@ -3,6 +3,9 @@ using ManagedCodecs.Aac;
 using ManagedCodecs.Containers;
 using ManagedCodecs.H264;
 using ManagedCodecs.Mjpeg;
+#if !UNITY_BUILD
+using ManagedCodecs.Thumbnails;
+#endif
 
 namespace ManagedCodecs.Fuzz;
 
@@ -18,8 +21,16 @@ public static class Targets
     /// bytes of avcC, then packets of length-prefixed NAL units, each packet behind a 4-byte length. mjpeg: one JPEG
     /// image. aac: a 1-byte length, that many bytes of AudioSpecificConfig, then raw AAC frames, each behind a
     /// 2-byte big-endian length (several, so SBR's and parametric stereo's state carries from frame to frame).
+    /// thumbnail: a container file probed and thumbnailed (ManagedCodecs.Thumbnails; not in the Unity build's tests,
+    /// which leave that package out).
     /// </summary>
-    public static readonly string[] Names = ["file", "h264", "mjpeg", "aac"];
+    public static readonly string[] Names =
+    [
+        "file", "h264", "mjpeg", "aac",
+#if !UNITY_BUILD
+        "thumbnail",
+#endif
+    ];
 
     /// <summary>
     /// Runs <paramref name="target"/> on <paramref name="data"/>, H.264 with <paramref name="threads"/> threads
@@ -44,6 +55,11 @@ public static class Targets
                 case "aac":
                     DecodeAac(data);
                     break;
+#if !UNITY_BUILD
+                case "thumbnail":
+                    Thumbnail(data.ToArray());
+                    break;
+#endif
                 default:
                     throw new ArgumentException($"Unknown target '{target}'.", nameof(target));
             }
@@ -55,6 +71,20 @@ public static class Targets
             return false;
         }
     }
+
+#if !UNITY_BUILD
+    /// <summary>
+    /// Probes a container file and makes its thumbnail the way an upload service would: small, stepping past dark
+    /// frames (more decoding, keyframe by keyframe), as a PNG file.
+    /// </summary>
+    public static void Thumbnail(byte[] file)
+    {
+        VideoProbe.Read(new MemoryStream(file));
+        var options = new ThumbnailOptions { MaxWidth = 48, MaxHeight = 48, SkipDark = true };
+        VideoThumbnail.Create(new MemoryStream(file), options).ToPng();
+    }
+
+#endif
 
     /// <summary>
     /// Demuxes a container file and decodes every packet of the streams there are decoders for. An MP4 file is read again

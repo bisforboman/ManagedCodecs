@@ -501,6 +501,7 @@ public sealed class H264Decoder : IVideoDecoder
         frame.IsTopFieldFirst = job.Interlacing.TopFieldFirst;
         frame.FieldOrder = job.Interlacing.Order;
         frame.IsCodedAsFields = job.Interlacing.CodedAsFields;
+        state.Sps.Signal.Apply(frame);
         frames.AddRange(_output.Add(frame, picture.Poc, job.Restart, ReorderDepth(state.Sps), borrow ? picture : null));
     }
 

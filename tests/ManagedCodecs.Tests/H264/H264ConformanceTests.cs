@@ -77,6 +77,8 @@ public class H264ConformanceTests
         Assert.True(types is null || types.Count == expected.Count, $"ffprobe lists {types?.Count} frames, framemd5 {expected.Count}.");
         var interlacing = Interlacings.Read(sampleName);
         Assert.True(interlacing is null || interlacing.Frames.Count == expected.Count, $"ffprobe lists {interlacing?.Frames.Count} frames' interlacing, framemd5 {expected.Count}.");
+        var colors = ColorReferences.Read(sampleName);
+        Assert.True(colors is null || colors.Frames.Count == expected.Count, $"ffprobe lists {colors?.Frames.Count} frames' colour properties, framemd5 {expected.Count}.");
 
         using var demuxer = Mp4Demuxer.Open(TestSamples.PathOf(sampleName));
         var video = demuxer.Video!;
@@ -98,6 +100,7 @@ public class H264ConformanceTests
                 $"Frame {index}: pts {frame.Pts} ({video.TimeBase}) is not FFmpeg's {expected[index].Pts} ({timeBase}).");
             Assert.True(types is null || types[index] == frame.PictureType, $"Frame {index}: picture type {frame.PictureType} is not FFmpeg's {types?[index]}.");
             interlacing?.Check(index, frame);
+            colors?.Check(index, frame);
             index++;
             if (dispose)
             {

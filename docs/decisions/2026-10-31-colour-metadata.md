@@ -1,6 +1,6 @@
 # Colour and geometry metadata for 0.5.0 (2026-10-31)
 
-A design, decided (below); no code yet. It comes from the review of the repository's decisions
+A design, decided (below). The first pull request (H.264's VUI, the enums and `VideoFrame`'s properties) is done. It comes from the review of the repository's decisions
 (2026-10-31): the frames carry no colour information, so a consumer cannot convert them to RGB correctly, and this is
 the gap in the API most likely to matter next.
 
@@ -70,7 +70,9 @@ New public API, so a minor version (0.5.0); nothing removed or changed, so code 
 2. **MJPEG**: full range, BT.601 matrix, centre chroma, SAR from JFIF's density (FFmpeg's rules, `ffprobe` as the
    oracle; Adobe APP14 files too).
 3. **MP4**: 'colr', 'pasp' and 'tkhd''s rotation into `VideoStreamInfo`, and into the frames where the bitstream says
-   nothing (as FFmpeg's decoder takes the container's values as defaults).
+   nothing (as FFmpeg's decoder takes the container's values as defaults). Found in the first: ffprobe's frame
+   `sample_aspect_ratio` prefers the container's 'pasp' (`av_guess_sample_aspect_ratio`), so the sample where 'pasp'
+   and the VUI disagree checks the frame against the VUI and `VideoStreamInfo` against 'pasp'.
 
 Each adds to PublicAPI.Unshipped.txt and CHANGELOG's Unreleased under Added; the release that carries them is 0.5.0.
 

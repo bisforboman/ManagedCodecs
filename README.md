@@ -175,6 +175,14 @@ is the stream's, as `ffprobe -show_streams` prints it for an MP4 file (its first
 picture timing SEI where the stream has one, else how the frame was coded and its fields' order counts
 (docs/conformance.md, Interlacing); MJPEG frames are never flagged, as in FFmpeg.
 
+What the samples mean, for a converter to RGB or a player to go by: `ColorRange` (limited or full), `ColorPrimaries`,
+`ColorTransfer` (PQ and HLG among them) and `ColorMatrix` (the YCbCr to RGB coefficients), with ITU-T H.273's values
+as FFmpeg's `color_range`, `color_primaries`, `color_transfer` and `color_space` have them; `ChromaLocation`; and
+`SampleAspectRatio` (a frame is shown `Width` times it wide; 0:1 when unknown). In H.264 they are the SPS's VUI as
+FFmpeg reads it (docs/conformance.md, Colour and aspect ratio). Nothing is guessed: most streams leave the matrix
+unspecified, which usually means BT.601 below 720 lines and BT.709 from 720, in limited range. MJPEG frames and the
+MP4 container's 'colr', 'pasp' and rotation do not say anything yet (docs/decisions/2026-10-31-colour-metadata.md).
+
 An MP4 file's tracks can be read one at a time: `new Mp4Demuxer(stream, MediaTypes.Video)` leaves the audio track out
 (no sample table, no packets, `Audio` null). `ReadPacketInfo()` lists the packets without their data, each one's
 size, keyframe and discard flags and timestamps from the sample tables, without reading the file: a duration, a packet

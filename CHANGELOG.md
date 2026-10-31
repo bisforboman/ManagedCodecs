@@ -18,6 +18,11 @@ run time.
 - Every package carries THIRD-PARTY-NOTICES.md: the BSD-2-Clause and Apache-2.0 notices of OpenH264 and libxaac, from
   which some of the specifications' constant tables were transcribed (H.264's CABAC tables; HE-AAC's QMF window, SBR
   noise table and parametric stereo's 34-band tables). The code and its license are unchanged.
+- What each decoded frame's samples mean: `VideoFrame.ColorRange`, `ColorPrimaries`, `ColorTransfer`, `ColorMatrix`
+  and `ChromaLocation` (new enums with ITU-T H.273's values, FFmpeg's `color_range`, `color_primaries`,
+  `color_transfer`, `color_space` and `chroma_location`) and `SampleAspectRatio`, from H.264's VUI as FFmpeg reads it
+  (compared with ffprobe on every H.264 sample). New public API: the next release is a minor version. MJPEG and the
+  MP4 container's values follow (docs/decisions/2026-10-31-colour-metadata.md).
 
 ### Changed
 

@@ -79,6 +79,9 @@ internal sealed class SequenceParameterSet
     /// </summary>
     public PictureTimingLayout? PictureTiming { get; internal init; }
 
+    /// <summary>What the VUI says the samples mean (colour properties, chroma location, aspect ratio); <see cref="VideoSignal.None"/> without a VUI.</summary>
+    public VideoSignal Signal { get; internal init; } = VideoSignal.None;
+
     /// <summary>Crop offsets in luma samples (already scaled by CropUnitX/Y).</summary>
     public (int Left, int Right, int Top, int Bottom) Crop { get; internal init; }
 
@@ -164,9 +167,10 @@ internal sealed class SequenceParameterSet
                 r.ReadUe(maxCrop, "frame_crop_top_offset") * unitY, r.ReadUe(maxCrop, "frame_crop_bottom_offset") * unitY);
         }
 
-        // Of the VUI, the bitstream restriction says how far output is reordered, and pic_struct_present_flag with the
-        // HRD parameters how to read the picture timing SEI.
-        var (restriction, timing) = r.ReadFlag() ? ReadVui(r) : (null, null);
+        // Of the VUI, the bitstream restriction says how far output is reordered, pic_struct_present_flag with the
+        // HRD parameters how to read the picture timing SEI, and the rest what the samples mean (the frames' colour
+        // properties and aspect ratio).
+        var (restriction, timing, signal) = r.ReadFlag() ? ReadVui(r) : (null, null, VideoSignal.None);
 
         var sps = new SequenceParameterSet
         {
@@ -198,6 +202,7 @@ internal sealed class SequenceParameterSet
             MaxNumReorderFrames = restriction?.Reorder,
             MaxDecFrameBuffering = restriction?.Buffering,
             PictureTiming = timing,
+            Signal = signal,
         };
 
         if (sps.Width <= 0 || sps.Height <= 0)
@@ -208,12 +213,20 @@ internal sealed class SequenceParameterSet
         return sps;
     }
 
-    /// <summary>vui_parameters (E.1.1), read up to and including bitstream_restriction; each null when absent.</summary>
-    private static ((int Reorder, int Buffering)? Restriction, PictureTimingLayout? Timing) ReadVui(BitReader r)
+    /// <summary>
+    /// vui_parameters (E.1.1), read up to and including bitstream_restriction; the restriction and timing null when
+    /// absent. The signal as FFmpeg reads it: the chroma location left where the VUI does not say (FFmpeg's default for
+    /// a VUI, whatever the chroma format), only the top field's.
+    /// </summary>
+    private static ((int Reorder, int Buffering)? Restriction, PictureTimingLayout? Timing, VideoSignal Signal) ReadVui(BitReader r)
     {
-        if (r.ReadFlag() && r.ReadBits(8) == 255)
+        var aspectRatio = new Rational(0, 1);
+        if (r.ReadFlag())
         {
-            r.ReadBits(32); // aspect_ratio_idc Extended_SAR: sar_width, sar_height
+            int idc = (int)r.ReadBits(8); // aspect_ratio_idc
+            int sarWidth = idc == 255 ? (int)r.ReadBits(16) : 0;
+            int sarHeight = idc == 255 ? (int)r.ReadBits(16) : 0;
+            aspectRatio = VideoSignal.AspectRatioOf(idc, sarWidth, sarHeight);
         }
 
         if (r.ReadFlag())
@@ -221,20 +234,28 @@ internal sealed class SequenceParameterSet
             r.ReadFlag(); // overscan_appropriate_flag
         }
 
+        var range = ColorRange.Unspecified;
+        var (primaries, transfer, matrix) = (ColorPrimaries.Unspecified, ColorTransfer.Unspecified, ColorMatrix.Unspecified);
         if (r.ReadFlag())
         {
-            r.ReadBits(4); // video_format, video_full_range_flag
+            r.ReadBits(3); // video_format
+            range = r.ReadFlag() ? ColorRange.Full : ColorRange.Limited; // video_full_range_flag
             if (r.ReadFlag())
             {
-                r.ReadBits(24); // colour_primaries, transfer_characteristics, matrix_coefficients
+                primaries = VideoSignal.PrimariesOf((int)r.ReadBits(8));
+                transfer = VideoSignal.TransferOf((int)r.ReadBits(8));
+                matrix = VideoSignal.MatrixOf((int)r.ReadBits(8));
             }
         }
 
+        var location = ChromaLocation.Left;
         if (r.ReadFlag())
         {
-            r.ReadUe(); // chroma_sample_loc_type_top_field
+            location = VideoSignal.LocationOf(r.ReadUe()); // chroma_sample_loc_type_top_field
             r.ReadUe(); // chroma_sample_loc_type_bottom_field
         }
+
+        var signal = new VideoSignal(range, primaries, transfer, matrix, location, aspectRatio);
 
         if (r.ReadFlag())
         {
@@ -268,7 +289,7 @@ internal sealed class SequenceParameterSet
             : null;
         if (!r.ReadFlag())
         {
-            return (null, timing);
+            return (null, timing, signal);
         }
 
         r.ReadFlag(); // motion_vectors_over_pic_boundaries_flag
@@ -278,7 +299,7 @@ internal sealed class SequenceParameterSet
         r.ReadUe(); // log2_max_mv_length_vertical
         int reorder = r.ReadUe(16, "max_num_reorder_frames");
         int buffering = r.ReadUe(16, "max_dec_frame_buffering");
-        return ((reorder, buffering), timing);
+        return ((reorder, buffering), timing, signal);
     }
 
     /// <summary>hrd_parameters (E.1.2): the lengths of cpb_removal_delay, dpb_output_delay and time_offset.</summary>

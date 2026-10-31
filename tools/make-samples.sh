@@ -259,6 +259,18 @@ ff -f lavfi -i "testsrc2=size=321x239:rate=25,scroll=v=0.02" -t 1 "${H[@]}" -bf 
 ff -f lavfi -i "testsrc2=size=320x240:rate=25,scroll=h=0.02,noise=alls=10:allf=t" -t 1 "${H[@]}" -bf 2 -refs 2 -x264-params constrained-intra=1:chroma-qp-offset=4 samples/h264-high-constrained-intra.mp4
 ff -f lavfi -i "testsrc2=size=320x240:rate=25,fade=in:0:20,fade=out:30:20" -t 2 "${H[@]}" samples/h264-high-default.mp4
 
+# ---- H.264 colour description and sample aspect ratio (the VUI) ----
+# Each frame's colour properties and aspect ratio (VideoFrame.ColorRange to SampleAspectRatio; name.color): BT.709 in
+# limited range; BT.2020 with PQ in full range and the chroma at the top left (chroma_sample_loc_type 2); SMPTE 170M
+# with HLG and a ratio of Table E-1 (16:11, aspect_ratio_idc 4); a ratio of its own (64:45, Extended_SAR). The other
+# samples send no colour description (libx264's default) or no VUI at all (JM's).
+ff -f lavfi -i testsrc2=size=320x240:rate=25 -t 0.2 "${H[@]}" -color_range tv -colorspace bt709 -color_primaries bt709 \
+  -color_trc bt709 samples/h264-color-bt709.mp4
+ff -f lavfi -i testsrc2=size=320x240:rate=25 -t 0.2 "${H[@]}" -color_range pc -colorspace bt2020nc -color_primaries bt2020 \
+  -color_trc smpte2084 -x264-params chromaloc=2 samples/h264-color-bt2020-pq.mp4
+ff -f lavfi -i testsrc2=size=320x240:rate=25,setsar=16/11 -t 0.2 "${H[@]}" -colorspace smpte170m -color_primaries smpte170m \
+  -color_trc arib-std-b67 samples/h264-color-hlg-sar.mp4
+ff -f lavfi -i testsrc2=size=320x240:rate=25,setsar=64/45 -t 0.2 "${H[@]}" samples/h264-sar-extended.mp4
 # ---- H.264 High 4:2:2 ----
 # 4:2:2 chroma (chroma_format_idc 2): 8x16 chroma blocks of eight 4x4 blocks, a 2x4 chroma DC transform at QP_C + 3,
 # CAVLC's chroma DC tables for nC = -2 and CABAC's chroma DC contexts for 8 coefficients, plane and DC intra
@@ -603,6 +615,14 @@ for f in samples/*.avi samples/*.mp4; do
   t=$(ffprobe -v error -select_streams v:0 -show_entries stream=field_order:frame=interlaced_frame,top_field_first -of csv "$f" \
     | cut -d, -f1-3)
   if [ -n "$t" ]; then echo "$t" > "${f%.*}.interlacing"; fi
+done
+# name.color: each decoded video frame's colour properties and sample aspect ratio as ffprobe lists them, one a line in
+# output order ("color_range=tv|color_space=bt709|..."), for VideoFrame.ColorRange, ColorPrimaries, ColorTransfer,
+# ColorMatrix, ChromaLocation and SampleAspectRatio.
+for f in samples/*.avi samples/*.mp4; do
+  t=$(ffprobe -v error -select_streams v:0 -of compact=p=0 \
+    -show_entries frame=color_range,color_space,color_primaries,color_transfer,chroma_location,sample_aspect_ratio "$f")
+  if [ -n "$t" ]; then echo "$t" > "${f%.*}.color"; fi
 done
 for f in samples/*.mp4; do
   ff -copyts -i "$f" -c copy -f framemd5 "${f%.mp4}.packets.framemd5"

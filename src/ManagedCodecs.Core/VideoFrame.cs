@@ -155,6 +155,45 @@ public sealed class VideoFrame : IDisposable
     /// </summary>
     public bool IsCodedAsFields { get; internal set; }
 
+    /// <summary>
+    /// Which values the samples take, as FFmpeg's <c>color_range</c>: in H.264 the SPS's video_full_range_flag where its
+    /// VUI has a video signal type, else <see cref="ColorRange.Unspecified"/> (most streams, limited range in practice).
+    /// </summary>
+    public ColorRange ColorRange { get; internal set; }
+
+    /// <summary>
+    /// The colour primaries, as FFmpeg's <c>color_primaries</c>: in H.264 the VUI's colour_primaries where it has a colour
+    /// description, else (and for a value ITU-T H.273 does not define) <see cref="ColorPrimaries.Unspecified"/>.
+    /// </summary>
+    public ColorPrimaries ColorPrimaries { get; internal set; } = ColorPrimaries.Unspecified;
+
+    /// <summary>
+    /// The transfer characteristics, as FFmpeg's <c>color_transfer</c>: in H.264 the VUI's transfer_characteristics where
+    /// it has a colour description, else (and for a value ITU-T H.273 does not define) <see cref="ColorTransfer.Unspecified"/>.
+    /// </summary>
+    public ColorTransfer ColorTransfer { get; internal set; } = ColorTransfer.Unspecified;
+
+    /// <summary>
+    /// The YCbCr to RGB matrix, as FFmpeg's <c>color_space</c>: in H.264 the VUI's matrix_coefficients where it has a
+    /// colour description, else (and for a value ITU-T H.273 does not define) <see cref="ColorMatrix.Unspecified"/>.
+    /// Nothing is guessed: an unspecified matrix is usually BT.601 below 720 lines and BT.709 from 720.
+    /// </summary>
+    public ColorMatrix ColorMatrix { get; internal set; } = ColorMatrix.Unspecified;
+
+    /// <summary>
+    /// Where the chroma samples sit, as FFmpeg's <c>chroma_location</c>: in H.264 the VUI's
+    /// chroma_sample_loc_type_top_field plus one where it says, <see cref="ChromaLocation.Left"/> for a VUI that
+    /// does not (as FFmpeg reads it, whatever the chroma format), <see cref="ChromaLocation.Unspecified"/> without a VUI.
+    /// </summary>
+    public ChromaLocation ChromaLocation { get; internal set; }
+
+    /// <summary>
+    /// The width of a sample over its height, as FFmpeg's <c>sample_aspect_ratio</c>: a frame is shown
+    /// <see cref="Width"/> times this wide. 0:1 when unknown (FFmpeg's <c>N/A</c>). In H.264 the VUI's aspect_ratio_idc
+    /// (Table E-1) or sar_width:sar_height, in lowest terms.
+    /// </summary>
+    public Rational SampleAspectRatio { get; internal set; } = new(0, 1);
+
     /// <summary>The visible samples of one row in one plane, as bytes (two a sample in the formats deeper than 8 bits).</summary>
     public Span<byte> GetRow(int plane, int y)
     {

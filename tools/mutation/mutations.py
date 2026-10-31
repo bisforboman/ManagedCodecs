@@ -305,6 +305,19 @@ MUTATIONS = [
          find="return zeros + 4;", replace="return zeros + 3;",
          tests="FullyQualifiedName~H264"),
 
+    # The VUI's signal as FFmpeg reads it (H.264 E.2.1; the frames' colour properties). A VUI without chroma_loc_info
+    # means left, whatever the chroma format: libx264's and OpenH264's streams (h264-color-*, name.color).
+    dict(file="src/ManagedCodecs.H264/ParameterSets.cs",
+         find="var location = ChromaLocation.Left;", replace="var location = ChromaLocation.Unspecified;",
+         tests="FullyQualifiedName~VideoSignalTests.EmptyVui|DisplayName~h264-color-bt709"),
+    # FFmpeg's av_image_check_sar: a ratio that shows the frame as nothing wide (or high) is unknown; no encoder writes one.
+    dict(file="src/ManagedCodecs.H264/VideoSignal.cs",
+         find="return shown > 0 ? ratio : new(0, 1);", replace="return ratio;",
+         tests="FullyQualifiedName~VideoSignalTests"),
+    # Matrix coefficients FFmpeg 6.1 does not name (15 and up, IPT-C2 and YCgCo-R among them) are unspecified to it.
+    dict(file="src/ManagedCodecs.H264/VideoSignal.cs",
+         find="value is >= 0 and <= 14 ? (ColorMatrix)value", replace="value is >= 0 and <= 255 ? (ColorMatrix)value",
+         tests="FullyQualifiedName~VideoSignalTests"),
     # ---- MJPEG
     # FFmpeg takes an image of less than 3/4 of the stream's height (integer division) as a field.
     dict(file="src/ManagedCodecs.Mjpeg/MjpegDecoder.cs",

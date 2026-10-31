@@ -1,1 +1,70 @@
 #nullable enable
+ManagedCodecs.ChromaLocation
+ManagedCodecs.ChromaLocation.Bottom = 6 -> ManagedCodecs.ChromaLocation
+ManagedCodecs.ChromaLocation.BottomLeft = 5 -> ManagedCodecs.ChromaLocation
+ManagedCodecs.ChromaLocation.Center = 2 -> ManagedCodecs.ChromaLocation
+ManagedCodecs.ChromaLocation.Left = 1 -> ManagedCodecs.ChromaLocation
+ManagedCodecs.ChromaLocation.Top = 4 -> ManagedCodecs.ChromaLocation
+ManagedCodecs.ChromaLocation.TopLeft = 3 -> ManagedCodecs.ChromaLocation
+ManagedCodecs.ChromaLocation.Unspecified = 0 -> ManagedCodecs.ChromaLocation
+ManagedCodecs.ColorMatrix
+ManagedCodecs.ColorMatrix.Bt2020Cl = 10 -> ManagedCodecs.ColorMatrix
+ManagedCodecs.ColorMatrix.Bt2020Ncl = 9 -> ManagedCodecs.ColorMatrix
+ManagedCodecs.ColorMatrix.Bt470BG = 5 -> ManagedCodecs.ColorMatrix
+ManagedCodecs.ColorMatrix.Bt709 = 1 -> ManagedCodecs.ColorMatrix
+ManagedCodecs.ColorMatrix.ChromaDerivedCl = 13 -> ManagedCodecs.ColorMatrix
+ManagedCodecs.ColorMatrix.ChromaDerivedNcl = 12 -> ManagedCodecs.ColorMatrix
+ManagedCodecs.ColorMatrix.Fcc = 4 -> ManagedCodecs.ColorMatrix
+ManagedCodecs.ColorMatrix.ICtCp = 14 -> ManagedCodecs.ColorMatrix
+ManagedCodecs.ColorMatrix.Identity = 0 -> ManagedCodecs.ColorMatrix
+ManagedCodecs.ColorMatrix.Reserved = 3 -> ManagedCodecs.ColorMatrix
+ManagedCodecs.ColorMatrix.Smpte170M = 6 -> ManagedCodecs.ColorMatrix
+ManagedCodecs.ColorMatrix.Smpte2085 = 11 -> ManagedCodecs.ColorMatrix
+ManagedCodecs.ColorMatrix.Smpte240M = 7 -> ManagedCodecs.ColorMatrix
+ManagedCodecs.ColorMatrix.Unspecified = 2 -> ManagedCodecs.ColorMatrix
+ManagedCodecs.ColorMatrix.YCgCo = 8 -> ManagedCodecs.ColorMatrix
+ManagedCodecs.ColorPrimaries
+ManagedCodecs.ColorPrimaries.Bt2020 = 9 -> ManagedCodecs.ColorPrimaries
+ManagedCodecs.ColorPrimaries.Bt470BG = 5 -> ManagedCodecs.ColorPrimaries
+ManagedCodecs.ColorPrimaries.Bt470M = 4 -> ManagedCodecs.ColorPrimaries
+ManagedCodecs.ColorPrimaries.Bt709 = 1 -> ManagedCodecs.ColorPrimaries
+ManagedCodecs.ColorPrimaries.Ebu3213 = 22 -> ManagedCodecs.ColorPrimaries
+ManagedCodecs.ColorPrimaries.Film = 8 -> ManagedCodecs.ColorPrimaries
+ManagedCodecs.ColorPrimaries.Reserved = 3 -> ManagedCodecs.ColorPrimaries
+ManagedCodecs.ColorPrimaries.Reserved0 = 0 -> ManagedCodecs.ColorPrimaries
+ManagedCodecs.ColorPrimaries.Smpte170M = 6 -> ManagedCodecs.ColorPrimaries
+ManagedCodecs.ColorPrimaries.Smpte240M = 7 -> ManagedCodecs.ColorPrimaries
+ManagedCodecs.ColorPrimaries.Smpte428 = 10 -> ManagedCodecs.ColorPrimaries
+ManagedCodecs.ColorPrimaries.Smpte431 = 11 -> ManagedCodecs.ColorPrimaries
+ManagedCodecs.ColorPrimaries.Smpte432 = 12 -> ManagedCodecs.ColorPrimaries
+ManagedCodecs.ColorPrimaries.Unspecified = 2 -> ManagedCodecs.ColorPrimaries
+ManagedCodecs.ColorRange
+ManagedCodecs.ColorRange.Full = 2 -> ManagedCodecs.ColorRange
+ManagedCodecs.ColorRange.Limited = 1 -> ManagedCodecs.ColorRange
+ManagedCodecs.ColorRange.Unspecified = 0 -> ManagedCodecs.ColorRange
+ManagedCodecs.ColorTransfer
+ManagedCodecs.ColorTransfer.AribStdB67 = 18 -> ManagedCodecs.ColorTransfer
+ManagedCodecs.ColorTransfer.Bt1361 = 12 -> ManagedCodecs.ColorTransfer
+ManagedCodecs.ColorTransfer.Bt2020TenBit = 14 -> ManagedCodecs.ColorTransfer
+ManagedCodecs.ColorTransfer.Bt2020TwelveBit = 15 -> ManagedCodecs.ColorTransfer
+ManagedCodecs.ColorTransfer.Bt709 = 1 -> ManagedCodecs.ColorTransfer
+ManagedCodecs.ColorTransfer.Gamma22 = 4 -> ManagedCodecs.ColorTransfer
+ManagedCodecs.ColorTransfer.Gamma28 = 5 -> ManagedCodecs.ColorTransfer
+ManagedCodecs.ColorTransfer.Linear = 8 -> ManagedCodecs.ColorTransfer
+ManagedCodecs.ColorTransfer.Log = 9 -> ManagedCodecs.ColorTransfer
+ManagedCodecs.ColorTransfer.LogSqrt = 10 -> ManagedCodecs.ColorTransfer
+ManagedCodecs.ColorTransfer.Reserved = 3 -> ManagedCodecs.ColorTransfer
+ManagedCodecs.ColorTransfer.Reserved0 = 0 -> ManagedCodecs.ColorTransfer
+ManagedCodecs.ColorTransfer.Smpte170M = 6 -> ManagedCodecs.ColorTransfer
+ManagedCodecs.ColorTransfer.Smpte2084 = 16 -> ManagedCodecs.ColorTransfer
+ManagedCodecs.ColorTransfer.Smpte240M = 7 -> ManagedCodecs.ColorTransfer
+ManagedCodecs.ColorTransfer.Smpte428 = 17 -> ManagedCodecs.ColorTransfer
+ManagedCodecs.ColorTransfer.Srgb = 13 -> ManagedCodecs.ColorTransfer
+ManagedCodecs.ColorTransfer.Unspecified = 2 -> ManagedCodecs.ColorTransfer
+ManagedCodecs.ColorTransfer.Xvycc = 11 -> ManagedCodecs.ColorTransfer
+ManagedCodecs.VideoFrame.ChromaLocation.get -> ManagedCodecs.ChromaLocation
+ManagedCodecs.VideoFrame.ColorMatrix.get -> ManagedCodecs.ColorMatrix
+ManagedCodecs.VideoFrame.ColorPrimaries.get -> ManagedCodecs.ColorPrimaries
+ManagedCodecs.VideoFrame.ColorRange.get -> ManagedCodecs.ColorRange
+ManagedCodecs.VideoFrame.ColorTransfer.get -> ManagedCodecs.ColorTransfer
+ManagedCodecs.VideoFrame.SampleAspectRatio.get -> ManagedCodecs.Rational

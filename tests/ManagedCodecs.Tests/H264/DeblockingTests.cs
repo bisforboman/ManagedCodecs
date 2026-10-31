@@ -190,6 +190,7 @@ public class DeblockingTests
         Assert.True(filtered > 5_000, $"Only {filtered} cases changed any sample; the test data is too rough.");
     }
 
+#if !UNITY_BUILD
     /// <summary>
     /// A whole 8-bit 4:2:0 macroblock filtered at once (its parameters worked out once, the vector filters called
     /// directly) must match its edges filtered one by one with the sample-by-sample filter, in the same order: on
@@ -279,7 +280,9 @@ public class DeblockingTests
 
         Assert.True(filtered > 2_000, $"Only {filtered} cases changed both luma and chroma; the test data is too rough.");
     }
+#endif
 
+#if !UNITY_BUILD
     /// <summary>
     /// The internal edge strengths of a macroblock with motion from one list, in vectors, against 8.7.2.1 block pair by
     /// block pair: random motion vectors near each other (so both sides of the 4 and limitY thresholds come up),
@@ -346,7 +349,9 @@ public class DeblockingTests
             }
         }
     }
+#endif
 
+#if !UNITY_BUILD
     /// <summary>
     /// The internal edge strengths of a macroblock with motion from either list or both, in vectors, against 8.7.2.1
     /// block pair by block pair: each partition's reference pictures drawn from two pictures or none in each list (so one
@@ -478,6 +483,7 @@ public class DeblockingTests
             return (byte)(straight || swapped ? 0 : 1);
         }
     }
+#endif
 
     /// <summary>A plane of flat blocks (<paramref name="block"/> samples a side) a few levels apart, with small noise.</summary>
     private static byte[] Blocks(Random random, int stride, int block)
@@ -526,6 +532,7 @@ public class DeblockingTests
         return plane;
     }
 
+#if !UNITY_BUILD
     /// <summary>
     /// The Vector128 transposes of vertical edges (what WebAssembly runs; x64 and ARM64 take their own interleaves)
     /// against their definition on random planes: tap k, lane i is byte k of row i (rows 0-7 from the top start, 8-15
@@ -573,4 +580,5 @@ public class DeblockingTests
             Assert.Equal(expected, plane);
         }
     }
+#endif
 }

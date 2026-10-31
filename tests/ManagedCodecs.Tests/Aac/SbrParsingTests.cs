@@ -1,6 +1,9 @@
 using ManagedCodecs.Aac;
 using ManagedCodecs.Aac.Sbr;
 using ManagedCodecs.Containers;
+#if UNITY_BUILD
+using Vlc = ManagedCodecs.H264.Vlc; // one assembly: the shared Vlc is compiled once, into H.264's namespace
+#endif
 
 namespace ManagedCodecs.Tests.Aac;
 

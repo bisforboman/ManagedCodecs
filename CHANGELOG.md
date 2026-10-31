@@ -29,6 +29,13 @@ run time.
   on GitHub's x64 and ARM64 runners in two `compare.yml` runs against main, `h264-10bit-motion.mp4` (mostly CABAC
   residuals) unchanged. Motion compensation's reference window widens eight samples a vector.
 
+### Fixed
+
+- H.264: a stream that switches to an SPS of another bit depth, size or chroma format at a picture that is not IDR
+  (which the standard forbids) no longer throws InvalidCastException or reads its references as the new format: they
+  are dropped, so the picture's inter slices fail with InvalidDataException, or are concealed with `ConcealErrors`.
+  Found by fuzzing.
+
 ## 0.4.0 – 2026-10-30
 
 Each decoded frame's interlacing as FFmpeg reports it, and an MP4 demuxer that reads one track at a time and lists

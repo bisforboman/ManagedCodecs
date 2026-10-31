@@ -1,6 +1,8 @@
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+#if NET
 using System.Runtime.Intrinsics;
+#endif
 using ManagedCodecs.Aac.Sbr;
 
 namespace ManagedCodecs.Aac;
@@ -162,11 +164,14 @@ internal static class Imdct
     /// </summary>
     public static void Inverse(ReadOnlySpan<double> spec, Span<double> output)
     {
+#if NET
         if (!Vector128.IsHardwareAccelerated)
+#endif
         {
             InverseScalar(spec, output);
             return;
         }
+#if NET
 
         var plan = spec.Length == 1024 ? Long : Short;
         int m = plan.Size;
@@ -229,6 +234,7 @@ internal static class Imdct
         {
             ((-Vector128.LoadUnsafe(ref uRef, (nuint)(n - (3 * half)))) * scale).StoreUnsafe(ref y, (nuint)n);
         }
+#endif
     }
 
     /// <summary>The scalar <see cref="Inverse"/>: without vector hardware, and the vector one's reference.</summary>
@@ -421,6 +427,7 @@ internal static class Imdct
             for (int span = 1; span < length; span *= 2)
             {
                 int k0 = span - 1;
+#if NET
                 if (Vector256.IsHardwareAccelerated && span >= Vector256<double>.Count)
                 {
                     for (int start = 0; start < length; start += 2 * span)
@@ -468,6 +475,7 @@ internal static class Imdct
                     }
                 }
                 else
+#endif
                 {
                     for (int start = 0; start < length; start += 2 * span)
                     {
@@ -553,6 +561,7 @@ internal static class Vectors
         ref double x = ref MemoryMarshal.GetReference(a);
         ref double y = ref MemoryMarshal.GetReference(w);
         int n = 0;
+#if NET
         if (Vector256.IsHardwareAccelerated)
         {
             for (; n <= a.Length - Vector256<double>.Count; n += Vector256<double>.Count)
@@ -567,6 +576,7 @@ internal static class Vectors
                 (Vector128.LoadUnsafe(ref x, (nuint)n) * Vector128.LoadUnsafe(ref y, (nuint)n)).StoreUnsafe(ref x, (nuint)n);
             }
         }
+#endif
 
         for (; n < a.Length; n++)
         {
@@ -581,6 +591,7 @@ internal static class Vectors
         ref double u = ref MemoryMarshal.GetReference(b);
         ref double y = ref MemoryMarshal.GetReference(w);
         int n = 0;
+#if NET
         if (Vector256.IsHardwareAccelerated)
         {
             for (; n <= a.Length - Vector256<double>.Count; n += Vector256<double>.Count)
@@ -595,6 +606,7 @@ internal static class Vectors
                 (Vector128.LoadUnsafe(ref x, (nuint)n) + (Vector128.LoadUnsafe(ref u, (nuint)n) * Vector128.LoadUnsafe(ref y, (nuint)n))).StoreUnsafe(ref x, (nuint)n);
             }
         }
+#endif
 
         for (; n < a.Length; n++)
         {
@@ -629,6 +641,7 @@ internal static class Vectors
         int n = 0;
 
         // Four vectors' sums at once: each is a chain of one add a term, so one alone would wait on the adds' latency.
+#if NET
         if (Vector256.IsHardwareAccelerated)
         {
             int count = Vector256<double>.Count;
@@ -701,6 +714,7 @@ internal static class Vectors
                 sum.StoreUnsafe(ref x, (nuint)n);
             }
         }
+#endif
 
         for (; n < a.Length; n++)
         {
@@ -721,6 +735,7 @@ internal static class Vectors
         ref double x = ref MemoryMarshal.GetReference(re);
         ref double y = ref MemoryMarshal.GetReference(im);
         int n = 0;
+#if NET
         if (Vector256.IsHardwareAccelerated)
         {
             for (; n <= sum.Length - Vector256<double>.Count; n += Vector256<double>.Count)
@@ -739,6 +754,7 @@ internal static class Vectors
                 (Vector128.LoadUnsafe(ref s, (nuint)n) + ((a * a) + (b * b))).StoreUnsafe(ref s, (nuint)n);
             }
         }
+#endif
 
         for (; n < sum.Length; n++)
         {
@@ -753,6 +769,7 @@ internal static class Vectors
         ref double y = ref MemoryMarshal.GetReference(b);
         ref float o = ref MemoryMarshal.GetReference(output);
         int n = 0;
+#if NET
         if (Vector256.IsHardwareAccelerated)
         {
             var sv = Vector256.Create(scale);
@@ -773,6 +790,7 @@ internal static class Vectors
                 Vector128.Narrow(low, high).StoreUnsafe(ref o, (nuint)n);
             }
         }
+#endif
 
         for (; n < a.Length; n++)
         {

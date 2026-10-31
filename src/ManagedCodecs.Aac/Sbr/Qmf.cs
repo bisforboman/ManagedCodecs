@@ -1,8 +1,14 @@
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+#if NET
 using System.Runtime.Intrinsics;
+#endif
+#if NET
 using System.Runtime.Intrinsics.Arm;
+#endif
+#if NET
 using System.Runtime.Intrinsics.X86;
+#endif
 
 namespace ManagedCodecs.Aac.Sbr;
 
@@ -98,6 +104,7 @@ internal sealed class QmfAnalysis
         ref double minusCos = ref MemoryMarshal.GetArrayDataReference(MinusCos);
         ref double minusSin = ref MemoryMarshal.GetArrayDataReference(MinusSin);
         int k = 0;
+#if NET
         if (Vector128.IsHardwareAccelerated && !scalar)
         {
             for (; k < Bands; k += 2)
@@ -119,6 +126,7 @@ internal sealed class QmfAnalysis
                 ((pr * s) + (pi * c) + ((mr * t) + (mi * d))).StoreUnsafe(ref outIm, (nuint)k);
             }
         }
+#endif
 
         for (; k < Bands; k++)
         {
@@ -244,6 +252,7 @@ internal sealed class QmfSynthesis
         QmfDctIV.Pretransform(real, alternate: false, aRe, aIm, scalar);
         QmfDctIV.Pretransform(imaginary, alternate: true, bRe, bIm, scalar);
         ref double w = ref MemoryMarshal.GetReference(v);
+#if NET
         if (Vector128.IsHardwareAccelerated && !scalar)
         {
             // Two p at a time, P = (p, p + 1) and Q = (30 - p, 31 - p): the values of v at 2p and 2p + 2 come from P, those
@@ -271,6 +280,7 @@ internal sealed class QmfSynthesis
 
             return;
         }
+#endif
 
         for (int p = 0; p < 32; p++)
         {
@@ -284,6 +294,7 @@ internal sealed class QmfSynthesis
     }
 
     // even(0) odd(0) even(1) odd(1) at w[n..n + 4].
+#if NET
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void Store(ref double w, int n, Vector128<double> even, Vector128<double> odd)
     {
@@ -291,6 +302,7 @@ internal sealed class QmfSynthesis
         low.StoreUnsafe(ref w, (nuint)n);
         high.StoreUnsafe(ref w, (nuint)(n + 2));
     }
+#endif
 
     // The DCT-IVs with the 1/64 of v(n).
     private static readonly QmfDctIV Dct = new(1.0 / 64);
@@ -375,6 +387,7 @@ internal sealed class QmfDctIV(double scale = 1)
         ref double preCos = ref MemoryMarshal.GetArrayDataReference(PreCos);
         ref double preSin = ref MemoryMarshal.GetArrayDataReference(PreSin);
         int m = 0;
+#if NET
         if (Vector128.IsHardwareAccelerated && !scalar)
         {
             // x(2m) and x(2m + 2) are the first of the pairs at 2m and 2m + 2; x(63 - 2m) and x(61 - 2m) the second of
@@ -390,6 +403,7 @@ internal sealed class QmfDctIV(double scale = 1)
                 ((a * sn) - (b * c)).StoreUnsafe(ref i, (nuint)m);
             }
         }
+#endif
 
         for (; m < 32; m++)
         {
@@ -414,6 +428,7 @@ internal sealed class QmfDctIV(double scale = 1)
         return ((yr * c) - (yi * s), (yr * s) + (yi * c));
     }
 
+#if NET
     /// <summary><see cref="Output(double, double, int)"/> at p and p + 1.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public (Vector128<double> Even, Vector128<double> Odd) Output(Vector128<double> yr, Vector128<double> yi, int p)
@@ -422,6 +437,7 @@ internal sealed class QmfDctIV(double scale = 1)
         var s = Vector128.LoadUnsafe(ref MemoryMarshal.GetArrayDataReference(_postSin), (nuint)p);
         return ((yr * c) - (yi * s), (yr * s) + (yi * c));
     }
+#endif
 }
 
 /// <summary>
@@ -430,26 +446,34 @@ internal sealed class QmfDctIV(double scale = 1)
 /// </summary>
 internal static class QmfState
 {
+#if NET
     /// <summary>(a(0), b(0)) and (a(1), b(1)).</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static (Vector128<double> Low, Vector128<double> High) Zip(Vector128<double> a, Vector128<double> b)
     {
+#if NET
         if (Sse2.IsSupported)
         {
             return (Sse2.UnpackLow(a, b), Sse2.UnpackHigh(a, b));
         }
+#endif
 
+#if NET
         if (AdvSimd.Arm64.IsSupported)
         {
             return (AdvSimd.Arm64.ZipLow(a, b), AdvSimd.Arm64.ZipHigh(a, b));
         }
+#endif
 
         return (Vector128.Create(a.GetElement(0), b.GetElement(0)), Vector128.Create(a.GetElement(1), b.GetElement(1)));
     }
+#endif
 
+#if NET
     /// <summary>(v(1), v(0)).</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static Vector128<double> Reverse(Vector128<double> v) => Vector128.Shuffle(v, Vector128.Create(1L, 0L));
+#endif
 
     /// <summary>(outRe + i outIm)[k] = (re + i im)[k] (cos + i sin)[k], for k below re's length.</summary>
     public static void Rotate(ReadOnlySpan<double> re, ReadOnlySpan<double> im, ReadOnlySpan<double> cos, ReadOnlySpan<double> sin, Span<double> outRe, Span<double> outIm)
@@ -467,6 +491,7 @@ internal static class QmfState
         ref double x = ref MemoryMarshal.GetReference(outRe);
         ref double y = ref MemoryMarshal.GetReference(outIm);
         int k = 0;
+#if NET
         if (Vector128.IsHardwareAccelerated)
         {
             for (; k <= length - Vector128<double>.Count; k += Vector128<double>.Count)
@@ -479,6 +504,7 @@ internal static class QmfState
                 ((r * sn) + (i * cs)).StoreUnsafe(ref y, (nuint)k);
             }
         }
+#endif
 
         for (; k < length; k++)
         {
@@ -502,6 +528,7 @@ internal static class QmfState
         ref double d = ref MemoryMarshal.GetReference(sin);
         ref double x = ref MemoryMarshal.GetReference(output);
         int n = 0;
+#if NET
         if (Vector128.IsHardwareAccelerated)
         {
             for (; n <= length - Vector128<double>.Count; n += Vector128<double>.Count)
@@ -511,6 +538,7 @@ internal static class QmfState
                 ((r * Vector128.LoadUnsafe(ref c, (nuint)n)) - (i * Vector128.LoadUnsafe(ref d, (nuint)n))).StoreUnsafe(ref x, (nuint)n);
             }
         }
+#endif
 
         for (; n < length; n++)
         {
@@ -593,12 +621,14 @@ internal sealed class QmfFft
     {
         re = re[.._length];
         im = im[.._length];
+#if NET
         if (Vector128.IsHardwareAccelerated && !scalar)
         {
             ReorderFirstStage(re, im);
             VectorStages(re, im);
             return;
         }
+#endif
 
         for (int s = 0; s < _swaps.Length; s += 2)
         {
@@ -675,6 +705,7 @@ internal sealed class QmfFft
         }
     }
 
+#if NET
     private void VectorStages(Span<double> re, Span<double> im)
     {
         ref double r = ref MemoryMarshal.GetReference(re);
@@ -683,6 +714,7 @@ internal sealed class QmfFft
         ref double sin = ref MemoryMarshal.GetArrayDataReference(_sin);
         for (int half = 2; half < _length; half *= 2)
         {
+#if NET
             if (Vector256.IsHardwareAccelerated && half >= Vector256<double>.Count)
             {
                 for (int start = 0; start < _length; start += 2 * half)
@@ -708,6 +740,7 @@ internal sealed class QmfFft
 
                 continue;
             }
+#endif
 
             for (int start = 0; start < _length; start += 2 * half)
             {
@@ -731,6 +764,7 @@ internal sealed class QmfFft
             }
         }
     }
+#endif
 
     private static uint ReverseBits(uint value)
     {

@@ -1,5 +1,7 @@
 using System.Runtime.CompilerServices;
+#if NET
 using System.Runtime.Intrinsics;
+#endif
 
 namespace ManagedCodecs.Aac.Sbr;
 
@@ -617,6 +619,7 @@ internal sealed class PsProcessor
     internal static void AllPassRow(ReadOnlySpan<double> inRe, ReadOnlySpan<double> inIm, int first, int end, double[] decay, double[] delayRe, double[] delayIm, double[][][] linkRe, double[][][] linkIm, ReadOnlySpan<int> linkIndex, Span<double> outRe, Span<double> outIm)
     {
         int sb = first;
+#if NET
         if (Vector256.IsHardwareAccelerated)
         {
             for (; sb + 4 <= end; sb += 4)
@@ -687,6 +690,7 @@ internal sealed class PsProcessor
                 m.CopyTo(outIm[sb..]);
             }
         }
+#endif
 
         for (; sb < end; sb++)
         {

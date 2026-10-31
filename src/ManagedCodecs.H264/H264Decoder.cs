@@ -309,7 +309,12 @@ public sealed class H264Decoder : IVideoDecoder
     /// </summary>
     private static async Task WaitForAsync(Task task, CancellationToken cancellationToken)
     {
+#if NET
         await task.WaitAsync(cancellationToken).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+#else
+        // netstandard2.1 has neither WaitAsync nor ConfigureAwaitOptions: the first of the task and the cancellation.
+        await Task.WhenAny(task, Task.Delay(Timeout.Infinite, cancellationToken)).ConfigureAwait(false);
+#endif
         if (!task.IsCompleted)
         {
             cancellationToken.ThrowIfCancellationRequested();

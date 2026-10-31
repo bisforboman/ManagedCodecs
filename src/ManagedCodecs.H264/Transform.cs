@@ -1,8 +1,12 @@
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+#if NET
 using System.Runtime.Intrinsics;
+#endif
+#if NET
 using System.Runtime.Intrinsics.X86;
+#endif
 
 namespace ManagedCodecs.H264;
 
@@ -65,11 +69,14 @@ internal static class Transform
     /// </summary>
     public static void Dequantize(Span<int> block, int qp, bool skipDc, ReadOnlySpan<int> levelScale)
     {
+#if NET
         if (!Vector128.IsHardwareAccelerated)
+#endif
         {
             DequantizeScalar(block, qp, skipDc, levelScale);
             return;
         }
+#if NET
 
         // The same arithmetic four coefficients at a time (32-bit lanes, so the same result for every input), the DC
         // put back where a DC transform made it.
@@ -103,6 +110,7 @@ internal static class Transform
         {
             block[0] = dc;
         }
+#endif
     }
 
     /// <summary>The scalar <see cref="Dequantize"/>: without vector hardware, and the vector one's reference.</summary>
@@ -209,15 +217,18 @@ internal static class Transform
     public static void InverseTransform8x8Add<TPixel>(Span<int> d, Span<TPixel> dest, int stride, int bitDepth)
         where TPixel : unmanaged
     {
+#if NET
         if (typeof(TPixel) == typeof(byte))
         {
             InverseTransform8x8Add(d, MemoryMarshal.Cast<TPixel, byte>(dest), stride);
             return;
         }
+#endif
 
         InverseTransform8x8AddScalar(d, dest, stride, bitDepth);
     }
 
+#if NET
     /// <summary>
     /// <see cref="InverseTransform8x8Add{TPixel}"/> for 8-bit samples: the rows' transform as in the scalar one, then the
     /// columns' four columns at a time (<see cref="Columns8"/>), each output row added to its eight samples and clipped
@@ -228,10 +239,12 @@ internal static class Transform
     {
         _ = d[63];
         _ = dest[(7 * stride) + 7];
+#if NET
         if (Sse2.IsSupported && InverseTransform8x8Add16(d, dest, stride))
         {
             return;
         }
+#endif
 
         Span<int> g = stackalloc int[64];
         for (int i = 0; i < 8; i++)
@@ -252,7 +265,9 @@ internal static class Transform
             AddRow(ref Unsafe.Add(ref target, (i * stride) + 4), (right[i] + round) >> 6);
         }
     }
+#endif
 
+#if NET
     /// <summary>
     /// <see cref="InverseTransform8x8Add(Span{int}, Span{byte}, int)"/> in 16-bit lanes, a row (or column) a vector, as
     /// FFmpeg's 8-bit transform, for coefficients under 2^9 in magnitude (false, and nothing written, for others): one
@@ -299,7 +314,9 @@ internal static class Transform
         static Vector128<short> Pack(ref int row, int offset) =>
             Sse2.PackSignedSaturate(Vector128.LoadUnsafe(ref row, (nuint)offset), Vector128.LoadUnsafe(ref row, (nuint)(offset + 4)));
     }
+#endif
 
+#if NET
     /// <summary>Two rows of residuals, each shifted down 6, added to their 8 samples and clipped to 8 bits.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void AddRows(ref byte row0, int stride, Vector128<short> residual0, Vector128<short> residual1)
@@ -312,7 +329,9 @@ internal static class Transform
         Unsafe.WriteUnaligned(ref row0, samples.GetElement(0));
         Unsafe.WriteUnaligned(ref row1, samples.GetElement(1));
     }
+#endif
 
+#if NET
     /// <summary>Transposes an 8x8 matrix of shorts held a row a vector.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void Transpose8x8(ref Vector128<short> v0, ref Vector128<short> v1, ref Vector128<short> v2, ref Vector128<short> v3, ref Vector128<short> v4, ref Vector128<short> v5, ref Vector128<short> v6, ref Vector128<short> v7)
@@ -342,7 +361,9 @@ internal static class Transform
         v6 = Sse2.UnpackLow(u3.AsInt64(), u7.AsInt64()).AsInt16();
         v7 = Sse2.UnpackHigh(u3.AsInt64(), u7.AsInt64()).AsInt16();
     }
+#endif
 
+#if NET
     /// <summary>The 8-point transform of 8.5.13.2 lane by lane: input k in vk, output k back there.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void Transform8Lanes(ref Vector128<short> v0, ref Vector128<short> v1, ref Vector128<short> v2, ref Vector128<short> v3, ref Vector128<short> v4, ref Vector128<short> v5, ref Vector128<short> v6, ref Vector128<short> v7)
@@ -383,7 +404,9 @@ internal static class Transform
         v6 = f2 - f5;
         v7 = f0 - f7;
     }
+#endif
 
+#if NET
     /// <summary>
     /// <see cref="Transform8"/> down four columns at once: <paramref name="g"/> is the first of them in row 0 of a
     /// row-major 8x8 block; output row k of the four columns goes to <paramref name="o"/>[k].
@@ -426,6 +449,7 @@ internal static class Transform
         o[6] = f2 - f5;
         o[7] = f0 - f7;
     }
+#endif
 
     /// <summary>The scalar <see cref="InverseTransform8x8Add{TPixel}"/>: for deeper samples, and the 8-bit one's reference.</summary>
     [SkipLocalsInit]
@@ -576,15 +600,18 @@ internal static class Transform
     public static void InverseTransformAdd<TPixel>(Span<int> d, Span<TPixel> dest, int stride, int bitDepth)
         where TPixel : unmanaged
     {
+#if NET
         if (typeof(TPixel) == typeof(byte))
         {
             InverseTransformAdd(d, MemoryMarshal.Cast<TPixel, byte>(dest), stride);
             return;
         }
+#endif
 
         InverseTransformAddScalar(d, dest, stride, bitDepth);
     }
 
+#if NET
     /// <summary>
     /// <see cref="InverseTransformAdd{TPixel}"/> for 8-bit samples: the rows' transform as in the scalar one, then the
     /// columns' for all four columns at once, each output row a vector, added to its four samples and clipped in 32-bit
@@ -596,10 +623,12 @@ internal static class Transform
     {
         _ = d[15];
         _ = dest[(3 * stride) + 3];
+#if NET
         if (Sse2.IsSupported && InverseTransformAdd16(d, dest, stride))
         {
             return;
         }
+#endif
 
         Span<int> f = stackalloc int[16];
         for (int i = 0; i < 4; i++)
@@ -634,7 +663,9 @@ internal static class Transform
         AddRow(ref Unsafe.Add(ref target, 2 * stride), (g1 - g2 + round) >> 6);
         AddRow(ref Unsafe.Add(ref target, 3 * stride), (g0 - g3 + round) >> 6);
     }
+#endif
 
+#if NET
     /// <summary>
     /// <see cref="InverseTransformAdd(Span{int}, Span{byte}, int)"/> in 16-bit lanes, two rows (or columns) a vector, as
     /// FFmpeg's 8-bit transform, for coefficients under 2^11 in magnitude (false, and nothing written, for others): from
@@ -680,7 +711,9 @@ internal static class Transform
         Unsafe.WriteUnaligned(ref row2, samples.GetElement(3));
         return true;
     }
+#endif
 
+#if NET
     /// <summary>Transposes a 4x4 matrix of shorts held as rows 0 | 1 and rows 2 | 3.</summary>
     private static (Vector128<short> Columns01, Vector128<short> Columns23) Transpose4x4(Vector128<short> rows01, Vector128<short> rows23)
     {
@@ -690,7 +723,9 @@ internal static class Transform
         var mixed1 = Sse2.UnpackHigh(low, high); // columns 2 and 3
         return (mixed0, mixed1);
     }
+#endif
 
+#if NET
     /// <summary>
     /// The 4-point transform of 8.5.12.2 lane by lane, its inputs as x0 | x1 and x2 | x3 (four lanes each): returns
     /// y0 | y1 and y3 | y2.
@@ -707,6 +742,7 @@ internal static class Transform
         var e32 = Sse2.UnpackHigh(e03.AsInt64(), e12.AsInt64()).AsInt16();
         return (Sse2.Add(e01, e32), Sse2.Subtract(e01, e32));
     }
+#endif
 
     /// <summary>The scalar <see cref="InverseTransformAdd{TPixel}"/>: for deeper samples, and the 8-bit one's reference.</summary>
     internal static void InverseTransformAddScalar<TPixel>(Span<int> d, Span<TPixel> dest, int stride, int bitDepth)
@@ -763,6 +799,7 @@ internal static class Transform
             return;
         }
 
+#if NET
         if (typeof(TPixel) == typeof(byte))
         {
             var bytes = MemoryMarshal.Cast<TPixel, byte>(dest);
@@ -775,6 +812,7 @@ internal static class Transform
             AddRow(ref Unsafe.Add(ref target, 3 * stride), r);
             return;
         }
+#endif
 
         AddDcScalar(dc, dest, stride, bitDepth);
     }
@@ -832,6 +870,7 @@ internal static class Transform
         }
     }
 
+#if NET
     /// <summary>Adds four residuals to the four 8-bit samples at <paramref name="dest"/> and clips them to 0 .. 255, unchecked.</summary>
     private static void AddRow(ref byte dest, Vector128<int> residual)
     {
@@ -840,6 +879,7 @@ internal static class Transform
         var words = Vector128.Narrow(sum, sum).AsUInt16();
         Unsafe.WriteUnaligned(ref dest, Vector128.Narrow(words, words).AsUInt32().ToScalar());
     }
+#endif
 
     private static void AddClipped<TPixel>(Span<TPixel> dest, int index, int residual, int max)
         where TPixel : unmanaged =>

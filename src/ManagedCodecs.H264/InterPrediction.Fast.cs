@@ -1,3 +1,6 @@
+// Vector code: the net10.0 build only (the Unity build, netstandard2.1, has no System.Runtime.Intrinsics;
+// docs/decisions/2026-10-31-unity-netstandard.md).
+#if NET
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics;
@@ -696,3 +699,4 @@ internal static partial class InterPrediction
 
     private static byte Clip8(int value) => (byte)Math.Clamp(value, 0, 255);
 }
+#endif

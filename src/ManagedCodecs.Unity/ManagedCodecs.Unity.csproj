@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The decoders for Unity (Mono and IL2CPP, the .NET Standard 2.1 profile): every src/ project's sources in one
+       assembly, without the vector paths (#if NET around them; their scalar references run), and Polyfills.cs for the
+       APIs netstandard2.1 lacks. docs/decisions/2026-10-31-unity-netstandard.md. Not packed yet (its third pull
+       request), so neither its public API files nor package validation apply yet. -->
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <RootNamespace>ManagedCodecs</RootNamespace>
+    <AssemblyName>ManagedCodecs.Unity</AssemblyName>
+    <IsPackable>false</IsPackable>
+    <EnablePackageValidation>false</EnablePackageValidation>
+    <DefineConstants>$(DefineConstants);MANAGEDCODECS_H264</DefineConstants>
+    <!-- CS1574: doc comments of the shared sources name vector members and APIs this build leaves out. -->
+    <NoWarn>$(NoWarn);RS0016;RS0017;RS0026;RS0027;RS0036;RS0037;CS1574</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\ManagedCodecs.Core\**\*.cs;..\ManagedCodecs.Containers\**\*.cs;..\ManagedCodecs.Mjpeg\**\*.cs;..\ManagedCodecs.H264\**\*.cs;..\ManagedCodecs.Aac\**\*.cs"
+             Exclude="..\*\obj\**;..\*\bin\**" LinkBase="Sources" />
+    <!-- Shared\Vlc.cs compiles into each project's namespace there; here once, into H.264's (GlobalUsings.cs aliases it for AAC). -->
+    <Compile Include="..\Shared\*.cs" Link="Shared\%(Filename)%(Extension)" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.Runtime.CompilerServices.Unsafe" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="ManagedCodecs.Tests" />
+  </ItemGroup>
+
+</Project>

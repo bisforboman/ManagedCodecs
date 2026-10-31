@@ -46,6 +46,28 @@ Mono's JIT is slower than CoreCLR's on scalar code too, and IL2CPP compiles thro
 cost is unknown. At the proxy's worst, the 1080p film that decoded at 57.5 frames a second on one thread would decode
 at about 6. That rules out large video for Unity and leaves cutscenes at modest sizes, audio, and MJPEG.
 
+## Measured (pull request 1)
+
+The scalar build itself, `ManagedCodecs.Unity.dll`, under a copy of mcdec on CoreCLR (net10.0; one decode each,
+`--hash`, on the cloud VM), against the net10.0 build:
+
+| Sample | net10.0 | Unity build | Ratio |
+| --- | ---: | ---: | ---: |
+| h264-bench-720p (1 I, 49 P) | 355 ms | 1211 ms | 3.4 |
+| h264-main-p-refs | 28 ms | 65 ms | 2.3 |
+| jm-paff-b | 15 ms | 34 ms | 2.3 |
+| h264-mbaff-default | 67 ms | 148 ms | 2.2 |
+| h264-b-pyramid | 60 ms | 112 ms | 1.9 |
+| h264-10bit-b | 83 ms | 109 ms | 1.3 |
+| aac-pns-stereo | 6.0 ms | 7.4 ms | 1.2 |
+| mjpeg-interlaced-420 | 65 ms | 74 ms | 1.1 |
+| heaac-5.1 | 129 ms | 129 ms | 1.0 |
+
+So 1 to 3.4 times, not the proxy's 10: that one did run software `Vector128`. All 246 samples (libx264, OpenH264, JM,
+MJPEG, AAC, HE-AAC) decode to the same SHA-256 as the net10.0 build. Mono is still unmeasured: Ubuntu's Mono 6.8
+cannot run netstandard2.1 assemblies (`MissingMethodException` on `ReadOnlySpan<T>`'s indexer, its facade too old),
+and the cloud sandbox cannot reach mono-project.com's 6.12, so the Mono job of pull request 2 measures it on CI.
+
 ## The design
 
 - **One linked assembly**: a new project, `src/ManagedCodecs.Unity`, compiles the sources of Core, Containers, Mjpeg,

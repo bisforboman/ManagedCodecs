@@ -1,3 +1,6 @@
+// Vector code: the net10.0 build only (the Unity build, netstandard2.1, has no System.Runtime.Intrinsics;
+// docs/decisions/2026-10-31-unity-netstandard.md).
+#if NET
 using System.Runtime.CompilerServices;
 using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.Arm;
@@ -108,3 +111,4 @@ internal static class VectorZip
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static Vector128<ulong> High(Vector128<ulong> a, Vector128<ulong> b) => Vector128.Create(a.GetUpper(), b.GetUpper());
 }
+#endif

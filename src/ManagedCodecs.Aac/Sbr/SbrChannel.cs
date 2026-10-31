@@ -1,5 +1,7 @@
 using System.Runtime.InteropServices;
+#if NET
 using System.Runtime.Intrinsics;
+#endif
 
 namespace ManagedCodecs.Aac.Sbr;
 
@@ -258,6 +260,7 @@ internal sealed class SbrChannel(bool downsampled = false)
     {
         int i = 0;
         int length = real.Length;
+#if NET
         if (Vector256.IsHardwareAccelerated && length >= 4 && re0.Length >= length && im0.Length >= length && re1.Length >= length
             && im1.Length >= length && re2.Length >= length && im2.Length >= length && a0Real.Length >= length
             && a0Imaginary.Length >= length && a1Real.Length >= length && a1Imaginary.Length >= length && imaginary.Length >= length)
@@ -318,6 +321,7 @@ internal sealed class SbrChannel(bool downsampled = false)
                 (Vector128.LoadUnsafe(ref y0, (nuint)i) + (ai0 * r1) + (ar0 * j1) + (ai1 * r2) + (ar1 * j2)).StoreUnsafe(ref outIm, (nuint)i);
             }
         }
+#endif
 
         for (; i < real.Length; i++)
         {
@@ -348,6 +352,7 @@ internal sealed class SbrChannel(bool downsampled = false)
     internal static void Covariances(double[][] real, double[][] imaginary, int count, Span<double> phi)
     {
         int k = 0;
+#if NET
         if (Vector256.IsHardwareAccelerated)
         {
             for (; k + 4 <= count; k += 4)
@@ -428,6 +433,7 @@ internal sealed class SbrChannel(bool downsampled = false)
                 phi22.CopyTo(phi[(Covariance.Phi22 + k)..]);
             }
         }
+#endif
 
         CovariancesScalar(real, imaginary, k, count, phi);
     }
@@ -801,6 +807,7 @@ internal sealed class SbrChannel(bool downsampled = false)
         }
 
         int i = 0;
+#if NET
         if (Vector256.IsHardwareAccelerated)
         {
             var noiseRe = NoiseReal.AsSpan((noiseIndex + 1) & 511, m);
@@ -849,6 +856,7 @@ internal sealed class SbrChannel(bool downsampled = false)
                 im.CopyTo(imaginary[i..]);
             }
         }
+#endif
 
         ApplyGainsScalar(real[i..m], imaginary[i..m], gain[i..], noise[i..], tone[i..], kx + i, (noiseIndex + i) & 511, sineIndex, noNoise);
     }

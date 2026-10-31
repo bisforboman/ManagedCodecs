@@ -10,7 +10,7 @@ namespace ManagedCodecs.Tests.Containers;
 /// (<c>ffmpeg -seek_timestamp 1 -ss t -i ... -frames:v 1</c>, make-samples.sh's name.seekNNNN.framemd5): a fresh decoder
 /// on the packets from the seek, and the first frame it shows at or after the time.
 /// </summary>
-public partial class SeekFrameTests
+public class SeekFrameTests
 {
     public static TheoryData<string> References()
     {
@@ -61,6 +61,9 @@ public partial class SeekFrameTests
         Assert.Equal(expected.Md5, FrameMd5.Hash(shown));
     }
 
-    [GeneratedRegex(@"^(.+)\.seek(\d+)\.framemd5$")]
-    private static partial Regex SeekReference();
+    // A plain Regex, not [GeneratedRegex]: its generated code names SkipLocalsInitAttribute, which the Unity build's
+    // polyfill (visible to the tests) makes ambiguous in the UnityBuild test run.
+    private static Regex SeekReference() => SeekReferencePattern;
+
+    private static readonly Regex SeekReferencePattern = new(@"^(.+)\.seek(\d+)\.framemd5$", RegexOptions.CultureInvariant);
 }

@@ -2,6 +2,7 @@
   <Folder Name="/src/">
     <Project Path="src/ManagedCodecs.Core/ManagedCodecs.Core.csproj" />
     <Project Path="src/ManagedCodecs.Containers/ManagedCodecs.Containers.csproj" />
+    <Project Path="src/ManagedCodecs.Thumbnails/ManagedCodecs.Thumbnails.csproj" />
     <Project Path="src/ManagedCodecs.Mjpeg/ManagedCodecs.Mjpeg.csproj" />
     <Project Path="src/ManagedCodecs.H264/ManagedCodecs.H264.csproj" />
     <Project Path="src/ManagedCodecs.Aac/ManagedCodecs.Aac.csproj" />

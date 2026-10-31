@@ -29,6 +29,8 @@
 
   <ItemGroup Condition="'$(UnityBuild)' == 'true'">
     <Compile Remove="**\VectorZipTests.cs" />
+    <!-- ManagedCodecs.Thumbnails is not part of the Unity build. -->
+    <Compile Remove="Thumbnails\**" />
     <ProjectReference Include="..\..\src\ManagedCodecs.Unity\ManagedCodecs.Unity.csproj" />
   </ItemGroup>
 
@@ -38,6 +40,7 @@
     <ProjectReference Include="..\..\src\ManagedCodecs.Mjpeg\ManagedCodecs.Mjpeg.csproj" />
     <ProjectReference Include="..\..\src\ManagedCodecs.H264\ManagedCodecs.H264.csproj" />
     <ProjectReference Include="..\..\src\ManagedCodecs.Aac\ManagedCodecs.Aac.csproj" />
+    <ProjectReference Include="..\..\src\ManagedCodecs.Thumbnails\ManagedCodecs.Thumbnails.csproj" />
   </ItemGroup>
 
 </Project>

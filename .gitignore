@@ -17,6 +17,7 @@ samples/*.picttypes
 samples/*.interlacing
 samples/*.color
 samples/*.display
+samples/*.probe.json
 samples/*.flags
 samples/*.csv
 samples/*.f32

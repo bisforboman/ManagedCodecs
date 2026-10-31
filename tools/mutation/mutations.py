@@ -133,7 +133,7 @@ MUTATIONS = [
          find="&& sps.Crop.Top == 0 && sps.Crop.Left == 0", replace="&& sps.Crop.Left == 0",
          tests="DisplayName~h264-container-crop"),
     dict(file="src/ManagedCodecs.H264/H264Decoder.cs",
-         find="&& RoundUp16(_containerHeight) == RoundUp16(sps.Height)", replace="",
+         find="&& RoundUp16(containerHeight) == RoundUp16(sps.Height)", replace="",
          tests="DisplayName~h264-container-crop"),
     # Long-term field pictures (reference: JM's decoder; FFmpeg breaks the second): an IDR field marked long-term by
     # long_term_reference_flag; a field taking a LongTermFrameIdx keeps it on the other field of its own frame.
@@ -201,6 +201,21 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.Containers/Mp4/Mp4Demuxer.cs",
          find="int otherStart = otherBase is { } b ? other.KeyframeAtOrBefore(Rescale(pts, seekedBase, b)) : 0;", replace="int otherStart = 0;",
          tests="FullyQualifiedName~SeekTests"),
+
+    # A stream's duration as FFmpeg gives it (VideoProbe's against ffprobe's): an edit lasts no longer than the samples it
+    # takes (JM's field-picture files) ...
+    dict(file="src/ManagedCodecs.Containers/Mp4/Mp4Demuxer.cs",
+         find="return Math.Min(edited, total);", replace="return edited;",
+         tests="FullyQualifiedName~VideoProbeTests"),
+    # ... and a fragmented file's samples outlast its 'mdhd'.
+    dict(file="src/ManagedCodecs.Containers/Mp4/Mp4Demuxer.cs",
+         find="return Math.Max(MediaDuration, total);", replace="return MediaDuration;",
+         tests="FullyQualifiedName~VideoProbeTests"),
+    # The probe's H.264 frame size is the SPS's visible area or the container's crop of it, as the decoder's frames.
+    dict(file="src/ManagedCodecs.H264/H264Decoder.cs",
+         find="return TakesContainerSize(sps, stream.Width, stream.Height) ? (stream.Width, stream.Height) : (sps.Width, sps.Height);",
+         replace="return (stream.Width, stream.Height);",
+         tests="FullyQualifiedName~VideoProbeTests"),
 
     # ---- AAC
     # A FAAC stream's encoder delay, which FFmpeg skips (its name in a fill element).

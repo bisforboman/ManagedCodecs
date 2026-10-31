@@ -648,6 +648,11 @@ for f in samples/*.mp4 samples/*.avi; do
   t=$(ffprobe -v error -select_streams v:0 -of default=nw=1 -show_entries stream=sample_aspect_ratio:stream_side_data=rotation "$f")
   if [ -n "$t" ]; then echo "$t" > "${f%.*}.display"; fi
 done
+# name.probe.json: the file's duration and its streams' facts as ffprobe reports them, for VideoProbe (Thumbnails).
+for f in samples/*.mp4 samples/*.avi; do
+  ffprobe -v error -of json -show_entries format=duration,start_time:stream=index,codec_type,codec_name,width,height,sample_aspect_ratio,r_frame_rate,avg_frame_rate,sample_rate,channels,duration:stream_side_data=rotation \
+    "$f" > "${f%.*}.probe.json"
+done
 # name.color: each decoded video frame's colour properties and sample aspect ratio as ffprobe lists them, one a line in
 # output order ("color_range=tv|color_space=bt709|..."), for VideoFrame.ColorRange, ColorPrimaries, ColorTransfer,
 # ColorMatrix, ChromaLocation and SampleAspectRatio.

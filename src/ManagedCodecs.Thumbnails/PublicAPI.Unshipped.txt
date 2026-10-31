@@ -1,0 +1,50 @@
+#nullable enable
+ManagedCodecs.Thumbnails.AudioInfo
+ManagedCodecs.Thumbnails.AudioInfo.<Clone>$() -> ManagedCodecs.Thumbnails.AudioInfo!
+ManagedCodecs.Thumbnails.AudioInfo.AudioInfo(string! Codec, int SampleRate, int Channels) -> void
+ManagedCodecs.Thumbnails.AudioInfo.Channels.get -> int
+ManagedCodecs.Thumbnails.AudioInfo.Channels.init -> void
+ManagedCodecs.Thumbnails.AudioInfo.Codec.get -> string!
+ManagedCodecs.Thumbnails.AudioInfo.Codec.init -> void
+ManagedCodecs.Thumbnails.AudioInfo.Deconstruct(out string! Codec, out int SampleRate, out int Channels) -> void
+ManagedCodecs.Thumbnails.AudioInfo.Equals(ManagedCodecs.Thumbnails.AudioInfo? other) -> bool
+ManagedCodecs.Thumbnails.AudioInfo.SampleRate.get -> int
+ManagedCodecs.Thumbnails.AudioInfo.SampleRate.init -> void
+ManagedCodecs.Thumbnails.VideoInfo
+ManagedCodecs.Thumbnails.VideoInfo.<Clone>$() -> ManagedCodecs.Thumbnails.VideoInfo!
+ManagedCodecs.Thumbnails.VideoInfo.Audio.get -> ManagedCodecs.Thumbnails.AudioInfo?
+ManagedCodecs.Thumbnails.VideoInfo.Audio.init -> void
+ManagedCodecs.Thumbnails.VideoInfo.Codec.get -> string!
+ManagedCodecs.Thumbnails.VideoInfo.Codec.init -> void
+ManagedCodecs.Thumbnails.VideoInfo.Deconstruct(out System.TimeSpan Duration, out string! Codec, out int Width, out int Height, out int DisplayWidth, out int DisplayHeight, out double FramesPerSecond, out int Rotation, out ManagedCodecs.Rational SampleAspectRatio, out ManagedCodecs.Thumbnails.AudioInfo? Audio) -> void
+ManagedCodecs.Thumbnails.VideoInfo.DisplayHeight.get -> int
+ManagedCodecs.Thumbnails.VideoInfo.DisplayHeight.init -> void
+ManagedCodecs.Thumbnails.VideoInfo.DisplayWidth.get -> int
+ManagedCodecs.Thumbnails.VideoInfo.DisplayWidth.init -> void
+ManagedCodecs.Thumbnails.VideoInfo.Duration.get -> System.TimeSpan
+ManagedCodecs.Thumbnails.VideoInfo.Duration.init -> void
+ManagedCodecs.Thumbnails.VideoInfo.Equals(ManagedCodecs.Thumbnails.VideoInfo? other) -> bool
+ManagedCodecs.Thumbnails.VideoInfo.FramesPerSecond.get -> double
+ManagedCodecs.Thumbnails.VideoInfo.FramesPerSecond.init -> void
+ManagedCodecs.Thumbnails.VideoInfo.Height.get -> int
+ManagedCodecs.Thumbnails.VideoInfo.Height.init -> void
+ManagedCodecs.Thumbnails.VideoInfo.Rotation.get -> int
+ManagedCodecs.Thumbnails.VideoInfo.Rotation.init -> void
+ManagedCodecs.Thumbnails.VideoInfo.SampleAspectRatio.get -> ManagedCodecs.Rational
+ManagedCodecs.Thumbnails.VideoInfo.SampleAspectRatio.init -> void
+ManagedCodecs.Thumbnails.VideoInfo.VideoInfo(System.TimeSpan Duration, string! Codec, int Width, int Height, int DisplayWidth, int DisplayHeight, double FramesPerSecond, int Rotation, ManagedCodecs.Rational SampleAspectRatio, ManagedCodecs.Thumbnails.AudioInfo? Audio) -> void
+ManagedCodecs.Thumbnails.VideoInfo.Width.get -> int
+ManagedCodecs.Thumbnails.VideoInfo.Width.init -> void
+ManagedCodecs.Thumbnails.VideoProbe
+override ManagedCodecs.Thumbnails.AudioInfo.Equals(object? obj) -> bool
+override ManagedCodecs.Thumbnails.AudioInfo.GetHashCode() -> int
+override ManagedCodecs.Thumbnails.AudioInfo.ToString() -> string!
+override ManagedCodecs.Thumbnails.VideoInfo.Equals(object? obj) -> bool
+override ManagedCodecs.Thumbnails.VideoInfo.GetHashCode() -> int
+override ManagedCodecs.Thumbnails.VideoInfo.ToString() -> string!
+static ManagedCodecs.Thumbnails.AudioInfo.operator !=(ManagedCodecs.Thumbnails.AudioInfo? left, ManagedCodecs.Thumbnails.AudioInfo? right) -> bool
+static ManagedCodecs.Thumbnails.AudioInfo.operator ==(ManagedCodecs.Thumbnails.AudioInfo? left, ManagedCodecs.Thumbnails.AudioInfo? right) -> bool
+static ManagedCodecs.Thumbnails.VideoInfo.operator !=(ManagedCodecs.Thumbnails.VideoInfo? left, ManagedCodecs.Thumbnails.VideoInfo? right) -> bool
+static ManagedCodecs.Thumbnails.VideoInfo.operator ==(ManagedCodecs.Thumbnails.VideoInfo? left, ManagedCodecs.Thumbnails.VideoInfo? right) -> bool
+static ManagedCodecs.Thumbnails.VideoProbe.Read(string! path) -> ManagedCodecs.Thumbnails.VideoInfo!
+static ManagedCodecs.Thumbnails.VideoProbe.Read(System.IO.Stream! stream) -> ManagedCodecs.Thumbnails.VideoInfo!

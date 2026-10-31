@@ -26,6 +26,10 @@ ff -f lavfi -i testsrc2=size=320x240:rate=25 -t 1 -c:v mjpeg -pix_fmt yuvj420p -
 # decoder then gives yuv420p, tv), and a JFIF density of 2:1, the frames' aspect ratio.
 ff -f lavfi -i testsrc2=size=320x240:rate=25 -t 0.2 -c:v mjpeg -pix_fmt yuv420p -strict -1 -q:v 3 samples/mjpeg-limited-range.avi
 ff -f lavfi -i testsrc2=size=320x240:rate=25,setsar=2/1 -t 0.2 -c:v mjpeg -pix_fmt yuvj420p -q:v 3 samples/mjpeg-sar.avi
+# The AVI's 'vprp' against the JFIF density (tools/avi-vprp.py; FFmpeg's muxer writes both from one ratio): a picture of
+# 16:9, a sample ratio of 4:3 at 320x240, over JFIF's 2:1. ffprobe shows the container's, and so do the frames.
+cp samples/mjpeg-sar.avi samples/mjpeg-vprp-conflict.avi
+python3 tools/avi-vprp.py samples/mjpeg-vprp-conflict.avi 16 9
 # Noise at the highest quality: large coefficients exercise the IDCT's full range
 ff -f lavfi -i testsrc2=size=320x240:rate=25,noise=alls=60:allf=t -t 1 -c:v mjpeg -pix_fmt yuvj420p -q:v 1 samples/noise-q1.avi
 # A dropped frame: with MP3 alongside, FFmpeg's muxer writes an empty '00dc' chunk after the first frame while
@@ -637,10 +641,10 @@ for f in samples/*.avi samples/*.mp4; do
     | cut -d, -f1-3)
   if [ -n "$t" ]; then echo "$t" > "${f%.*}.interlacing"; fi
 done
-# name.display: the video stream's sample aspect ratio and rotation as ffprobe lists them ("sample_aspect_ratio=4:3",
+# name.display: the video stream's sample aspect ratio and rotation as ffprobe lists them (MP4 and AVI) ("sample_aspect_ratio=4:3",
 # "rotation=-90"; the ratio the container's where it has one, else the decoder's), for VideoStreamInfo.SampleAspectRatio
 # and Rotation.
-for f in samples/*.mp4; do
+for f in samples/*.mp4 samples/*.avi; do
   t=$(ffprobe -v error -select_streams v:0 -of default=nw=1 -show_entries stream=sample_aspect_ratio:stream_side_data=rotation "$f")
   if [ -n "$t" ]; then echo "$t" > "${f%.*}.display"; fi
 done

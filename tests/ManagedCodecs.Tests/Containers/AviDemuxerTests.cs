@@ -72,7 +72,32 @@ public class AviDemuxerTests
 
     // AVI with one MJPEG video stream (index 0) and one audio stream (index 1); with an empty video chunk (a dropped
     // frame) between the two packets if asked.
-    private static byte[] TinyAvi(bool dropFrame = false)
+    /// <summary>
+    /// The 'vprp' sample aspect ratio, as FFmpeg's avidec reads it: the picture's ratio (dwFrameAspectRatio, Y in its low
+    /// word) over the frame's (dwFrameWidthInPixels, dwFrameHeightInLines), in lowest terms; none with a zero anywhere,
+    /// a chunk of 36 bytes or fewer, or no chunk.
+    /// </summary>
+    [Theory]
+    [InlineData(16, 9, 320, 240, 36 + 8, 4, 3)]
+    [InlineData(4, 3, 720, 576, 36 + 8, 16, 15)]
+    [InlineData(4, 3, 320, 240, 36 + 8, 1, 1)]
+    [InlineData(0, 3, 320, 240, 36 + 8, 0, 1)]
+    [InlineData(4, 3, 0, 240, 36 + 8, 0, 1)]
+    [InlineData(4, 3, 320, 240, 36, 0, 1)]
+    public void AspectRatio_FromVprp(int x, int y, int width, int height, int size, int numerator, int denominator)
+    {
+        var vprp = new byte[size];
+        BinaryPrimitives.WriteUInt16LittleEndian(vprp.AsSpan(20), (ushort)y);
+        BinaryPrimitives.WriteUInt16LittleEndian(vprp.AsSpan(22), (ushort)x);
+        BinaryPrimitives.WriteUInt32LittleEndian(vprp.AsSpan(24), (uint)width);
+        BinaryPrimitives.WriteUInt32LittleEndian(vprp.AsSpan(28), (uint)height);
+        using var demuxer = new AviDemuxer(new MemoryStream(TinyAvi(vprp: vprp)));
+        Assert.Equal(new Rational(numerator, denominator), demuxer.Video!.SampleAspectRatio);
+        using var none = new AviDemuxer(new MemoryStream(TinyAvi()));
+        Assert.Equal(new Rational(0, 1), none.Video!.SampleAspectRatio);
+    }
+
+    private static byte[] TinyAvi(bool dropFrame = false, byte[]? vprp = null)
     {
         var avih = new byte[56];
         BinaryPrimitives.WriteUInt32LittleEndian(avih.AsSpan(0), 40_000); // microseconds per frame = 25 fps
@@ -96,7 +121,7 @@ public class AviDemuxerTests
             "AVI ",
             List("hdrl",
                 Chunk("avih", avih),
-                List("strl", Chunk("strh", videoStrh), Chunk("strf", videoStrf)),
+                List("strl", [.. Chunk("strh", videoStrh), .. Chunk("strf", videoStrf), .. vprp is null ? [] : Chunk("vprp", vprp)]),
                 List("strl", Chunk("strh", audioStrh), Chunk("strf", new byte[16]))),
             List("movi",
                 Chunk("00dc", [1, 2, 3]),

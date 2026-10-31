@@ -104,6 +104,6 @@ All three pull requests were made as planned, with two details settled by what F
 - **A mirrored matrix** is rotation 0, as proposed, though ffprobe prints its rotation (`-display_hflip` with 90 gives
   90): mirroring is not expressed here, and turning without mirroring would be wrong as well.
 
-Not done: AVI's 'vprp' aspect ratio (ffprobe prefers it for MJPEG in AVI; FFmpeg's muxer writes it from the same
-source as the JFIF density, so the samples agree), and the rotation of anything but a multiple of 90 degrees.
+Done afterwards: AVI's 'vprp' aspect ratio, which ffprobe prefers for MJPEG in AVI, in `VideoStreamInfo`. Not done:
+the rotation of anything but a multiple of 90 degrees.
 

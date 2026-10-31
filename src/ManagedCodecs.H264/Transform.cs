@@ -207,7 +207,7 @@ internal static class Transform
     /// in <paramref name="dest"/> and clipped to <paramref name="bitDepth"/> bits (8.5.14).
     /// </summary>
     public static void InverseTransform8x8Add<TPixel>(Span<int> d, Span<TPixel> dest, int stride, int bitDepth)
-        where TPixel : unmanaged, IBinaryInteger<TPixel>
+        where TPixel : unmanaged
     {
         if (typeof(TPixel) == typeof(byte))
         {
@@ -430,7 +430,7 @@ internal static class Transform
     /// <summary>The scalar <see cref="InverseTransform8x8Add{TPixel}"/>: for deeper samples, and the 8-bit one's reference.</summary>
     [SkipLocalsInit]
     internal static void InverseTransform8x8AddScalar<TPixel>(Span<int> d, Span<TPixel> dest, int stride, int bitDepth)
-        where TPixel : unmanaged, IBinaryInteger<TPixel>
+        where TPixel : unmanaged
     {
         int max = Samples.Max<TPixel>(bitDepth);
         Span<int> g = stackalloc int[64];
@@ -574,7 +574,7 @@ internal static class Transform
     /// in <paramref name="dest"/> and clipped to <paramref name="bitDepth"/> bits (8.5.14).
     /// </summary>
     public static void InverseTransformAdd<TPixel>(Span<int> d, Span<TPixel> dest, int stride, int bitDepth)
-        where TPixel : unmanaged, IBinaryInteger<TPixel>
+        where TPixel : unmanaged
     {
         if (typeof(TPixel) == typeof(byte))
         {
@@ -710,7 +710,7 @@ internal static class Transform
 
     /// <summary>The scalar <see cref="InverseTransformAdd{TPixel}"/>: for deeper samples, and the 8-bit one's reference.</summary>
     internal static void InverseTransformAddScalar<TPixel>(Span<int> d, Span<TPixel> dest, int stride, int bitDepth)
-        where TPixel : unmanaged, IBinaryInteger<TPixel>
+        where TPixel : unmanaged
     {
         int max = Samples.Max<TPixel>(bitDepth);
         Span<int> f = stackalloc int[16];
@@ -755,7 +755,7 @@ internal static class Transform
     /// <paramref name="dc"/> (already scaled): every residual sample is then (dc + 32) &gt;&gt; 6.
     /// </summary>
     public static void AddDc<TPixel>(int dc, Span<TPixel> dest, int stride, int bitDepth)
-        where TPixel : unmanaged, IBinaryInteger<TPixel>
+        where TPixel : unmanaged
     {
         int residual = (dc + 32) >> 6;
         if (residual == 0)
@@ -781,7 +781,7 @@ internal static class Transform
 
     /// <summary>The scalar <see cref="AddDc{TPixel}"/>: for deeper samples, and the 8-bit one's reference.</summary>
     internal static void AddDcScalar<TPixel>(int dc, Span<TPixel> dest, int stride, int bitDepth)
-        where TPixel : unmanaged, IBinaryInteger<TPixel>
+        where TPixel : unmanaged
     {
         int residual = (dc + 32) >> 6;
         int max = Samples.Max<TPixel>(bitDepth);
@@ -802,7 +802,7 @@ internal static class Transform
     /// or along each row (<see cref="BypassDpcm.Horizontal"/>), in place.
     /// </summary>
     public static void AddBypass<TPixel>(Span<int> r, int width, int height, BypassDpcm dpcm, Span<TPixel> dest, int stride, int bitDepth)
-        where TPixel : unmanaged, IBinaryInteger<TPixel>
+        where TPixel : unmanaged
     {
         if (dpcm == BypassDpcm.Vertical)
         {
@@ -842,8 +842,8 @@ internal static class Transform
     }
 
     private static void AddClipped<TPixel>(Span<TPixel> dest, int index, int residual, int max)
-        where TPixel : unmanaged, IBinaryInteger<TPixel> =>
-        dest[index] = TPixel.CreateTruncating(Math.Clamp(int.CreateTruncating(dest[index]) + residual, 0, max));
+        where TPixel : unmanaged =>
+        dest[index] = Samples.From<TPixel>(Math.Clamp(Samples.ToInt(dest[index]) + residual, 0, max));
 
     private static void Hadamard4x4(ReadOnlySpan<int> c, Span<int> f)
     {

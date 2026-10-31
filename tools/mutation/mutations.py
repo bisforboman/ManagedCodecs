@@ -315,9 +315,32 @@ MUTATIONS = [
          find="return shown > 0 ? ratio : new(0, 1);", replace="return ratio;",
          tests="FullyQualifiedName~VideoSignalTests"),
     # Matrix coefficients FFmpeg 6.1 does not name (15 and up, IPT-C2 and YCgCo-R among them) are unspecified to it.
-    dict(file="src/ManagedCodecs.H264/VideoSignal.cs",
+    dict(file="src/ManagedCodecs.Core/ColorCodes.cs",
          find="value is >= 0 and <= 14 ? (ColorMatrix)value", replace="value is >= 0 and <= 255 ? (ColorMatrix)value",
          tests="FullyQualifiedName~VideoSignalTests"),
+    # The container's colour and ratio as FFmpeg gives frames them: the VUI's range wins over 'colr' where it sends one
+    # (h264-colr-conflict), the container's ratio over the VUI's (h264-pasp-conflict, ffprobe's
+    # av_guess_sample_aspect_ratio), and an 'nclx' without its range flag means limited (h264-colr-only).
+    dict(file="src/ManagedCodecs.H264/VideoSignal.cs",
+         find="frame.ColorRange = RangeSent || stream is null ? Range : stream.ColorRange;", replace="frame.ColorRange = stream is null ? Range : stream.ColorRange;",
+         tests="DisplayName~h264-colr-conflict"),
+    dict(file="src/ManagedCodecs.H264/VideoSignal.cs",
+         find="stream is { SampleAspectRatio.Numerator: > 0 } ? stream.SampleAspectRatio : ", replace="",
+         tests="DisplayName~h264-pasp-conflict"),
+    dict(file="src/ManagedCodecs.Containers/Mp4/Mp4Demuxer.cs",
+         find="? ColorRange.Full : ColorRange.Limited) : Color.Range;", replace="? ColorRange.Full : ColorRange.Unspecified) : Color.Range;",
+         tests="FullyQualifiedName~Mp4DemuxerTests|DisplayName~h264-colr-only"),
+    # FFmpeg's codec context keeps the range and colour description an SPS leaves out (h264_init_ps).
+    dict(file="src/ManagedCodecs.H264/VideoSignal.cs",
+         find="var signal = RangeSent ? this : this with { Range = previous.Range, RangeSent = previous.RangeSent };", replace="var signal = this;",
+         tests="FullyQualifiedName~VideoSignalTests"),
+    dict(file="src/ManagedCodecs.H264/VideoSignal.cs",
+         find="if (ColourSent)\n        {\n            return signal;", replace="if (true)\n        {\n            return signal;",
+         tests="FullyQualifiedName~VideoSignalTests"),
+    # The decoder's signal reaches each frame (and the conformance tests compare it with name.color).
+    dict(file="src/ManagedCodecs.H264/H264Decoder.cs",
+         find="_signal = sps.Signal.After(_signal);", replace="",
+         tests="DisplayName~h264-color-bt2020-pq"),
     # ---- MJPEG
     # FFmpeg takes an image of less than 3/4 of the stream's height (integer division) as a field.
     dict(file="src/ManagedCodecs.Mjpeg/MjpegDecoder.cs",
@@ -326,9 +349,19 @@ MUTATIONS = [
     # FFmpeg's colour properties for JPEG (T.81 leaves them open): a gray image's range is unspecified, not full
     # (gray.avi, ImageMagick's), and its encoder's "CS=ITU601" comment means limited range (mjpeg-limited-range.avi).
     dict(file="src/ManagedCodecs.Mjpeg/MjpegDecoder.cs",
-         find="frame.Format == PixelFormat.Gray8 ? ColorRange.Unspecified : ", replace="",
+         find="frame.Format == PixelFormat.Gray8 ? _stream?.ColorRange ?? ColorRange.Unspecified : ", replace="",
          tests="FullyQualifiedName~Mjpeg"),
     dict(file="src/ManagedCodecs.Mjpeg/MjpegDecoder.cs",
          find="_limitedRange = true;", replace="_limitedRange = false;",
          tests="FullyQualifiedName~Mjpeg"),
+    # MJPEG frames take the container's aspect ratio where it has one, over the JFIF density, as ffprobe shows FFmpeg's
+    # frames (mjpeg-vprp-conflict: AVI's 'vprp' 4:3 over JFIF's 2:1).
+    dict(file="src/ManagedCodecs.Mjpeg/MjpegDecoder.cs",
+         find="frame.SampleAspectRatio = _stream is { SampleAspectRatio.Numerator: > 0 } ? _stream.SampleAspectRatio : _aspectRatio;",
+         replace="frame.SampleAspectRatio = _aspectRatio;",
+         tests="DisplayName~mjpeg-vprp-conflict"),
+    # MJPEG frames take the container's primaries and transfer, which JPEG has none of (mjpeg-colr).
+    dict(file="src/ManagedCodecs.Mjpeg/MjpegDecoder.cs",
+         find="frame.ColorPrimaries = _stream?.ColorPrimaries ?? ColorPrimaries.Unspecified;", replace="frame.ColorPrimaries = ColorPrimaries.Unspecified;",
+         tests="DisplayName~mjpeg-colr"),
 ]

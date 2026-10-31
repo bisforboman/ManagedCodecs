@@ -32,6 +32,9 @@ references:
   `chroma_location`, `sample_aspect_ratio`): every decoded video frame's colour properties and sample aspect ratio, in
   output order, for `VideoFrame.ColorRange`, `ColorPrimaries`, `ColorTransfer`, `ColorMatrix`, `ChromaLocation` and
   `SampleAspectRatio` (checked for H.264 and MJPEG).
+- `name.display` (`ffprobe -show_streams`, `sample_aspect_ratio` and the display matrix's `rotation`): an MP4 video
+  stream's aspect ratio (the container's where it has one) and rotation, for `VideoStreamInfo.SampleAspectRatio` and
+  `Rotation`.
 - `name.packets.csv` (`ffprobe -show_packets -show_data_hash MD5`): every demuxed MP4 packet with the demuxer's own
   timestamps, its keyframe and discard flags and the MD5 of its data. `name.packets.framemd5` (with `-copyts`) for the
   codec private data, and for raw AAC (`.aac`, ADTS) the packets.

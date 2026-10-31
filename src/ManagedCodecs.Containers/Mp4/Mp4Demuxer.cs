@@ -98,6 +98,7 @@ public sealed class Mp4Demuxer : IDemuxer
         {
             var moov = ReadMoov(stream, out bool hasFragments);
             uint movieTimescale = 0;
+            var movieMatrix = Matrix.Identity;
             Track? video = null;
             Track? audio = null;
             int trackIndex = 0;
@@ -110,6 +111,7 @@ public sealed class Mp4Demuxer : IDemuxer
                 if (type == Box.Mvhd)
                 {
                     movieTimescale = ReadUInt32(payload, payload.Length > 0 && payload[0] == 1 ? 20 : 12);
+                    movieMatrix = Matrix.Read(payload, payload.Length > 0 && payload[0] == 1 ? 48 : 36);
                 }
                 else if (type == Box.Trak)
                 {
@@ -173,7 +175,15 @@ public sealed class Mp4Demuxer : IDemuxer
                     samples.Sizes.Count(size => size > 0),
                     new Rational(1, checked((int)video.Timescale)),
                     video.CodecPrivate,
-                    video.StreamIndex);
+                    video.StreamIndex)
+                {
+                    ColorRange = video.Color.Range,
+                    ColorPrimaries = video.Color.Primaries,
+                    ColorTransfer = video.Color.Transfer,
+                    ColorMatrix = video.Color.Matrix,
+                    SampleAspectRatio = video.AspectRatio,
+                    Rotation = Matrix.RotationOf(video.Matrix, movieMatrix),
+                };
             }
 
             if (audio is not null && tracks.HasFlag(MediaTypes.Audio))
@@ -648,6 +658,7 @@ public sealed class Mp4Demuxer : IDemuxer
             if (FindChild(trak, Box.Tkhd, out var tkhd))
             {
                 TrackId = ReadUInt32(tkhd, tkhd.Length > 0 && tkhd[0] == 1 ? 20 : 12);
+                Matrix = Matrix.Read(tkhd, tkhd.Length > 0 && tkhd[0] == 1 ? 52 : 40);
             }
 
             if (FindChild(trak, Box.Edts, out var edts) && FindChild(edts, Box.Elst, out var elst))
@@ -718,6 +729,16 @@ public sealed class Mp4Demuxer : IDemuxer
         public int Channels { get; private set; }
 
         public ReadOnlyMemory<byte> CodecPrivate { get; private set; } = ReadOnlyMemory<byte>.Empty;
+
+        /// <summary>The 'tkhd' matrix's rotation and scale part (a, b, c, d).</summary>
+        public Matrix Matrix { get; } = Matrix.Identity;
+
+        /// <summary>The sample entry's 'colr' (the last 'nclx' or 'nclc' one): range, primaries, transfer, matrix.</summary>
+        public (ColorRange Range, ColorPrimaries Primaries, ColorTransfer Transfer, ColorMatrix Matrix) Color { get; private set; } =
+            (ColorRange.Unspecified, ColorPrimaries.Unspecified, ColorTransfer.Unspecified, ColorMatrix.Unspecified);
+
+        /// <summary>The sample entry's 'pasp' in lowest terms, 0:1 without one.</summary>
+        public Rational AspectRatio { get; private set; } = new(0, 1);
 
         public void SetFragmentDefaults(uint duration, uint size, uint flags) => _fragmentDefaults = (duration, size, flags);
 
@@ -1298,6 +1319,7 @@ public sealed class Mp4Demuxer : IDemuxer
             Codec = Box.Name(format);
 
             var children = entry[78..];
+            ReadColorAndAspect(children);
             switch (format)
             {
                 case Box.Avc1 or Box.Avc3:
@@ -1320,6 +1342,36 @@ public sealed class Mp4Demuxer : IDemuxer
                 case Box.Jpeg or Box.Mjpa:
                     Codec = CodecIds.Mjpeg;
                     break;
+            }
+        }
+
+        /// <summary>
+        /// The visual sample entry's 'colr' boxes (14496-12 12.1.5; 'nclx' with its full range flag, QuickTime's 'nclc'
+        /// without one; ICC profiles are left alone, a later box replacing an earlier one's values) and 'pasp' (12.1.4,
+        /// hSpacing:vSpacing), as FFmpeg's mov_read_colr and mov_read_pasp read them. An 'nclx' without the flag set is
+        /// limited range.
+        /// </summary>
+        private void ReadColorAndAspect(ReadOnlySpan<byte> children)
+        {
+            while (NextBox(ref children, out uint type, out var box))
+            {
+                if (type == Box.Colr && box.Length >= 10)
+                {
+                    uint kind = BinaryPrimitives.ReadUInt32BigEndian(box);
+                    bool nclx = kind == Box.Nclx && box.Length >= 11;
+                    if (nclx || kind == Box.Nclc)
+                    {
+                        var range = nclx ? ((box[10] & 0x80) != 0 ? ColorRange.Full : ColorRange.Limited) : Color.Range;
+                        Color = (range,
+                            ColorCodes.PrimariesOf(BinaryPrimitives.ReadUInt16BigEndian(box[4..])),
+                            ColorCodes.TransferOf(BinaryPrimitives.ReadUInt16BigEndian(box[6..])),
+                            ColorCodes.MatrixOf(BinaryPrimitives.ReadUInt16BigEndian(box[8..])));
+                    }
+                }
+                else if (type == Box.Pasp && box.Length >= 8)
+                {
+                    AspectRatio = ColorCodes.AspectRatio(BinaryPrimitives.ReadUInt32BigEndian(box), BinaryPrimitives.ReadUInt32BigEndian(box[4..]));
+                }
             }
         }
 
@@ -1594,6 +1646,10 @@ public sealed class Mp4Demuxer : IDemuxer
         public const uint Wave = 0x77617665;
         public const uint Jpeg = 0x6A706567;
         public const uint Mjpa = 0x6D6A7061;
+        public const uint Colr = 0x636F6C72;
+        public const uint Nclx = 0x6E636C78;
+        public const uint Nclc = 0x6E636C63;
+        public const uint Pasp = 0x70617370;
         public const uint Udta = 0x75647461;
         public const uint Meta = 0x6D657461;
         public const uint Ilst = 0x696C7374;

@@ -68,3 +68,15 @@ ManagedCodecs.VideoFrame.ColorPrimaries.get -> ManagedCodecs.ColorPrimaries
 ManagedCodecs.VideoFrame.ColorRange.get -> ManagedCodecs.ColorRange
 ManagedCodecs.VideoFrame.ColorTransfer.get -> ManagedCodecs.ColorTransfer
 ManagedCodecs.VideoFrame.SampleAspectRatio.get -> ManagedCodecs.Rational
+ManagedCodecs.VideoStreamInfo.ColorMatrix.get -> ManagedCodecs.ColorMatrix
+ManagedCodecs.VideoStreamInfo.ColorMatrix.init -> void
+ManagedCodecs.VideoStreamInfo.ColorPrimaries.get -> ManagedCodecs.ColorPrimaries
+ManagedCodecs.VideoStreamInfo.ColorPrimaries.init -> void
+ManagedCodecs.VideoStreamInfo.ColorRange.get -> ManagedCodecs.ColorRange
+ManagedCodecs.VideoStreamInfo.ColorRange.init -> void
+ManagedCodecs.VideoStreamInfo.ColorTransfer.get -> ManagedCodecs.ColorTransfer
+ManagedCodecs.VideoStreamInfo.ColorTransfer.init -> void
+ManagedCodecs.VideoStreamInfo.Rotation.get -> int
+ManagedCodecs.VideoStreamInfo.Rotation.init -> void
+ManagedCodecs.VideoStreamInfo.SampleAspectRatio.get -> ManagedCodecs.Rational
+ManagedCodecs.VideoStreamInfo.SampleAspectRatio.init -> void

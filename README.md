@@ -183,13 +183,19 @@ as FFmpeg's `color_range`, `color_primaries`, `color_transfer` and `color_space`
 FFmpeg reads it (docs/conformance.md, Colour and aspect ratio). Nothing is guessed: most H.264 streams leave the
 matrix unspecified, which usually means BT.601 below 720 lines and BT.709 from 720, in limited range. MJPEG frames are
 BT.601 (`Bt470BG`) with centred chroma, full range (limited where FFmpeg's encoder said so), and take the JFIF
-density's aspect ratio, as FFmpeg gives them (docs/conformance.md, MJPEG). The MP4 container's 'colr', 'pasp' and
-rotation are not read yet (docs/decisions/2026-10-31-colour-metadata.md).
+density's aspect ratio, as FFmpeg gives them (docs/conformance.md, MJPEG). An MP4 file's `VideoStreamInfo` has the
+container's say, before anything is decoded: `ColorRange`, `ColorPrimaries`, `ColorTransfer` and `ColorMatrix` from
+'colr', `SampleAspectRatio` from 'pasp', and `Rotation` (0, 90, 180 or 270 degrees counter-clockwise, from the track
+and movie matrices: phone video) for a player to turn the frames by, which the decoders do not. A decoder made from
+the stream gives its frames the container's colour where the bitstream says none, and the container's ratio where it
+has one, as ffprobe shows FFmpeg's frames. An AVI file's has the sample aspect ratio of its 'vprp' (OpenDML's video
+properties, which FFmpeg's muxer writes), and nothing else of these.
 
 An MP4 file's tracks can be read one at a time: `new Mp4Demuxer(stream, MediaTypes.Video)` leaves the audio track out
-(no sample table, no packets, `Audio` null). `ReadPacketInfo()` lists the packets without their data, each one's
-size, keyframe and discard flags and timestamps from the sample tables, without reading the file: a duration, a packet
-list or a bitrate graph needs nothing more.
+(no sample table, no packets, `Audio` null). Every demuxer's `ReadPacketInfo()` lists the packets without their data,
+each one's size, keyframe and discard flags and timestamps: a duration, a packet list or a bitrate graph needs nothing
+more. MP4's comes from the sample tables and ADTS's from the frames found on opening, neither reading the file; AVI's
+walks the 'movi' list reading each chunk's 8-byte header and skipping its data.
 
 ```csharp
 using var demuxer = new Mp4Demuxer(File.OpenRead("video.mp4"), MediaTypes.Video);

@@ -222,13 +222,71 @@ public class Mp4DemuxerTests
         Assert.Equal(AudioData, packet.Data.ToArray());
     }
 
+    /// <summary>
+    /// The sample entry's 'colr' and 'pasp' as FFmpeg reads them: 'nclx' with its range flag (clear: limited), QuickTime's
+    /// 'nclc' without one, ICC profiles ignored, a later box replacing an earlier one's values, code points FFmpeg does
+    /// not name unspecified; 'pasp' in lowest terms, unknown with a zero.
+    /// </summary>
+    [Fact]
+    public void ColourAndAspectRatio_FromTheSampleEntry()
+    {
+        static VideoStreamInfo Video(params byte[][] boxes) => new Mp4Demuxer(new MemoryStream(TinyMp4(videoEntryBoxes: boxes))).Video!;
+        static byte[] Colr(string kind, int primaries, int transfer, int matrix, byte? range = null) =>
+            Box("colr", Ascii(kind), [(byte)(primaries >> 8), (byte)primaries], [(byte)(transfer >> 8), (byte)transfer], [(byte)(matrix >> 8), (byte)matrix], range is { } r ? [r] : []);
+
+        var none = Video();
+        Assert.Equal((ColorRange.Unspecified, ColorPrimaries.Unspecified, ColorTransfer.Unspecified, ColorMatrix.Unspecified, new Rational(0, 1), 0),
+            (none.ColorRange, none.ColorPrimaries, none.ColorTransfer, none.ColorMatrix, none.SampleAspectRatio, none.Rotation));
+
+        var nclx = Video(Colr("nclx", 9, 16, 9, 0x80), Box("pasp", U32(128), U32(90)));
+        Assert.Equal((ColorRange.Full, ColorPrimaries.Bt2020, ColorTransfer.Smpte2084, ColorMatrix.Bt2020Ncl, new Rational(64, 45)),
+            (nclx.ColorRange, nclx.ColorPrimaries, nclx.ColorTransfer, nclx.ColorMatrix, nclx.SampleAspectRatio));
+        Assert.Equal(ColorRange.Limited, Video(Colr("nclx", 1, 1, 1, 0x00)).ColorRange);
+
+        var nclc = Video(Colr("nclc", 1, 1, 6));
+        Assert.Equal((ColorRange.Unspecified, ColorPrimaries.Bt709, ColorTransfer.Bt709, ColorMatrix.Smpte170M),
+            (nclc.ColorRange, nclc.ColorPrimaries, nclc.ColorTransfer, nclc.ColorMatrix));
+
+        var later = Video(Colr("nclx", 1, 1, 1, 0x80), Box("colr", Ascii("prof"), new byte[16]), Colr("nclc", 9, 18, 9));
+        Assert.Equal((ColorRange.Full, ColorPrimaries.Bt2020, ColorTransfer.AribStdB67, ColorMatrix.Bt2020Ncl),
+            (later.ColorRange, later.ColorPrimaries, later.ColorTransfer, later.ColorMatrix));
+
+        var undefined = Video(Colr("nclx", 300, 19, 15, 0x80));
+        Assert.Equal((ColorPrimaries.Unspecified, ColorTransfer.Unspecified, ColorMatrix.Unspecified), (undefined.ColorPrimaries, undefined.ColorTransfer, undefined.ColorMatrix));
+        Assert.Equal(ColorPrimaries.Unspecified, Video(Box("colr", Ascii("nclx"), [0, 1])).ColorPrimaries); // cut short
+        Assert.Equal(new Rational(0, 1), Video(Box("pasp", U32(0), U32(1))).SampleAspectRatio);
+        Assert.Equal(new Rational(0, 1), Video(Box("pasp", U32(uint.MaxValue), U32(1))).SampleAspectRatio);
+        Assert.Equal(new Rational(0, 1), Video(Box("pasp", U32(1))).SampleAspectRatio); // cut short
+    }
+
+    /// <summary>
+    /// The rotation of the track's matrix followed by the movie's, counter-clockwise (ffprobe's display matrix rotation:
+    /// 90 for a = 0, b = -1, c = 1), at any scale; another angle or a mirror is 0.
+    /// </summary>
+    [Theory]
+    [InlineData(new[] { 0x10000, 0, 0, 0x10000 }, null, 0)]
+    [InlineData(new[] { 0, -0x10000, 0x10000, 0 }, null, 90)]
+    [InlineData(new[] { -0x10000, 0, 0, -0x10000 }, null, 180)]
+    [InlineData(new[] { 0, 0x10000, -0x10000, 0 }, null, 270)]
+    [InlineData(new[] { 0, -0x20000, 0x20000, 0 }, null, 90)]
+    [InlineData(new[] { 0, -0x10000, -0x10000, 0 }, null, 0)]
+    [InlineData(new[] { 46340, -46340, 46340, 46340 }, null, 0)]
+    [InlineData(new[] { 0x10000, 0, 0, 0x10000 }, new[] { 0, -0x10000, 0x10000, 0 }, 90)]
+    [InlineData(new[] { 0, -0x10000, 0x10000, 0 }, new[] { 0, -0x10000, 0x10000, 0 }, 180)]
+    [InlineData(new[] { 0, 0x10000, -0x10000, 0 }, new[] { 0, -0x10000, 0x10000, 0 }, 0)]
+    public void Rotation_FromTheMatrices(int[] track, int[]? movie, int expected)
+    {
+        // A movie matrix of zeros (TinyMp4's default 'mvhd') would turn everything to nothing, as in FFmpeg: the identity.
+        Assert.Equal(expected, new Mp4Demuxer(new MemoryStream(TinyMp4(trackMatrix: track, movieMatrix: movie ?? [0x10000, 0, 0, 0x10000]))).Video!.Rotation);
+    }
+
     [Fact]
     public void RejectsFileWithoutMoov()
     {
         Assert.Throws<InvalidDataException>(() => new Mp4Demuxer(new MemoryStream(Box("ftyp", Ascii("isom"), U32(0)))));
     }
 
-    private static byte[] TinyMp4(byte[]? ctts = null, bool editList = true)
+    private static byte[] TinyMp4(byte[]? ctts = null, bool editList = true, byte[][]? videoEntryBoxes = null, int[]? trackMatrix = null, int[]? movieMatrix = null)
     {
         var ftyp = Box("ftyp", Ascii("isom"), U32(512), Ascii("isom"));
 
@@ -240,7 +298,7 @@ public class Mp4DemuxerTests
         long audioChunk = chunk2 + SampleData[2].Length;
 
         var stbl = Box("stbl",
-            SampleDescription(),
+            SampleDescription(videoEntryBoxes ?? []),
             FullBox("stts", 0, U32(1), U32(3), U32(3000)),
             ctts ?? FullBox("ctts", 0, U32(2), U32(2), U32(3000), U32(1), U32(0)),
             FullBox("stsc", 0, U32(2), U32(1), U32(2), U32(1), U32(2), U32(1), U32(1)),
@@ -249,6 +307,7 @@ public class Mp4DemuxerTests
             FullBox("stss", 0, U32(2), U32(1), U32(3)));
 
         var video = Box("trak",
+            trackMatrix is null ? [] : FullBox("tkhd", 0, new byte[8], U32(2), new byte[24], Matrix(trackMatrix), new byte[8]),
             editList ? Box("edts", FullBox("elst", 0, U32(2), U32(500), U32(uint.MaxValue), U32(0x0001_0000), U32(3000), U32(200), U32(0x0001_0000))) : [],
             Box("mdia",
                 MediaHeader(version: 1),
@@ -262,7 +321,10 @@ public class Mp4DemuxerTests
             FullBox("stsz", 0, U32(0), U32(1), U32((uint)AudioData.Length)),
             FullBox("stco", 0, U32(1), U32((uint)audioChunk))))));
 
-        var moov = Box("moov", FullBox("mvhd", 0, new byte[8], U32(1000), new byte[84]), audio, video);
+        var mvhd = movieMatrix is null
+            ? FullBox("mvhd", 0, new byte[8], U32(1000), new byte[84])
+            : FullBox("mvhd", 0, new byte[8], U32(1000), new byte[20], Matrix(movieMatrix), new byte[28]);
+        var moov = Box("moov", mvhd, audio, video);
         return [.. ftyp, .. mdat, .. moov];
     }
 
@@ -287,7 +349,13 @@ public class Mp4DemuxerTests
 
     private static byte[] Handler(string type) => FullBox("hdlr", 0, U32(0), Ascii(type), new byte[12], [0]);
 
-    private static byte[] SampleDescription()
+    /// <summary>A transformation matrix: a, b, c, d (16.16) with u, v, x, y 0 and w 1.0 (2.30).</summary>
+    private static byte[] Matrix(int[] abcd) =>
+        [.. I32(abcd[0]), .. I32(abcd[1]), .. U32(0), .. I32(abcd[2]), .. I32(abcd[3]), .. U32(0), .. U32(0), .. U32(0), .. U32(0x4000_0000)];
+
+    private static byte[] I32(int value) => U32(unchecked((uint)value));
+
+    private static byte[] SampleDescription(params byte[][] extraBoxes)
     {
         // VisualSampleEntry: 78 bytes with width and height at 24 and 26, then child boxes.
         var entry = new byte[78];
@@ -298,7 +366,7 @@ public class Mp4DemuxerTests
         byte[] decoderConfig = [0x04, 17, 0x6C, 0x11, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x05, 2, 0xAA, 0xBB];
         byte[] esDescriptor = [0x03, 0x80, 0x80, 0x80, (byte)(3 + decoderConfig.Length), 0, 1, 0, .. decoderConfig];
 
-        return FullBox("stsd", 0, U32(1), Box("mp4v", entry, FullBox("esds", 0, esDescriptor)));
+        return FullBox("stsd", 0, U32(1), Box("mp4v", [entry, FullBox("esds", 0, esDescriptor), .. extraBoxes]));
     }
 
     private static byte[] Box(string type, params byte[][] parts)

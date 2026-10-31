@@ -8,7 +8,8 @@ namespace ManagedCodecs.MonoGame;
 
 /// <summary>
 /// Plays a file into a texture: the newest decoded frame that is due by a clock started at the first frame, drawn
-/// letterboxed to the window; audio submitted to a dynamic sound as it comes. Escape quits. The window title shows the
+/// letterboxed to the window at its sample aspect ratio and turned by the stream's rotation (phone video); audio
+/// submitted to a dynamic sound as it comes. Escape quits. The window title shows the
 /// decode and conversion time per frame, the number a game's frame budget cares about.
 /// </summary>
 internal sealed class PlayerGame : Game
@@ -20,6 +21,7 @@ internal sealed class PlayerGame : Game
     private Texture2D? _texture;
     private DynamicSoundEffectInstance? _sound;
     private RgbaFrame? _next;
+    private double _aspect = 1;
     private bool _ended;
     private double _start;
 
@@ -87,6 +89,7 @@ internal sealed class PlayerGame : Game
             }
 
             _texture.SetData(due.Pixels);
+            _aspect = due.AspectRatio;
         }
 
         var (count, milliseconds) = _source.DecodeStatistics;
@@ -103,12 +106,20 @@ internal sealed class PlayerGame : Game
             return;
         }
 
+        // The picture as shown: the texture's width stretched by the aspect ratio, then turned (counter-clockwise; a
+        // quarter turn swaps the sides it needs), centred and scaled to fit.
         var viewport = GraphicsDevice.Viewport;
-        float scale = Math.Min(viewport.Width / (float)_texture.Width, viewport.Height / (float)_texture.Height);
-        var size = new Vector2(_texture.Width, _texture.Height) * scale;
-        var at = (new Vector2(viewport.Width, viewport.Height) - size) / 2;
+        int rotation = _source.VideoStream.Rotation;
+        bool quarter = rotation is 90 or 270;
+        float shownWidth = (float)(_texture.Width * _aspect);
+        float shownHeight = _texture.Height;
+        var (fitWidth, fitHeight) = quarter ? (shownHeight, shownWidth) : (shownWidth, shownHeight);
+        float scale = Math.Min(viewport.Width / fitWidth, viewport.Height / fitHeight);
+        var centre = new Vector2(viewport.Width, viewport.Height) / 2;
+        var origin = new Vector2(_texture.Width, _texture.Height) / 2;
+        var stretch = new Vector2(scale * (float)_aspect, scale);
         _sprites!.Begin(samplerState: SamplerState.LinearClamp);
-        _sprites.Draw(_texture, new Rectangle((int)at.X, (int)at.Y, (int)size.X, (int)size.Y), Color.White);
+        _sprites.Draw(_texture, centre, null, Color.White, -MathHelper.ToRadians(rotation), origin, stretch, SpriteEffects.None, 0);
         _sprites.End();
         base.Draw(gameTime);
     }

@@ -36,6 +36,9 @@ public sealed class MjpegDecoder : IVideoDecoder
     private Rational _aspectRatio = new(0, 1);
     private bool _limitedRange;
 
+    // The container's colour properties and aspect ratio, for what JPEG does not say; null without one.
+    private readonly VideoStreamInfo? _stream;
+
     /// <summary>A decoder that knows nothing of the stream's height, so it takes every image as a whole frame, never as a field.</summary>
     public MjpegDecoder()
     {
@@ -53,6 +56,7 @@ public sealed class MjpegDecoder : IVideoDecoder
         : this()
     {
         _streamHeight = stream.Height;
+        _stream = stream;
     }
 
     /// <summary>
@@ -121,14 +125,18 @@ public sealed class MjpegDecoder : IVideoDecoder
     /// The frame's colour properties as FFmpeg's decoder gives them (T.81 leaves them open; JFIF says YCbCr with
     /// BT.601's matrix, full range, chroma centred): BT.470BG (BT.601) and centred chroma whatever the image; full range
     /// for YCbCr unless a "CS=ITU601" comment came (FFmpeg's encoder writes it for limited range), unspecified for gray;
-    /// the last JFIF density's aspect ratio, in lowest terms.
+    /// the last JFIF density's aspect ratio, in lowest terms. With the container's values (<see cref="MjpegDecoder(VideoStreamInfo)"/>),
+    /// as FFmpeg's decoder starts from them: its primaries and transfer (JPEG has none), a gray frame's range, and its
+    /// aspect ratio where it has one (ffprobe's <c>av_guess_sample_aspect_ratio</c>).
     /// </summary>
     private void SetColor(VideoFrame frame)
     {
         frame.ColorMatrix = ColorMatrix.Bt470BG;
         frame.ChromaLocation = ChromaLocation.Center;
-        frame.ColorRange = frame.Format == PixelFormat.Gray8 ? ColorRange.Unspecified : _limitedRange ? ColorRange.Limited : ColorRange.Full;
-        frame.SampleAspectRatio = _aspectRatio;
+        frame.ColorRange = frame.Format == PixelFormat.Gray8 ? _stream?.ColorRange ?? ColorRange.Unspecified : _limitedRange ? ColorRange.Limited : ColorRange.Full;
+        frame.ColorPrimaries = _stream?.ColorPrimaries ?? ColorPrimaries.Unspecified;
+        frame.ColorTransfer = _stream?.ColorTransfer ?? ColorTransfer.Unspecified;
+        frame.SampleAspectRatio = _stream is { SampleAspectRatio.Numerator: > 0 } ? _stream.SampleAspectRatio : _aspectRatio;
     }
 
     /// <summary>
@@ -149,16 +157,7 @@ public sealed class MjpegDecoder : IVideoDecoder
     }
 
     /// <summary>Xdensity:Ydensity in lowest terms, 0:1 (unknown) if either is 0.</summary>
-    internal static Rational AspectRatioOf(int x, int y)
-    {
-        if (x <= 0 || y <= 0)
-        {
-            return new(0, 1);
-        }
-
-        int gcd = (int)System.Numerics.BigInteger.GreatestCommonDivisor(x, y);
-        return new(x / gcd, y / gcd);
-    }
+    internal static Rational AspectRatioOf(int x, int y) => ColorCodes.AspectRatio(x, y);
 
     /// <summary>A COM segment: "CS=ITU601" (to a terminating zero, if any) marks limited range, as FFmpeg reads it.</summary>
     private void ReadComment(ReadOnlySpan<byte> payload)

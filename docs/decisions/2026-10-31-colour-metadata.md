@@ -1,6 +1,6 @@
 # Colour and geometry metadata for 0.5.0 (2026-10-31)
 
-A design, decided (below). The first two pull requests (H.264's VUI, the enums and `VideoFrame`'s properties; MJPEG) are done. It comes from the review of the repository's decisions
+A design, decided (below). Done: all three pull requests (H.264's VUI, the enums and `VideoFrame`'s properties; MJPEG; MP4). What was found on the way changed two details, below (Outcome). It comes from the review of the repository's decisions
 (2026-10-31): the frames carry no colour information, so a consumer cannot convert them to RGB correctly, and this is
 the gap in the API most likely to matter next.
 
@@ -91,3 +91,19 @@ Asked with the multiple-choice prompt; the owner took each proposal (2026-10-31)
 - **Separate properties or one value. Decided:** separate properties on the frame (as the interlacing ones are). The
   alternative is one `ColorInfo` record struct on the frame and the stream, which groups them but makes a consumer
   write `frame.Color.Range`.
+
+## Outcome (2026-10-31)
+
+All three pull requests were made as planned, with two details settled by what FFmpeg turned out to do:
+
+- **A frame's aspect ratio** is the container's where the decoder was given one, else the bitstream's, not the
+  bitstream's first: ffprobe's frames show `av_guess_sample_aspect_ratio`, which prefers the container's ('pasp' in MP4,
+  'vprp' in AVI), and that is the ratio a player should use. FFmpeg's decoder itself keeps the bitstream's in its
+  frames, unreduced. The colour properties stay the bitstream's first, the container's where it says nothing, as
+  FFmpeg's decoder gives them.
+- **A mirrored matrix** is rotation 0, as proposed, though ffprobe prints its rotation (`-display_hflip` with 90 gives
+  90): mirroring is not expressed here, and turning without mirroring would be wrong as well.
+
+Done afterwards: AVI's 'vprp' aspect ratio, which ffprobe prefers for MJPEG in AVI, in `VideoStreamInfo`. Not done:
+the rotation of anything but a multiple of 90 degrees.
+

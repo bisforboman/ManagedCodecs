@@ -16,7 +16,7 @@ internal static class IntraPrediction
     /// <summary>Intra_4x4 prediction (8.3.1.2) for the block at <paramref name="offset"/>.</summary>
     [SkipLocalsInit]
     public static void Predict4x4<TPixel>(int mode, TPixel[] plane, int offset, int stride, IntraNeighbors n, int bitDepth)
-        where TPixel : unmanaged, IBinaryInteger<TPixel>
+        where TPixel : unmanaged
     {
         // The edge layout of PredictBlock: p[-1, y] for y = 3..0 at e[4..7], p[-1, -1] at e[8],
         // p[x, -1] for x = 0..7 at e[9..16].
@@ -26,13 +26,13 @@ internal static class IntraPrediction
         {
             for (int x = 0; x < 4; x++)
             {
-                e[9 + x] = int.CreateTruncating(plane[offset - stride + x]);
+                e[9 + x] = Samples.ToInt(plane[offset - stride + x]);
             }
 
             // Missing top-right samples are replaced by p[3, -1] (8.3.1.2).
             for (int x = 4; x < 8; x++)
             {
-                e[9 + x] = n.TopRight ? int.CreateTruncating(plane[offset - stride + x]) : e[12];
+                e[9 + x] = n.TopRight ? Samples.ToInt(plane[offset - stride + x]) : e[12];
             }
         }
 
@@ -40,13 +40,13 @@ internal static class IntraPrediction
         {
             for (int y = 0; y < 4; y++)
             {
-                e[7 - y] = int.CreateTruncating(plane[offset + (y * stride) - 1]);
+                e[7 - y] = Samples.ToInt(plane[offset + (y * stride) - 1]);
             }
         }
 
         if (n.TopLeft)
         {
-            e[8] = int.CreateTruncating(plane[offset - stride - 1]);
+            e[8] = Samples.ToInt(plane[offset - stride - 1]);
         }
 
         PredictBlock(4, mode, e, plane, offset, stride, n, bitDepth);
@@ -58,7 +58,7 @@ internal static class IntraPrediction
     /// </summary>
     [SkipLocalsInit]
     public static void Predict8x8<TPixel>(int mode, TPixel[] plane, int offset, int stride, IntraNeighbors n, int bitDepth)
-        where TPixel : unmanaged, IBinaryInteger<TPixel>
+        where TPixel : unmanaged
     {
         // p[-1, y] for y = 7..-1 then p[x, -1] for x = 0..15: p[-1, y] is e[7 - y], p[x, -1] is e[9 + x].
         Span<int> p = stackalloc int[25];
@@ -69,13 +69,13 @@ internal static class IntraPrediction
         {
             for (int x = 0; x < 8; x++)
             {
-                p[9 + x] = int.CreateTruncating(plane[offset - stride + x]);
+                p[9 + x] = Samples.ToInt(plane[offset - stride + x]);
             }
 
             // Missing top-right samples are replaced by p[7, -1] (8.3.2.2).
             for (int x = 8; x < 16; x++)
             {
-                p[9 + x] = n.TopRight ? int.CreateTruncating(plane[offset - stride + x]) : p[16];
+                p[9 + x] = n.TopRight ? Samples.ToInt(plane[offset - stride + x]) : p[16];
             }
         }
 
@@ -83,13 +83,13 @@ internal static class IntraPrediction
         {
             for (int y = 0; y < 8; y++)
             {
-                p[7 - y] = int.CreateTruncating(plane[offset + (y * stride) - 1]);
+                p[7 - y] = Samples.ToInt(plane[offset + (y * stride) - 1]);
             }
         }
 
         if (n.TopLeft)
         {
-            p[8] = int.CreateTruncating(plane[offset - stride - 1]);
+            p[8] = Samples.ToInt(plane[offset - stride - 1]);
         }
 
         // Reference sample filtering (8.3.2.2.1).
@@ -136,7 +136,7 @@ internal static class IntraPrediction
     /// x = 0..2 * size - 1. The mode is chosen once for the whole block.
     /// </summary>
     private static void PredictBlock<TPixel>(int size, int mode, ReadOnlySpan<int> e, TPixel[] plane, int offset, int stride, IntraNeighbors n, int bitDepth)
-        where TPixel : unmanaged, IBinaryInteger<TPixel>
+        where TPixel : unmanaged
     {
         int last = size - 1;
         switch (mode)
@@ -147,7 +147,7 @@ internal static class IntraPrediction
                 {
                     for (int x = 0; x < size; x++)
                     {
-                        plane[offset + (y * stride) + x] = TPixel.CreateTruncating(T(e, x));
+                        plane[offset + (y * stride) + x] = Samples.From<TPixel>(T(e, x));
                     }
                 }
 
@@ -157,7 +157,7 @@ internal static class IntraPrediction
                 Require(n.Left, mode);
                 for (int y = 0; y < size; y++)
                 {
-                    plane.AsSpan(offset + (y * stride), size).Fill(TPixel.CreateTruncating(L(e, y)));
+                    plane.AsSpan(offset + (y * stride), size).Fill(Samples.From<TPixel>(L(e, y)));
                 }
 
                 break;
@@ -183,7 +183,7 @@ internal static class IntraPrediction
 
                     for (int y = 0; y < size; y++)
                     {
-                        plane.AsSpan(offset + (y * stride), size).Fill(TPixel.CreateTruncating(dc));
+                        plane.AsSpan(offset + (y * stride), size).Fill(Samples.From<TPixel>(dc));
                     }
 
                     break;
@@ -195,7 +195,7 @@ internal static class IntraPrediction
                 {
                     for (int x = 0; x < size; x++)
                     {
-                        plane[offset + (y * stride) + x] = TPixel.CreateTruncating(x == last && y == last
+                        plane[offset + (y * stride) + x] = Samples.From<TPixel>(x == last && y == last
                             ? (T(e, (2 * size) - 2) + (3 * T(e, (2 * size) - 1)) + 2) >> 2
                             : Filter3(T(e, x + y), T(e, x + y + 1), T(e, x + y + 2)));
                     }
@@ -209,7 +209,7 @@ internal static class IntraPrediction
                 {
                     for (int x = 0; x < size; x++)
                     {
-                        plane[offset + (y * stride) + x] = TPixel.CreateTruncating(x > y ? Filter3(T(e, x - y - 2), T(e, x - y - 1), T(e, x - y))
+                        plane[offset + (y * stride) + x] = Samples.From<TPixel>(x > y ? Filter3(T(e, x - y - 2), T(e, x - y - 1), T(e, x - y))
                             : x < y ? Filter3(L(e, y - x - 2), L(e, y - x - 1), L(e, y - x))
                             : Filter3(T(e, 0), T(e, -1), L(e, 0)));
                     }
@@ -223,7 +223,7 @@ internal static class IntraPrediction
                 {
                     for (int x = 0; x < size; x++)
                     {
-                        plane[offset + (y * stride) + x] = TPixel.CreateTruncating(mode == 5 ? VerticalRight(e, x, y) : HorizontalDown(e, x, y));
+                        plane[offset + (y * stride) + x] = Samples.From<TPixel>(mode == 5 ? VerticalRight(e, x, y) : HorizontalDown(e, x, y));
                     }
                 }
 
@@ -235,7 +235,7 @@ internal static class IntraPrediction
                 {
                     for (int x = 0; x < size; x++)
                     {
-                        plane[offset + (y * stride) + x] = TPixel.CreateTruncating((y & 1) == 0
+                        plane[offset + (y * stride) + x] = Samples.From<TPixel>((y & 1) == 0
                             ? (T(e, x + (y >> 1)) + T(e, x + (y >> 1) + 1) + 1) >> 1
                             : Filter3(T(e, x + (y >> 1)), T(e, x + (y >> 1) + 1), T(e, x + (y >> 1) + 2)));
                     }
@@ -249,7 +249,7 @@ internal static class IntraPrediction
                 {
                     for (int x = 0; x < size; x++)
                     {
-                        plane[offset + (y * stride) + x] = TPixel.CreateTruncating(HorizontalUp(e, x, y, last));
+                        plane[offset + (y * stride) + x] = Samples.From<TPixel>(HorizontalUp(e, x, y, last));
                     }
                 }
 
@@ -307,7 +307,7 @@ internal static class IntraPrediction
 
     /// <summary>Intra_16x16 prediction (8.3.3).</summary>
     public static void Predict16x16<TPixel>(int mode, TPixel[] plane, int offset, int stride, IntraNeighbors n, int bitDepth)
-        where TPixel : unmanaged, IBinaryInteger<TPixel> =>
+        where TPixel : unmanaged =>
         PredictBlock(mode, plane, offset, stride, n, width: 16, height: 16, bitDepth);
 
     /// <summary>Chroma prediction (8.3.4) for one component: 8x8 (4:2:0) or 8x16 (4:2:2, <paramref name="height"/> 16).</summary>
@@ -317,7 +317,7 @@ internal static class IntraPrediction
     /// intra prediction): only DC prediction treats the rows apart. -1: as Left says, for all.
     /// </param>
     public static void PredictChroma<TPixel>(int mode, TPixel[] plane, int offset, int stride, IntraNeighbors n, int bitDepth, int leftBlocks = -1, int height = 8)
-        where TPixel : unmanaged, IBinaryInteger<TPixel>
+        where TPixel : unmanaged
     {
         // Chroma mode numbers differ from 16x16: 0 DC, 1 Horizontal, 2 Vertical, 3 Plane.
         if (mode == 0)
@@ -338,11 +338,11 @@ internal static class IntraPrediction
 
     /// <summary>Vertical (0), Horizontal (1), DC (2, luma only) and Plane (3) for 16x16, 8x8 or 8x16.</summary>
     private static void PredictBlock<TPixel>(int mode, TPixel[] plane, int offset, int stride, IntraNeighbors n, int width, int height, int bitDepth)
-        where TPixel : unmanaged, IBinaryInteger<TPixel>
+        where TPixel : unmanaged
     {
-        int Top(int x) => int.CreateTruncating(plane[offset - stride + x]);
-        int Left(int y) => int.CreateTruncating(plane[offset + (y * stride) - 1]);
-        int Corner() => int.CreateTruncating(plane[offset - stride - 1]);
+        int Top(int x) => Samples.ToInt(plane[offset - stride + x]);
+        int Left(int y) => Samples.ToInt(plane[offset + (y * stride) - 1]);
+        int Corner() => Samples.ToInt(plane[offset - stride - 1]);
 
         switch (mode)
         {
@@ -359,7 +359,7 @@ internal static class IntraPrediction
                 Require(n.Left, mode);
                 for (int y = 0; y < height; y++)
                 {
-                    plane.AsSpan(offset + (y * stride), width).Fill(TPixel.CreateTruncating(Left(y)));
+                    plane.AsSpan(offset + (y * stride), width).Fill(Samples.From<TPixel>(Left(y)));
                 }
 
                 break;
@@ -384,7 +384,7 @@ internal static class IntraPrediction
 
                     for (int y = 0; y < 16; y++)
                     {
-                        plane.AsSpan(offset + (y * stride), 16).Fill(TPixel.CreateTruncating(value));
+                        plane.AsSpan(offset + (y * stride), 16).Fill(Samples.From<TPixel>(value));
                     }
 
                     break;
@@ -420,7 +420,7 @@ internal static class IntraPrediction
                         for (int x = 0; x < width; x++)
                         {
                             int value = (a + (b * (x - halfW + 1)) + (c * (y - halfH + 1)) + 16) >> 5;
-                            plane[offset + (y * stride) + x] = TPixel.CreateTruncating(Math.Clamp(value, 0, Samples.Max<TPixel>(bitDepth)));
+                            plane[offset + (y * stride) + x] = Samples.From<TPixel>(Math.Clamp(value, 0, Samples.Max<TPixel>(bitDepth)));
                         }
                     }
 
@@ -434,7 +434,7 @@ internal static class IntraPrediction
 
     /// <summary>Chroma DC (8.3.4.1-3): each 4x4 block gets its own average with its own fallbacks.</summary>
     private static void PredictChromaDc<TPixel>(TPixel[] plane, int offset, int stride, IntraNeighbors n, int leftBlocks, int height, int bitDepth)
-        where TPixel : unmanaged, IBinaryInteger<TPixel>
+        where TPixel : unmanaged
     {
         for (int yO = 0; yO < height; yO += 4)
         {
@@ -445,8 +445,8 @@ internal static class IntraPrediction
                 int sumLeft = 0;
                 for (int i = 0; i < 4; i++)
                 {
-                    sumTop += n.Top ? int.CreateTruncating(plane[offset - stride + xO + i]) : 0;
-                    sumLeft += left ? int.CreateTruncating(plane[offset + ((yO + i) * stride) - 1]) : 0;
+                    sumTop += n.Top ? Samples.ToInt(plane[offset - stride + xO + i]) : 0;
+                    sumLeft += left ? Samples.ToInt(plane[offset + ((yO + i) * stride) - 1]) : 0;
                 }
 
                 int value;
@@ -471,7 +471,7 @@ internal static class IntraPrediction
 
                 for (int y = 0; y < 4; y++)
                 {
-                    plane.AsSpan(offset + ((yO + y) * stride) + xO, 4).Fill(TPixel.CreateTruncating(value));
+                    plane.AsSpan(offset + ((yO + y) * stride) + xO, 4).Fill(Samples.From<TPixel>(value));
                 }
             }
         }

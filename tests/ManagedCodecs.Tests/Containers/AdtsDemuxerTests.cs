@@ -73,6 +73,23 @@ public class AdtsDemuxerTests
         Assert.Equal(frames, Packets([.. id3v2, .. id3v2, .. file, .. id3v1]));
     }
 
+    /// <summary>
+    /// <see cref="AdtsDemuxer.ReadPacketInfo"/> gives <see cref="AdtsDemuxer.ReadPackets"/>'s packets (checked against
+    /// FFmpeg's above) without their data, in the same order, and reads nothing from the file to do it.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(Samples))]
+    public void PacketInfo_IsThePacketsWithoutData(string sampleName)
+    {
+        using var stream = new ReadCountingStream(File.ReadAllBytes(TestSamples.PathOf(sampleName)));
+        using var demuxer = new AdtsDemuxer(stream);
+        var expected = demuxer.ReadPackets().Select(ReadCountingStream.InfoOf).ToList();
+
+        stream.Reads.Clear();
+        Assert.Equal(expected, demuxer.ReadPacketInfo());
+        Assert.Empty(stream.Reads);
+    }
+
     /// <summary>A file that breaks off inside a frame gives the frames before it, then <see cref="InvalidDataException"/>.</summary>
     [Fact]
     public void TruncatedFrame_Throws()
@@ -93,6 +110,17 @@ public class AdtsDemuxerTests
             }
         });
         Assert.Equal(frames[..^1], packets);
+
+        // And so do the packets without their data.
+        var sizes = new List<int>();
+        Assert.Throws<InvalidDataException>(() =>
+        {
+            foreach (var info in ((AdtsDemuxer)demuxer).ReadPacketInfo())
+            {
+                sizes.Add(info.Size);
+            }
+        });
+        Assert.Equal(frames[..^1].Select(f => f.Length), sizes);
     }
 
     /// <summary>

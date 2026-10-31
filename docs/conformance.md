@@ -24,8 +24,12 @@ as for H.264). T.81 leaves them open; JFIF implies BT.601 YCbCr in full range wi
 - Both are kept for the rest of the stream: a stream whose first image alone had the comment, or a JFIF density of
   3:2, gave tv, or 3:2, for every frame; a later JFIF replaces the ratio. `MjpegColorTests` covers these.
 
-As for H.264, ffprobe's ratio prefers the container's (AVI's 'vprp', MP4's 'pasp'); FFmpeg's muxers write it from the
-same source as the JFIF density, so on the samples they agree.
+As for H.264, ffprobe's ratio prefers the container's (AVI's 'vprp', MP4's 'pasp'), and so does a decoder made from
+the stream (`MjpegDecoder(VideoStreamInfo)`): FFmpeg's muxers write it from the same source as the JFIF density, so
+`mjpeg-vprp-conflict` patches the 'vprp' (tools/avi-vprp.py; a 16:9 picture, 4:3 samples at 320x240, over JFIF's 2:1)
+and its frames read 4:3. `AviDemuxer` reads 'vprp' as FFmpeg's avidec does: the picture's ratio (dwFrameAspectRatio,
+Y in the low word) over the frame's (dwFrameWidthInPixels over dwFrameHeightInLines), none with a zero anywhere or a
+chunk of 36 bytes or fewer (`AviDemuxerTests`; `DisplayTests` compares every AVI with ffprobe's stream).
 
 ## Real films
 
@@ -65,10 +69,26 @@ Decoding straight into the output frame: opt-in, `MjpegDecoder.ZeroCopy` (6% few
 
 ## MP4 demuxing
 
+`VideoStreamInfo`'s colour properties, aspect ratio and rotation are the container's, as FFmpeg's mov demuxer reads
+them (6.1.1): the visual sample entry's 'colr' ('nclx', its full range flag clear meaning limited; QuickTime's 'nclc',
+without a range; ICC profiles ignored; a later 'colr' replacing an earlier one's values; code points FFmpeg does not
+name unspecified) and 'pasp' (in lowest terms; a zero unknown), and the rotation of the track's matrix ('tkhd') times
+the movie's ('mvhd'), which FFmpeg multiplies too (a 90-degree 'mvhd' alone gave ffprobe's rotation 90). ffprobe's
+stream shows the container's ratio and the rotation (`name.display`, `DisplayTests`; `h264-rotate-90`, `-180`, `-270`
+from `-display_rotation`, which ffprobe prints as 90, -180 and -90: here 90, 180, 270); its stream colour is the
+decoder's once it has decoded frames, so 'colr' is checked through the frames (`h264-colr-only`, `mjpeg-colr`).
+`Mp4DemuxerTests` builds what no muxer at hand writes: 'nclc', a profile between two 'colr's, undefined code points,
+boxes cut short, a zero or huge 'pasp', scaled, mirrored and 45-degree matrices. A mirrored matrix (FFmpeg's
+`-display_hflip`) is 0 here, where ffprobe prints its rotation: turning such a frame without mirroring it would be
+wrong too. FFmpeg's command line turns decoded frames by the rotation (the references take `-noautorotate`); the
+decoders here do not.
+
 ISO BMFF (`moov`, `trak`, `stbl` sample tables): packets, timestamps and
 codec private data match FFmpeg, for video and audio tracks, fragmented files (moof) included. On every MP4 sample,
 `ReadPacketInfo` is checked to be `ReadPackets`'s packets without their data, with no read of the file, and a demuxer of
-one track (`MediaTypes.Video` or `Audio`) to give that track's description and packets as one of both does. Audio is trimmed by the edit list as FFmpeg trims it: priming
+one track (`MediaTypes.Video` or `Audio`) to give that track's description and packets as one of both does. AVI's
+and ADTS's `ReadPacketInfo` are checked the same way on their samples: ADTS's with no read of the file, AVI's reading
+only chunk headers, 8 bytes each. Audio is trimmed by the edit list as FFmpeg trims it: priming
 skipped sample by sample, packets after the edit's end left out.
 
 Edit lists of several edits, which FFmpeg's muxer never writes, come from rewritten samples (`tools/mp4-edit-list.py`,
@@ -186,13 +206,19 @@ nothing) `VideoSignalTests` covers through the SPS parser. The spec (E.2.1) give
 ffprobe's `sample_aspect_ratio` for a frame is not quite the decoder's: it prints `av_guess_sample_aspect_ratio`,
 which takes the container's ratio ('pasp' in MP4) where there is one, else the frame's, either in lowest terms (an
 SPS patched to 128:90 under a 'pasp' of 3:2 printed 3:2; FFmpeg's decoder itself keeps 128:90). The frames here give
-the SPS's ratio in lowest terms; on every sample the container's agrees with it (FFmpeg's muxer writes it from the
-same source).
+the container's ratio where the decoder was given one (`H264Decoder(VideoStreamInfo)`), else the SPS's in lowest
+terms, so they show what ffprobe shows; `h264-pasp-conflict` ('pasp' 4:3 over a VUI of 64:45, tools/mp4-pasp.py, as
+FFmpeg's muxer copies the VUI's) checks that. The container's colour ('colr') is what FFmpeg's decoder starts from:
+where the VUI sends a video signal type, its range wins, where it sends a colour description, its primaries, transfer
+and matrix (`h264-colr-conflict`, a BT.2020 'colr' over a BT.709 VUI, gives BT.709), and otherwise the frames take the
+container's (`h264-colr-only`).
 
-Where this decoder departs from FFmpeg, untested by any sample: FFmpeg keeps the range and colour description of an
-earlier SPS when a later one leaves them out, and takes a container's values ('colr' in MP4) where the stream says
-nothing; here each frame has what its own SPS says (the spec's reading: the VUI describes its coded video sequence),
-and the container's values are not read yet.
+An SPS that leaves out the range or the colour description keeps what an earlier SPS sent, as FFmpeg's codec context
+does (`h264_init_ps` writes the range only under video_signal_type_present_flag and the three codes only under
+colour_description_present_flag), and those still win over the container's; the spec's reading would be the
+container's or unspecified, the VUI describing its own coded video sequence. The chroma location and aspect ratio are
+each SPS's own. No sample changes its colour between SPSs, so `VideoSignalTests.LaterSps_KeepsWhatItLeavesOut` builds
+them (the owner's choice, 2026-10-31).
 
 ### The container's picture size
 

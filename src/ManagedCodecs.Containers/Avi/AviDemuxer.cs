@@ -97,7 +97,10 @@ public sealed class AviDemuxer : IDemuxer
                 ? Rational.Reduce(header.Scale, header.Rate)
                 : Rational.Reduce(header.MicrosecondsPerFrame, 1_000_000);
             double fps = timeBase.Numerator > 0 ? 1 / timeBase.ToDouble() : 0;
-            Video = new VideoStreamInfo(NormalizeCodec(header.Codec), header.Width, header.Height, fps, header.TotalFrames, timeBase, ReadOnlyMemory<byte>.Empty, _videoStreamIndex);
+            Video = new VideoStreamInfo(NormalizeCodec(header.Codec), header.Width, header.Height, fps, header.TotalFrames, timeBase, ReadOnlyMemory<byte>.Empty, _videoStreamIndex)
+            {
+                SampleAspectRatio = header.AspectRatio,
+            };
         }
         catch (Exception e) when (Malformed.IsMalformedInput(e))
         {
@@ -128,8 +131,16 @@ public sealed class AviDemuxer : IDemuxer
     /// </summary>
     public IAsyncEnumerable<Packet> ReadPacketsAsync(CancellationToken cancellationToken = default) => ReadSteps.RunAsync(_stream, Steps(), "AVI", cancellationToken);
 
-    // The walk through the movi list: each chunk header's read, and each video chunk's read and packet.
-    private IEnumerable<ReadStep> Steps()
+    /// <summary>
+    /// The packets <see cref="ReadPackets"/> gives, in its order and with its values, without their data: the walk
+    /// through the 'movi' list reads each chunk's 8-byte header and skips its data.
+    /// </summary>
+    /// <exception cref="InvalidDataException">A chunk runs past the end of the file (after the packets before it).</exception>
+    public IEnumerable<PacketInfo> ReadPacketInfo() => ReadSteps.RunInfo(_stream, Steps(withData: false), "AVI");
+
+    // The walk through the movi list: each chunk header's read, and each video chunk's read and packet (or, without
+    // the data, its description).
+    private IEnumerable<ReadStep> Steps(bool withData = true)
     {
         string prefix = _videoStreamIndex.ToString("00", CultureInfo.InvariantCulture);
         long sequence = 0;
@@ -173,9 +184,17 @@ public sealed class AviDemuxer : IDemuxer
                         throw new InvalidDataException($"The chunk at offset {pos} runs past the end of the file.");
                     }
 
-                    var data = new byte[size];
-                    yield return ReadStep.Read(pos + 8, data);
-                    yield return ReadStep.Yield(new Packet(_videoStreamIndex, sequence, data, IsKeyframe: true, Dts: frame, Pts: frame, Duration: 1));
+                    if (withData)
+                    {
+                        var data = new byte[size];
+                        yield return ReadStep.Read(pos + 8, data);
+                        yield return ReadStep.Yield(new Packet(_videoStreamIndex, sequence, data, IsKeyframe: true, Dts: frame, Pts: frame, Duration: 1));
+                    }
+                    else
+                    {
+                        yield return ReadStep.Describe(new PacketInfo(_videoStreamIndex, sequence, checked((int)size), IsKeyframe: true, Dts: frame, Pts: frame, Duration: 1));
+                    }
+
                     sequence++;
                     frame++;
                 }
@@ -216,12 +235,13 @@ public sealed class AviDemuxer : IDemuxer
             }
             else if (id == "LIST" && size >= 4 && ReadFourCC(_stream) == "strl")
             {
-                if (info.VideoStreamIndex < 0 && TryReadVideoStream(pos + 12, Math.Min(pos + 8 + size, end), out string codec, out uint scale, out uint rate))
+                if (info.VideoStreamIndex < 0 && TryReadVideoStream(pos + 12, Math.Min(pos + 8 + size, end), out string codec, out uint scale, out uint rate, out var aspectRatio))
                 {
                     info.VideoStreamIndex = streamCount;
                     info.Codec = codec;
                     info.Scale = scale;
                     info.Rate = rate;
+                    info.AspectRatio = aspectRatio;
                 }
 
                 streamCount++;
@@ -233,14 +253,16 @@ public sealed class AviDemuxer : IDemuxer
         return info;
     }
 
-    private bool TryReadVideoStream(long start, long end, out string codec, out uint scale, out uint rate)
+    private bool TryReadVideoStream(long start, long end, out string codec, out uint scale, out uint rate, out Rational aspectRatio)
     {
         codec = "????";
         scale = 0;
         rate = 0;
+        aspectRatio = new(0, 1);
         bool isVideo = false;
         Span<byte> bitmapInfo = stackalloc byte[20];
         Span<byte> streamHeader = stackalloc byte[28];
+        Span<byte> properties = stackalloc byte[32];
 
         long pos = start;
         while (pos + 8 <= end)
@@ -261,6 +283,20 @@ public sealed class AviDemuxer : IDemuxer
                 // BITMAPINFOHEADER: biCompression is the FourCC at offset 16.
                 _stream.ReadExactly(bitmapInfo);
                 codec = Encoding.ASCII.GetString(bitmapInfo.Slice(16, 4));
+            }
+            else if (id == "vprp" && size > 36)
+            {
+                // VIDEOPROPHEADER (OpenDML): dwFrameAspectRatio at 20 (the shown picture's, Y in its low word and X in its
+                // high), dwFrameWidthInPixels at 24 and dwFrameHeightInLines at 28. The sample aspect ratio is the
+                // picture's over the frame's, as FFmpeg's avidec reads it (a zero anywhere: none), in lowest terms.
+                _stream.ReadExactly(properties);
+                int aspectY = BinaryPrimitives.ReadUInt16LittleEndian(properties[20..]);
+                int aspectX = BinaryPrimitives.ReadUInt16LittleEndian(properties[22..]);
+                uint width = BinaryPrimitives.ReadUInt32LittleEndian(properties[24..]);
+                uint height = BinaryPrimitives.ReadUInt32LittleEndian(properties[28..]);
+                aspectRatio = aspectX > 0 && aspectY > 0 && width > 0 && height > 0 && width <= int.MaxValue && height <= int.MaxValue
+                    ? ColorCodes.AspectRatio((long)aspectX * height, (long)aspectY * width)
+                    : new(0, 1);
             }
 
             pos = NextChunk(pos, size);
@@ -313,5 +349,8 @@ public sealed class AviDemuxer : IDemuxer
         public int VideoStreamIndex { get; set; } = -1;
 
         public string Codec { get; set; } = "????";
+
+        /// <summary>The video stream's 'vprp' sample aspect ratio, 0:1 without one.</summary>
+        public Rational AspectRatio { get; set; } = new(0, 1);
     }
 }

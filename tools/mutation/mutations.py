@@ -270,12 +270,12 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.Aac/Sbr/PsData.cs",
          find="PhaseBands = EnableIid ? PhaseBandCounts[IidMode % 3] : PhaseBands;", replace="PhaseBands = PhaseBandCounts[IidMode % 3];",
          tests="FullyQualifiedName~PhaseBandsFollowTheLastHeaderWithIid"),
-    # A frame without envelopes under a coarse header, keeping fine IID indices from before (a fuzzing finding, which
+    # A frame without envelopes under a coarse header, keeping fine IID indices from before (two fuzzing findings, which
     # indexed past the coarse scale factors): rejected, as FFmpeg rejects it.
-    dict(file="src/ManagedCodecs.Aac/Sbr/PsData.cs",
-         find="else if (EnableIid && _lastIid.AsSpan(0, _lastIidBands).ContainsAnyExceptInRange(FineIid ? -15 : -7, FineIid ? 15 : 7))",
-         replace="else if (false)",
-         tests="DisplayName~mp4-ps-fine-iid-kept-by-coarse-header"),
+    dict(file="src/ManagedCodecs.Aac/Sbr/PsProcessor.cs",
+         find="if (hasData && data.EnableIid && _lastIid.AsSpan(0, layout.Bins).ContainsAnyExceptInRange(data.FineIid ? -15 : -7, data.FineIid ? 15 : 7))",
+         replace="if (false)",
+         tests="DisplayName~ps-fine-iid-kept-by-coarse-header"),
     # A pulse on a zero quantized value goes negative (4.6.3.3: x_quant > 0 adds the amplitude, else subtracts it); only
     # the hand-built aac-pulse sample (tools/make-aac-pulse.py) has pulse data.
     dict(file="src/ManagedCodecs.Aac/AacDecoder.cs",

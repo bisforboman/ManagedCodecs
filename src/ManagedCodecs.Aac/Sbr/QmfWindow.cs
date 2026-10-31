@@ -2,8 +2,9 @@ namespace ManagedCodecs.Aac.Sbr;
 
 /// <summary>
 /// The QMF banks' prototype window c (ISO/IEC 14496-3 Table 4.A.89, 640 taps): the analysis takes every other tap, the
-/// synthesis all of them. Transcribed from libxaac (Apache-2.0), whose table is in the spec's order; its even taps agree
-/// to the last digit given (5e-10) with the PacketVideo decoder's own analysis table (Apache-2.0).
+/// synthesis all of them. The spec's values, transcribed from libxaac (Apache-2.0, THIRD-PARTY-NOTICES.md), whose table
+/// is in the spec's order; its even taps agree to the last digit given (5e-10) with the PacketVideo decoder's own
+/// analysis table (Apache-2.0).
 /// </summary>
 internal static class QmfWindow
 {

@@ -92,10 +92,10 @@ and code that reproduces FFmpeg's reading where it differs from the spec), and n
   would have to be decoded from lists that can no longer be trusted, so its marking never applies).
 - H.264 speed: 1.4 to 3.0 times FFmpeg's time on one thread in the steady state, interlaced video included (Benchmarking); at 720p
   every class sits at 2.2 to 2.8 times (CAVLC and CABAC, P and intra-only, High), so the gap is general rather than
-  one class's (the CAVLC residual reader's compiled code is clean). MBAFF frames still look neighbours up through
-  Table 6-4 call by call (about 9% of their time, field pictures 7%), where progressive pictures read a table made
-  once a picture; neither a table of neighbouring pairs nor a cache of each macroblock's A and B locations moved it
-  (docs/conformance.md, Performance notes).
+  one class's (the CAVLC residual reader's compiled code is clean). MBAFF frames and field pictures find the pairs
+  around a macroblock once (#177: 2.9% off `h264-mbaff-default.mp4`'s time, 4.0% off `jm-paff-b.mp4`'s), but each
+  neighbour lookup still runs Table 6-4's case analysis on (xN, yN) for itself, where progressive pictures read a
+  table made once a picture (docs/conformance.md, Performance notes; docs/decisions/2026-10-28-h264-neighbour-context.md).
   With 4 threads a 720p P chain takes 0.52 of one thread's time over 50 frames and 0.41 over 250 (one IDR picture
   each, which decodes in 2.4 times a P picture's time with the P pictures trailing it: short GOPs gain less; medians
   of five interleaved runs), on 4 cores without SMT where four single-threaded decodes run side by side about 7%
@@ -466,8 +466,10 @@ license. Implementing from the public specifications (ITU-T T.81 for JPEG, ITU-T
 ISO/IEC 14496-12 for MP4) and using FFmpeg only as a reference for test output is what lets
 this code be MIT. Codec patents (e.g. H.264, AAC) apply regardless of language.
 
-Two exceptions to "from the spec only": the MJPEG IDCT reproduces FFmpeg's integer IDCT arithmetic
-(that is what bit-exact JPEG output requires; see `SimpleIdct`), and the H.264 CAVLC tables, kept
+Two things the specifications leave to others. T.81 does not fix the IDCT's arithmetic, and output bit-exact with
+FFmpeg's needs its integer arithmetic: `SimpleIdct` implements the same arithmetic independently (its constants are
+cos(k pi / 16) sqrt(2) 2^14 rounded, its rows keep 11 fractional bits), no code copied. And constant tables are
+error-prone to type in: each was taken from one source and checked against another. The H.264 CAVLC tables, kept
 in the spec's own layout, were cross-checked against h264bsd (Apache-2.0) by enumerating its decoder.
 The CABAC tables (context initialization, rangeTabLPS, state transitions) are the spec's values,
 transcribed from OpenH264 (BSD-2-Clause) and verified against libavc (Apache-2.0): its precomputed
@@ -476,8 +478,8 @@ to 1023 (4:4:4's Cb and Cr residual blocks and the coded_block_flag of 8x8 block
 block category; all of them were compared, with the residual contexts below 460, against the tables of JM, the ITU's
 reference software (3740 values, all four initialization tables).
 The AAC Huffman codebooks were cross-checked the same way against the PacketVideo AAC decoder
-from Android (Apache-2.0). Parametric stereo's phase codebooks (IPD, OPD), which that decoder doesn't read, are the FDK encoder's code tables,
-equal to FFmpeg's code lengths; its 34-band tables (the hybrid filters' prototypes, the groups and their parameter
+from Android (Apache-2.0). Parametric stereo's phase codebooks (IPD, OPD), which that decoder doesn't read, are the spec's (Annex 8.B), read
+from the FDK encoder's code tables and equal to the codes FFmpeg's code lengths give in canonical order; its 34-band tables (the hybrid filters' prototypes, the groups and their parameter
 bands, the sub-subbands' centre frequencies) are libxaac's (Apache-2.0), which equal FFmpeg's. For spectral band replication (HE-AAC), whose specification text (ISO/IEC 14496-3 4.6.18,
 and 3GPP TS 26.404) is out of the sandbox's reach, the same decoder's SBR sources stand in for it as JM did for MBAFF:
 read for the syntax and the clauses its comments cite, its Huffman codebooks enumerated from its decoding trees, its
@@ -490,3 +492,7 @@ with the seed FFmpeg uses (the spec leaves the generator open), so noise bands m
 For MBAFF (the neighbour table 6-4, the field scans, the field CABAC context maps, the order of the
 deblocking filter's field edges and the co-located field or frame of direct prediction) the ITU's reference decoder, JM (royalty-free, from the ITU), stood
 in for the specification's text where that was out of reach; no code was copied.
+
+[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md), packed into every package, has the notices of the projects whose
+tables were transcribed (OpenH264's CABAC tables; libxaac's QMF window, SBR noise table and 34-band tables) and lists
+the ones only consulted.

@@ -462,6 +462,12 @@ the left column's and the top row's, the rest inside the macroblock or chroma, C
 cache of the current macroblock's luma A and B locations, filled on first use and keyed on its address, field flag and
 slice, saved about 8 of them but cost more than it saved (the lookups' share rose from 9.6 to 11.6%, and from 7.0 to
 8.4% in `jm-paff-b`; reverted). Left: the lookups' callers each asking for what they need in fewer calls.
+What did move it (#177, 2026-10-28): splitting Table 6-4 into its two halves, finding the pairs around the macroblock
+(A to D, their availability in the slice and whether each is a field pair) once a macroblock (`FindAffPairs`) and the
+case analysis on (xN, yN) per lookup (`AffNeighbor(in AffPairs, ...)`), the static lookup kept as the reference that
+`PairsFoundOnce_MatchTheLookup` compares it with: -5.4% of `h264-mbaff-default`'s instructions and -6.0% of
+`jm-paff-b`'s by callgrind, -2.9% and -4.0% of their time by perf
+(docs/decisions/2026-10-28-h264-neighbour-context.md). The per-lookup case analysis remains.
 
 A profile of a
 720p libx264 default stream (2026-10-22) is flat: CABAC residual decoding takes 14%, deblocking 21%

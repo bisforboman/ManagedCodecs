@@ -88,7 +88,12 @@ codec private data match FFmpeg, for video and audio tracks, fragmented files (m
 `ReadPacketInfo` is checked to be `ReadPackets`'s packets without their data, with no read of the file, and a demuxer of
 one track (`MediaTypes.Video` or `Audio`) to give that track's description and packets as one of both does. AVI's
 and ADTS's `ReadPacketInfo` are checked the same way on their samples: ADTS's with no read of the file, AVI's reading
-only chunk headers, 8 bytes each. Audio is trimmed by the edit list as FFmpeg trims it: priming
+only chunk headers, 8 bytes each. `Seek` is checked on every MP4 and AVI sample (MJPEG), at each keyframe's time, one
+tick before and after it, between keyframes, before the first and past the last, in both streams: each stream's
+packets after it are the tail of a read from the start, from the last keyframe whose pts is at or before the time
+(`SeekTests`). The frame then shown at a time matches FFmpeg's accurate seek (`ffmpeg -seek_timestamp 1 -ss t -i ...
+-frames:v 1`, name.seekNNNN.framemd5) between keyframes, on one, in a fragmented file that starts late, past an empty
+edit and in MJPEG (`SeekFrameTests`). Audio is trimmed by the edit list as FFmpeg trims it: priming
 skipped sample by sample, packets after the edit's end left out.
 
 Edit lists of several edits, which FFmpeg's muxer never writes, come from rewritten samples (`tools/mp4-edit-list.py`,

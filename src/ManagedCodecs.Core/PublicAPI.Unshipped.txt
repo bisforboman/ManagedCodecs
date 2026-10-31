@@ -62,6 +62,7 @@ ManagedCodecs.ColorTransfer.Smpte428 = 17 -> ManagedCodecs.ColorTransfer
 ManagedCodecs.ColorTransfer.Srgb = 13 -> ManagedCodecs.ColorTransfer
 ManagedCodecs.ColorTransfer.Unspecified = 2 -> ManagedCodecs.ColorTransfer
 ManagedCodecs.ColorTransfer.Xvycc = 11 -> ManagedCodecs.ColorTransfer
+ManagedCodecs.IDemuxer.Seek(long pts, int streamIndex) -> void
 ManagedCodecs.VideoFrame.ChromaLocation.get -> ManagedCodecs.ChromaLocation
 ManagedCodecs.VideoFrame.ColorMatrix.get -> ManagedCodecs.ColorMatrix
 ManagedCodecs.VideoFrame.ColorPrimaries.get -> ManagedCodecs.ColorPrimaries

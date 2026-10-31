@@ -21,6 +21,9 @@ public sealed class AviDemuxer : IDemuxer
     private readonly long _moviEnd;
     private readonly int _videoStreamIndex;
 
+    // The first packet a read gives, 0 until a Seek moves it.
+    private long _startSequence;
+
     /// <summary>Reads the file's headers; packets are read from the stream later, by <see cref="ReadPackets"/>.</summary>
     /// <param name="stream">A seekable stream holding the file.</param>
     /// <param name="leaveOpen">Whether <see cref="Dispose"/> leaves <paramref name="stream"/> open.</param>
@@ -138,10 +141,43 @@ public sealed class AviDemuxer : IDemuxer
     /// <exception cref="InvalidDataException">A chunk runs past the end of the file (after the packets before it).</exception>
     public IEnumerable<PacketInfo> ReadPacketInfo() => ReadSteps.RunInfo(_stream, Steps(withData: false), "AVI");
 
-    // The walk through the movi list: each chunk header's read, and each video chunk's read and packet (or, without
-    // the data, its description).
-    private IEnumerable<ReadStep> Steps(bool withData = true)
+    /// <inheritdoc/>
+    /// <remarks>
+    /// MJPEG only: every frame is a keyframe, so reading starts at the frame shown at <paramref name="pts"/> (or the one
+    /// before it, after a dropped frame). The walk to it reads the chunk headers before it, not their data. Other
+    /// codecs need the keyframes, which this demuxer does not read from the 'idx1' index yet, and throw.
+    /// </remarks>
+    public void Seek(long pts, int streamIndex)
     {
+        if (streamIndex != _videoStreamIndex)
+        {
+            throw new ArgumentOutOfRangeException(nameof(streamIndex), streamIndex, "The file's video stream has another index.");
+        }
+
+        if (Video.Codec != CodecIds.Mjpeg)
+        {
+            throw new NotSupportedException($"Seeking in {Video.Codec} in AVI is not supported: only MJPEG, whose every frame is a keyframe.");
+        }
+
+        long start = 0;
+        foreach (var info in ReadSteps.RunInfo(_stream, Steps(withData: false, from: 0), "AVI"))
+        {
+            if (info.Pts > pts)
+            {
+                break;
+            }
+
+            start = info.Sequence;
+        }
+
+        _startSequence = start;
+    }
+
+    // The walk through the movi list: each chunk header's read, and each video chunk's read and packet (or, without
+    // the data, its description), from packet number from on (the ones before it are walked over, their data unread).
+    private IEnumerable<ReadStep> Steps(bool withData = true, long? from = null)
+    {
+        long first = from ?? _startSequence;
         string prefix = _videoStreamIndex.ToString("00", CultureInfo.InvariantCulture);
         long sequence = 0;
         long frame = 0;
@@ -184,7 +220,11 @@ public sealed class AviDemuxer : IDemuxer
                         throw new InvalidDataException($"The chunk at offset {pos} runs past the end of the file.");
                     }
 
-                    if (withData)
+                    if (sequence < first)
+                    {
+                        // Before where a Seek put the start: walked over.
+                    }
+                    else if (withData)
                     {
                         var data = new byte[size];
                         yield return ReadStep.Read(pos + 8, data);

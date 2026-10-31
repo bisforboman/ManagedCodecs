@@ -192,6 +192,16 @@ MUTATIONS = [
          find="|| (FindChild(children, Box.Wave, out var wave) && FindChild(wave, Box.Esds, out esds))", replace="",
          tests="FullyQualifiedName~Mp4|FullyQualifiedName~Aac"),
 
+    # Seeking starts at the last keyframe whose pts is at or before the time: a frame shown at a keyframe's own time
+    # decodes from that keyframe, not the one before (FFmpeg's -ss reaches it the same way).
+    dict(file="src/ManagedCodecs.Containers/Mp4/Mp4Demuxer.cs",
+         find="if (Sizes[i] != 0 && IsKeyframe(i) && Pts(i) <= pts)", replace="if (Sizes[i] != 0 && IsKeyframe(i) && Pts(i) < pts)",
+         tests="FullyQualifiedName~SeekTests"),
+    # The other stream starts at the same instant, not at its beginning.
+    dict(file="src/ManagedCodecs.Containers/Mp4/Mp4Demuxer.cs",
+         find="int otherStart = otherBase is { } b ? other.KeyframeAtOrBefore(Rescale(pts, seekedBase, b)) : 0;", replace="int otherStart = 0;",
+         tests="FullyQualifiedName~SeekTests"),
+
     # ---- AAC
     # A FAAC stream's encoder delay, which FFmpeg skips (its name in a fill element).
     dict(file="src/ManagedCodecs.Aac/AacDecoder.cs",

@@ -55,4 +55,8 @@ decoder and demuxer also has an async API (`ReadPacketsAsync`, `DecodeAsync`, `F
 The [repository](https://github.com/bisforboman/ManagedCodecs) has the full documentation: the
 [README](https://github.com/bisforboman/ManagedCodecs#readme) (the API in detail, threading, malformed input,
 WebAssembly, speed against FFmpeg), [what each feature is checked against](https://github.com/bisforboman/ManagedCodecs/blob/main/docs/conformance.md),
-and the [changelog](https://github.com/bisforboman/ManagedCodecs/blob/main/CHANGELOG.md). MIT licensed.
+and the [changelog](https://github.com/bisforboman/ManagedCodecs/blob/main/CHANGELOG.md).
+
+MIT licensed; the package carries THIRD-PARTY-NOTICES.md, the notices of the projects some constant tables were
+transcribed from. The license covers the code, not the formats: codec patents (H.264, AAC) apply regardless of the
+language a decoder is written in.

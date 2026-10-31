@@ -1,6 +1,10 @@
 # H.264: a neighbour context a macroblock (2026-10-28)
 
-A design, decided (below), no code yet. It follows `docs/notes/h264-speed-gap-2026-10.md`, whose second
+**Closed, 2026-10-28.** The grids were built and not merged (slower in frames, the first outcome below); what was
+kept is MBAFF frames' and field pictures' pairs found once a macroblock (#177, the second outcome). The design
+and decisions below are as they were decided, before either.
+
+A design, decided (below). It follows `docs/notes/h264-speed-gap-2026-10.md`, whose second
 candidate this is: the largest share of the decoder's time still left in one mechanism, and a change large enough to
 be designed before it is written.
 

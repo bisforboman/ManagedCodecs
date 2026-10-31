@@ -4,8 +4,8 @@ namespace ManagedCodecs.Aac.Sbr;
 /// The Huffman codebooks of parametric stereo (ISO/IEC 14496-3 Annex 8.B): inter-channel intensity differences (IID,
 /// coarse and fine) and inter-channel coherences (ICC), each coded as deltas in time or in frequency. The codes of the
 /// deltas from -LAV to LAV, in that order, enumerated from the PacketVideo decoder's decoding trees (Apache-2.0). The
-/// phase differences (IPD and OPD), which that decoder doesn't read, have deltas 0 to 7 (modulo 8), from the FDK
-/// encoder's code and length tables, which give the same codes as FFmpeg's lengths in canonical order.
+/// phase differences (IPD and OPD), which that decoder doesn't read, have deltas 0 to 7 (modulo 8): the spec's codes,
+/// read from the FDK encoder's code and length tables and equal to the codes FFmpeg's lengths give in canonical order.
 /// </summary>
 internal static class PsTables
 {

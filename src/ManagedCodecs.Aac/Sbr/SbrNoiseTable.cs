@@ -2,8 +2,8 @@ namespace ManagedCodecs.Aac.Sbr;
 
 /// <summary>
 /// The HF adjustment's noise (ISO/IEC 14496-3 Table 4.A.90): 512 complex values of unit average energy, real and imaginary
-/// parts interleaved. Transcribed from libxaac (Apache-2.0); the real parts equal the PacketVideo decoder's table
-/// (Apache-2.0) digit for digit.
+/// parts interleaved. The spec's values, transcribed from libxaac (Apache-2.0, THIRD-PARTY-NOTICES.md); the real parts
+/// equal the PacketVideo decoder's table (Apache-2.0) digit for digit.
 /// </summary>
 internal static class SbrNoiseTable
 {

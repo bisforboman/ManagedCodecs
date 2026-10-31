@@ -13,6 +13,12 @@ run time.
 
 ## Unreleased
 
+### Added
+
+- Every package carries THIRD-PARTY-NOTICES.md: the BSD-2-Clause and Apache-2.0 notices of OpenH264 and libxaac, from
+  which some of the specifications' constant tables were transcribed (H.264's CABAC tables; HE-AAC's QMF window, SBR
+  noise table and parametric stereo's 34-band tables). The code and its license are unchanged.
+
 ### Changed
 
 - MJPEG decodes faster on ARM64, bit for bit as before: 2.9% off `testsrc-420.avi`'s steady frame, 3.4% off

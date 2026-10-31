@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # Fuzzes one target of tools/ManagedCodecs.Fuzz with AFL++ through SharpFuzz, for a number of minutes.
 #
-# Usage: tools/fuzz.sh <file|h264|mjpeg|aac> <minutes> [work dir]
+# Usage: tools/fuzz.sh <file|h264|mjpeg|aac|thumbnail> <minutes> [work dir]
 #   Needs afl-fuzz (apt install afl++) and the SharpFuzz tool (dotnet tool install --global SharpFuzz.CommandLine).
 #   Findings end up in <work dir>/<target>/out/default/crashes and hangs; reproduce one with
 #   dotnet tools/ManagedCodecs.Fuzz/bin/Debug/net10.0/ManagedCodecs.Fuzz.dll <target> <file>,
 #   and once fixed, keep it in tests/ManagedCodecs.Tests/Fuzz/Findings/<target>/ (MalformedInputTests replays them).
 set -euo pipefail
 
-target=${1:?usage: tools/fuzz.sh <file|h264|mjpeg|aac> <minutes> [work dir]}
+target=${1:?usage: tools/fuzz.sh <file|h264|mjpeg|aac|thumbnail> <minutes> [work dir]}
 minutes=${2:?usage: tools/fuzz.sh <target> <minutes> [work dir]}
 cd "$(dirname "$0")/.."
 work=$(mkdir -p "${3:-fuzz-work}" && cd "${3:-fuzz-work}" && pwd)
@@ -22,7 +22,7 @@ if [[ ! -d $work/seeds ]]; then
   dotnet "$build/ManagedCodecs.Fuzz.dll" --seeds samples "$work/seeds"
 fi
 
-for library in Core Containers Mjpeg H264 Aac; do
+for library in Core Containers Mjpeg H264 Aac Thumbnails; do
   sharpfuzz "$build/ManagedCodecs.$library.dll" > /dev/null
 done
 

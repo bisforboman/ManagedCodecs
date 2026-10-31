@@ -280,8 +280,9 @@ public sealed class Mp4Demuxer : IDemuxer
     public void Seek(long pts, int streamIndex)
     {
         var (seeked, other, seekedBase, otherBase) =
-            _video.Count > 0 && Video is { } video && streamIndex == video.StreamIndex ? (_video, _audio, video.TimeBase, Audio?.TimeBase)
-            : _audio.Count > 0 && Audio is { } audio && streamIndex == audio.StreamIndex ? (_audio, _video, audio.TimeBase, Video?.TimeBase)
+            // A track without samples is still the stream: its read starts (and ends) at the beginning.
+            Video is { } video && streamIndex == video.StreamIndex ? (_video, _audio, video.TimeBase, Audio?.TimeBase)
+            : Audio is { } audio && streamIndex == audio.StreamIndex ? (_audio, _video, audio.TimeBase, Video?.TimeBase)
             : throw new ArgumentOutOfRangeException(nameof(streamIndex), streamIndex, "No video or audio stream of the file has this index.");
 
         int start = seeked.KeyframeAtOrBefore(pts);

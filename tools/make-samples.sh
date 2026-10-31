@@ -429,6 +429,13 @@ ff -f lavfi -i "testsrc2=size=320x240:rate=25,scroll=h=0.01:v=0.005" -t 1 "${F[@
 ff -f lavfi -i "testsrc2=size=320x240:rate=25,scroll=h=0.013:v=-0.021,noise=alls=12:allf=t" -t 2 "${F[@]}" -bf 3 -refs 3 -qp 22 -x264-params partitions=all:me=umh:merange=32 samples/h264-444-motion.mp4
 ff -f lavfi -i "testsrc2=size=321x239:rate=25,scroll=v=0.02" -t 1 "${F[@]}" -bf 2 -refs 2 samples/h264-444-odd-size.mp4
 ff -f lavfi -i "testsrc2=size=320x240:rate=25,scroll=h=0.02,noise=alls=10:allf=t" -t 1 "${F[@]}" -bf 2 -refs 2 -x264-params constrained-intra=1:chroma-qp-offset=4 samples/h264-444-constrained-intra.mp4
+# A fade in from black over the first second, a keyframe every 5 frames: VideoThumbnail's SkipDark steps keyframe by
+# keyframe past the dark ones (the first at 10% of white's mean luma is at 0.4 s).
+ff -f lavfi -i "testsrc2=size=320x240:rate=25,fade=in:st=0:d=1" -t 2 -c:v libx264 -bf 0 -x264-params keyint=5:min-keyint=5:scenecut=0 \
+  samples/h264-fade-in.mp4
+# RGB coded as 4:4:4 (libx264rgb): matrix_coefficients 0, the planes G, B and R (FFmpeg's gbrp), full range, for the
+# thumbnails' conversion of the identity matrix; its frames are the decoder's 4:4:4 as any other.
+ff -f lavfi -i "testsrc2=size=320x240:rate=25,scroll=h=0.02" -t 0.4 -c:v libx264rgb -pix_fmt bgr24 -bf 2 samples/h264-444-gbr.mp4
 ff -f lavfi -i "testsrc2=size=320x240:rate=25,fade=in:0:20,fade=out:30:20" -t 2 "${F[@]}" samples/h264-444-default.mp4
 ff -f lavfi -i testsrc2=size=320x240:rate=50 -t 1 "${F[@]}" -vf "tinterlace=interleave_top,setfield=tff" -flags +ildct+ilme -bf 3 -refs 3 samples/h264-444-mbaff.mp4
 F10=(-c:v libx264 -profile:v high444 -pix_fmt yuv444p10le)
@@ -674,6 +681,16 @@ for f in samples/*.mp4 samples/*.avi; do
   ff -idct simple -i "$f" -map 0:v:0 -frames:v 1 \
     -vf "${eight}format=rgba,scale=max(1\\,trunc(iw*3/8)):max(1\\,trunc(ih*3/8)):flags=area+accurate_rnd+full_chroma_int+full_chroma_inp,format=rgba" \
     -f rawvideo "${f%.*}.thumb.rgba"
+done
+# name.atNNNN.thumb.rgba: as name.thumb.rgba, the first frame shown at NNNN ms from the file's start (ffmpeg's -ss
+# before -i, counted from the start time as ThumbnailOptions.At is), for VideoThumbnail.Create: between keyframes, on
+# one, in a fragmented file that starts late, past an empty edit, MJPEG, and in the fade-in.
+for s in h264-bframes.mp4:1200 h264-bframes.mp4:960 fmp4-base-moof.mp4:200 h264-edit-gap.mp4:500 testsrc-420.avi:600 \
+  h264-fade-in.mp4:400; do
+  f=samples/${s%%:*}; ms=${s##*:}
+  ff -ss "$(printf '%d.%03d' $((ms / 1000)) $((ms % 1000)))" -idct simple -i "$f" -map 0:v:0 -frames:v 1 \
+    -vf "format=rgba,scale=max(1\\,trunc(iw*3/8)):max(1\\,trunc(ih*3/8)):flags=area+accurate_rnd+full_chroma_int+full_chroma_inp,format=rgba" \
+    -f rawvideo "${f%.*}.at$ms.thumb.rgba"
 done
 # name.color: each decoded video frame's colour properties and sample aspect ratio as ffprobe lists them, one a line in
 # output order ("color_range=tv|color_space=bt709|..."), for VideoFrame.ColorRange, ColorPrimaries, ColorTransfer,

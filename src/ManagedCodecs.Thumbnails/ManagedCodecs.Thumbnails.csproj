@@ -5,7 +5,7 @@
   <PropertyGroup>
     <RootNamespace>ManagedCodecs.Thumbnails</RootNamespace>
     <PackageId>ManagedCodecs.Thumbnails</PackageId>
-    <Description>The basic facts of a video file (duration, displayed size, codecs, rotation) without FFmpeg, in pure managed C#, for web back ends, serverless functions and WebAssembly; thumbnails to come.</Description>
+    <Description>Thumbnails (PNG or RGBA) and the basic facts (duration, displayed size, codecs, rotation) of a video file without FFmpeg, in pure managed C#, for web back ends, serverless functions and WebAssembly.</Description>
     <PackageTags>$(PackageTags);thumbnail;probe;ffprobe</PackageTags>
     <IsAotCompatible>true</IsAotCompatible>
     <!-- No release of this package on nuget.org yet, so package validation has no baseline to compare with (the one in

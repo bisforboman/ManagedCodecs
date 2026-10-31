@@ -43,7 +43,7 @@ public static class VideoProbe
         var (codedWidth, codedHeight) = video.Codec == CodecIds.H264 && H264.H264Decoder.FrameSize(video) is { } size ? size : (video.Width, video.Height);
         var (width, height) = DisplaySize(codedWidth, codedHeight, video.SampleAspectRatio, video.Rotation);
         var audio = demuxer.Audio is { } a ? new AudioInfo(a.Codec, a.SampleRate, a.Channels) : null;
-        return new VideoInfo(Duration(demuxer), video.Codec, codedWidth, codedHeight, width, height, video.FramesPerSecond, video.Rotation, Ratio(video.SampleAspectRatio), audio);
+        return new VideoInfo(Timing(demuxer).Duration, video.Codec, codedWidth, codedHeight, width, height, video.FramesPerSecond, video.Rotation, Ratio(video.SampleAspectRatio), audio);
     }
 
     /// <summary>
@@ -77,7 +77,8 @@ public static class VideoProbe
     /// lasting its container duration (<see cref="VideoStreamInfo.Duration"/>), or to the end of its last packet where
     /// the container gives none.
     /// </summary>
-    private static TimeSpan Duration(IDemuxer demuxer)
+    /// <returns>The duration, and the earliest stream's start in seconds (ffprobe's <c>format=start_time</c>).</returns>
+    internal static (TimeSpan Duration, double Start) Timing(IDemuxer demuxer)
     {
         var streams = new Dictionary<int, (Rational TimeBase, long Duration, long Start, long End)>();
         if (demuxer.Video is { } video)
@@ -118,7 +119,7 @@ public static class VideoProbe
             end = Math.Max(end, (duration > 0 ? first + duration : last) * timeBase.ToDouble());
         }
 
-        return end > start ? TimeSpan.FromSeconds(end - start) : TimeSpan.Zero;
+        return end > start ? (TimeSpan.FromSeconds(end - start), start) : (TimeSpan.Zero, double.IsFinite(start) ? start : 0);
     }
 }
 

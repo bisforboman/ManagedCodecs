@@ -32,7 +32,7 @@ in between. That comparison is not measured here.
 | `src/ManagedCodecs.Containers` | `AviDemuxer`, `Mp4Demuxer`, `AdtsDemuxer` (raw .aac), and `Demuxer.Open` to pick one by content |
 | `src/ManagedCodecs.Mjpeg` | `MjpegDecoder`: baseline/extended Huffman JPEG, interlaced AVI1, bit-exact with FFmpeg |
 | `src/ManagedCodecs.H264` | `H264Decoder`: Constrained Baseline, Main, High, High 10, High 4:2:2 and High 4:4:4 Predictive profile H.264 (CAVLC, CABAC, I/P/B, weighted prediction, 8x8 transform, scaling matrices, deblocking, monochrome, 4:2:0, 4:2:2 and 4:4:4, also as separate colour planes, 8 to 14 bits, lossless, progressive and interlaced), bit-exact |
-| `src/ManagedCodecs.Thumbnails` | `VideoProbe`: a video file's duration, displayed size, codecs and rotation as ffprobe reports them, without decoding; the `ManagedCodecs.Thumbnails` package (see Probing a video), thumbnails to come (docs/decisions/2026-10-31-thumbnails.md) |
+| `src/ManagedCodecs.Thumbnails` | `VideoProbe`: a video file's duration, displayed size, codecs and rotation as ffprobe reports them, without decoding; `VideoThumbnail`: a frame as a small upright RGBA image or PNG; the `ManagedCodecs.Thumbnails` package (see Probing a video, Thumbnails; docs/decisions/2026-10-31-thumbnails.md) |
 | `src/ManagedCodecs.Unity` | The netstandard2.1 build for Unity (Mono, IL2CPP): every decoder's sources in one assembly, without the vector paths, 1 to 3.4 times slower on CoreCLR; the `ManagedCodecs.Unity` package (see Unity) |
 | `src/ManagedCodecs.Aac` | `AacDecoder`: AAC LC (mono to 7.1, M/S, intensity, PNS, TNS), within 3e-7 of FFmpeg's float output; HE-AAC (spectral band replication) |
 | `src/Shared` | Source files linked into several codec projects (the VLC decoder) |
@@ -126,8 +126,8 @@ dotnet add package ManagedCodecs
 ```
 
 For Unity (Mono, IL2CPP), `ManagedCodecs.Unity` instead (see Unity, below).
-For a video's facts (and later its thumbnail) in a web back end or a browser, `ManagedCodecs.Thumbnails` (see Probing a
-video, below).
+For a video's facts and thumbnail in a web back end or a browser, `ManagedCodecs.Thumbnails` (see Probing a video and
+Thumbnails, below).
 
 Building from source requires the .NET 10 SDK. The tests also need samples made with FFmpeg (with libx264) and ImageMagick:
 
@@ -345,6 +345,38 @@ AVI's stream header length.
 ```csharp
 var info = VideoProbe.Read("upload.mp4");
 Console.WriteLine($"{info.Duration} {info.DisplayWidth}x{info.DisplayHeight} {info.Codec}");
+```
+
+### Thumbnails
+
+`VideoThumbnail.Create(stream, options)` takes one frame of an MP4 or AVI file (H.264 or MJPEG) and gives a
+`Thumbnail`: its RGBA pixels upright, `Width`, `Height`, the frame's `Time`, and `SavePng`/`ToPng` (a PNG written here,
+deflated by the BCL: no image library, native code or FFmpeg). For JPEG or WebP, hand `Pixels` to SkiaSharp or
+ImageSharp.
+
+- **Which frame:** the first shown at or after `At` from the file's start, decoded from the keyframe before it
+  (`IDemuxer.Seek`; AVI's H.264, which has no index to seek by, from the start). By default 10% into the video, at most
+  10 s. `SkipDark` steps keyframe by keyframe past frames whose mean luma is under 10% of white (up to 10, then the
+  brightest). Damaged streams decode on with concealment, and an undamaged frame is taken where there is one.
+- **Its size:** the frame as shown (aspect ratio and rotation applied), scaled down by area to fit `MaxWidth` x
+  `MaxHeight` (320 x 320 by default), never above its decoded size.
+- **Its colours:** converted at full size by the frame's matrix and range, as FFmpeg's scaler takes them where the
+  stream says nothing (BT.601, limited range; MJPEG full range), or by `Matrix` and `Range` from the options. The
+  primaries and transfer are not converted: HDR comes out dim and flat. Within 0 to 3 levels of
+  `ffmpeg -vf format=rgba,scale=w:h:flags=area` on every sample (docs/conformance.md).
+- **Uploads nobody vetted:** a file declaring frames over `MaxPixels` (16,777,216 by default; in its container, its
+  SPS or a JPEG's header) is refused with `NotSupportedException` before they are decoded, and `CancellationToken`
+  stops the decoding. Managed code rules out the memory corruption FFmpeg's parsers keep yielding; it doesn't rule out
+  a hostile file being slow, which is what the limits are for (the `thumbnail` fuzz target, tools/fuzz.sh, covers this
+  path).
+
+```csharp
+await using var buffer = new MemoryStream();
+await request.Body.CopyToAsync(buffer); // MP4's index can follow its data: the stream must be seekable
+buffer.Position = 0;
+
+var thumbnail = await VideoThumbnail.CreateAsync(buffer, new ThumbnailOptions { MaxWidth = 480 }, cancellationToken);
+thumbnail.SavePng(response.Body);
 ```
 
 ### Unity

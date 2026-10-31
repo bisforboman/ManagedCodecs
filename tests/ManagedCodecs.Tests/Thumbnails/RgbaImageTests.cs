@@ -82,14 +82,15 @@ public class RgbaImageTests
                 double kr = round < 5 ? RgbaConverter.Coefficients((ColorMatrix)(round + 1)).Kr : 0.05 + (random.NextDouble() * 0.4);
                 double kb = round < 5 ? RgbaConverter.Coefficients((ColorMatrix)(round + 1)).Kb : 0.05 + (random.NextDouble() * 0.4);
                 bool full = round % 2 == 0;
-                var converter = RgbaConverter.Of(kr, kb, full, format.BitDepth());
+                bool identity = format.PlaneCount() == 3 && format.PlaneSize(1, width, height) == (width, height) && round == 11;
+                var converter = RgbaConverter.Of(kr, kb, full, format.BitDepth(), identity);
                 var row = new byte[width * 4];
                 for (int y = 0; y < height; y++)
                 {
                     converter.ConvertRow(frame, y, row);
                     for (int x = 0; x < width; x++)
                     {
-                        var (r, g, b) = Definition(frame, x, y, kr, kb, full);
+                        var (r, g, b) = identity ? IdentityDefinition(frame, x, y, full) : Definition(frame, x, y, kr, kb, full);
                         Assert.InRange(row[x * 4] - r, -1, 1);
                         Assert.InRange(row[(x * 4) + 1] - g, -1, 1);
                         Assert.InRange(row[(x * 4) + 2] - b, -1, 1);
@@ -141,6 +142,11 @@ public class RgbaImageTests
         Assert.Equal((0.2126, 0.0722), RgbaConverter.Coefficients(ColorMatrix.Bt709));
         Assert.True(RgbaConverter.For(frame, CodecIds.H264, range: ColorRange.Full).FullRange);
         Assert.Equal(0.2627, RgbaConverter.For(frame, CodecIds.H264, ColorMatrix.Bt2020Ncl).Kr);
+
+        // The identity matrix only where the planes are full size (4:4:4); subsampled, as BT.601.
+        Assert.False(RgbaConverter.For(frame, CodecIds.H264, ColorMatrix.Identity).Identity);
+        using var full = new VideoFrame(2, 2, PixelFormat.Yuv444P10);
+        Assert.True(RgbaConverter.For(full, CodecIds.H264, ColorMatrix.Identity).Identity);
     }
 
     [Fact]
@@ -273,6 +279,19 @@ public class RgbaImageTests
         double b = l + (2 * (1 - kb) * cb);
         double g = (l - (kr * r) - (kb * b)) / (1 - kr - kb);
         return (Round(r), Round(g), Round(b));
+    }
+
+    // The identity matrix: G, B and R in the planes, each scaled as luma.
+    private static (int R, int G, int B) IdentityDefinition(VideoFrame frame, int x, int y, bool full)
+    {
+        double scale = 1 << (frame.Format.BitDepth() - 8);
+        int Level(int plane)
+        {
+            double value = Sample(frame, plane, x, y) / scale;
+            return Round(full ? value : (value - 16) * 255 / 219);
+        }
+
+        return (Level(2), Level(0), Level(1));
     }
 
     private static int Round(double value) => (int)Math.Clamp(Math.Floor(value + 0.5), 0, 255);

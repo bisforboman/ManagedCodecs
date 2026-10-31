@@ -9,6 +9,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="ManagedCodecs.Tests" />
+    <InternalsVisibleTo Include="ManagedCodecs.Thumbnails" />
   </ItemGroup>
 
   <ItemGroup>

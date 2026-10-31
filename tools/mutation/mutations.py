@@ -401,4 +401,13 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.Thumbnails/RgbaImage.cs",
          find=" || (said == ColorRange.Unspecified && codec == CodecIds.Mjpeg)", replace="",
          tests="DisplayName~gray.avi"),
+    # The identity matrix (H.273's 0): G, B and R planes, as FFmpeg's gbrp (h264-444-gbr, libx264rgb's).
+    dict(file="src/ManagedCodecs.Thumbnails/RgbaImage.cs",
+         find="bool identity = said == ColorMatrix.Identity &&", replace="bool identity = false &&",
+         tests="DisplayName~h264-444-gbr"),
+    # A JPEG's header is read before it is decoded, so a large image inside a small AVI is refused before its planes are
+    # made (VideoThumbnail; the frame's own size is checked only after decoding).
+    dict(file="src/ManagedCodecs.Thumbnails/VideoThumbnail.cs",
+         find='CheckSize(image.Width, image.Height, _options, "A JPEG image in the video declares");', replace="",
+         tests="FullyQualifiedName~VideoThumbnailTests"),
 ]

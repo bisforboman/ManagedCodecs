@@ -79,17 +79,27 @@ first frame 80 ms, the frame at 1 s 245 ms (24 frames decoded). Missing:
 - Seek: the packets after a seek are the tail of `ReadPackets` from that keyframe, on every MP4 and AVI sample
   (including edited, fragmented and B-frame ones); the frame decoded at a time matches `ffmpeg -ss <t> -i ... -frames:v 1
   -f framemd5` (FFmpeg's accurate seek: decode from the keyframe before, drop until the time).
-- Conversion: scalar reference against vector path (bit-exact), and against FFmpeg's scaler within the tolerance above
-  on every sample's frame and phone-style rotated samples (`ffmpeg -display_rotation 90 -i in.mp4 -c copy out.mp4`:
-  the input option reaches the output's 'tkhd' matrix through the copy).
-- Fuzzing: the new target in `tools/fuzz.sh`, and its seeds in CI's fuzz smoke test.
+- Conversion: the fixed-point converter against its definition in double precision (within one level), the scaling
+  against the exact overlap mean, and both against FFmpeg's scaler on every sample's first frame and the rotated
+  samples (`ffmpeg -display_rotation 90 -i in.mp4 -c copy out.mp4`: the input option reaches the output's 'tkhd'
+  matrix through the copy), FFmpeg 0 to 3 levels below and 1 above (docs/conformance.md). A vector path, if one comes,
+  bit-exact against the scalar one.
+- Thumbnails: `VideoThumbnail.Create` against the same FFmpeg chain at the start of every sample and at times into a
+  few (`ffmpeg -ss <t>`, counted from the start time as `ThumbnailOptions.At` is); the PNG writer by a reader written
+  from the spec and by FFmpeg's PNG decoder.
+- Fuzzing: the `thumbnail` target in `tools/fuzz.sh`; there is no CI fuzz job, the committed findings are replayed by
+  `MalformedInputTests` (through this path too).
 
 ## Work, one pull request each (after the colour metadata)
 
 1. `IDemuxer.Seek` for MP4 and AVI, with the packet and frame checks above.
 2. `ManagedCodecs.Thumbnails` with `VideoProbe` (no images yet), its package, readme and API.
 3. YUV-to-RGBA conversion, rotation and area scaling, scalar reference first, then vector.
-4. PNG writer and `VideoThumbnail.Create` with its options; the fuzz target; README section.
+4. PNG writer and `VideoThumbnail.Create` with its options; the fuzz target; README section. *Built:* the result type
+   is `Thumbnail`, not `Image` (the owner's choice: ImageSharp's, System.Drawing's and MAUI's `Image` would clash in
+   the files that pass its pixels on); `SkipDark` is off by default; `MaxPixels` 16,777,216; the identity matrix
+   (G, B and R planes) converts too. `VideoProbe` has no async twin: the demuxers open and read their indexes
+   synchronously, and a probe reads nothing else; `CreateAsync` reads the packets asynchronously.
 5. A Blazor WebAssembly sample (`samples/` or `tools/`) that thumbnails a file picked in the browser, also the
    WebAssembly check for the package.
 

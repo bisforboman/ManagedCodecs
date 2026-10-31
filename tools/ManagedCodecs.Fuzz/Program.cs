@@ -71,6 +71,10 @@ static void WriteSeeds(string samples, string output)
         if ((info.ResolveLinkTarget(true) ?? info) is FileInfo { Length: <= 64 * 1024 })
         {
             File.Copy(path, Path.Combine(output, "file", Path.GetFileName(path)), true);
+            if (!path.EndsWith(".aac"))
+            {
+                File.Copy(path, Path.Combine(output, "thumbnail", Path.GetFileName(path)), true);
+            }
         }
 
         try

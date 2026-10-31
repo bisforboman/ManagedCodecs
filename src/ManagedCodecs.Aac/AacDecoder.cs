@@ -427,8 +427,13 @@ public sealed class AacDecoder : IAudioDecoder
         {
             Parallel.For(0, _config.Channels, _parallel, output => SynthesizeWithSbr(output, _channelCores[output], frame, _channelStatistics[output]));
         }
-        catch (AggregateException e) when (e.InnerExceptions.Count > 0)
+        catch (AggregateException e)
         {
+            if (e.InnerExceptions.Count == 0)
+            {
+                throw;
+            }
+
             ExceptionDispatchInfo.Throw(e.InnerExceptions[0]); // as on one thread
         }
 

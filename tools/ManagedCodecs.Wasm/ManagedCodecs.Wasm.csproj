@@ -16,6 +16,7 @@
   <ItemGroup>
     <Compile Include="..\ManagedCodecs.Cli\OutputHash.cs" Link="OutputHash.cs" />
     <Compile Include="..\ManagedCodecs.Cli\ThumbnailOutput.cs" Link="ThumbnailOutput.cs" />
+    <Compile Include="..\ManagedCodecs.Fuzz\Targets.cs" Link="Targets.cs" />
   </ItemGroup>
 
   <ItemGroup>

@@ -38,9 +38,13 @@ public static class Demuxer
                 return new AdtsDemuxer(stream, leaveOpen);
             }
         }
-        catch when (!leaveOpen)
+        catch
         {
-            stream.Dispose();
+            if (!leaveOpen)
+            {
+                stream.Dispose();
+            }
+
             throw;
         }
 

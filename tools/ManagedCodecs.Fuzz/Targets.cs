@@ -33,6 +33,30 @@ public static class Targets
     ];
 
     /// <summary>
+    /// What <see cref="Run"/> makes of <paramref name="data"/>, as one line: "accepted", "rejected", or the type and
+    /// message of any other exception (a finding), both on one thread and, for the targets that decode H.264, concealing
+    /// errors. tools/wasm-check.sh compares these lines on WebAssembly with the native build's for every finding kept in
+    /// tests/ManagedCodecs.Tests/Fuzz/Findings: the error paths, which the samples there don't reach.
+    /// </summary>
+    public static string Outcome(string target, byte[] data)
+    {
+        string plain = OutcomeOf(target, data, conceal: false);
+        return target is "h264" or "file" ? plain + ", concealing errors " + OutcomeOf(target, data, conceal: true) : plain;
+    }
+
+    private static string OutcomeOf(string target, byte[] data, bool conceal)
+    {
+        try
+        {
+            return Run(target, data, conceal: conceal) ? "accepted" : "rejected";
+        }
+        catch (Exception e)
+        {
+            return e.GetType().Name + ": " + e.Message;
+        }
+    }
+
+    /// <summary>
     /// Runs <paramref name="target"/> on <paramref name="data"/>, H.264 with <paramref name="threads"/> threads
     /// (<see cref="H264Decoder.Threads"/>) and concealing errors if <paramref name="conceal"/>
     /// (<see cref="H264Decoder.ConcealErrors"/>); true if the input was accepted.
@@ -66,8 +90,14 @@ public static class Targets
 
             return true;
         }
-        catch (Exception e) when (e is InvalidDataException or NotSupportedException)
+        catch (Exception e)
         {
+            // No exception filter: this file runs on WebAssembly too (tools/ManagedCodecs.Wasm/CLAUDE.md).
+            if (e is not (InvalidDataException or NotSupportedException))
+            {
+                throw;
+            }
+
             return false;
         }
     }

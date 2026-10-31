@@ -82,6 +82,11 @@ run time.
 
 ### Fixed
 
+- WebAssembly compiled ahead of time (`RunAOTCompilation`): a malformed MP4 file could bring the .NET runtime down (a
+  Mono assertion) instead of throwing `InvalidDataException`. Mono's AOT code read a method's arguments wrong after an
+  exception filter (`catch ... when`) had run, and `Demuxer.Open` disposed a garbage stream in one; the libraries use no
+  exception filters now (the demuxers' malformed-input handling, `AdtsDemuxer.Probe`, the AAC decoder's threads, H.264's
+  lost references when concealing errors), and the WebAssembly check runs the fuzz findings too.
 - H.264: a stream that switches to an SPS of another bit depth, size or chroma format at a picture that is not IDR
   (which the standard forbids) no longer throws InvalidCastException or reads its references as the new format: they
   are dropped, so the picture's inter slices fail with InvalidDataException, or are concealed with `ConcealErrors`.

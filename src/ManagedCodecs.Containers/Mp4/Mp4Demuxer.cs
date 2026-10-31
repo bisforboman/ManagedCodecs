@@ -213,8 +213,13 @@ public sealed class Mp4Demuxer : IDemuxer
                 };
             }
         }
-        catch (Exception e) when (Malformed.IsMalformedInput(e))
+        catch (Exception e)
         {
+            if (!Malformed.IsMalformedInput(e))
+            {
+                throw;
+            }
+
             throw Malformed.Wrap(e, "MP4");
         }
     }

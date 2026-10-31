@@ -30,8 +30,13 @@ internal static class Malformed
                     yield break;
                 }
             }
-            catch (Exception e) when (IsMalformedInput(e))
+            catch (Exception e)
             {
+                if (!IsMalformedInput(e))
+                {
+                    throw;
+                }
+
                 throw Wrap(e, format);
             }
 

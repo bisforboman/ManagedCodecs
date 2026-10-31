@@ -85,8 +85,13 @@ public sealed class AdtsDemuxer : IDemuxer
             int sampleRate = SampleRates[first.SampleRateIndex];
             Audio = new AudioStreamInfo(CodecIds.Aac, sampleRate, channels, frames, new Rational(1, sampleRate), config, 0);
         }
-        catch (Exception e) when (Malformed.IsMalformedInput(e))
+        catch (Exception e)
         {
+            if (!Malformed.IsMalformedInput(e))
+            {
+                throw;
+            }
+
             throw Malformed.Wrap(e, "ADTS");
         }
     }
@@ -136,8 +141,13 @@ public sealed class AdtsDemuxer : IDemuxer
             long start = SkipId3v2(stream);
             return TryReadHeader(stream, start, out var header) && FollowedByFrame(stream, start, header);
         }
-        catch (Exception e) when (Malformed.IsMalformedInput(e))
+        catch (Exception e)
         {
+            if (!Malformed.IsMalformedInput(e))
+            {
+                throw;
+            }
+
             return false;
         }
         finally

@@ -54,3 +54,25 @@ else
   echo "WebAssembly (AOT: $aot) thumbnails differ from the native ones (lines above: < native, > wasm)." >&2
   exit 1
 fi
+
+# The fuzz findings kept in tests/ManagedCodecs.Tests/Fuzz/Findings, the error paths the samples don't reach, through
+# their targets (Targets.Outcome: accepted, rejected, or the exception that escaped) on WebAssembly and natively. Compiled
+# ahead of time, exception filters there once read their methods' arguments wrong, and an MP4 finding brought the
+# runtime down (tests/ManagedCodecs.Tests/ExceptionFilterTests.cs).
+dotnet build tools/ManagedCodecs.Fuzz -c Release -v q -nologo > /dev/null
+findings=tests/ManagedCodecs.Tests/Fuzz/Findings
+for dir in "$findings"/*/; do
+  target=$(basename "$dir")
+  # shellcheck disable=SC2086
+  dotnet tools/ManagedCodecs.Fuzz/bin/Release/net10.0/ManagedCodecs.Fuzz.dll --outcomes "$target" "$dir"* >> "$work/native-findings.txt"
+  # shellcheck disable=SC2086
+  node "$bundle/main.mjs" --outcomes "$target" "$dir"* >> "$work/wasm-findings-stdout.txt" 2>> "$work/wasm-findings-stderr.txt" ||
+    { cat "$work/wasm-findings-stdout.txt" "$work/wasm-findings-stderr.txt" >&2; echo "The WebAssembly run of the $target findings failed." >&2; exit 1; }
+done
+grep -v '^MONO_WASM:' "$work/wasm-findings-stdout.txt" > "$work/wasm-findings.txt" || true
+if diff "$work/native-findings.txt" "$work/wasm-findings.txt"; then
+  echo "WebAssembly (AOT: $aot) and native outcomes agree on all $(wc -l < "$work/native-findings.txt") fuzz findings."
+else
+  echo "WebAssembly (AOT: $aot) outcomes differ from the native ones on the fuzz findings (< native, > wasm)." >&2
+  exit 1
+fi

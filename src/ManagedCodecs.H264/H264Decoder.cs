@@ -646,8 +646,13 @@ public sealed class H264Decoder : IVideoDecoder
                             _ => (new List<Picture>(), new List<Picture>()),
                         };
                     }
-                    catch (InvalidDataException) when (ConcealErrors)
+                    catch (InvalidDataException)
                     {
+                        if (!ConcealErrors)
+                        {
+                            throw;
+                        }
+
                         // No reference to predict from, or a list modification naming a missing one: a lost reference.
                         (list0, list1, lost) = ([], [], true);
                     }

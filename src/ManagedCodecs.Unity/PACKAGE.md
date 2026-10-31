@@ -11,9 +11,33 @@ runtimes (Mono, IL2CPP). It is the same C# as the other packages, compiled into 
 
 It is the scalar build. .NET Standard 2.1 has no `System.Runtime.Intrinsics`, so the SIMD paths are left out and their
 scalar references run instead. The output is the same to the bit: the whole test suite, conformance against FFmpeg
-included, runs against this assembly. On .NET (CoreCLR) it decodes 1 to 3.4 times slower than the other packages.
-H.264 takes 1.3 to 3.4 times as long (8-bit streams 1.9 or more), AAC and HE-AAC 1.0 to 1.2. Use the other packages wherever
-.NET 10 runs.
+included, runs against this assembly, and every sample decodes the same on Mono.
+
+## Speed
+
+On Mono 6.12 (mono-project.com's, one thread, GitHub's x64 runner), the time a frame, against the other packages on
+.NET 10:
+
+| Sample | net10.0 (ms a frame) | Mono 6.12 (ms a frame) | Mono / net10.0 |
+| --- | ---: | ---: | ---: |
+| h264-bench-720p (1280x720, 1 I, 49 P) | 4.22 | 79.8 | 18.9 |
+| h264-p-refs (320x240, P frames, CAVLC) | 0.30 | 3.89 | 12.8 |
+| h264-b-pyramid (320x240, CABAC, B frames) | 0.72 | 6.45 | 9.0 |
+| h264-high-default (320x240, libx264's High defaults) | 0.59 | 5.75 | 9.8 |
+| h264-10bit-b (320x240, High 10) | 0.99 | 7.04 | 7.1 |
+| h264-mbaff-default (320x240, MBAFF) | 1.05 | 7.53 | 7.2 |
+| h264-high-motion (320x240, QP 22, fast motion) | 4.15 | 21.6 | 5.2 |
+| testsrc-420.avi (320x240 MJPEG) | 0.23 | 1.05 | 4.5 |
+| noise-q1.avi (MJPEG, highest quality) | 0.89 | 3.42 | 3.8 |
+| aac-stereo-48k (a frame: 1024 samples, 21 ms) | 0.018 | 0.096 | 5.3 |
+| aac-5.1 | 0.065 | 0.33 | 5.0 |
+| heaac-5.1 (a frame: 2048 samples, 43 ms) | 0.30 | 2.84 | 9.5 |
+| heaacv2-stereo | 0.12 | 0.99 | 8.1 |
+
+So: audio (AAC 0.5 to 1.5% of a core in real time, HE-AAC 2 to 7%), MJPEG and small cutscenes play; HD H.264 does not
+in real time on one thread (720p at 12.5 frames a second; `H264Decoder.Threads` decodes several pictures at once where
+threads exist). Unity's own Mono and IL2CPP are not measured. On .NET 10 itself this build takes 1 to 3.4 times the
+other packages' time: use them wherever .NET 10 runs.
 
 ## In Unity
 

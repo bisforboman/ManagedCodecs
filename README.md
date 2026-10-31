@@ -318,8 +318,11 @@ checks the lists after each.
 `System.Runtime.Intrinsics`, so the vector paths are left out (`#if NET`) and their scalar references run. The
 output is the same to the bit: CI runs the whole test suite against this assembly on CoreCLR, and decodes every sample
 on Mono 6.12 (`tools/unity-check.sh`), comparing the output with the net10.0 build's. IL2CPP is not tested; it needs a
-Unity install. On CoreCLR the scalar build takes 1 to 3.4 times the other packages' time: H.264 1.3 to 3.4 times (the
-8-bit streams 1.9 or more), AAC and HE-AAC 1.0 to 1.2 (docs/decisions/2026-10-31-unity-netstandard.md). WebGL builds have no threads,
+Unity install. On Mono 6.12 (one thread, GitHub's x64 runner) it takes 4 to 19 times the net10.0 build's time:
+H.264 4 to 22 ms a 320x240 frame and 80 ms a 720p one (12.5 frames a second), MJPEG 1 to 3.4 ms a 320x240 frame,
+AAC 0.5 to 1.5% of a core in real time and HE-AAC 2 to 7%; so audio, MJPEG and small cutscenes, not HD H.264 on one
+thread. On CoreCLR the scalar build takes 1 to 3.4 times the other packages' time
+(docs/decisions/2026-10-31-unity-netstandard.md has both tables). WebGL builds have no threads,
 so `H264Decoder.Threads` stays at 1 there. The package holds the same types as the others, so a project references one
 or the other, never both. Its nuget.org page is `src/ManagedCodecs.Unity/PACKAGE.md`.
 

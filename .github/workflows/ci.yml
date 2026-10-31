@@ -83,11 +83,6 @@ jobs:
         env:
           DOTNET_EnableHWIntrinsic: 0
 
-      # The Unity build (src/ManagedCodecs.Unity, netstandard2.1, the scalar paths; docs/decisions/2026-10-31-unity-netstandard.md):
-      # the same tests against it, here on CoreCLR, the vector paths' own tests left out.
-      - name: Test the Unity build
-        run: dotnet test tests/ManagedCodecs.Tests -c Release -p:UnityBuild=true
-
       - name: Test MJPEG without AVX2 (the Vector128 IDCT, which ARM64 runs)
         run: dotnet test ManagedCodecs.slnx -c Release --no-build --filter FullyQualifiedName~Mjpeg
         env:
@@ -108,6 +103,12 @@ jobs:
             samples/jm/*.mp4
             samples/openh264/*.mp4
           retention-days: 1
+
+      # The Unity build (src/ManagedCodecs.Unity, netstandard2.1, the scalar paths; docs/decisions/2026-10-31-unity-netstandard.md):
+      # the same tests against it, here on CoreCLR, the vector paths' own tests left out. Last in the job: it
+      # rebuilds the test assembly in place, which the --no-build steps above would otherwise pick up.
+      - name: Test the Unity build
+        run: dotnet test tests/ManagedCodecs.Tests -c Release -p:UnityBuild=true
 
   # The same on ARM64 (GitHub's arm64 runner): the Vector128 and AdvSimd paths x64 never takes run here, against
   # references made by the runner's own FFmpeg. A job of its own, so the `build` check keeps its name.

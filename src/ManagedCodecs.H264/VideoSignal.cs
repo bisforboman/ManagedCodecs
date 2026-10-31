@@ -73,6 +73,24 @@ internal readonly record struct VideoSignal(
     }
 
     /// <summary>
+    /// This SPS's signal as a frame gets it after <paramref name="previous"/>, the decoder's until then: FFmpeg's
+    /// <c>h264_init_ps</c> writes the range into its codec context only under video_signal_type_present_flag and the
+    /// colour description only under colour_description_present_flag, so an SPS without them keeps what an earlier one
+    /// sent (with its <see cref="RangeSent"/> and <see cref="ColourSent"/>, so the container's values stand in only
+    /// while no SPS has sent any); the chroma location and aspect ratio are always the SPS's own.
+    /// </summary>
+    public VideoSignal After(VideoSignal previous)
+    {
+        var signal = RangeSent ? this : this with { Range = previous.Range, RangeSent = previous.RangeSent };
+        if (ColourSent)
+        {
+            return signal;
+        }
+
+        return signal with { Primaries = previous.Primaries, Transfer = previous.Transfer, Matrix = previous.Matrix, ColourSent = previous.ColourSent };
+    }
+
+    /// <summary>
     /// The frame's colour properties and sample aspect ratio from this signal, as FFmpeg gives them: where the VUI sent
     /// no range (or no colour description), the container's (<paramref name="stream"/>, FFmpeg's decoder starting from
     /// the container's values); the container's aspect ratio where it has one (ffprobe's

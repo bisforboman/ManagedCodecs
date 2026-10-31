@@ -33,6 +33,35 @@ public class VideoSignalTests
             signal);
     }
 
+    /// <summary>
+    /// A later SPS that sends no range or colour description keeps the earlier ones, as FFmpeg's codec context does (and
+    /// so they still win over the container's); the chroma location and aspect ratio are the SPS's own. No sample changes
+    /// its SPS's colour, so the SPSs are built here.
+    /// </summary>
+    [Fact]
+    public void LaterSps_KeepsWhatItLeavesOut()
+    {
+        var hdr = Parse(new Vui(AspectIdc: 4, FullRange: true, Primaries: 9, Transfer: 16, Matrix: 9, ChromaLocType: 2)).Signal.After(VideoSignal.None);
+        var bare = Parse(vui: null).Signal.After(hdr);
+        Assert.Equal(hdr with { Location = ChromaLocation.Unspecified, AspectRatio = new(0, 1) }, bare);
+
+        // A range without a description changes the range alone; a description of unspecified codes replaces the earlier one.
+        var limited = Parse(new Vui(FullRange: false, Primaries: null)).Signal.After(bare);
+        Assert.Equal(bare with { Range = ColorRange.Limited, Location = ChromaLocation.Left }, limited);
+        var unspecified = Parse(new Vui(FullRange: false, Primaries: 2, Transfer: 2, Matrix: 2)).Signal.After(limited);
+        Assert.Equal((ColorPrimaries.Unspecified, ColorTransfer.Unspecified, ColorMatrix.Unspecified), (unspecified.Primaries, unspecified.Transfer, unspecified.Matrix));
+
+        // Kept values still win over the container's, as they are in FFmpeg's codec context.
+        var frame = new VideoFrame(16, 16, PixelFormat.Yuv420P);
+        var stream = new VideoStreamInfo(CodecIds.H264, 16, 16, 25, 1, new(1, 25), default, 0) { ColorRange = ColorRange.Limited, ColorPrimaries = ColorPrimaries.Bt709, ColorTransfer = ColorTransfer.Bt709, ColorMatrix = ColorMatrix.Bt709 };
+        bare.Apply(frame, stream);
+        Assert.Equal((ColorRange.Full, ColorPrimaries.Bt2020, ColorTransfer.Smpte2084, ColorMatrix.Bt2020Ncl), (frame.ColorRange, frame.ColorPrimaries, frame.ColorTransfer, frame.ColorMatrix));
+
+        // Before any SPS sends them, the container's.
+        Parse(vui: null).Signal.After(VideoSignal.None).Apply(frame, stream);
+        Assert.Equal((ColorRange.Limited, ColorPrimaries.Bt709), (frame.ColorRange, frame.ColorPrimaries));
+    }
+
     /// <summary>A video signal type without a colour description gives the range alone.</summary>
     [Fact]
     public void RangeWithoutColourDescription()

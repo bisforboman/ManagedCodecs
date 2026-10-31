@@ -211,9 +211,12 @@ where the VUI sends a video signal type, its range wins, where it sends a colour
 and matrix (`h264-colr-conflict`, a BT.2020 'colr' over a BT.709 VUI, gives BT.709), and otherwise the frames take the
 container's (`h264-colr-only`).
 
-Where this decoder departs from FFmpeg, untested by any sample: FFmpeg keeps the range and colour description of an
-earlier SPS when a later one leaves them out; here each frame has what its own SPS says, else the container's (the
-spec's reading: the VUI describes its coded video sequence).
+An SPS that leaves out the range or the colour description keeps what an earlier SPS sent, as FFmpeg's codec context
+does (`h264_init_ps` writes the range only under video_signal_type_present_flag and the three codes only under
+colour_description_present_flag), and those still win over the container's; the spec's reading would be the
+container's or unspecified, the VUI describing its own coded video sequence. The chroma location and aspect ratio are
+each SPS's own. No sample changes its colour between SPSs, so `VideoSignalTests.LaterSps_KeepsWhatItLeavesOut` builds
+them (the owner's choice, 2026-10-31).
 
 ### The container's picture size
 

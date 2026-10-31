@@ -77,6 +77,10 @@ public sealed class H264Decoder : IVideoDecoder
     // The container's colour properties and aspect ratio, which frames take where their SPS says nothing; null without one.
     private VideoStreamInfo? _stream;
 
+    // The colour properties as FFmpeg's codec context holds them (VideoSignal.After): an SPS that sends no range or
+    // colour description keeps the earlier ones, through new sequences and flushes alike.
+    private VideoSignal _signal = VideoSignal.None;
+
     /// <param name="codecPrivate">The AVCDecoderConfigurationRecord ('avcC') from the container.</param>
     public H264Decoder(ReadOnlySpan<byte> codecPrivate)
     {
@@ -507,7 +511,7 @@ public sealed class H264Decoder : IVideoDecoder
         frame.IsTopFieldFirst = job.Interlacing.TopFieldFirst;
         frame.FieldOrder = job.Interlacing.Order;
         frame.IsCodedAsFields = job.Interlacing.CodedAsFields;
-        state.Sps.Signal.Apply(frame, _stream);
+        job.Signal.Apply(frame, _stream);
         frames.AddRange(_output.Add(frame, picture.Poc, job.Restart, ReorderDepth(state.Sps), borrow ? picture : null));
     }
 
@@ -748,9 +752,10 @@ public sealed class H264Decoder : IVideoDecoder
         var state = new PictureState(header, sps, decoder, picture, poc, OutputSize(sps), secondField);
         int decodedPoc = header.BottomField ? _order.DecodedFields.Bottom : _order.DecodedFields.Top;
         var interlacing = InterlacingOf(header, sps, decodedPoc, secondField);
+        _signal = sps.Signal.After(_signal);
         var job = secondField
-            ? new PictureJob(state, _firstField!.Pts, _firstField.Restart, _firstField.Discard) { FirstField = _firstField, PictureType = _firstField.PictureType, Interlacing = interlacing }
-            : new PictureJob(state, pts, header.IsIdr || header.MemoryManagement.Any(op => op.Op == 5), _discard) { PictureType = ToPictureType(header.Type), Interlacing = interlacing, DecodedPoc = decodedPoc };
+            ? new PictureJob(state, _firstField!.Pts, _firstField.Restart, _firstField.Discard) { FirstField = _firstField, PictureType = _firstField.PictureType, Interlacing = interlacing, Signal = _firstField.Signal }
+            : new PictureJob(state, pts, header.IsIdr || header.MemoryManagement.Any(op => op.Op == 5), _discard) { PictureType = ToPictureType(header.Type), Interlacing = interlacing, DecodedPoc = decodedPoc, Signal = _signal };
         decoder.ConcealErrors = ConcealErrors;
         if (ConcealErrors && _lastReference is { IsNonExisting: false } latest && _references.Contains(latest) && latest != picture)
         {
@@ -1117,6 +1122,9 @@ public sealed class H264Decoder : IVideoDecoder
 
         /// <summary>Its frame's interlacing: a frame picture's or second field's own, a first field's for a frame without its second field.</summary>
         public Interlacing Interlacing { get; init; }
+
+        /// <summary>Its frame's colour properties: the decoder's after its SPS (<see cref="VideoSignal.After"/>), a second field's its first field's.</summary>
+        public VideoSignal Signal { get; init; } = VideoSignal.None;
 
         /// <summary>A field's order count as decoded, before memory_management_control_operation 5 rebased it (<see cref="PictureOrder.DecodedFields"/>).</summary>
         public int DecodedPoc { get; init; }

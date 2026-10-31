@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- A Unity sample for issue #254: ManagedCodecsVideo.cs, a MonoBehaviour that plays an MP4 or AVI into a Texture2D
+       and an AudioClip with the ManagedCodecs.Unity package. Its decoding (MediaSource.cs) and colour conversion
+       (YuvToRgba.cs) are mcplay's (tools/ManagedCodecs.MonoGame), linked. Built for netstandard2.1 against
+       UnityEngineStubs.cs, which declares only the UnityEngine members the sample calls so that CI checks it compiles
+       against the Unity build; it is not Unity's API, and Unity itself has not run it (README.md). -->
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <AssemblyName>ManagedCodecs.Unity.Sample</AssemblyName>
+    <RootNamespace>ManagedCodecs.UnitySample</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\ManagedCodecs.MonoGame\MediaSource.cs" Link="MediaSource.cs" />
+    <Compile Include="..\ManagedCodecs.MonoGame\YuvToRgba.cs" Link="YuvToRgba.cs" />
+    <ProjectReference Include="..\..\src\ManagedCodecs.Unity\ManagedCodecs.Unity.csproj" />
+  </ItemGroup>
+
+</Project>

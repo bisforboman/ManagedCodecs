@@ -37,6 +37,7 @@ in between. That comparison is not measured here.
 | `src/Shared` | Source files linked into several codec projects (the VLC decoder) |
 | `tools/ManagedCodecs.Cli` | `mcdec`: decodes a file and times it, to compare with `ffmpeg -benchmark` (`--threads N` for H.264 frame threading and HE-AAC's channels) |
 | `tools/ManagedCodecs.MonoGame` | `mcplay`: a MonoGame sample that plays a file into a texture, for in-game video (its README; issue #254) |
+| `tools/ManagedCodecs.Unity.Sample` | A Unity `MonoBehaviour` that plays a video into a `Texture2D` and an `AudioClip` with the `ManagedCodecs.Unity` package (mcplay's decoding and colour conversion, linked); CI compiles it against stubs of UnityEngine, Unity has not run it |
 | `tools/make-samples.sh` | Generates the test samples and FFmpeg's references |
 | `tools/compare.sh` | Times mcdec and FFmpeg on the same file |
 | `tools/realworld.py` | Decodes real public films with mcdec and FFmpeg and compares them (nightly, `realworld.yml`) |
@@ -324,7 +325,8 @@ AAC 0.5 to 1.5% of a core in real time and HE-AAC 2 to 7%; so audio, MJPEG and s
 thread. On CoreCLR the scalar build takes 1 to 3.4 times the other packages' time
 (docs/decisions/2026-10-31-unity-netstandard.md has both tables). WebGL builds have no threads,
 so `H264Decoder.Threads` stays at 1 there. The package holds the same types as the others, so a project references one
-or the other, never both. Its nuget.org page is `src/ManagedCodecs.Unity/PACKAGE.md`.
+or the other, never both. Its nuget.org page is `src/ManagedCodecs.Unity/PACKAGE.md`. A sample `MonoBehaviour` playing a video with it is in `tools/ManagedCodecs.Unity.Sample` (compiled in CI
+against stubs of UnityEngine; not yet run in Unity).
 
 ### WebAssembly
 

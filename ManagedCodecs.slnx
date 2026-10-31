@@ -14,6 +14,7 @@
   <Folder Name="/tools/">
     <Project Path="tools/ManagedCodecs.Cli/ManagedCodecs.Cli.csproj" />
     <Project Path="tools/ManagedCodecs.MonoGame/ManagedCodecs.MonoGame.csproj" />
+    <Project Path="tools/ManagedCodecs.Unity.Sample/ManagedCodecs.Unity.Sample.csproj" />
     <Project Path="tools/ManagedCodecs.Fuzz/ManagedCodecs.Fuzz.csproj" />
   </Folder>
   <Folder Name="/benchmarks/">

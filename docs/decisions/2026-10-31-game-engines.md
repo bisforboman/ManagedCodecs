@@ -55,3 +55,9 @@ The owner (2026-10-31), against the recommendation to keep it parked:
   two targets and `#if` around the vector paths, or linked files), which C# features the scalar code may use, how CI
   tests it (the conformance tests on netstandard2.1 through a net-framework-free test host), and the package name.
   The recommendation was no netstandard2.1 target until Unity ships its CoreCLR runtime. Its record: docs/decisions/2026-10-31-unity-netstandard.md (decided).
+
+## Since
+
+- A Unity sample, `tools/ManagedCodecs.Unity.Sample`: a `MonoBehaviour` playing a video into a `Texture2D` and a
+  streamed `AudioClip` with the `ManagedCodecs.Unity` package, on mcplay's decoding and colour conversion. CI compiles
+  it for netstandard2.1 against stubs of the UnityEngine members it calls; nobody has run it in Unity yet.

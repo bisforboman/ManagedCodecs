@@ -343,6 +343,14 @@ internal sealed class PsProcessor
         int count = hasData ? data.NumEnvelopes : 0;
         if (count == 0)
         {
+            // No envelopes keep the last values applied (8.6.4.4): fine IID indices beyond a coarse header's range have no
+            // value there, and FFmpeg rejects them too ("iid_par invalid"). These, not PsData's, which a frame that failed
+            // after its parametric stereo was read has moved on.
+            if (hasData && data.EnableIid && _lastIid.AsSpan(0, layout.Bins).ContainsAnyExceptInRange(data.FineIid ? -15 : -7, data.FineIid ? 15 : 7))
+            {
+                throw new InvalidDataException("Parametric stereo keeps IID indices outside its header's quantization.");
+            }
+
             _lastIid.CopyTo(iid[0], 0);
             _lastIcc.CopyTo(icc[0], 0);
             _lastIpd.CopyTo(_ipd[0], 0);

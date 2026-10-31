@@ -51,7 +51,7 @@ Fuzzer.OutOfProcess.Run(stream =>
 return 0;
 
 // Seeds: small whole files for "file"; for the codec targets, the first packets of a few samples in the target's
-// framing (avcC and packets, a JPEG, AudioSpecificConfig and a frame).
+// framing (avcC and packets, a JPEG, AudioSpecificConfig and frames).
 static void WriteSeeds(string samples, string output)
 {
     foreach (var name in Targets.Names)
@@ -105,16 +105,15 @@ static void WriteSeeds(string samples, string output)
                 }
             }
 
-            if (demuxer.Audio is { Codec: CodecIds.Aac } audio && packets.FirstOrDefault(p => p.StreamIndex == audio.StreamIndex) is { Data.Length: > 0 } first)
+            if (demuxer.Audio is { Codec: CodecIds.Aac } audio && packets.Where(p => p.StreamIndex == audio.StreamIndex).Take(8).Select(p => p.Data.ToArray()).ToList() is [{ Length: > 0 }, ..] frames)
             {
-                byte[] seed = [(byte)audio.CodecPrivate.Length, .. audio.CodecPrivate.Span, .. first.Data.Span];
-                File.WriteAllBytes(Path.Combine(output, "aac", stem + ".bin"), seed);
+                File.WriteAllBytes(Path.Combine(output, "aac", stem + ".bin"), AacSeed(audio.CodecPrivate.Span, frames));
 
                 // ADTS: the first frames again as frames of 2 to 4 raw data blocks with CRCs, which no sample has.
                 if (path.EndsWith(".aac") && JoinedFrames(packets.Take(12).Select(p => p.Data.ToArray()).ToList()) is { Count: > 0 } joined)
                 {
                     File.WriteAllBytes(Path.Combine(output, "file", stem + "-blocks.aac"), [.. joined.SelectMany(f => f)]);
-                    File.WriteAllBytes(Path.Combine(output, "aac", stem + "-blocks.bin"), [(byte)audio.CodecPrivate.Length, .. audio.CodecPrivate.Span, .. joined[0]]);
+                    File.WriteAllBytes(Path.Combine(output, "aac", stem + "-blocks.bin"), AacSeed(audio.CodecPrivate.Span, joined.Take(4)));
                 }
             }
         }
@@ -122,6 +121,21 @@ static void WriteSeeds(string samples, string output)
         {
         }
     }
+}
+
+// An aac target input: the config behind its 1-byte length, then each frame behind a 2-byte big-endian one.
+static byte[] AacSeed(ReadOnlySpan<byte> config, IEnumerable<byte[]> frames)
+{
+    var seed = new List<byte> { (byte)config.Length };
+    seed.AddRange(config);
+    foreach (var frame in frames)
+    {
+        seed.Add((byte)(frame.Length >> 8));
+        seed.Add((byte)frame.Length);
+        seed.AddRange(frame);
+    }
+
+    return [.. seed];
 }
 
 // ADTS frames (one raw data block each, no CRC) joined 2, 3, 4, 2, ... at a time under one header with CRCs (of no

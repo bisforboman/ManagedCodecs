@@ -54,4 +54,4 @@ The owner (2026-10-31), against the recommendation to keep it parked:
   said so. Its own decision record first, as it touches every project: how the sources are shared (one project with
   two targets and `#if` around the vector paths, or linked files), which C# features the scalar code may use, how CI
   tests it (the conformance tests on netstandard2.1 through a net-framework-free test host), and the package name.
-  The recommendation was no netstandard2.1 target until Unity ships its CoreCLR runtime.
+  The recommendation was no netstandard2.1 target until Unity ships its CoreCLR runtime. Its record: docs/decisions/2026-10-31-unity-netstandard.md (decided).

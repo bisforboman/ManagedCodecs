@@ -35,6 +35,7 @@ in between. That comparison is not measured here.
 | `src/ManagedCodecs.Aac` | `AacDecoder`: AAC LC (mono to 7.1, M/S, intensity, PNS, TNS), within 3e-7 of FFmpeg's float output; HE-AAC (spectral band replication) |
 | `src/Shared` | Source files linked into several codec projects (the VLC decoder) |
 | `tools/ManagedCodecs.Cli` | `mcdec`: decodes a file and times it, to compare with `ffmpeg -benchmark` (`--threads N` for H.264 frame threading and HE-AAC's channels) |
+| `tools/ManagedCodecs.MonoGame` | `mcplay`: a MonoGame sample that plays a file into a texture, for in-game video (its README; issue #254) |
 | `tools/make-samples.sh` | Generates the test samples and FFmpeg's references |
 | `tools/compare.sh` | Times mcdec and FFmpeg on the same file |
 | `tools/realworld.py` | Decodes real public films with mcdec and FFmpeg and compares them (nightly, `realworld.yml`) |

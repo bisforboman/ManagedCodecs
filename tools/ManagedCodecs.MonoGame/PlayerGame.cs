@@ -1,0 +1,145 @@
+using System.Diagnostics;
+using Microsoft.Xna.Framework;
+using Microsoft.Xna.Framework.Audio;
+using Microsoft.Xna.Framework.Graphics;
+using Microsoft.Xna.Framework.Input;
+
+namespace ManagedCodecs.MonoGame;
+
+/// <summary>
+/// Plays a file into a texture: the newest decoded frame that is due by a clock started at the first frame, drawn
+/// letterboxed to the window; audio submitted to a dynamic sound as it comes. Escape quits. The window title shows the
+/// decode and conversion time per frame, the number a game's frame budget cares about.
+/// </summary>
+internal sealed class PlayerGame : Game
+{
+    private readonly GraphicsDeviceManager _graphics;
+    private readonly MediaSource _source;
+    private readonly Stopwatch _clock = new();
+    private SpriteBatch? _sprites;
+    private Texture2D? _texture;
+    private DynamicSoundEffectInstance? _sound;
+    private RgbaFrame? _next;
+    private bool _ended;
+    private double _start;
+
+    public PlayerGame(string path)
+    {
+        _source = new MediaSource(path);
+        _graphics = new GraphicsDeviceManager(this)
+        {
+            PreferredBackBufferWidth = Math.Min(_source.VideoStream.Width, 1280),
+            PreferredBackBufferHeight = Math.Min(_source.VideoStream.Height, 720),
+        };
+        Window.AllowUserResizing = true;
+        Window.Title = Path.GetFileName(path);
+        IsMouseVisible = true;
+    }
+
+    protected override void LoadContent()
+    {
+        _sprites = new SpriteBatch(GraphicsDevice);
+        _source.Start();
+    }
+
+    protected override void Update(GameTime gameTime)
+    {
+        if (Keyboard.GetState().IsKeyDown(Keys.Escape) || (_ended && _next is null))
+        {
+            Exit();
+            return;
+        }
+
+        SubmitAudio();
+
+        // The newest frame due; frames that are late are dropped, as a player does when decoding can't keep up.
+        RgbaFrame? due = null;
+        while (true)
+        {
+            if (_next is null && !_source.Frames.TryTake(out _next))
+            {
+                _ended = _source.Frames.IsCompleted;
+                break;
+            }
+
+            if (!_clock.IsRunning)
+            {
+                _clock.Start();
+                _start = _next.Time;
+            }
+
+            if (_next.Time - _start > _clock.Elapsed.TotalSeconds)
+            {
+                break;
+            }
+
+            due = _next;
+            _next = null;
+        }
+
+        if (due is not null)
+        {
+            // The decoded size, after the stream's cropping, which can differ from the container's.
+            if (_texture is null || _texture.Width != due.Width || _texture.Height != due.Height)
+            {
+                _texture?.Dispose();
+                _texture = new Texture2D(GraphicsDevice, due.Width, due.Height, false, SurfaceFormat.Color);
+            }
+
+            _texture.SetData(due.Pixels);
+        }
+
+        var (count, milliseconds) = _source.DecodeStatistics;
+        Window.Title = $"mcplay: {_source.VideoStream.Width}x{_source.VideoStream.Height}, {count} frames, {milliseconds:F1} ms a frame to decode and convert";
+        base.Update(gameTime);
+    }
+
+    protected override void Draw(GameTime gameTime)
+    {
+        GraphicsDevice.Clear(Color.Black);
+        if (_texture is null)
+        {
+            base.Draw(gameTime);
+            return;
+        }
+
+        var viewport = GraphicsDevice.Viewport;
+        float scale = Math.Min(viewport.Width / (float)_texture.Width, viewport.Height / (float)_texture.Height);
+        var size = new Vector2(_texture.Width, _texture.Height) * scale;
+        var at = (new Vector2(viewport.Width, viewport.Height) - size) / 2;
+        _sprites!.Begin(samplerState: SamplerState.LinearClamp);
+        _sprites.Draw(_texture, new Rectangle((int)at.X, (int)at.Y, (int)size.X, (int)size.Y), Color.White);
+        _sprites.End();
+        base.Draw(gameTime);
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _source.Dispose();
+            _sound?.Dispose();
+            _texture?.Dispose();
+            _sprites?.Dispose();
+        }
+
+        base.Dispose(disposing);
+    }
+
+    // Keeps a few buffers queued; the first audio frame sets the rate.
+    private void SubmitAudio()
+    {
+        while ((_sound is null || _sound.PendingBufferCount < 4) && _source.Audio.TryTake(out var chunk))
+        {
+            if (_sound is null)
+            {
+                _sound = new DynamicSoundEffectInstance(chunk.SampleRate, AudioChannels.Stereo);
+                _sound.Play();
+            }
+
+            var bytes = new byte[chunk.Samples.Length * 2];
+            Buffer.BlockCopy(chunk.Samples, 0, bytes, 0, bytes.Length);
+            _sound.SubmitBuffer(bytes);
+        }
+    }
+}

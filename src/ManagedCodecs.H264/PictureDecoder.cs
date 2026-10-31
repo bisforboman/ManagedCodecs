@@ -55,7 +55,7 @@ internal interface IPictureDecoder
 /// 4:2:0, up to 3 in 4:2:2, whose chroma blocks are 8x16 samples).
 /// </remarks>
 internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
-    where TPixel : unmanaged, IBinaryInteger<TPixel>
+    where TPixel : unmanaged
 {
     private readonly int _widthInMbs;
     private readonly int _mbCount;
@@ -679,7 +679,7 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
         {
             for (int x = 0; x < 16; x++)
             {
-                PlaneY[lumaOrigin + (y * lumaStride) + x] = TPixel.CreateTruncating(r.ReadBits(_bitDepth));
+                PlaneY[lumaOrigin + (y * lumaStride) + x] = Samples.From<TPixel>((int)r.ReadBits(_bitDepth));
             }
         }
 
@@ -690,7 +690,7 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
             {
                 for (int x = 0; x < _mbWidthC; x++)
                 {
-                    plane[chromaOrigin + (y * chromaStride) + x] = TPixel.CreateTruncating(r.ReadBits(_bitDepth));
+                    plane[chromaOrigin + (y * chromaStride) + x] = Samples.From<TPixel>((int)r.ReadBits(_bitDepth));
                 }
             }
         }

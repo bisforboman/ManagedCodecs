@@ -13,32 +13,32 @@ internal static partial class InterPrediction
     /// when logWd is 0; <paramref name="o"/> already scaled to the bit depth.
     /// </summary>
     public static void WeightOneReference<TPixel>(ReadOnlySpan<TPixel> prediction, int stride, int width, int height, Span<TPixel> output, int outputStride, int w, int o, int logWd, int max)
-        where TPixel : unmanaged, IBinaryInteger<TPixel>
+        where TPixel : unmanaged
     {
         int round = logWd >= 1 ? 1 << (logWd - 1) : 0;
         for (int j = 0; j < height; j++)
         {
             for (int i = 0; i < width; i++)
             {
-                int p = int.CreateTruncating(prediction[(j * stride) + i]);
+                int p = Samples.ToInt(prediction[(j * stride) + i]);
                 int value = logWd >= 1 ? (((p * w) + round) >> logWd) + o : (p * w) + o;
-                output[(j * outputStride) + i] = TPixel.CreateTruncating(Math.Clamp(value, 0, max));
+                output[(j * outputStride) + i] = Samples.From<TPixel>(Math.Clamp(value, 0, max));
             }
         }
     }
 
     /// <summary>Weighted bi-prediction (8-451): Clip1(((p0 * w0 + p1 * w1 + 2^logWd) >> (logWd + 1)) + o).</summary>
     public static void WeightBothReference<TPixel>(ReadOnlySpan<TPixel> prediction0, ReadOnlySpan<TPixel> prediction1, int stride, int width, int height, Span<TPixel> output, int outputStride, int w0, int w1, int o, int logWd, int max)
-        where TPixel : unmanaged, IBinaryInteger<TPixel>
+        where TPixel : unmanaged
     {
         for (int j = 0; j < height; j++)
         {
             for (int i = 0; i < width; i++)
             {
-                int p0 = int.CreateTruncating(prediction0[(j * stride) + i]);
-                int p1 = int.CreateTruncating(prediction1[(j * stride) + i]);
+                int p0 = Samples.ToInt(prediction0[(j * stride) + i]);
+                int p1 = Samples.ToInt(prediction1[(j * stride) + i]);
                 int value = (((p0 * w0) + (p1 * w1) + (1 << logWd)) >> (logWd + 1)) + o;
-                output[(j * outputStride) + i] = TPixel.CreateTruncating(Math.Clamp(value, 0, max));
+                output[(j * outputStride) + i] = Samples.From<TPixel>(Math.Clamp(value, 0, max));
             }
         }
     }

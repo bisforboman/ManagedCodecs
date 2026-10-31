@@ -948,10 +948,10 @@ internal sealed partial class PictureDecoder<TPixel>
     private static void FilterSamples(TPixel[] plane, int p0, int pStep, int q0, int qStep, int bS, int indexA, int alpha, int beta, bool chroma, int bitDepth)
     {
         int max = Samples.Max<TPixel>(bitDepth);
-        int p0v = int.CreateTruncating(plane[p0]);
-        int p1 = int.CreateTruncating(plane[p0 - pStep]);
-        int q0v = int.CreateTruncating(plane[q0]);
-        int q1 = int.CreateTruncating(plane[q0 + qStep]);
+        int p0v = Samples.ToInt(plane[p0]);
+        int p1 = Samples.ToInt(plane[p0 - pStep]);
+        int q0v = Samples.ToInt(plane[q0]);
+        int q1 = Samples.ToInt(plane[q0 + qStep]);
 
         if (Math.Abs(p0v - q0v) >= alpha || Math.Abs(p1 - p0v) >= beta || Math.Abs(q1 - q0v) >= beta)
         {
@@ -964,20 +964,20 @@ internal sealed partial class PictureDecoder<TPixel>
             {
                 int tc = (Tc0[(indexA * 3) + bS - 1] << (bitDepth - 8)) + 1;
                 int delta = Math.Clamp((((q0v - p0v) << 2) + (p1 - q1) + 4) >> 3, -tc, tc);
-                plane[p0] = TPixel.CreateTruncating(Math.Clamp(p0v + delta, 0, max));
-                plane[q0] = TPixel.CreateTruncating(Math.Clamp(q0v - delta, 0, max));
+                plane[p0] = Samples.From<TPixel>(Math.Clamp(p0v + delta, 0, max));
+                plane[q0] = Samples.From<TPixel>(Math.Clamp(q0v - delta, 0, max));
             }
             else
             {
-                plane[p0] = TPixel.CreateTruncating(((2 * p1) + p0v + q1 + 2) >> 2);
-                plane[q0] = TPixel.CreateTruncating(((2 * q1) + q0v + p1 + 2) >> 2);
+                plane[p0] = Samples.From<TPixel>(((2 * p1) + p0v + q1 + 2) >> 2);
+                plane[q0] = Samples.From<TPixel>(((2 * q1) + q0v + p1 + 2) >> 2);
             }
 
             return;
         }
 
-        int p2 = int.CreateTruncating(plane[p0 - (2 * pStep)]);
-        int q2 = int.CreateTruncating(plane[q0 + (2 * qStep)]);
+        int p2 = Samples.ToInt(plane[p0 - (2 * pStep)]);
+        int q2 = Samples.ToInt(plane[q0 + (2 * qStep)]);
         bool ap = Math.Abs(p2 - p0v) < beta;
         bool aq = Math.Abs(q2 - q0v) < beta;
 
@@ -986,16 +986,16 @@ internal sealed partial class PictureDecoder<TPixel>
             int tc0 = Tc0[(indexA * 3) + bS - 1] << (bitDepth - 8);
             int tc = tc0 + (ap ? 1 : 0) + (aq ? 1 : 0);
             int delta = Math.Clamp((((q0v - p0v) << 2) + (p1 - q1) + 4) >> 3, -tc, tc);
-            plane[p0] = TPixel.CreateTruncating(Math.Clamp(p0v + delta, 0, max));
-            plane[q0] = TPixel.CreateTruncating(Math.Clamp(q0v - delta, 0, max));
+            plane[p0] = Samples.From<TPixel>(Math.Clamp(p0v + delta, 0, max));
+            plane[q0] = Samples.From<TPixel>(Math.Clamp(q0v - delta, 0, max));
             if (ap)
             {
-                plane[p0 - pStep] = TPixel.CreateTruncating(p1 + Math.Clamp((p2 + ((p0v + q0v + 1) >> 1) - (p1 << 1)) >> 1, -tc0, tc0));
+                plane[p0 - pStep] = Samples.From<TPixel>(p1 + Math.Clamp((p2 + ((p0v + q0v + 1) >> 1) - (p1 << 1)) >> 1, -tc0, tc0));
             }
 
             if (aq)
             {
-                plane[q0 + qStep] = TPixel.CreateTruncating(q1 + Math.Clamp((q2 + ((p0v + q0v + 1) >> 1) - (q1 << 1)) >> 1, -tc0, tc0));
+                plane[q0 + qStep] = Samples.From<TPixel>(q1 + Math.Clamp((q2 + ((p0v + q0v + 1) >> 1) - (q1 << 1)) >> 1, -tc0, tc0));
             }
 
             return;
@@ -1005,26 +1005,26 @@ internal sealed partial class PictureDecoder<TPixel>
         bool small = Math.Abs(p0v - q0v) < ((alpha >> 2) + 2);
         if (ap && small)
         {
-            int p3 = int.CreateTruncating(plane[p0 - (3 * pStep)]);
-            plane[p0] = TPixel.CreateTruncating((p2 + (2 * p1) + (2 * p0v) + (2 * q0v) + q1 + 4) >> 3);
-            plane[p0 - pStep] = TPixel.CreateTruncating((p2 + p1 + p0v + q0v + 2) >> 2);
-            plane[p0 - (2 * pStep)] = TPixel.CreateTruncating(((2 * p3) + (3 * p2) + p1 + p0v + q0v + 4) >> 3);
+            int p3 = Samples.ToInt(plane[p0 - (3 * pStep)]);
+            plane[p0] = Samples.From<TPixel>((p2 + (2 * p1) + (2 * p0v) + (2 * q0v) + q1 + 4) >> 3);
+            plane[p0 - pStep] = Samples.From<TPixel>((p2 + p1 + p0v + q0v + 2) >> 2);
+            plane[p0 - (2 * pStep)] = Samples.From<TPixel>(((2 * p3) + (3 * p2) + p1 + p0v + q0v + 4) >> 3);
         }
         else
         {
-            plane[p0] = TPixel.CreateTruncating(((2 * p1) + p0v + q1 + 2) >> 2);
+            plane[p0] = Samples.From<TPixel>(((2 * p1) + p0v + q1 + 2) >> 2);
         }
 
         if (aq && small)
         {
-            int q3 = int.CreateTruncating(plane[q0 + (3 * qStep)]);
-            plane[q0] = TPixel.CreateTruncating((p1 + (2 * p0v) + (2 * q0v) + (2 * q1) + q2 + 4) >> 3);
-            plane[q0 + qStep] = TPixel.CreateTruncating((p0v + q0v + q1 + q2 + 2) >> 2);
-            plane[q0 + (2 * qStep)] = TPixel.CreateTruncating(((2 * q3) + (3 * q2) + q1 + q0v + p0v + 4) >> 3);
+            int q3 = Samples.ToInt(plane[q0 + (3 * qStep)]);
+            plane[q0] = Samples.From<TPixel>((p1 + (2 * p0v) + (2 * q0v) + (2 * q1) + q2 + 4) >> 3);
+            plane[q0 + qStep] = Samples.From<TPixel>((p0v + q0v + q1 + q2 + 2) >> 2);
+            plane[q0 + (2 * qStep)] = Samples.From<TPixel>(((2 * q3) + (3 * q2) + q1 + q0v + p0v + 4) >> 3);
         }
         else
         {
-            plane[q0] = TPixel.CreateTruncating(((2 * q1) + q0v + p1 + 2) >> 2);
+            plane[q0] = Samples.From<TPixel>(((2 * q1) + q0v + p1 + 2) >> 2);
         }
     }
 

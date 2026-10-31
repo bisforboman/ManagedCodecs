@@ -367,11 +367,11 @@ internal sealed partial class PictureDecoder<TPixel>
 
     private bool Available(int mbAddr) => mbAddr >= 0 && _sliceOfMb[mbAddr] >= 0;
 
-    private static int Sample(TPixel value) => int.CreateTruncating(value);
+    private static int Sample(TPixel value) => Samples.ToInt(value);
 
     private void FillGrey(int lumaOut, int lumaStride, int chromaOut, int chromaStride)
     {
-        var grey = TPixel.CreateTruncating(1 << (_bitDepth - 1));
+        var grey = Samples.From<TPixel>(1 << (_bitDepth - 1));
         for (int y = 0; y < 16; y++)
         {
             PlaneY.AsSpan(lumaOut + (y * lumaStride), 16).Fill(grey);

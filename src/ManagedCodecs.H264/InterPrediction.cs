@@ -20,7 +20,7 @@ internal static partial class InterPrediction
     /// quarter samples, into <paramref name="dest"/> at the same position.
     /// </summary>
     public static void PredictLumaReference<TPixel>(Picture reference, TPixel[] dest, int stride, int x, int y, int width, int height, int mvX, int mvY)
-        where TPixel : unmanaged, IBinaryInteger<TPixel> =>
+        where TPixel : unmanaged =>
         PredictLumaReference(reference, x, y, width, height, mvX, mvY, dest.AsSpan((y * stride) + x), stride);
 
     /// <summary>
@@ -29,7 +29,7 @@ internal static partial class InterPrediction
     /// (<see cref="Picture.Field"/>) is a picture of its own: every other row, half the height.
     /// </summary>
     public static void PredictLumaReference<TPixel>(Picture reference, int x, int y, int width, int height, int mvX, int mvY, Span<TPixel> output, int outputStride, int component = 0)
-        where TPixel : unmanaged, IBinaryInteger<TPixel>
+        where TPixel : unmanaged
     {
         var (origin, stride, maxY) = Plane(reference, reference.LumaStride, reference.HeightInMbs * 16);
         int maxX = (reference.WidthInMbs * 16) - 1;
@@ -38,7 +38,7 @@ internal static partial class InterPrediction
         int xFrac = mvX & 3;
         int yFrac = mvY & 3;
 
-        int S(int sx, int sy) => int.CreateTruncating(src[origin + (Math.Clamp(sy, 0, maxY) * stride) + Math.Clamp(sx, 0, maxX)]);
+        int S(int sx, int sy) => Samples.ToInt(src[origin + (Math.Clamp(sy, 0, maxY) * stride) + Math.Clamp(sx, 0, maxX)]);
 
         // Half-sample values before rounding (b1, h1 and j1 of 8.4.2.2.1).
         int B1(int sx, int sy) => Tap(S(sx - 2, sy), S(sx - 1, sy), S(sx, sy), S(sx + 1, sy), S(sx + 2, sy), S(sx + 3, sy));
@@ -76,7 +76,7 @@ internal static partial class InterPrediction
                     _ => Avg(Center(J1(gx, gy)), Half(H1(gx + 1, gy))),         // k (3, 2)
                 };
 
-                output[(j * outputStride) + i] = TPixel.CreateTruncating(value);
+                output[(j * outputStride) + i] = Samples.From<TPixel>(value);
             }
         }
     }
@@ -87,12 +87,12 @@ internal static partial class InterPrediction
     /// whose chroma has the luma's rows, its vertical component doubled.
     /// </summary>
     public static void PredictChromaReference<TPixel>(Picture reference, int component, TPixel[] dest, int stride, int x, int y, int width, int height, int mvX, int mvY)
-        where TPixel : unmanaged, IBinaryInteger<TPixel> =>
+        where TPixel : unmanaged =>
         PredictChromaReference(reference, component, x, y, width, height, mvX, mvY, dest.AsSpan((y * stride) + x), stride);
 
     /// <summary>The same, written to <paramref name="output"/> (the block's top-left); field views as for luma.</summary>
     public static void PredictChromaReference<TPixel>(Picture reference, int component, int x, int y, int width, int height, int mvX, int mvY, Span<TPixel> output, int outputStride)
-        where TPixel : unmanaged, IBinaryInteger<TPixel>
+        where TPixel : unmanaged
     {
         var (origin, stride, maxY) = Plane(reference, reference.ChromaStride, reference.HeightInMbs * reference.MbHeightC);
         int maxX = (reference.WidthInMbs * 8) - 1;
@@ -100,7 +100,7 @@ internal static partial class InterPrediction
         int xFrac = mvX & 7;
         int yFrac = mvY & 7;
 
-        int S(int sx, int sy) => int.CreateTruncating(src[origin + (Math.Clamp(sy, 0, maxY) * stride) + Math.Clamp(sx, 0, maxX)]);
+        int S(int sx, int sy) => Samples.ToInt(src[origin + (Math.Clamp(sy, 0, maxY) * stride) + Math.Clamp(sx, 0, maxX)]);
 
         for (int j = 0; j < height; j++)
         {
@@ -112,7 +112,7 @@ internal static partial class InterPrediction
                     + (xFrac * (8 - yFrac) * S(ax + 1, ay))
                     + ((8 - xFrac) * yFrac * S(ax, ay + 1))
                     + (xFrac * yFrac * S(ax + 1, ay + 1));
-                output[(j * outputStride) + i] = TPixel.CreateTruncating((value + 32) >> 6);
+                output[(j * outputStride) + i] = Samples.From<TPixel>((value + 32) >> 6);
             }
         }
     }
@@ -122,7 +122,7 @@ internal static partial class InterPrediction
     /// for 8-bit samples, <see cref="PredictLuma16"/> for deeper ones.
     /// </summary>
     public static void PredictLumaBlock<TPixel>(Picture reference, int x, int y, int width, int height, int mvX, int mvY, Span<TPixel> output, int outputStride, int component = 0)
-        where TPixel : unmanaged, IBinaryInteger<TPixel>
+        where TPixel : unmanaged
     {
         if (typeof(TPixel) == typeof(byte))
         {
@@ -135,7 +135,7 @@ internal static partial class InterPrediction
 
     /// <summary>A chroma block of any sample type, as <see cref="PredictLumaBlock"/>.</summary>
     public static void PredictChromaBlock<TPixel>(Picture reference, int component, int x, int y, int width, int height, int mvX, int mvY, Span<TPixel> output, int outputStride)
-        where TPixel : unmanaged, IBinaryInteger<TPixel>
+        where TPixel : unmanaged
     {
         if (typeof(TPixel) == typeof(byte))
         {
@@ -148,7 +148,7 @@ internal static partial class InterPrediction
 
     /// <summary>The rounded average of two predictions (8.4.2.3.1), of any sample type, as <see cref="Average(ReadOnlySpan{byte}, ReadOnlySpan{byte}, int, int, int, Span{byte}, int)"/>.</summary>
     public static void AverageBlock<TPixel>(ReadOnlySpan<TPixel> a, ReadOnlySpan<TPixel> b, int stride, int width, int height, Span<TPixel> output, int outputStride)
-        where TPixel : unmanaged, IBinaryInteger<TPixel>
+        where TPixel : unmanaged
     {
         if (typeof(TPixel) == typeof(byte))
         {
@@ -160,7 +160,7 @@ internal static partial class InterPrediction
         {
             for (int i = 0; i < width; i++)
             {
-                output[(j * outputStride) + i] = TPixel.CreateTruncating((int.CreateTruncating(a[(j * stride) + i]) + int.CreateTruncating(b[(j * stride) + i]) + 1) >> 1);
+                output[(j * outputStride) + i] = Samples.From<TPixel>((Samples.ToInt(a[(j * stride) + i]) + Samples.ToInt(b[(j * stride) + i]) + 1) >> 1);
             }
         }
     }

@@ -1,6 +1,6 @@
 # Colour and geometry metadata for 0.5.0 (2026-10-31)
 
-A design, decided (below). The first pull request (H.264's VUI, the enums and `VideoFrame`'s properties) is done. It comes from the review of the repository's decisions
+A design, decided (below). The first two pull requests (H.264's VUI, the enums and `VideoFrame`'s properties; MJPEG) are done. It comes from the review of the repository's decisions
 (2026-10-31): the frames carry no colour information, so a consumer cannot convert them to RGB correctly, and this is
 the gap in the API most likely to matter next.
 

@@ -16,6 +16,8 @@ internal static class JpegMarker
     public const byte Sos = 0xDA;
     public const byte Dqt = 0xDB;
     public const byte Dri = 0xDD;
+    public const byte App0 = 0xE0; // JFIF, AVI1
+    public const byte Com = 0xFE;
     public const byte Tem = 0x01;
 
     public static bool IsStandalone(byte marker) => marker is Tem or (>= Rst0 and <= Eoi);

@@ -323,4 +323,12 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.Mjpeg/MjpegDecoder.cs",
          find="height < _streamHeight * 3 / 4", replace="height <= _streamHeight * 3 / 4",
          tests="FullyQualifiedName~Mjpeg"),
+    # FFmpeg's colour properties for JPEG (T.81 leaves them open): a gray image's range is unspecified, not full
+    # (gray.avi, ImageMagick's), and its encoder's "CS=ITU601" comment means limited range (mjpeg-limited-range.avi).
+    dict(file="src/ManagedCodecs.Mjpeg/MjpegDecoder.cs",
+         find="frame.Format == PixelFormat.Gray8 ? ColorRange.Unspecified : ", replace="",
+         tests="FullyQualifiedName~Mjpeg"),
+    dict(file="src/ManagedCodecs.Mjpeg/MjpegDecoder.cs",
+         find="_limitedRange = true;", replace="_limitedRange = false;",
+         tests="FullyQualifiedName~Mjpeg"),
 ]

@@ -179,9 +179,11 @@ What the samples mean, for a converter to RGB or a player to go by: `ColorRange`
 `ColorTransfer` (PQ and HLG among them) and `ColorMatrix` (the YCbCr to RGB coefficients), with ITU-T H.273's values
 as FFmpeg's `color_range`, `color_primaries`, `color_transfer` and `color_space` have them; `ChromaLocation`; and
 `SampleAspectRatio` (a frame is shown `Width` times it wide; 0:1 when unknown). In H.264 they are the SPS's VUI as
-FFmpeg reads it (docs/conformance.md, Colour and aspect ratio). Nothing is guessed: most streams leave the matrix
-unspecified, which usually means BT.601 below 720 lines and BT.709 from 720, in limited range. MJPEG frames and the
-MP4 container's 'colr', 'pasp' and rotation do not say anything yet (docs/decisions/2026-10-31-colour-metadata.md).
+FFmpeg reads it (docs/conformance.md, Colour and aspect ratio). Nothing is guessed: most H.264 streams leave the
+matrix unspecified, which usually means BT.601 below 720 lines and BT.709 from 720, in limited range. MJPEG frames are
+BT.601 (`Bt470BG`) with centred chroma, full range (limited where FFmpeg's encoder said so), and take the JFIF
+density's aspect ratio, as FFmpeg gives them (docs/conformance.md, MJPEG). The MP4 container's 'colr', 'pasp' and
+rotation are not read yet (docs/decisions/2026-10-31-colour-metadata.md).
 
 An MP4 file's tracks can be read one at a time: `new Mp4Demuxer(stream, MediaTypes.Video)` leaves the audio track out
 (no sample table, no packets, `Audio` null). `ReadPacketInfo()` lists the packets without their data, each one's

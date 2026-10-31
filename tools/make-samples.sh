@@ -22,6 +22,10 @@ ff -f lavfi -i testsrc2=size=320x240:rate=25 -t 1 -c:v mjpeg -pix_fmt yuvj444p -
 ff -f lavfi -i testsrc2=size=320x240:rate=25 -t 1 -c:v mjpeg -pix_fmt yuvj422p -q:v 3 -threads 4 -slices 4 samples/testsrc-rst.avi
 # Annex K Huffman tables; the conformance tests also decode this one with DHT stripped
 ff -f lavfi -i testsrc2=size=320x240:rate=25 -t 1 -c:v mjpeg -pix_fmt yuvj420p -q:v 3 -huffman default samples/testsrc-stdhuff.avi
+# The samples' meaning (name.color): limited range, which FFmpeg's encoder marks with a "CS=ITU601" comment (and its
+# decoder then gives yuv420p, tv), and a JFIF density of 2:1, the frames' aspect ratio.
+ff -f lavfi -i testsrc2=size=320x240:rate=25 -t 0.2 -c:v mjpeg -pix_fmt yuv420p -strict -1 -q:v 3 samples/mjpeg-limited-range.avi
+ff -f lavfi -i testsrc2=size=320x240:rate=25,setsar=2/1 -t 0.2 -c:v mjpeg -pix_fmt yuvj420p -q:v 3 samples/mjpeg-sar.avi
 # Noise at the highest quality: large coefficients exercise the IDCT's full range
 ff -f lavfi -i testsrc2=size=320x240:rate=25,noise=alls=60:allf=t -t 1 -c:v mjpeg -pix_fmt yuvj420p -q:v 1 samples/noise-q1.avi
 # A dropped frame: with MP3 alongside, FFmpeg's muxer writes an empty '00dc' chunk after the first frame while

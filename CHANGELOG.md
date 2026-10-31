@@ -21,8 +21,10 @@ run time.
 - What each decoded frame's samples mean: `VideoFrame.ColorRange`, `ColorPrimaries`, `ColorTransfer`, `ColorMatrix`
   and `ChromaLocation` (new enums with ITU-T H.273's values, FFmpeg's `color_range`, `color_primaries`,
   `color_transfer`, `color_space` and `chroma_location`) and `SampleAspectRatio`, from H.264's VUI as FFmpeg reads it
-  (compared with ffprobe on every H.264 sample). New public API: the next release is a minor version. MJPEG and the
-  MP4 container's values follow (docs/decisions/2026-10-31-colour-metadata.md).
+  (compared with ffprobe on every H.264 sample). New public API: the next release is a minor version. MJPEG frames
+  too, as FFmpeg gives them: BT.601, centred chroma, full range (limited after FFmpeg's encoder's "CS=ITU601"
+  comment), the JFIF density's aspect ratio. The MP4 container's values follow
+  (docs/decisions/2026-10-31-colour-metadata.md).
 
 ### Changed
 

@@ -25,3 +25,4 @@ samples/*.f32
 samples/realworld
 .claude/worktrees/
 fuzz-work/
+__pycache__/

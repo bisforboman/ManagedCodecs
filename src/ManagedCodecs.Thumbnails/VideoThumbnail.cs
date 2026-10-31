@@ -154,12 +154,14 @@ public static class VideoThumbnail
             _decoder = video.Codec == CodecIds.H264 ? new H264Decoder(video) { ConcealErrors = true } : new MjpegDecoder(video);
 
             // The time from the file's start, as ffmpeg's -ss: 10% in, at most 10 s, unless said; in the stream's time
-            // base rounded up, so the first frame at or after it is the one shown.
+            // base to the nearest unit (halves up), as FFmpeg rescales -ss, and the first frame at or after that is the
+            // one shown. Where the time base is a frame's (AVI's MJPEG, a 1/24 MP4 track) that is the frame nearest the
+            // time: FFmpeg's -ss 5.2208 on Sintel's trailer (1/24) gives the frame at 5.2083, not 5.25 (realworld.py).
             var (duration, start) = VideoProbe.Timing(demuxer);
             _start = start;
             var at = options.At ?? TimeSpan.FromTicks(Math.Min(duration.Ticks / 10, TimeSpan.TicksPerSecond * 10));
             double seconds = start + at.TotalSeconds;
-            _target = (long)Math.Ceiling(seconds * video.TimeBase.Denominator / video.TimeBase.Numerator);
+            _target = (long)Math.Round(seconds * video.TimeBase.Denominator / video.TimeBase.Numerator, MidpointRounding.AwayFromZero);
             try
             {
                 demuxer.Seek(_target, video.StreamIndex);

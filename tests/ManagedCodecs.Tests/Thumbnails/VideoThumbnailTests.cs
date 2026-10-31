@@ -60,8 +60,12 @@ public class VideoThumbnailTests
         string stem = match.Groups[1].Value;
         string file = File.Exists(TestSamples.PathOf(stem + ".mp4")) ? stem + ".mp4" : stem + ".avi";
         var at = TimeSpan.FromMilliseconds(int.Parse(match.Groups[2].Value, System.Globalization.CultureInfo.InvariantCulture));
-        var thumbnail = Compare(file, TestSamples.PathOf(reference), at, VideoProbe.Read(TestSamples.PathOf(file)));
-        Assert.True(thumbnail.Time >= at - TimeSpan.FromMilliseconds(1), $"Shown at {thumbnail.Time}, before {at}.");
+        var info = VideoProbe.Read(TestSamples.PathOf(file));
+        var thumbnail = Compare(file, TestSamples.PathOf(reference), at, info);
+
+        // The frame nearest the time where the time base is a frame's (testsrc-420.at610: the frame at 600), else the
+        // first at or after it: within a frame of it either way.
+        Assert.True((thumbnail.Time - at).Duration().TotalSeconds <= 1 / info.FramesPerSecond, $"Shown at {thumbnail.Time}, a frame or more from {at}.");
     }
 
     [Fact]

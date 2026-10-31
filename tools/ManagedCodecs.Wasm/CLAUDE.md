@@ -15,3 +15,8 @@ The repository's CLAUDE.md (process, core idea, cross-cutting gotchas) applies t
   0xFFFF becomes 0), so narrow only values the narrower type holds, comparison masks as signed lanes
   (`NarrowMasks`; dotnet/runtime#136688). Such a bug shows only after warm-up, so a file can decode right alone and wrong after others:
   find it with a probe that runs the vector function against its scalar reference many thousand times in the bundle.
+- Compiled ahead of time (`wasm-check.sh aot`, .NET 10.0.13), a method that caught an exception through a filter
+  (`catch (Exception e) when (...)`) read its string argument as empty afterwards, in the catch and after it
+  (`ThumbnailOutput.Line`'s name); the interpreter and the native build kept it, and a plain `catch` that rethrows the
+  others did too. The decoders' own filters (H.264's `when (ConcealErrors)`) run on error paths the samples don't
+  reach under AOT: suspect this first if one misbehaves there.

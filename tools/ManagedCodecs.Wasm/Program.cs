@@ -4,10 +4,17 @@ using System.Runtime.Intrinsics;
 using ManagedCodecs.Cli;
 
 // The decoders on WebAssembly: prints the hash of each file's decoded output, as `mcdec --hash` does natively
-// (tools/wasm-check.sh compares the two), and on stderr how long a decode takes here.
-//   node main.mjs [--loops N] <file>...   (from the AppBundle directory; files are read through Node)
+// (tools/wasm-check.sh compares the two), and on stderr how long a decode takes here; with --thumbnails, each file's
+// probe and thumbnail line instead, as `mcdec --thumbnail-hash` does.
+//   node main.mjs [--thumbnails] [--loops N] <file>...   (from the AppBundle directory; files are read through Node)
 int loops = 1;
 var files = args.ToList();
+bool thumbnails = files.Count > 0 && files[0] == "--thumbnails";
+if (thumbnails)
+{
+    files.RemoveAt(0);
+}
+
 if (files.Count >= 2 && files[0] == "--loops")
 {
     loops = int.Parse(files[1]);
@@ -22,11 +29,11 @@ foreach (var file in files)
     string line = "";
     for (int loop = 0; loop < loops; loop++)
     {
-        line = OutputHash.Line(file, data);
+        line = thumbnails ? ThumbnailOutput.Line(file, data) : OutputHash.Line(file, data);
     }
 
     Console.WriteLine(line);
-    Console.Error.WriteLine($"{file}: {watch.Elapsed.TotalMilliseconds / loops:F1} ms a decode");
+    Console.Error.WriteLine($"{file}: {watch.Elapsed.TotalMilliseconds / loops:F1} ms a {(thumbnails ? "thumbnail" : "decode")}");
 }
 
 return 0;

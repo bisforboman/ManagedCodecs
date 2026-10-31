@@ -5,6 +5,7 @@
     <Project Path="src/ManagedCodecs.Mjpeg/ManagedCodecs.Mjpeg.csproj" />
     <Project Path="src/ManagedCodecs.H264/ManagedCodecs.H264.csproj" />
     <Project Path="src/ManagedCodecs.Aac/ManagedCodecs.Aac.csproj" />
+    <Project Path="src/ManagedCodecs.Unity/ManagedCodecs.Unity.csproj" />
     <Project Path="src/ManagedCodecs/ManagedCodecs.csproj" />
   </Folder>
   <Folder Name="/tests/">

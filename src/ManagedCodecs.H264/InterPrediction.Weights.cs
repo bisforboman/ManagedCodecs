@@ -1,7 +1,9 @@
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+#if NET
 using System.Runtime.Intrinsics;
+#endif
 
 namespace ManagedCodecs.H264;
 
@@ -43,6 +45,7 @@ internal static partial class InterPrediction
         }
     }
 
+#if NET
     /// <summary>
     /// <see cref="WeightOneReference"/> for 8-bit samples, a row of up to 16 at a time in 16-bit lanes: with weights
     /// and offsets of -128 to 127 (7.4.3.2) every step stays within 16 bits. Rows are read as 16 bytes.
@@ -63,7 +66,9 @@ internal static partial class InterPrediction
             StorePartial(ClampNarrow(low, high), ref Unsafe.Add(ref dest, j * outputStride), width);
         }
     }
+#endif
 
+#if NET
     /// <summary><see cref="WeightBothReference"/> for 8-bit samples, in 32-bit lanes (the sum of two products needs 17 bits).</summary>
     public static void WeightBoth(ReadOnlySpan<byte> prediction0, ReadOnlySpan<byte> prediction1, int stride, int width, int height, Span<byte> output, int outputStride, int w0, int w1, int o, int logWd)
     {
@@ -89,12 +94,16 @@ internal static partial class InterPrediction
             StorePartial(ClampNarrow(low, high), ref Unsafe.Add(ref dest, j * outputStride), width);
         }
     }
+#endif
 
     // One bi-predicted lane group, clamped to 0..255 already, so that it narrows to 16 bits as it is.
+#if NET
     private static Vector128<int> Sum(Vector128<int> p0, Vector128<int> p1, Vector128<int> w0, Vector128<int> w1, Vector128<int> round, int shift, Vector128<int> offset) =>
         Vector128.Min(Vector128.Max((((p0 * w0) + (p1 * w1) + round) >> shift) + offset, Vector128<int>.Zero), Vector128.Create(255));
+#endif
 
     // Clip1 of sixteen 16-bit values, as bytes.
+#if NET
     private static Vector128<byte> ClampNarrow(Vector128<short> low, Vector128<short> high)
     {
         var max = Vector128.Create((short)255);
@@ -102,6 +111,7 @@ internal static partial class InterPrediction
             Vector128.Min(Vector128.Max(low, Vector128<short>.Zero), max).AsUInt16(),
             Vector128.Min(Vector128.Max(high, Vector128<short>.Zero), max).AsUInt16());
     }
+#endif
 
     private static void CheckWeightBounds(int predictionLength, int stride, int height, int outputLength, int outputStride, int width)
     {

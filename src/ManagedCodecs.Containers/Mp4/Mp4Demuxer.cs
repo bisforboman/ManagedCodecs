@@ -1284,10 +1284,10 @@ public sealed class Mp4Demuxer : IDemuxer
 
                 if (edits.Count == 0)
                 {
-                    start = (long)((Int128)empty * Timescale / movieTimescale);
+                    start = ScaleTime(empty, Timescale, 0, movieTimescale);
                 }
 
-                long length = (long)((((Int128)duration * Timescale) + (movieTimescale / 2)) / movieTimescale);
+                long length = ScaleTime(duration, Timescale, movieTimescale / 2, movieTimescale);
                 edits.Add(new Edit(start, mediaTime, length));
                 start += length;
             }
@@ -1602,6 +1602,19 @@ public sealed class Mp4Demuxer : IDemuxer
 
             return box.AsSpan(8, (int)(count * entrySize));
         }
+    }
+
+    /// <summary>
+    /// value * mul + add, over div, without overflowing the product (edit list times in a movie's timescale moved to a
+    /// track's): Int128 on .NET, BigInteger on netstandard2.1 (the Unity build), which has no Int128.
+    /// </summary>
+    private static long ScaleTime(long value, long mul, long add, long div)
+    {
+#if NET
+        return (long)((((Int128)value * mul) + add) / div);
+#else
+        return (long)((((System.Numerics.BigInteger)value * mul) + add) / div);
+#endif
     }
 
     /// <summary>Box types (FourCCs) as big-endian integers.</summary>

@@ -1,8 +1,14 @@
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+#if NET
 using System.Runtime.Intrinsics;
+#endif
+#if NET
 using System.Runtime.Intrinsics.Arm;
+#endif
+#if NET
 using System.Runtime.Intrinsics.X86;
+#endif
 
 namespace ManagedCodecs.Mjpeg;
 
@@ -50,6 +56,7 @@ internal static class SimpleIdct
     /// </summary>
     public static void Put(Span<short> block, Span<byte> dest, int stride)
     {
+#if NET
         if (Avx2.IsSupported)
         {
             PutAvx2(block, dest, stride);
@@ -61,6 +68,7 @@ internal static class SimpleIdct
             PutVector128(block, dest, stride);
         }
         else
+#endif
         {
             PutScalar(block, dest, stride);
         }
@@ -188,6 +196,7 @@ internal static class SimpleIdct
         dest[7 * stride] = Clamp((a0 - b0) >> ColShift);
     }
 
+#if NET
     internal static void PutAvx2(Span<short> block, Span<byte> dest, int stride)
     {
         if (block.Length < 64)
@@ -267,7 +276,9 @@ internal static class SimpleIdct
         StoreRows(ref output, stride, 4, y4, y5);
         StoreRows(ref output, stride, 6, y6, y7);
     }
+#endif
 
+#if NET
     /// <summary>
     /// The shared even/odd butterfly of both passes. <paramref name="a"/> is the scaled and
     /// rounded DC term; the outputs are a0 + b0, a1 + b1, ..., a0 - b0 in output order.
@@ -321,7 +332,9 @@ internal static class SimpleIdct
         o6 = a1 - b1;
         o7 = a0 - b0;
     }
+#endif
 
+#if NET
     /// <summary>Shifts a row-pass result down and keeps its low 16 bits, like a C store to int16_t.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static Vector128<short> NarrowRow(Vector256<int> value)
@@ -330,7 +343,9 @@ internal static class SimpleIdct
         var truncated = Avx2.ShiftRightArithmetic(Avx2.ShiftLeftLogical(Avx2.ShiftRightArithmetic(value, RowShift), 16), 16);
         return Sse2.PackSignedSaturate(truncated.GetLower(), truncated.GetUpper());
     }
+#endif
 
+#if NET
     /// <summary>Shifts two column-pass rows down, clamps them to 0..255 and stores them.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void StoreRows(ref byte dest, int stride, int y, Vector256<int> upper, Vector256<int> lower)
@@ -346,7 +361,9 @@ internal static class SimpleIdct
         Unsafe.WriteUnaligned(ref Unsafe.Add(ref dest, y * stride), bytes.GetElement(0));
         Unsafe.WriteUnaligned(ref Unsafe.Add(ref dest, (y + 1) * stride), bytes.GetElement(1));
     }
+#endif
 
+#if NET
     /// <summary>8x8 transpose of 16-bit values held as eight rows.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void Transpose(
@@ -386,7 +403,9 @@ internal static class SimpleIdct
         r6 = Sse2.UnpackLow(b3, b7).AsInt16();
         r7 = Sse2.UnpackHigh(b3, b7).AsInt16();
     }
+#endif
 
+#if NET
     /// <summary>
     /// <see cref="PutAvx2"/> in 128-bit vectors with <see cref="Vector128"/> operations only:
     /// each 32-bit butterfly runs on the low and the high four rows (or columns) in turn.
@@ -465,7 +484,9 @@ internal static class SimpleIdct
         StoreRow128(ref output, 6 * stride, l6, h6);
         StoreRow128(ref output, 7 * stride, l7, h7);
     }
+#endif
 
+#if NET
     /// <summary>The butterfly of <see cref="Butterfly"/> on four lanes.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void HalfButterfly(
@@ -508,7 +529,9 @@ internal static class SimpleIdct
         o6 = a1 - b1;
         o7 = a0 - b0;
     }
+#endif
 
+#if NET
     /// <summary>Shifts a column-pass row down, clamps it to 0..255 and stores its eight bytes.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void StoreRow128(ref byte dest, int offset, Vector128<int> rowLow, Vector128<int> rowHigh)
@@ -519,7 +542,9 @@ internal static class SimpleIdct
         var bytes = Vector128.Narrow(Vector128.Narrow(low, high).AsUInt16(), Vector128<ushort>.Zero).AsUInt64();
         Unsafe.WriteUnaligned(ref Unsafe.Add(ref dest, offset), bytes.ToScalar());
     }
+#endif
 
+#if NET
     /// <summary>
     /// <see cref="Transpose"/> with <see cref="Vector128"/> operations: each unpack takes the
     /// low or high halves of two vectors, spread over every other lane by a constant shuffle,
@@ -563,6 +588,7 @@ internal static class SimpleIdct
         r6 = Vector128.Create(b3.GetLower(), b7.GetLower()).AsInt16();
         r7 = Vector128.Create(b3.GetUpper(), b7.GetUpper()).AsInt16();
     }
+#endif
 
     private static void CheckDestination(Span<byte> dest, int stride)
     {

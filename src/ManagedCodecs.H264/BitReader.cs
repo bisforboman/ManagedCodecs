@@ -102,17 +102,26 @@ internal sealed class BitReader
     /// <summary>The reads of <see cref="BitReader"/> on locals (<see cref="Begin"/>).</summary>
     public ref struct Cursor
     {
+#if NET
         private readonly ref byte _data;
+#endif
         private readonly byte[] _array;
         private readonly int _length;
 
         public Cursor(byte[] data, int length, long position)
         {
             _array = data;
+#if NET
             _data = ref MemoryMarshal.GetArrayDataReference(data);
+#endif
             _length = length;
             Position = position;
         }
+
+#if !NET
+        // netstandard2.1's runtimes have no ref fields: the array's first element, found each time.
+        private readonly ref byte _data => ref MemoryMarshal.GetArrayDataReference(_array);
+#endif
 
         public long Position { readonly get; private set; }
 

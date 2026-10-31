@@ -210,11 +210,25 @@ internal static class Cavlc
     }
 
     /// <summary>The levels of one block, on the stack without a stack allocation's probe.</summary>
+#if NET
     [InlineArray(16)]
     private struct Levels
     {
         private int _element;
     }
+#else
+    // netstandard2.1's runtimes have no inline arrays: a fixed buffer, indexed as the inline array is.
+    private unsafe struct Levels
+    {
+        private fixed int _elements[16];
+
+        public int this[int index]
+        {
+            readonly get => _elements[index];
+            set => _elements[index] = value;
+        }
+    }
+#endif
 
     /// <summary>level_prefix (9.2.2.1): the number of leading zero bits before a one.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

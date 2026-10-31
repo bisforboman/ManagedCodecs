@@ -44,7 +44,9 @@ console where the platform's decoder differs, tools and editors, deterministic r
 The owner (2026-10-31), against the recommendation to keep it parked:
 
 - **What to do now. Decided:** build the MonoGame sample now: an MP4 played into a texture each frame, YUV converted
-  by a shader, audio through `DynamicSoundEffectInstance`, on modern .NET with no change to the packages; it builds in
+  to RGBA on the CPU and uploaded with `Texture2D.SetData` (a shader would be cheaper, but MonoGame's effect compiler,
+  mgfxc, needs Wine on Linux, so it comes later if the CPU conversion is the bottleneck), audio through
+  `DynamicSoundEffectInstance`, on modern .NET with no change to the packages; it builds in
   CI (a window and a GPU are not there, so it runs only on a developer's machine). The recommendation was to leave
   #254 parked with these numbers.
 - **Unity. Decided:** multi-target, as a separate package: a netstandard2.1 build of the decoders with the scalar

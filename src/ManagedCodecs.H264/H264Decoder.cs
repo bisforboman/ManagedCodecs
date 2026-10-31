@@ -692,6 +692,12 @@ public sealed class H264Decoder : IVideoDecoder
             _references.Clear();
             _referenceLost = false;
         }
+        else if (_references.Any(p => !FitsFormat(p, sps)))
+        {
+            // A new SPS takes effect only at an IDR picture (7.4.1.2.1): references of another size or format, from before
+            // one that broke the rule, are lost to this picture (its inter slices fail, or conceal) rather than read as its own.
+            _references.Clear();
+        }
         else if (!secondField)
         {
             InferGapFrames(header, sps);
@@ -962,13 +968,17 @@ public sealed class H264Decoder : IVideoDecoder
         }
     }
 
+    /// <summary>Whether <paramref name="picture"/> has the size, chroma format and bit depth of <paramref name="sps"/>'s pictures.</summary>
+    private static bool FitsFormat(Picture picture, SequenceParameterSet sps) =>
+        picture.WidthInMbs == sps.WidthInMbs && picture.HeightInMbs == sps.HeightInMbs && picture.MbHeightC == sps.MbHeightC
+        && picture.MbWidthC == sps.MbWidthC && picture.BitDepth == sps.BitDepthLuma && picture.SeparatePlanes == sps.SeparateColourPlanes;
+
     /// <summary>A picture of the stream's size that is not a reference, reused when one is free.</summary>
     private Picture TakePicture(SequenceParameterSet sps, int frameNum, int poc)
     {
         // A picture whose frame was returned by the previous call may be reused: borrowed frames
         // are valid until the next call. One waiting in the output queue may not.
-        bool Fits(Picture p) => p.WidthInMbs == sps.WidthInMbs && p.HeightInMbs == sps.HeightInMbs && p.MbHeightC == sps.MbHeightC
-            && p.MbWidthC == sps.MbWidthC && p.BitDepth == sps.BitDepthLuma && p.SeparatePlanes == sps.SeparateColourPlanes;
+        bool Fits(Picture p) => FitsFormat(p, sps);
         _pictures.RemoveAll(p => !Fits(p) && !_references.Contains(p) && !_output.Holds(p) && !InUse(p));
         var picture = _pictures.Find(p => Fits(p) && !_references.Contains(p) && !_output.Holds(p) && !InUse(p));
         if (picture is null)

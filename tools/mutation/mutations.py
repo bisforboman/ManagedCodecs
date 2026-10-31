@@ -156,6 +156,11 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.H264/H264Decoder.cs",
          find="&& FrameNumAfter(first.Header) == header.FrameNum", replace="&& first.Header.FrameNum == header.FrameNum",
          tests="DisplayName~paff-mmco5"),
+    # A non-IDR picture activating an SPS of another size or format (against 7.4.1.2.1): the references, of the old
+    # format, are dropped rather than read as the new one's (the fuzzing finding casts 16-bit planes to 8-bit).
+    dict(file="src/ManagedCodecs.H264/H264Decoder.cs",
+         find="else if (_references.Any(p => !FitsFormat(p, sps)))", replace="else if (false)",
+         tests="DisplayName~sps-format-change-without-idr"),
 
     # ---- AVI (as FFmpeg reads it)
     # An empty video chunk (a dropped frame) gives no packet but takes its tick.

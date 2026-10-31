@@ -27,6 +27,9 @@ internal sealed class ReferenceList
     /// <summary>True while <paramref name="picture"/> is marked as a reference, short or long term.</summary>
     public bool Contains(Picture picture) => _pictures.Contains(picture);
 
+    /// <summary>True if a picture marked as a reference matches <paramref name="match"/>.</summary>
+    public bool Any(Predicate<Picture> match) => _pictures.Exists(match);
+
     /// <summary>RefPicList0 for a P slice of the current picture.</summary>
     public List<Picture> BuildList(SliceHeader header, SequenceParameterSet sps)
     {

@@ -540,42 +540,40 @@ internal sealed class PsProcessor
         // (slot, subband) is computed as it would be subband by subband, so the output is the same to the bit.
         Span<int> linkIndex = stackalloc int[3];
         _linkIndex.CopyTo(linkIndex);
-        Span<double> delayedRe = stackalloc double[64];
-        Span<double> delayedIm = stackalloc double[64];
+        Span<double> duck = stackalloc double[64];
         int d = _delayIndex;
         for (int i = 0; i < Slots; i++)
         {
             var hybridDelayRe = _hybridDelayRe[d];
             var hybridDelayIm = _hybridDelayIm[d];
+            var slotRatio = ratio[i];
             for (int gr = 0; gr < layout.SubQmfGroups; gr++)
             {
                 int sb = layout.GroupBorders[gr];
                 var (outRe, outIm) = AllPass(_leftRe[i][sb], _leftIm[i][sb], sb, 1, hybridDelayRe, hybridDelayIm, layout.HybridPhase, _hybridLinkRe, _hybridLinkIm, layout.HybridLinkPhase, linkIndex);
-                double duck = ratio[i][layout.GroupBins[gr]];
-                _rightRe[i][sb] = duck * outRe;
-                _rightIm[i][sb] = duck * outIm;
+                double factor = slotRatio[layout.GroupBins[gr]];
+                _rightRe[i][sb] = factor * outRe;
+                _rightIm[i][sb] = factor * outIm;
+            }
+
+            // Each QMF subband's ducking factor, its group's.
+            int first = layout.GroupBorders[layout.SubQmfGroups];
+            for (int gr = layout.SubQmfGroups; gr < layout.Groups; gr++)
+            {
+                duck[layout.GroupBorders[gr]..layout.GroupBorders[gr + 1]].Fill(slotRatio[layout.GroupBins[gr]]);
             }
 
             var inRe = re[i];
             var inIm = im[i];
             var outRow = rightRe[i];
             var outRowIm = rightIm[i];
-            AllPassRow(inRe, inIm, layout.GroupBorders[layout.SubQmfGroups], AllPassBands, layout.QmfDecay, _qmfDelayRe[d], _qmfDelayIm[d], _qmfLinkRe, _qmfLinkIm, linkIndex, delayedRe, delayedIm);
+            AllPassRow(inRe, inIm, first, AllPassBands, layout.QmfDecay, _qmfDelayRe[d], _qmfDelayIm[d], _qmfLinkRe, _qmfLinkIm, linkIndex, outRow, outRowIm);
+            Duck(duck, first, AllPassBands, outRow, outRowIm);
 
             // The plain delays: what went in 14 slots ago below band 35, one slot ago from it up.
-            Delay(inRe, inIm, AllPassBands, ShortDelayBands, _qmfDelayRe[_qmfDelayIndex], _qmfDelayIm[_qmfDelayIndex], delayedRe, delayedIm);
-            Delay(inRe, inIm, ShortDelayBands, 64, _qmfDelayRe[0], _qmfDelayIm[0], delayedRe, delayedIm);
+            DuckDelay(inRe, inIm, duck, AllPassBands, ShortDelayBands, _qmfDelayRe[_qmfDelayIndex], _qmfDelayIm[_qmfDelayIndex], outRow, outRowIm);
+            DuckDelay(inRe, inIm, duck, ShortDelayBands, 64, _qmfDelayRe[0], _qmfDelayIm[0], outRow, outRowIm);
             _qmfDelayIndex = _qmfDelayIndex + 1 >= LongDelay ? 0 : _qmfDelayIndex + 1;
-            for (int gr = layout.SubQmfGroups; gr < layout.Groups; gr++)
-            {
-                double duck = ratio[i][layout.GroupBins[gr]];
-                for (int sb = layout.GroupBorders[gr]; sb < layout.GroupBorders[gr + 1]; sb++)
-                {
-                    outRow[sb] = duck * delayedRe[sb];
-                    outRowIm[sb] = duck * delayedIm[sb];
-                }
-            }
-
             d = d + 1 >= AllPassDelay ? 0 : d + 1;
             for (int link = 0; link < 3; link++)
             {
@@ -587,13 +585,50 @@ internal sealed class PsProcessor
         linkIndex.CopyTo(_linkIndex);
     }
 
-    // Subbands first .. end - 1 of a plain delay line's row: out what it held, in what comes now.
-    private static void Delay(ReadOnlySpan<double> inRe, ReadOnlySpan<double> inIm, int first, int end, double[] rowRe, double[] rowIm, Span<double> outRe, Span<double> outIm)
+    // Subbands first .. end - 1 of a slot, ducked in place: one multiply each.
+    internal static void Duck(ReadOnlySpan<double> duck, int first, int end, Span<double> re, Span<double> im)
     {
-        rowRe.AsSpan(first..end).CopyTo(outRe[first..end]);
-        rowIm.AsSpan(first..end).CopyTo(outIm[first..end]);
-        inRe[first..end].CopyTo(rowRe.AsSpan(first..end));
-        inIm[first..end].CopyTo(rowIm.AsSpan(first..end));
+        int sb = first;
+        if (Vector128.IsHardwareAccelerated)
+        {
+            for (; sb + 2 <= end; sb += 2)
+            {
+                var factor = Vector128.Create(duck[sb..]);
+                (factor * Vector128.Create<double>(re[sb..])).CopyTo(re[sb..]);
+                (factor * Vector128.Create<double>(im[sb..])).CopyTo(im[sb..]);
+            }
+        }
+
+        for (; sb < end; sb++)
+        {
+            re[sb] *= duck[sb];
+            im[sb] *= duck[sb];
+        }
+    }
+
+    // Subbands first .. end - 1 of a plain delay line's row: out what it held, ducked, and in what comes now.
+    internal static void DuckDelay(ReadOnlySpan<double> inRe, ReadOnlySpan<double> inIm, ReadOnlySpan<double> duck, int first, int end, double[] rowRe, double[] rowIm, Span<double> outRe, Span<double> outIm)
+    {
+        int sb = first;
+        if (Vector128.IsHardwareAccelerated)
+        {
+            for (; sb + 2 <= end; sb += 2)
+            {
+                var factor = Vector128.Create(duck[sb..]);
+                (factor * Vector128.Create<double>(rowRe.AsSpan(sb))).CopyTo(outRe[sb..]);
+                (factor * Vector128.Create<double>(rowIm.AsSpan(sb))).CopyTo(outIm[sb..]);
+                Vector128.Create(inRe[sb..]).CopyTo(rowRe.AsSpan(sb));
+                Vector128.Create(inIm[sb..]).CopyTo(rowIm.AsSpan(sb));
+            }
+        }
+
+        for (; sb < end; sb++)
+        {
+            outRe[sb] = duck[sb] * rowRe[sb];
+            outIm[sb] = duck[sb] * rowIm[sb];
+            rowRe[sb] = inRe[sb];
+            rowIm[sb] = inIm[sb];
+        }
     }
 
     /// <summary>The decay of the all-pass links by QMF subband: 1 up to <paramref name="cutoff"/>, then falling by DecaySlope a subband.</summary>

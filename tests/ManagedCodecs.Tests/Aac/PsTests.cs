@@ -291,4 +291,54 @@ public class PsTests
             }
         }
     }
+
+    /// <summary>
+    /// The decorrelator's vector ducking (in place, and out of a plain delay line) is one multiply a subband: the same
+    /// outputs and delay line, to the bit, as the definition, from the first subband to one past the last, tails included.
+    /// </summary>
+    [Theory]
+    [InlineData(3, 23)]
+    [InlineData(23, 35)]
+    [InlineData(35, 64)]
+    [InlineData(4, 5)]
+    public void PsDucking_MatchesScalar(int first, int end)
+    {
+        var random = new Random((first * 64) + end);
+        double[] Row() => [.. Enumerable.Range(0, 64).Select(_ => (random.NextDouble() - 0.5) * Math.Pow(10, random.Next(-3, 4)))];
+        for (int trial = 0; trial < 20; trial++)
+        {
+            var duck = Row();
+            var inRe = Row();
+            var inIm = Row();
+            var rowRe = Row();
+            var rowIm = Row();
+            var re = Row();
+            var im = Row();
+            var expectedRe = (double[])re.Clone();
+            var expectedIm = (double[])im.Clone();
+            var expectedRowRe = (double[])rowRe.Clone();
+            var expectedRowIm = (double[])rowIm.Clone();
+            var outRe = new double[64];
+            var outIm = new double[64];
+            var expectedOutRe = new double[64];
+            var expectedOutIm = new double[64];
+            for (int sb = first; sb < end; sb++)
+            {
+                expectedRe[sb] = duck[sb] * re[sb];
+                expectedIm[sb] = duck[sb] * im[sb];
+                expectedOutRe[sb] = duck[sb] * rowRe[sb];
+                expectedOutIm[sb] = duck[sb] * rowIm[sb];
+                (expectedRowRe[sb], expectedRowIm[sb]) = (inRe[sb], inIm[sb]);
+            }
+
+            PsProcessor.Duck(duck, first, end, re, im);
+            PsProcessor.DuckDelay(inRe, inIm, duck, first, end, rowRe, rowIm, outRe, outIm);
+            Assert.Equal(expectedRe, re);
+            Assert.Equal(expectedIm, im);
+            Assert.Equal(expectedOutRe, outRe);
+            Assert.Equal(expectedOutIm, outIm);
+            Assert.Equal(expectedRowRe, rowRe);
+            Assert.Equal(expectedRowIm, rowIm);
+        }
+    }
 }

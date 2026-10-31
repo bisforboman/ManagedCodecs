@@ -44,6 +44,8 @@ run time.
   (which the standard forbids) no longer throws InvalidCastException or reads its references as the new format: they
   are dropped, so the picture's inter slices fail with InvalidDataException, or are concealed with `ConcealErrors`.
   Found by fuzzing.
+- AAC: parametric stereo that keeps fine IID indices (a frame without envelopes) under a header with coarse ones
+  throws InvalidDataException, as FFmpeg rejects it, rather than IndexOutOfRangeException. Found by fuzzing.
 
 ## 0.4.0 – 2026-10-30
 

@@ -133,7 +133,7 @@ MUTATIONS = [
          find="&& sps.Crop.Top == 0 && sps.Crop.Left == 0", replace="&& sps.Crop.Left == 0",
          tests="DisplayName~h264-container-crop"),
     dict(file="src/ManagedCodecs.H264/H264Decoder.cs",
-         find="&& RoundUp16(_containerHeight) == RoundUp16(sps.Height)", replace="",
+         find="&& RoundUp16(containerHeight) == RoundUp16(sps.Height)", replace="",
          tests="DisplayName~h264-container-crop"),
     # Long-term field pictures (reference: JM's decoder; FFmpeg breaks the second): an IDR field marked long-term by
     # long_term_reference_flag; a field taking a LongTermFrameIdx keeps it on the other field of its own frame.

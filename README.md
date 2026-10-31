@@ -188,7 +188,8 @@ container's say, before anything is decoded: `ColorRange`, `ColorPrimaries`, `Co
 'colr', `SampleAspectRatio` from 'pasp', and `Rotation` (0, 90, 180 or 270 degrees counter-clockwise, from the track
 and movie matrices: phone video) for a player to turn the frames by, which the decoders do not. A decoder made from
 the stream gives its frames the container's colour where the bitstream says none, and the container's ratio where it
-has one, as ffprobe shows FFmpeg's frames.
+has one, as ffprobe shows FFmpeg's frames. An AVI file's has the sample aspect ratio of its 'vprp' (OpenDML's video
+properties, which FFmpeg's muxer writes), and nothing else of these.
 
 An MP4 file's tracks can be read one at a time: `new Mp4Demuxer(stream, MediaTypes.Video)` leaves the audio track out
 (no sample table, no packets, `Audio` null). `ReadPacketInfo()` lists the packets without their data, each one's

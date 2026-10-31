@@ -343,6 +343,12 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.Mjpeg/MjpegDecoder.cs",
          find="_limitedRange = true;", replace="_limitedRange = false;",
          tests="FullyQualifiedName~Mjpeg"),
+    # MJPEG frames take the container's aspect ratio where it has one, over the JFIF density, as ffprobe shows FFmpeg's
+    # frames (mjpeg-vprp-conflict: AVI's 'vprp' 4:3 over JFIF's 2:1).
+    dict(file="src/ManagedCodecs.Mjpeg/MjpegDecoder.cs",
+         find="frame.SampleAspectRatio = _stream is { SampleAspectRatio.Numerator: > 0 } ? _stream.SampleAspectRatio : _aspectRatio;",
+         replace="frame.SampleAspectRatio = _aspectRatio;",
+         tests="DisplayName~mjpeg-vprp-conflict"),
     # MJPEG frames take the container's primaries and transfer, which JPEG has none of (mjpeg-colr).
     dict(file="src/ManagedCodecs.Mjpeg/MjpegDecoder.cs",
          find="frame.ColorPrimaries = _stream?.ColorPrimaries ?? ColorPrimaries.Unspecified;", replace="frame.ColorPrimaries = ColorPrimaries.Unspecified;",

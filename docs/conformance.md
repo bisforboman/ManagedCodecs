@@ -24,8 +24,12 @@ as for H.264). T.81 leaves them open; JFIF implies BT.601 YCbCr in full range wi
 - Both are kept for the rest of the stream: a stream whose first image alone had the comment, or a JFIF density of
   3:2, gave tv, or 3:2, for every frame; a later JFIF replaces the ratio. `MjpegColorTests` covers these.
 
-As for H.264, ffprobe's ratio prefers the container's (AVI's 'vprp', MP4's 'pasp'); FFmpeg's muxers write it from the
-same source as the JFIF density, so on the samples they agree.
+As for H.264, ffprobe's ratio prefers the container's (AVI's 'vprp', MP4's 'pasp'), and so does a decoder made from
+the stream (`MjpegDecoder(VideoStreamInfo)`): FFmpeg's muxers write it from the same source as the JFIF density, so
+`mjpeg-vprp-conflict` patches the 'vprp' (tools/avi-vprp.py; a 16:9 picture, 4:3 samples at 320x240, over JFIF's 2:1)
+and its frames read 4:3. `AviDemuxer` reads 'vprp' as FFmpeg's avidec does: the picture's ratio (dwFrameAspectRatio,
+Y in the low word) over the frame's (dwFrameWidthInPixels over dwFrameHeightInLines), none with a zero anywhere or a
+chunk of 36 bytes or fewer (`AviDemuxerTests`; `DisplayTests` compares every AVI with ffprobe's stream).
 
 ## Real films
 
@@ -70,7 +74,7 @@ them (6.1.1): the visual sample entry's 'colr' ('nclx', its full range flag clea
 without a range; ICC profiles ignored; a later 'colr' replacing an earlier one's values; code points FFmpeg does not
 name unspecified) and 'pasp' (in lowest terms; a zero unknown), and the rotation of the track's matrix ('tkhd') times
 the movie's ('mvhd'), which FFmpeg multiplies too (a 90-degree 'mvhd' alone gave ffprobe's rotation 90). ffprobe's
-stream shows the container's ratio and the rotation (`name.display`, `Mp4DisplayTests`; `h264-rotate-90`, `-180`, `-270`
+stream shows the container's ratio and the rotation (`name.display`, `DisplayTests`; `h264-rotate-90`, `-180`, `-270`
 from `-display_rotation`, which ffprobe prints as 90, -180 and -90: here 90, 180, 270); its stream colour is the
 decoder's once it has decoded frames, so 'colr' is checked through the frames (`h264-colr-only`, `mjpeg-colr`).
 `Mp4DemuxerTests` builds what no muxer at hand writes: 'nclc', a profile between two 'colr's, undefined code points,

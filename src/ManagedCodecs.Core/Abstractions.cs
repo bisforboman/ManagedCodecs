@@ -117,7 +117,7 @@ public sealed record VideoStreamInfo(
     public ColorMatrix ColorMatrix { get; init; } = ColorMatrix.Unspecified;
 
     /// <summary>
-    /// The sample aspect ratio as the container says it (MP4's 'pasp'), in lowest terms; 0:1 where it says nothing. A
+    /// The sample aspect ratio as the container says it (MP4's 'pasp', AVI's 'vprp'), in lowest terms; 0:1 where it says nothing. A
     /// decoder given this stream gives its frames this ratio where there is one, as ffprobe shows frames (FFmpeg's
     /// <c>av_guess_sample_aspect_ratio</c> prefers the container's).
     /// </summary>

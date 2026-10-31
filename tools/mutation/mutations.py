@@ -330,6 +330,17 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.Containers/Mp4/Mp4Demuxer.cs",
          find="? ColorRange.Full : ColorRange.Limited) : Color.Range;", replace="? ColorRange.Full : ColorRange.Unspecified) : Color.Range;",
          tests="FullyQualifiedName~Mp4DemuxerTests|DisplayName~h264-colr-only"),
+    # FFmpeg's codec context keeps the range and colour description an SPS leaves out (h264_init_ps).
+    dict(file="src/ManagedCodecs.H264/VideoSignal.cs",
+         find="var signal = RangeSent ? this : this with { Range = previous.Range, RangeSent = previous.RangeSent };", replace="var signal = this;",
+         tests="FullyQualifiedName~VideoSignalTests"),
+    dict(file="src/ManagedCodecs.H264/VideoSignal.cs",
+         find="if (ColourSent)\n        {\n            return signal;", replace="if (true)\n        {\n            return signal;",
+         tests="FullyQualifiedName~VideoSignalTests"),
+    # The decoder's signal reaches each frame (and the conformance tests compare it with name.color).
+    dict(file="src/ManagedCodecs.H264/H264Decoder.cs",
+         find="_signal = sps.Signal.After(_signal);", replace="",
+         tests="DisplayName~h264-color-bt2020-pq"),
     # ---- MJPEG
     # FFmpeg takes an image of less than 3/4 of the stream's height (integer division) as a field.
     dict(file="src/ManagedCodecs.Mjpeg/MjpegDecoder.cs",

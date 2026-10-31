@@ -22,6 +22,9 @@ run time.
 - HE-AAC decodes faster, bit for bit as before: 5.9% off `heaac/heaac-5.1.mp4`'s steady frame on GitHub's x64
   runner and 4.9% on its ARM64 runner, 3.3% and 3.0% off `heaac/heaacv2-stereo.mp4` (`compare.yml` against main).
   The QMF banks sum their windows' terms in registers, four vectors at a time, in the same order as before.
+- AAC decodes faster, bit for bit as before: 10.8% off `aac-stereo-48k.mp4`'s steady frame on GitHub's x64 runner
+  and 9.3% on its ARM64 runner, 9.8% and 8.5% off `aac-5.1.mp4`, 3.4% and 1.9% off `heaac/heaac-5.1.mp4`
+  (`compare.yml` against main). The IMDCT's pre-twiddle and fold take two samples a vector.
 
 ## 0.4.0 – 2026-10-30
 

@@ -69,6 +69,15 @@ Decoding straight into the output frame: opt-in, `MjpegDecoder.ZeroCopy` (6% few
 
 ## MP4 demuxing
 
+`VideoProbe` (ManagedCodecs.Thumbnails) is checked against ffprobe on every MP4 and AVI sample with H.264 or MJPEG
+video (make-samples.sh's name.probe.json): `format=duration` within 1.5 µs, width and height, sample aspect ratio,
+rotation, average frame rate and the audio stream's rate and channels. The duration is the streams' container
+durations as FFmpeg reads them: MP4's edits' length, but no longer than the samples they take (JM's field-picture
+files edit to the last field's pts, their samples lasting half a frame), else 'mdhd''s, or the samples' when longer (a
+fragmented file's 'mdhd' counts only the samples in 'moov'); AVI's 'strh' length, and AVI's audio, which the demuxer
+does not expose, is not counted (avi-dropped-frame's MP3 outlasts its video). H.264's size is the decoder's frame size
+from the SPS, which can crop the container's.
+
 `VideoStreamInfo`'s colour properties, aspect ratio and rotation are the container's, as FFmpeg's mov demuxer reads
 them (6.1.1): the visual sample entry's 'colr' ('nclx', its full range flag clear meaning limited; QuickTime's 'nclc',
 without a range; ICC profiles ignored; a later 'colr' replacing an earlier one's values; code points FFmpeg does not

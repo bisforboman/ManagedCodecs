@@ -32,6 +32,7 @@ in between. That comparison is not measured here.
 | `src/ManagedCodecs.Containers` | `AviDemuxer`, `Mp4Demuxer`, `AdtsDemuxer` (raw .aac), and `Demuxer.Open` to pick one by content |
 | `src/ManagedCodecs.Mjpeg` | `MjpegDecoder`: baseline/extended Huffman JPEG, interlaced AVI1, bit-exact with FFmpeg |
 | `src/ManagedCodecs.H264` | `H264Decoder`: Constrained Baseline, Main, High, High 10, High 4:2:2 and High 4:4:4 Predictive profile H.264 (CAVLC, CABAC, I/P/B, weighted prediction, 8x8 transform, scaling matrices, deblocking, monochrome, 4:2:0, 4:2:2 and 4:4:4, also as separate colour planes, 8 to 14 bits, lossless, progressive and interlaced), bit-exact |
+| `src/ManagedCodecs.Thumbnails` | `VideoProbe`: a video file's duration, displayed size, codecs and rotation as ffprobe reports them, without decoding; the `ManagedCodecs.Thumbnails` package (see Probing a video), thumbnails to come (docs/decisions/2026-10-31-thumbnails.md) |
 | `src/ManagedCodecs.Unity` | The netstandard2.1 build for Unity (Mono, IL2CPP): every decoder's sources in one assembly, without the vector paths, 1 to 3.4 times slower on CoreCLR; the `ManagedCodecs.Unity` package (see Unity) |
 | `src/ManagedCodecs.Aac` | `AacDecoder`: AAC LC (mono to 7.1, M/S, intensity, PNS, TNS), within 3e-7 of FFmpeg's float output; HE-AAC (spectral band replication) |
 | `src/Shared` | Source files linked into several codec projects (the VLC decoder) |
@@ -125,6 +126,8 @@ dotnet add package ManagedCodecs
 ```
 
 For Unity (Mono, IL2CPP), `ManagedCodecs.Unity` instead (see Unity, below).
+For a video's facts (and later its thumbnail) in a web back end or a browser, `ManagedCodecs.Thumbnails` (see Probing a
+video, below).
 
 Building from source requires the .NET 10 SDK. The tests also need samples made with FFmpeg (with libx264) and ImageMagick:
 
@@ -326,6 +329,23 @@ hour each of `mjpeg` and `aac` after that (17 and 18 million inputs) found nothi
 minutes of `h264` seeded with the long-term field samples alone (4.4 million inputs, with and without concealment)
 found nothing, and `ReferenceListTests` marks random field pictures with random memory management operations and
 checks the lists after each.
+
+### Probing a video
+
+`ManagedCodecs.Thumbnails`'s `VideoProbe.Read(stream)` gives an MP4 or AVI file's facts without decoding a frame:
+`Duration` as ffprobe's `format=duration`, the coded and the displayed size (stretched by the pixels' aspect ratio,
+wider above 1 and taller below, then turned by the rotation), codec, frame rate, rotation and the audio's codec, rate
+and channels. Each is checked against ffprobe on every sample (VideoProbeTests). The stream must be seekable (an MP4
+file's index can follow its data): buffer an upload first. A codec this library does not decode throws
+`NotSupportedException`, a file without video `InvalidDataException`; AVI's audio is not read, so an AVI lasts as long
+as its video. The duration comes from the streams' `Duration` (`VideoStreamInfo`, `AudioStreamInfo`), which the
+demuxers give as FFmpeg's stream duration: MP4's edits' length, capped at the samples they take, else the track's,
+AVI's stream header length.
+
+```csharp
+var info = VideoProbe.Read("upload.mp4");
+Console.WriteLine($"{info.Duration} {info.DisplayWidth}x{info.DisplayHeight} {info.Codec}");
+```
 
 ### Unity
 

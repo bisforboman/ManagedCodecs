@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Probing and (from its later pull requests) thumbnails for uploads nobody vetted, without FFmpeg:
+       docs/decisions/2026-10-31-thumbnails.md. A package of its own, so a consumer who only decodes takes on none of it. -->
+  <PropertyGroup>
+    <RootNamespace>ManagedCodecs.Thumbnails</RootNamespace>
+    <PackageId>ManagedCodecs.Thumbnails</PackageId>
+    <Description>The basic facts of a video file (duration, displayed size, codecs, rotation) without FFmpeg, in pure managed C#, for web back ends, serverless functions and WebAssembly; thumbnails to come.</Description>
+    <PackageTags>$(PackageTags);thumbnail;probe;ffprobe</PackageTags>
+    <IsAotCompatible>true</IsAotCompatible>
+    <!-- No release of this package on nuget.org yet, so package validation has no baseline to compare with (the one in
+         Directory.Build.props is the other packages'); the pull request that sets the baseline after its first release
+         removes this line. -->
+    <PackageValidationBaselineVersion></PackageValidationBaselineVersion>
+  </PropertyGroup>
+
+  <!-- Its own page on nuget.org in place of the shared PACKAGE.md (Directory.Build.props). -->
+  <ItemGroup>
+    <None Remove="$(MSBuildThisFileDirectory)..\..\PACKAGE.md" />
+    <None Include="PACKAGE.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="ManagedCodecs.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ManagedCodecs.Core\ManagedCodecs.Core.csproj" />
+    <ProjectReference Include="..\ManagedCodecs.Containers\ManagedCodecs.Containers.csproj" />
+    <ProjectReference Include="..\ManagedCodecs.Mjpeg\ManagedCodecs.Mjpeg.csproj" />
+    <ProjectReference Include="..\ManagedCodecs.H264\ManagedCodecs.H264.csproj" />
+  </ItemGroup>
+
+</Project>

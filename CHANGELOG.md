@@ -1,7 +1,7 @@
 # Changelog
 
 Versions are git tags (`vX.Y.Z`); each one publishes every package (ManagedCodecs.Core, .Containers, .Mjpeg, .H264,
-.Aac, .Unity and the ManagedCodecs meta-package) to nuget.org at that version, and a GitHub release with this file's section
+.Aac, .Thumbnails, .Unity and the ManagedCodecs meta-package) to nuget.org at that version, and a GitHub release with this file's section
 as its notes. `release.yml` releases on the push to main that brings a version heading not yet tagged, so a release
 is a pull request that turns "Unreleased" into "## X.Y.Z – date" and runs `tools/ship-public-api.py`. From 0.1.0 on, the
 public API changes only in a new minor version (0.2.0, 0.3.0, ...), with a "Breaking changes" entry; a patch version
@@ -15,6 +15,11 @@ run time.
 
 ### Added
 
+- `ManagedCodecs.Thumbnails`, a new package: `VideoProbe.Read` gives an MP4 or AVI file's duration, displayed size,
+  codecs, frame rate, rotation and audio facts as ffprobe reports them, without decoding (README, Probing a video;
+  docs/decisions/2026-10-31-thumbnails.md, pull request 2). Thumbnails themselves come later.
+- `VideoStreamInfo.Duration` and `AudioStreamInfo.Duration`: a stream's length as the container gives it, as FFmpeg's
+  stream duration (MP4's edits, capped at the samples they take, else the track's; AVI's stream header length).
 - `ManagedCodecs.Unity`, a new package: every decoder and demuxer in one assembly for .NET Standard 2.1, which Unity's
   Mono and IL2CPP load. It is the scalar build (no `System.Runtime.Intrinsics` there), with the same output to the bit
   and on Mono 6.12 4 to 19 times the time of the other packages on .NET 10 (audio, MJPEG and small

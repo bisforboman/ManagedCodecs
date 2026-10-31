@@ -1028,9 +1028,7 @@ public sealed class H264Decoder : IVideoDecoder
     /// </summary>
     private (int Width, int Height) OutputSize(SequenceParameterSet sps)
     {
-        if (_containerWidth > 0 && _containerHeight > 0 && sps.Crop.Top == 0 && sps.Crop.Left == 0
-            && RoundUp16(_containerWidth) == RoundUp16(sps.Width) && RoundUp16(_containerHeight) == RoundUp16(sps.Height)
-            && _containerWidth <= sps.Width && _containerHeight <= sps.Height)
+        if (TakesContainerSize(sps, _containerWidth, _containerHeight))
         {
             return (_containerWidth, _containerHeight);
         }
@@ -1038,8 +1036,37 @@ public sealed class H264Decoder : IVideoDecoder
         _containerWidth = 0;
         _containerHeight = 0;
         return (sps.Width, sps.Height);
+    }
+
+    private static bool TakesContainerSize(SequenceParameterSet sps, int containerWidth, int containerHeight)
+    {
+        return containerWidth > 0 && containerHeight > 0 && sps.Crop.Top == 0 && sps.Crop.Left == 0
+            && RoundUp16(containerWidth) == RoundUp16(sps.Width) && RoundUp16(containerHeight) == RoundUp16(sps.Height)
+            && containerWidth <= sps.Width && containerHeight <= sps.Height;
 
         static int RoundUp16(int n) => (n + 15) & ~15;
+    }
+
+    /// <summary>
+    /// The size of the stream's first frames as a decoder for it gives them (<see cref="OutputSize"/>), from the first
+    /// SPS of its configuration record without decoding; null without one. For the thumbnail package's probe.
+    /// </summary>
+    internal static (int Width, int Height)? FrameSize(VideoStreamInfo stream)
+    {
+        var config = AvcConfiguration.Parse(stream.CodecPrivate.Span);
+        foreach (var data in config.Sps)
+        {
+            var nal = NalUnit.Parse(data);
+            if (nal.Type != NalUnitType.Sps)
+            {
+                continue;
+            }
+
+            var sps = SequenceParameterSet.Parse(nal.CreateReader());
+            return TakesContainerSize(sps, stream.Width, stream.Height) ? (stream.Width, stream.Height) : (sps.Width, sps.Height);
+        }
+
+        return null;
     }
 
     /// <summary>Copies the visible area (<paramref name="size"/> from the top left of the SPS's, see OutputSize) into a new frame.</summary>

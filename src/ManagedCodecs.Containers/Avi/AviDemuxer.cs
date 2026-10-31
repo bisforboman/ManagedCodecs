@@ -103,6 +103,7 @@ public sealed class AviDemuxer : IDemuxer
             Video = new VideoStreamInfo(NormalizeCodec(header.Codec), header.Width, header.Height, fps, header.TotalFrames, timeBase, ReadOnlyMemory<byte>.Empty, _videoStreamIndex)
             {
                 SampleAspectRatio = header.AspectRatio,
+                Duration = header.Length,
             };
         }
         catch (Exception e) when (Malformed.IsMalformedInput(e))
@@ -275,12 +276,13 @@ public sealed class AviDemuxer : IDemuxer
             }
             else if (id == "LIST" && size >= 4 && ReadFourCC(_stream) == "strl")
             {
-                if (info.VideoStreamIndex < 0 && TryReadVideoStream(pos + 12, Math.Min(pos + 8 + size, end), out string codec, out uint scale, out uint rate, out var aspectRatio))
+                if (info.VideoStreamIndex < 0 && TryReadVideoStream(pos + 12, Math.Min(pos + 8 + size, end), out string codec, out uint scale, out uint rate, out uint length, out var aspectRatio))
                 {
                     info.VideoStreamIndex = streamCount;
                     info.Codec = codec;
                     info.Scale = scale;
                     info.Rate = rate;
+                    info.Length = length;
                     info.AspectRatio = aspectRatio;
                 }
 
@@ -293,15 +295,16 @@ public sealed class AviDemuxer : IDemuxer
         return info;
     }
 
-    private bool TryReadVideoStream(long start, long end, out string codec, out uint scale, out uint rate, out Rational aspectRatio)
+    private bool TryReadVideoStream(long start, long end, out string codec, out uint scale, out uint rate, out uint length, out Rational aspectRatio)
     {
         codec = "????";
         scale = 0;
         rate = 0;
+        length = 0;
         aspectRatio = new(0, 1);
         bool isVideo = false;
         Span<byte> bitmapInfo = stackalloc byte[20];
-        Span<byte> streamHeader = stackalloc byte[28];
+        Span<byte> streamHeader = stackalloc byte[36];
         Span<byte> properties = stackalloc byte[32];
 
         long pos = start;
@@ -312,11 +315,16 @@ public sealed class AviDemuxer : IDemuxer
 
             if (id == "strh" && size >= 28)
             {
-                // AVISTREAMHEADER: fccType at 0, dwScale at 20, dwRate at 24.
-                _stream.ReadExactly(streamHeader);
+                // AVISTREAMHEADER: fccType at 0, dwScale at 20, dwRate at 24, dwLength (in dwScale / dwRate ticks) at 32.
+                _stream.ReadExactly(streamHeader[..28]);
                 isVideo = streamHeader[..4].SequenceEqual("vids"u8);
                 scale = BinaryPrimitives.ReadUInt32LittleEndian(streamHeader[20..]);
                 rate = BinaryPrimitives.ReadUInt32LittleEndian(streamHeader[24..]);
+                if (size >= 36)
+                {
+                    _stream.ReadExactly(streamHeader[28..36]);
+                    length = BinaryPrimitives.ReadUInt32LittleEndian(streamHeader[32..]);
+                }
             }
             else if (id == "strf" && isVideo && size >= 20)
             {
@@ -381,6 +389,9 @@ public sealed class AviDemuxer : IDemuxer
         public uint Scale { get; set; }
 
         public uint Rate { get; set; }
+
+        /// <summary>The video stream header's dwLength, in its ticks.</summary>
+        public uint Length { get; set; }
 
         public int Width { get; set; }
 

@@ -202,6 +202,21 @@ MUTATIONS = [
          find="int otherStart = otherBase is { } b ? other.KeyframeAtOrBefore(Rescale(pts, seekedBase, b)) : 0;", replace="int otherStart = 0;",
          tests="FullyQualifiedName~SeekTests"),
 
+    # A stream's duration as FFmpeg gives it (VideoProbe's against ffprobe's): an edit lasts no longer than the samples it
+    # takes (JM's field-picture files) ...
+    dict(file="src/ManagedCodecs.Containers/Mp4/Mp4Demuxer.cs",
+         find="return Math.Min(edited, total);", replace="return edited;",
+         tests="FullyQualifiedName~VideoProbeTests"),
+    # ... and a fragmented file's samples outlast its 'mdhd'.
+    dict(file="src/ManagedCodecs.Containers/Mp4/Mp4Demuxer.cs",
+         find="return Math.Max(MediaDuration, total);", replace="return MediaDuration;",
+         tests="FullyQualifiedName~VideoProbeTests"),
+    # The probe's H.264 frame size is the SPS's visible area or the container's crop of it, as the decoder's frames.
+    dict(file="src/ManagedCodecs.H264/H264Decoder.cs",
+         find="return TakesContainerSize(sps, stream.Width, stream.Height) ? (stream.Width, stream.Height) : (sps.Width, sps.Height);",
+         replace="return (stream.Width, stream.Height);",
+         tests="FullyQualifiedName~VideoProbeTests"),
+
     # ---- AAC
     # A FAAC stream's encoder delay, which FFmpeg skips (its name in a fill element).
     dict(file="src/ManagedCodecs.Aac/AacDecoder.cs",

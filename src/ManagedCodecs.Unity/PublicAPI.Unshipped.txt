@@ -1,8 +1,4 @@
 #nullable enable
-const ManagedCodecs.CodecIds.Aac = "AAC" -> string!
-const ManagedCodecs.CodecIds.H264 = "H264" -> string!
-const ManagedCodecs.CodecIds.Mjpeg = "MJPG" -> string!
-const ManagedCodecs.CodecIds.Mpeg4Visual = "MP4V" -> string!
 ManagedCodecs.Aac.AacDecoder
 ManagedCodecs.Aac.AacDecoder.AacDecoder(ManagedCodecs.AudioStreamInfo! stream) -> void
 ManagedCodecs.Aac.AacDecoder.AacDecoder(System.ReadOnlySpan<byte> audioSpecificConfig) -> void
@@ -31,6 +27,8 @@ ManagedCodecs.AudioStreamInfo.Codec.init -> void
 ManagedCodecs.AudioStreamInfo.CodecPrivate.get -> System.ReadOnlyMemory<byte>
 ManagedCodecs.AudioStreamInfo.CodecPrivate.init -> void
 ManagedCodecs.AudioStreamInfo.Deconstruct(out string! Codec, out int SampleRate, out int Channels, out long FrameCount, out ManagedCodecs.Rational TimeBase, out System.ReadOnlyMemory<byte> CodecPrivate, out int StreamIndex) -> void
+ManagedCodecs.AudioStreamInfo.Duration.get -> long
+ManagedCodecs.AudioStreamInfo.Duration.init -> void
 ManagedCodecs.AudioStreamInfo.Equals(ManagedCodecs.AudioStreamInfo? other) -> bool
 ManagedCodecs.AudioStreamInfo.FrameCount.get -> long
 ManagedCodecs.AudioStreamInfo.FrameCount.init -> void
@@ -126,8 +124,8 @@ ManagedCodecs.Containers.Mp4Demuxer
 ManagedCodecs.Containers.Mp4Demuxer.Audio.get -> ManagedCodecs.AudioStreamInfo?
 ManagedCodecs.Containers.Mp4Demuxer.Dispose() -> void
 ManagedCodecs.Containers.Mp4Demuxer.Mp4Demuxer(System.IO.Stream! stream) -> void
-ManagedCodecs.Containers.Mp4Demuxer.Mp4Demuxer(System.IO.Stream! stream, bool leaveOpen) -> void
 ManagedCodecs.Containers.Mp4Demuxer.Mp4Demuxer(System.IO.Stream! stream, ManagedCodecs.MediaTypes tracks, bool leaveOpen = false) -> void
+ManagedCodecs.Containers.Mp4Demuxer.Mp4Demuxer(System.IO.Stream! stream, bool leaveOpen) -> void
 ManagedCodecs.Containers.Mp4Demuxer.ReadPacketInfo() -> System.Collections.Generic.IEnumerable<ManagedCodecs.PacketInfo>!
 ManagedCodecs.Containers.Mp4Demuxer.ReadPackets() -> System.Collections.Generic.IEnumerable<ManagedCodecs.Packet>!
 ManagedCodecs.Containers.Mp4Demuxer.ReadPacketsAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerable<ManagedCodecs.Packet>!
@@ -314,6 +312,8 @@ ManagedCodecs.VideoStreamInfo.ColorRange.init -> void
 ManagedCodecs.VideoStreamInfo.ColorTransfer.get -> ManagedCodecs.ColorTransfer
 ManagedCodecs.VideoStreamInfo.ColorTransfer.init -> void
 ManagedCodecs.VideoStreamInfo.Deconstruct(out string! Codec, out int Width, out int Height, out double FramesPerSecond, out long FrameCount, out ManagedCodecs.Rational TimeBase, out System.ReadOnlyMemory<byte> CodecPrivate, out int StreamIndex) -> void
+ManagedCodecs.VideoStreamInfo.Duration.get -> long
+ManagedCodecs.VideoStreamInfo.Duration.init -> void
 ManagedCodecs.VideoStreamInfo.Equals(ManagedCodecs.VideoStreamInfo? other) -> bool
 ManagedCodecs.VideoStreamInfo.FrameCount.get -> long
 ManagedCodecs.VideoStreamInfo.FrameCount.init -> void
@@ -332,6 +332,10 @@ ManagedCodecs.VideoStreamInfo.TimeBase.init -> void
 ManagedCodecs.VideoStreamInfo.VideoStreamInfo(string! Codec, int Width, int Height, double FramesPerSecond, long FrameCount, ManagedCodecs.Rational TimeBase, System.ReadOnlyMemory<byte> CodecPrivate, int StreamIndex) -> void
 ManagedCodecs.VideoStreamInfo.Width.get -> int
 ManagedCodecs.VideoStreamInfo.Width.init -> void
+const ManagedCodecs.CodecIds.Aac = "AAC" -> string!
+const ManagedCodecs.CodecIds.H264 = "H264" -> string!
+const ManagedCodecs.CodecIds.Mjpeg = "MJPG" -> string!
+const ManagedCodecs.CodecIds.Mpeg4Visual = "MP4V" -> string!
 override ManagedCodecs.AudioStreamInfo.Equals(object? obj) -> bool
 override ManagedCodecs.AudioStreamInfo.GetHashCode() -> int
 override ManagedCodecs.AudioStreamInfo.ToString() -> string!
@@ -346,8 +350,8 @@ static ManagedCodecs.AudioStreamInfo.operator !=(ManagedCodecs.AudioStreamInfo? 
 static ManagedCodecs.AudioStreamInfo.operator ==(ManagedCodecs.AudioStreamInfo? left, ManagedCodecs.AudioStreamInfo? right) -> bool
 static ManagedCodecs.Containers.AdtsDemuxer.Open(string! path) -> ManagedCodecs.Containers.AdtsDemuxer!
 static ManagedCodecs.Containers.AviDemuxer.Open(string! path) -> ManagedCodecs.Containers.AviDemuxer!
-static ManagedCodecs.Containers.Demuxer.Open(string! path) -> ManagedCodecs.IDemuxer!
 static ManagedCodecs.Containers.Demuxer.Open(System.IO.Stream! stream, bool leaveOpen = false) -> ManagedCodecs.IDemuxer!
+static ManagedCodecs.Containers.Demuxer.Open(string! path) -> ManagedCodecs.IDemuxer!
 static ManagedCodecs.Containers.Mp4Demuxer.Open(string! path) -> ManagedCodecs.Containers.Mp4Demuxer!
 static ManagedCodecs.Packet.operator !=(ManagedCodecs.Packet left, ManagedCodecs.Packet right) -> bool
 static ManagedCodecs.Packet.operator ==(ManagedCodecs.Packet left, ManagedCodecs.Packet right) -> bool
@@ -357,9 +361,9 @@ static ManagedCodecs.PixelFormatExtensions.BitDepth(this ManagedCodecs.PixelForm
 static ManagedCodecs.PixelFormatExtensions.BytesPerSample(this ManagedCodecs.PixelFormat format) -> int
 static ManagedCodecs.PixelFormatExtensions.PlaneCount(this ManagedCodecs.PixelFormat format) -> int
 static ManagedCodecs.PixelFormatExtensions.PlaneSize(this ManagedCodecs.PixelFormat format, int plane, int width, int height) -> (int Width, int Height)
+static ManagedCodecs.Rational.Reduce(long numerator, long denominator) -> ManagedCodecs.Rational
 static ManagedCodecs.Rational.operator !=(ManagedCodecs.Rational left, ManagedCodecs.Rational right) -> bool
 static ManagedCodecs.Rational.operator ==(ManagedCodecs.Rational left, ManagedCodecs.Rational right) -> bool
-static ManagedCodecs.Rational.Reduce(long numerator, long denominator) -> ManagedCodecs.Rational
 static ManagedCodecs.VideoStreamInfo.operator !=(ManagedCodecs.VideoStreamInfo? left, ManagedCodecs.VideoStreamInfo? right) -> bool
 static ManagedCodecs.VideoStreamInfo.operator ==(ManagedCodecs.VideoStreamInfo? left, ManagedCodecs.VideoStreamInfo? right) -> bool
 ~override ManagedCodecs.Packet.Equals(object obj) -> bool

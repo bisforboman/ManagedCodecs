@@ -129,6 +129,13 @@ public sealed record VideoStreamInfo(
     /// matrix that turns by another angle or mirrors. The decoders do not turn frames.
     /// </summary>
     public int Rotation { get; init; }
+
+    /// <summary>
+    /// The stream's length in <c>TimeBase</c> ticks as the container gives it, as FFmpeg's stream duration: MP4's edits'
+    /// summed length (a leading empty edit only moves the start), else the track's 'mdhd' duration, else its samples'
+    /// summed durations; AVI's 'strh' length in frames. 0 where the container says nothing.
+    /// </summary>
+    public long Duration { get; init; }
 }
 
 /// <summary>Basic facts about a container's audio stream.</summary>
@@ -144,7 +151,15 @@ public sealed record AudioStreamInfo(
     long FrameCount,
     Rational TimeBase,
     ReadOnlyMemory<byte> CodecPrivate,
-    int StreamIndex);
+    int StreamIndex)
+{
+    /// <summary>
+    /// The stream's length in <c>TimeBase</c> ticks as the container gives it, as FFmpeg's stream duration: MP4's edits'
+    /// summed length (a leading empty edit only moves the start), else the track's 'mdhd' duration, else its samples'
+    /// summed durations; AVI's 'strh' length in frames. 0 where the container says nothing.
+    /// </summary>
+    public long Duration { get; init; }
+}
 
 /// <summary>Reads packets out of a container format (AVI, MP4, ...).</summary>
 public interface IDemuxer : IDisposable

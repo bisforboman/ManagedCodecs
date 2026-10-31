@@ -187,6 +187,7 @@ public sealed class Mp4Demuxer : IDemuxer
                     ColorMatrix = video.Color.Matrix,
                     SampleAspectRatio = video.AspectRatio,
                     Rotation = Matrix.RotationOf(video.Matrix, movieMatrix),
+                    Duration = video.StreamDuration(movieTimescale, samples),
                 };
             }
 
@@ -206,7 +207,10 @@ public sealed class Mp4Demuxer : IDemuxer
                     samples.Sizes.Count(size => size > 0),
                     new Rational(1, checked((int)audio.Timescale)),
                     audio.CodecPrivate,
-                    audio.StreamIndex);
+                    audio.StreamIndex)
+                {
+                    Duration = audio.StreamDuration(movieTimescale, samples),
+                };
             }
         }
         catch (Exception e) when (Malformed.IsMalformedInput(e))
@@ -746,6 +750,9 @@ public sealed class Mp4Demuxer : IDemuxer
             }
 
             Timescale = ReadUInt32(mdhd, mdhd.Length > 0 && mdhd[0] == 1 ? 20 : 12);
+            MediaDuration = mdhd.Length > 0 && mdhd[0] == 1
+                ? (long)Math.Min(BinaryPrimitives.ReadUInt64BigEndian(Require(mdhd, 32, "mdhd")[24..]), long.MaxValue)
+                : ReadUInt32(Require(mdhd, 20, "mdhd"), 16);
             if (Timescale == 0 || Timescale > int.MaxValue)
             {
                 throw new InvalidDataException($"Invalid track timescale {Timescale}.");
@@ -910,6 +917,38 @@ public sealed class Mp4Demuxer : IDemuxer
         }
 
         public bool HasEditList => _elst is not null;
+
+        /// <summary>'mdhd''s duration, in <see cref="Timescale"/> (0 in fragmented files, whose samples come later).</summary>
+        public long MediaDuration { get; }
+
+        /// <summary>
+        /// The track's duration as FFmpeg gives its stream: the edits' summed length (leading empty edits left out:
+        /// they move the start), else 'mdhd''s or, where longer (fragmented files), the samples' summed durations.
+        /// </summary>
+        public long StreamDuration(uint movieTimescale, SampleTable samples)
+        {
+            long edited = 0;
+            foreach (var edit in Edits(movieTimescale))
+            {
+                edited += edit.Duration;
+            }
+
+            long total = 0;
+            foreach (int duration in samples.Durations)
+            {
+                total += duration;
+            }
+
+            // An edit longer than the samples it takes (JM's files: their edit and 'mdhd' run to the last field's pts,
+            // a field's sample lasting half a frame) lasts as long as those samples do, as FFmpeg's stream duration.
+            if (edited > 0)
+            {
+                return Math.Min(edited, total);
+            }
+
+            // A fragmented file's 'mdhd' counts only the samples in 'moov', if any; its fragments add the rest.
+            return Math.Max(MediaDuration, total);
+        }
 
         public SampleTable BuildSamples(uint movieTimescale)
         {

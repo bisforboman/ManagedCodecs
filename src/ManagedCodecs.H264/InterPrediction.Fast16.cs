@@ -132,6 +132,26 @@ internal static partial class InterPrediction
         var wC = Vector128.Create((8 - xFrac) * yFrac);
         var wD = Vector128.Create(xFrac * yFrac);
         var round = Vector128.Create(32);
+        if (Wide(width))
+        {
+            var wideA = Vector256.Create(wA, wA);
+            var wideB = Vector256.Create(wB, wB);
+            var wideC = Vector256.Create(wC, wC);
+            var wideD = Vector256.Create(wD, wD);
+            var wideRound = Vector256.Create(32);
+            for (int j = 0; j < height; j++)
+            {
+                int upper = j * Window16Stride;
+                int lower = upper + Window16Stride;
+                var sum = (Lanes8(window, upper) * wideA) + (Lanes8(window, upper + 1) * wideB)
+                    + (Lanes8(window, lower) * wideC) + (Lanes8(window, lower + 1) * wideD);
+                sum = (sum + wideRound) >> 6;
+                Vector128.Narrow(sum.GetLower().AsUInt32(), sum.GetUpper().AsUInt32()).CopyTo(output[(j * outputStride)..]);
+            }
+
+            return;
+        }
+
         for (int j = 0; j < height; j++)
         {
             int upper = j * Window16Stride;
@@ -203,6 +223,22 @@ internal static partial class InterPrediction
     /// <summary>b: Clip1((b1 + 16) >> 5) for the half positions right of each G.</summary>
     private static void HalfHorizontal16(ReadOnlySpan<int> window, int origin, int width, int height, Span<int> output, Vector128<int> max)
     {
+        if (Wide(width))
+        {
+            var wideMax = Vector256.Create(max, max);
+            for (int j = 0; j < height; j++)
+            {
+                for (int x = 0; x < width; x += 8)
+                {
+                    int p = origin + (j * Window16Stride) - 2 + x;
+                    var tap = Tap(Lanes8(window, p), Lanes8(window, p + 1), Lanes8(window, p + 2), Lanes8(window, p + 3), Lanes8(window, p + 4), Lanes8(window, p + 5));
+                    Vector256.Clamp((tap + Vector256.Create(16)) >> 5, Vector256<int>.Zero, wideMax).CopyTo(output[((j * Plane16Stride) + x)..]);
+                }
+            }
+
+            return;
+        }
+
         for (int j = 0; j < height; j++)
         {
             for (int x = 0; x < width; x += 4)
@@ -218,6 +254,22 @@ internal static partial class InterPrediction
     private static void HalfVertical16(ReadOnlySpan<int> window, int origin, int width, int height, Span<int> output, Vector128<int> max)
     {
         const int ws = Window16Stride;
+        if (Wide(width))
+        {
+            var wideMax = Vector256.Create(max, max);
+            for (int j = 0; j < height; j++)
+            {
+                for (int x = 0; x < width; x += 8)
+                {
+                    int p = origin + ((j - 2) * ws) + x;
+                    var tap = Tap(Lanes8(window, p), Lanes8(window, p + ws), Lanes8(window, p + (2 * ws)), Lanes8(window, p + (3 * ws)), Lanes8(window, p + (4 * ws)), Lanes8(window, p + (5 * ws)));
+                    Vector256.Clamp((tap + Vector256.Create(16)) >> 5, Vector256<int>.Zero, wideMax).CopyTo(output[((j * Plane16Stride) + x)..]);
+                }
+            }
+
+            return;
+        }
+
         for (int j = 0; j < height; j++)
         {
             for (int x = 0; x < width; x += 4)
@@ -235,6 +287,33 @@ internal static partial class InterPrediction
     {
         // b1 for rows -2 .. height + 2.
         Span<int> b1 = stackalloc int[(Plane16Stride * (16 + 5)) + 4];
+        const int ps = Plane16Stride;
+        if (Wide(width))
+        {
+            for (int j = 0; j < height + 5; j++)
+            {
+                for (int x = 0; x < width; x += 8)
+                {
+                    int p = origin + ((j - 2) * Window16Stride) - 2 + x;
+                    Tap(Lanes8(window, p), Lanes8(window, p + 1), Lanes8(window, p + 2), Lanes8(window, p + 3), Lanes8(window, p + 4), Lanes8(window, p + 5))
+                        .CopyTo(b1[((j * ps) + x)..]);
+                }
+            }
+
+            var wideMax = Vector256.Create(max, max);
+            for (int j = 0; j < height; j++)
+            {
+                for (int x = 0; x < width; x += 8)
+                {
+                    int p = (j * ps) + x;
+                    var tap = Tap(Lanes8(b1, p), Lanes8(b1, p + ps), Lanes8(b1, p + (2 * ps)), Lanes8(b1, p + (3 * ps)), Lanes8(b1, p + (4 * ps)), Lanes8(b1, p + (5 * ps)));
+                    Vector256.Clamp((tap + Vector256.Create(512)) >> 10, Vector256<int>.Zero, wideMax).CopyTo(output[p..]);
+                }
+            }
+
+            return;
+        }
+
         for (int j = 0; j < height + 5; j++)
         {
             for (int x = 0; x < width; x += 4)
@@ -245,7 +324,6 @@ internal static partial class InterPrediction
             }
         }
 
-        const int ps = Plane16Stride;
         for (int j = 0; j < height; j++)
         {
             for (int x = 0; x < width; x += 4)
@@ -260,6 +338,21 @@ internal static partial class InterPrediction
     /// <summary>(a + b + 1) >> 1 of two planes into the output (a plane with itself: a copy).</summary>
     private static void Average16(ReadOnlySpan<int> a, int aStride, int aOrigin, ReadOnlySpan<int> b, int bStride, int bOrigin, int width, int height, Span<ushort> output, int outputStride)
     {
+        if (Wide(width))
+        {
+            var wideOne = Vector256.Create(1);
+            for (int j = 0; j < height; j++)
+            {
+                for (int x = 0; x < width; x += 8)
+                {
+                    var sum = (Lanes8(a, aOrigin + (j * aStride) + x) + Lanes8(b, bOrigin + (j * bStride) + x) + wideOne) >> 1;
+                    Vector128.Narrow(sum.GetLower().AsUInt32(), sum.GetUpper().AsUInt32()).CopyTo(output[((j * outputStride) + x)..]);
+                }
+            }
+
+            return;
+        }
+
         var one = Vector128.Create(1);
         for (int j = 0; j < height; j++)
         {
@@ -272,6 +365,14 @@ internal static partial class InterPrediction
     }
 
     private static Vector128<int> Lanes(ReadOnlySpan<int> data, int offset) => Vector128.Create(data.Slice(offset, 4));
+
+    private static Vector256<int> Lanes8(ReadOnlySpan<int> data, int offset) => Vector256.Create(data.Slice(offset, 8));
+
+    // Eight lanes a step where 256-bit vectors are accelerated (x64 with AVX2) and the block is 8 or 16 wide.
+    private static bool Wide(int width) => Vector256.IsHardwareAccelerated && (width & 7) == 0;
+
+    private static Vector256<int> Tap(Vector256<int> e, Vector256<int> f, Vector256<int> g, Vector256<int> h, Vector256<int> i, Vector256<int> j) =>
+        (e + j) - ((f + i) * 5) + ((g + h) * 20);
 
     private static Vector128<int> Tap(Vector128<int> e, Vector128<int> f, Vector128<int> g, Vector128<int> h, Vector128<int> i, Vector128<int> j) =>
         (e + j) - ((f + i) * 5) + ((g + h) * 20);

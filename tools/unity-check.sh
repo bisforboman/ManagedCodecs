@@ -3,7 +3,8 @@
 # built on: decodes every sample with tools/ManagedCodecs.Cli.Unity under mono and with the net10.0 mcdec
 # (mcdec --hash), fails unless both give the same output frame for frame, and prints each file's time on Mono over
 # the net10.0 build's (docs/decisions/2026-10-31-unity-netstandard.md). The net10.0 build is the one the conformance
-# tests check against FFmpeg, so this carries their result over to Mono.
+# tests check against FFmpeg, so this carries their result over to Mono. Then the same for the Thumbnails package
+# (mcdec --thumbnail-hash on the AVI and MP4 samples).
 #
 # Usage: tools/unity-check.sh
 #   Needs mono (6.12 or later: Ubuntu's 6.8 cannot load netstandard2.1 assemblies) and samples/ (tools/make-samples.sh).
@@ -30,7 +31,20 @@ if ! diff "$work/net.txt" "$work/mono.txt"; then
   exit 1
 fi
 
-echo "The Unity build on Mono ($(mono --version | head -1)) and the net10.0 build agree on all $(wc -l < "$work/net.txt") files."
+# The Thumbnails package's probe and thumbnail of every container file (ThumbnailOutput.Line: the RGBA's hash).
+containers=$(echo "$files" | tr ' ' '\n' | grep -v '\.aac$')
+# shellcheck disable=SC2086
+dotnet tools/ManagedCodecs.Cli/bin/Release/net10.0/mcdec.dll --thumbnail-hash $containers > "$work/net-thumb.txt" 2>&1 ||
+  { cat "$work/net-thumb.txt" >&2; echo "The net10.0 thumbnail run failed (above: its output up to the failing file)." >&2; exit 1; }
+# shellcheck disable=SC2086
+mono tools/ManagedCodecs.Cli.Unity/bin/Release/netstandard2.1/mcdec.dll --thumbnail-hash $containers > "$work/mono-thumb.txt" 2>&1 ||
+  { cat "$work/mono-thumb.txt" >&2; echo "The Mono thumbnail run failed (above: its output up to the failing file)." >&2; exit 1; }
+if ! diff "$work/net-thumb.txt" "$work/mono-thumb.txt"; then
+  echo "The Unity build's thumbnails on Mono differ from the net10.0 build's (above: < net10.0, > Mono)." >&2
+  exit 1
+fi
+
+echo "The Unity build on Mono ($(mono --version | head -1)) and the net10.0 build agree on all $(wc -l < "$work/net.txt") files and $(wc -l < "$work/net-thumb.txt") thumbnails."
 echo
 echo "| File | net10.0 (ms a decode) | Mono (ms a decode) | Mono / net10.0 |"
 echo "| --- | ---: | ---: | ---: |"

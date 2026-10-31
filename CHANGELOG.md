@@ -27,7 +27,9 @@ run time.
   Mono and IL2CPP load. It is the scalar build (no `System.Runtime.Intrinsics` there), with the same output to the bit
   and on Mono 6.12 4 to 19 times the time of the other packages on .NET 10 (audio, MJPEG and small
   cutscenes play; 720p H.264 runs at 12.5 frames a second on one thread). It holds the same types as the other packages, so reference
-  one or the other (README, Unity; docs/decisions/2026-10-31-unity-netstandard.md).
+  one or the other (README, Unity; docs/decisions/2026-10-31-unity-netstandard.md). It includes ManagedCodecs.Thumbnails
+  (`VideoProbe`, `VideoThumbnail`), its PNG written with .NET Standard's `DeflateStream` and its own zlib header and
+  Adler-32.
 - `IDemuxer.Seek(pts, streamIndex)`: the next read starts at the keyframe at or before a time, the other stream at the
   same instant, its packets those a read from the start gives from there (README, Decoding a file). `Mp4Demuxer` seeks in
   every file, `AviDemuxer` in MJPEG; other demuxers throw `NotSupportedException` (a default interface member, so an

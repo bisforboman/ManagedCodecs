@@ -8,6 +8,8 @@ runtimes (Mono, IL2CPP). It is the same C# as the other packages, compiled into 
 - **MJPEG**: baseline and extended Huffman JPEG, interlaced AVI1.
 - **AAC LC and HE-AAC** (SBR, parametric stereo), mono to 7.1.
 - **Containers**: AVI, MP4 (fragmented too) and raw AAC (ADTS).
+- **Thumbnails**: `VideoProbe` (a video file's duration, size as shown, codecs, rotation) and `VideoThumbnail` (one
+  frame as a small upright RGBA image or PNG), as in the ManagedCodecs.Thumbnails package.
 
 It is the scalar build. .NET Standard 2.1 has no `System.Runtime.Intrinsics`, so the SIMD paths are left out and their
 scalar references run instead. The output is the same to the bit: the whole test suite, conformance against FFmpeg

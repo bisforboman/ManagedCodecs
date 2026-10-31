@@ -14,6 +14,8 @@
     <!-- A netstandard2.1 build doesn't copy its package dependencies (System.Runtime.CompilerServices.Unsafe) to the
          output; Mono loads them from beside mcdec.dll. -->
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+    <!-- ThumbnailOutput.cs and the thumbnail hash mode: the Unity package has ManagedCodecs.Thumbnails too. -->
+    <DefineConstants>$(DefineConstants);THUMBNAILS</DefineConstants>
   </PropertyGroup>
 
   <ItemGroup>

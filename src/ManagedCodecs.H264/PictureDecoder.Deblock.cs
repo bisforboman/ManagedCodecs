@@ -1059,9 +1059,21 @@ internal sealed partial class PictureDecoder<TPixel>
     private static void FilterEdgeVector16(ushort[] plane, int q0, int across, int along, int length, ReadOnlySpan<byte> strengths, int segmentShift, int indexA, int alpha, int beta, bool chroma, int bitDepth)
     {
         Span<short> taps = stackalloc short[(8 * 16) + 16];
+
+        // A vertical edge's rows are p3 .. q3 side by side: eight rows a transpose, in and out.
+        bool columns = across == 1 && length % 8 == 0 && q0 - 4 >= 0 && q0 - 4 + ((length - 1) * along) + 8 <= plane.Length;
+        if (columns)
+        {
+            ref ushort first = ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(plane), q0 - 4);
+            for (int h = 0; h < length; h += 8)
+            {
+                Transpose8(ref Unsafe.Add(ref first, h * along), along, ref Unsafe.Add(ref MemoryMarshal.GetReference(taps), h), 16);
+            }
+        }
+
         int firstTap = chroma ? 2 : 0;
         int lastTap = chroma ? 5 : 7;
-        for (int k = firstTap; k <= lastTap; k++)
+        for (int k = firstTap; k <= lastTap && !columns; k++)
         {
             int start = q0 + ((k - 4) * across);
             var row = taps.Slice(k * 16, length);
@@ -1081,6 +1093,18 @@ internal sealed partial class PictureDecoder<TPixel>
         SetLanes(lanes, 0, length, strengths, segmentShift, indexA, alpha, beta, tcShift: bitDepth - 8);
         FilterTaps(taps, length, lanes, chroma, (short)((1 << bitDepth) - 1));
 
+        if (columns)
+        {
+            // Every row back, p3 and q3 (and chroma's p2, p1, q1, q2) as they were.
+            ref ushort first = ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(plane), q0 - 4);
+            for (int h = 0; h < length; h += 8)
+            {
+                Transpose8(ref Unsafe.As<short, ushort>(ref Unsafe.Add(ref MemoryMarshal.GetReference(taps), h)), 16, ref Unsafe.As<ushort, short>(ref Unsafe.Add(ref first, h * along)), along);
+            }
+
+            return;
+        }
+
         // Only p2 .. q2 (luma) or p0, q0 (chroma) can change.
         for (int k = chroma ? 3 : 1; k <= (chroma ? 4 : 6); k++)
         {
@@ -1097,6 +1121,49 @@ internal sealed partial class PictureDecoder<TPixel>
                 plane[start + (i * along)] = (ushort)row[i];
             }
         }
+    }
+
+    /// <summary>
+    /// Eight rows of eight 16-bit samples, <paramref name="sourceStride"/> apart, into eight rows
+    /// <paramref name="targetStride"/> apart with rows and columns swapped.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void Transpose8(ref ushort source, int sourceStride, ref short target, int targetStride)
+    {
+        var r0 = Vector128.LoadUnsafe(ref source);
+        var r1 = Vector128.LoadUnsafe(ref source, (nuint)sourceStride);
+        var r2 = Vector128.LoadUnsafe(ref source, (nuint)(2 * sourceStride));
+        var r3 = Vector128.LoadUnsafe(ref source, (nuint)(3 * sourceStride));
+        var r4 = Vector128.LoadUnsafe(ref source, (nuint)(4 * sourceStride));
+        var r5 = Vector128.LoadUnsafe(ref source, (nuint)(5 * sourceStride));
+        var r6 = Vector128.LoadUnsafe(ref source, (nuint)(6 * sourceStride));
+        var r7 = Vector128.LoadUnsafe(ref source, (nuint)(7 * sourceStride));
+
+        // Pairs of rows, then of pairs, then of quadruples.
+        var t0 = NativeZip.Low(r0, r1).AsUInt32();
+        var t1 = NativeZip.High(r0, r1).AsUInt32();
+        var t2 = NativeZip.Low(r2, r3).AsUInt32();
+        var t3 = NativeZip.High(r2, r3).AsUInt32();
+        var t4 = NativeZip.Low(r4, r5).AsUInt32();
+        var t5 = NativeZip.High(r4, r5).AsUInt32();
+        var t6 = NativeZip.Low(r6, r7).AsUInt32();
+        var t7 = NativeZip.High(r6, r7).AsUInt32();
+        var u0 = NativeZip.Low(t0, t2).AsUInt64();
+        var u1 = NativeZip.High(t0, t2).AsUInt64();
+        var u2 = NativeZip.Low(t1, t3).AsUInt64();
+        var u3 = NativeZip.High(t1, t3).AsUInt64();
+        var u4 = NativeZip.Low(t4, t6).AsUInt64();
+        var u5 = NativeZip.High(t4, t6).AsUInt64();
+        var u6 = NativeZip.Low(t5, t7).AsUInt64();
+        var u7 = NativeZip.High(t5, t7).AsUInt64();
+        NativeZip.Low(u0, u4).AsInt16().StoreUnsafe(ref target);
+        NativeZip.High(u0, u4).AsInt16().StoreUnsafe(ref target, (nuint)targetStride);
+        NativeZip.Low(u1, u5).AsInt16().StoreUnsafe(ref target, (nuint)(2 * targetStride));
+        NativeZip.High(u1, u5).AsInt16().StoreUnsafe(ref target, (nuint)(3 * targetStride));
+        NativeZip.Low(u2, u6).AsInt16().StoreUnsafe(ref target, (nuint)(4 * targetStride));
+        NativeZip.High(u2, u6).AsInt16().StoreUnsafe(ref target, (nuint)(5 * targetStride));
+        NativeZip.Low(u3, u7).AsInt16().StoreUnsafe(ref target, (nuint)(6 * targetStride));
+        NativeZip.High(u3, u7).AsInt16().StoreUnsafe(ref target, (nuint)(7 * targetStride));
     }
 
     /// <summary>

@@ -28,6 +28,9 @@ run time.
 - H.264 deeper than 8 bits decodes faster, bit for bit as before: 1.6 to 2.5% off `h264-10bit-b.mp4`'s steady frame
   on GitHub's x64 and ARM64 runners in two `compare.yml` runs against main, `h264-10bit-motion.mp4` (mostly CABAC
   residuals) unchanged. Motion compensation's reference window widens eight samples a vector.
+- H.264 deeper than 8 bits deblocks faster, bit for bit as before: 4.1 to 6.4% off `h264-10bit-b.mp4`'s steady frame
+  and 2.5 to 3.3% off `h264-10bit-motion.mp4` on GitHub's x64 and ARM64 runners in two `compare.yml` runs against
+  main. Vertical edges load eight rows a vector and transpose them, where they read one sample at a time.
 
 ### Fixed
 

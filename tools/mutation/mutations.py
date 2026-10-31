@@ -389,4 +389,16 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.Mjpeg/MjpegDecoder.cs",
          find="frame.ColorPrimaries = _stream?.ColorPrimaries ?? ColorPrimaries.Unspecified;", replace="frame.ColorPrimaries = ColorPrimaries.Unspecified;",
          tests="DisplayName~mjpeg-colr"),
+    # ---- Thumbnails: the RGB conversion's defaults, FFmpeg's scaler's rather than the spec's (which leaves them open):
+    # a matrix not said (or one the scaler doesn't know) is BT.601, a range not said limited, except MJPEG's, full as
+    # FFmpeg converts its grey frames (gray.avi).
+    dict(file="src/ManagedCodecs.Thumbnails/RgbaImage.cs",
+         find="        _ => (0.299, 0.114),\n    };", replace="        _ => (0.2126, 0.0722),\n    };",
+         tests="FullyQualifiedName~RgbaImageTests"),
+    dict(file="src/ManagedCodecs.Thumbnails/RgbaImage.cs",
+         find="bool full = said == ColorRange.Full ||", replace="bool full = said != ColorRange.Limited ||",
+         tests="FullyQualifiedName~RgbaImageTests"),
+    dict(file="src/ManagedCodecs.Thumbnails/RgbaImage.cs",
+         find=" || (said == ColorRange.Unspecified && codec == CodecIds.Mjpeg)", replace="",
+         tests="DisplayName~gray.avi"),
 ]

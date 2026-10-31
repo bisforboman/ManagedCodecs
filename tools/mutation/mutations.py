@@ -410,4 +410,10 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.Thumbnails/VideoThumbnail.cs",
          find='CheckSize(image.Width, image.Height, _options, "A JPEG image in the video declares");', replace="",
          tests="FullyQualifiedName~VideoThumbnailTests"),
+    # VideoThumbnail takes ThumbnailOptions.At in the stream's time base to the nearest unit, as FFmpeg rescales -ss
+    # (testsrc-420's 1/25: 610 ms is the frame at 600; realworld.py's Sintel trailer, 1/24).
+    dict(file="src/ManagedCodecs.Thumbnails/VideoThumbnail.cs",
+         find="_target = (long)Math.Round(seconds * video.TimeBase.Denominator / video.TimeBase.Numerator, MidpointRounding.AwayFromZero);",
+         replace="_target = (long)Math.Ceiling(seconds * video.TimeBase.Denominator / video.TimeBase.Numerator);",
+         tests="DisplayName~testsrc-420.at610"),
 ]

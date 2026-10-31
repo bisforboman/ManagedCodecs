@@ -22,7 +22,7 @@ var thumbnail = await VideoThumbnail.CreateAsync(buffer, new ThumbnailOptions { 
 thumbnail.SavePng(output); // or thumbnail.Pixels (RGBA) to an image library for JPEG or WebP
 ```
 
-- **The thumbnail:** the first frame shown at or after `ThumbnailOptions.At` (by default 10% in, at most 10 s; with
+- **The thumbnail:** the frame shown at `ThumbnailOptions.At`, as ffmpeg's `-ss` takes it (by default 10% in, at most 10 s; with
   `SkipDark`, past dark frames keyframe by keyframe), upright, scaled down by area to fit `MaxWidth` x `MaxHeight`,
   converted by the frame's own matrix and range. Within 0 to 3 levels of FFmpeg's scaler on every sample tested.
 - **Untrusted input:** frames larger than `MaxPixels` (16,777,216 by default) are refused before decoding, a

@@ -97,12 +97,22 @@ checked against the definition only.
 
 `VideoThumbnail.Create` is checked end to end against the same FFmpeg chain and band: at `At` zero on every sample
 whose pixels are square (FFmpeg's chain scales the coded size, `Create` the size as shown), and at times into six
-(name.atNNNN.thumb.rgba, `ffmpeg -ss <t> -i`, the first frame shown at or after the start time plus t: between
-keyframes, on one, a fragmented file that starts late, past an empty edit, MJPEG, a fade-in). `SkipDark` is checked on
+(name.atNNNN.thumb.rgba, `ffmpeg -ss <t> -i`: between keyframes, on one, a fragmented file that starts late, past an
+empty edit, MJPEG, a fade-in). FFmpeg rescales the time into the stream's time base to the nearest unit and takes the
+first frame at or after that, which `Create` does too: where the time base is a frame's that is the frame nearest the
+time, not the next (testsrc-420.at610, a quarter frame past 600 ms in AVI's 1/25: the frame at 600; Sintel's trailer
+at 5.2208 s in 1/24, below: the frame at 5.2083). `SkipDark` is checked on
 h264-fade-in (a keyframe every 0.2 s: the frame at 0.4 s is the first at 10% of white's mean luma). The PNG files are
 read back by a reader the tests have from the PNG spec (chunk CRCs bit by bit, inflate, the five filters undone) and,
 where ffmpeg is installed (CI), by FFmpeg's PNG decoder, to the byte. The fuzzer's `thumbnail` target probes and
 thumbnails whole files, and `MalformedInputTests` replays every container finding through it.
+
+On WebAssembly, `tools/wasm-check.sh` compares each video sample's probe facts and a thumbnail (160 x 160 at most,
+`SkipDark`; its pixels hashed, not its PNG, whose deflated bytes are the runtime's zlib's) with the native build's,
+interpreted and compiled ahead of time: all 362 agree. `tools/realworld.py` probes and thumbnails the films too: the
+facts against ffprobe (duration, size, rotation, average frame rate, audio rate and channels), the thumbnail at the
+size `Create` chose against FFmpeg's chain at that size and the same default time, in the same band; Big Buck Bunny
+640x359, an odd height, is probed but its thumbnail not compared (FFmpeg's general path, as above).
 
 `VideoStreamInfo`'s colour properties, aspect ratio and rotation are the container's, as FFmpeg's mov demuxer reads
 them (6.1.1): the visual sample entry's 'colr' ('nclx', its full range flag clear meaning limited; QuickTime's 'nclc',

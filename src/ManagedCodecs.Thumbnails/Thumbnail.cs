@@ -50,8 +50,10 @@ public sealed class Thumbnail
 public sealed record ThumbnailOptions
 {
     /// <summary>
-    /// When the frame is taken, from the start of the file: the first frame shown at or after it. Null (the default):
-    /// 10% into the video, at most 10 s, past a fade-in or a title. A time past the end takes the last frame.
+    /// When the frame is taken, from the start of the file, as ffmpeg's <c>-ss</c> takes it: the time in the video
+    /// stream's time base to the nearest unit, then the first frame shown at or after that (where the time base is a
+    /// frame's, the frame nearest the time). Null (the default): 10% into the video, at most 10 s, past a fade-in or a
+    /// title. A time past the end takes the last frame.
     /// </summary>
     public TimeSpan? At { get; init; }
 

@@ -1,0 +1,74 @@
+@* A video picked here is read into memory (an MP4's index can follow its data, so the stream must be seekable), probed
+   and thumbnailed in the browser by ManagedCodecs.Thumbnails: nothing is uploaded, and no FFmpeg or native code runs.
+   WebAssembly in a browser has one thread, so the page waits while the frame decodes. *@
+
+<h1>ManagedCodecs thumbnails</h1>
+<p>Pick an MP4 or AVI file (H.264 or MJPEG). It stays in this browser.</p>
+
+<InputFile OnChange="Load" accept="video/mp4,video/quicktime,video/x-msvideo,.mp4,.mov,.m4v,.avi" />
+
+@if (_status is not null)
+{
+    <p id="status">@_status</p>
+}
+
+@if (_info is not null)
+{
+    <dl id="facts">
+        <dt>Duration</dt><dd>@_info.Duration</dd>
+        <dt>Codec</dt><dd>@_info.Codec</dd>
+        <dt>Size as shown</dt><dd>@_info.DisplayWidth x @_info.DisplayHeight (coded @_info.Width x @_info.Height)</dd>
+        <dt>Frame rate</dt><dd>@_info.FramesPerSecond.ToString("0.###")</dd>
+        <dt>Rotation</dt><dd>@_info.Rotation°</dd>
+        <dt>Audio</dt><dd>@(_info.Audio is { } audio ? $"{audio.Codec}, {audio.SampleRate} Hz, {audio.Channels} channels" : "none")</dd>
+    </dl>
+}
+
+@if (_png is not null)
+{
+    <img id="thumbnail" src="@_png" alt="The video's thumbnail" />
+    <p>@_thumbnailFacts</p>
+}
+
+@code {
+    // The largest file read: a browser holds it in memory.
+    private const long MaxBytes = 512L * 1024 * 1024;
+
+    private string? _status;
+    private VideoInfo? _info;
+    private string? _png;
+    private string? _thumbnailFacts;
+
+    private async Task Load(InputFileChangeEventArgs e)
+    {
+        (_info, _png, _thumbnailFacts) = (null, null, null);
+        _status = $"Reading {e.File.Name} ...";
+        StateHasChanged();
+        try
+        {
+            // The browser's stream reads asynchronously only; the copy in memory is seekable.
+            var buffer = new MemoryStream();
+            await using (var file = e.File.OpenReadStream(MaxBytes))
+            {
+                await file.CopyToAsync(buffer);
+            }
+
+            buffer.Position = 0;
+            _info = VideoProbe.Read(buffer);
+            _status = "Decoding ...";
+            StateHasChanged();
+            await Task.Yield(); // let the page show it before the decoding holds the thread
+
+            buffer.Position = 0;
+            var watch = System.Diagnostics.Stopwatch.StartNew();
+            var thumbnail = VideoThumbnail.Create(buffer, new ThumbnailOptions { MaxWidth = 480, MaxHeight = 480, SkipDark = true });
+            _png = "data:image/png;base64," + Convert.ToBase64String(thumbnail.ToPng());
+            _thumbnailFacts = $"{thumbnail.Width} x {thumbnail.Height}, the frame at {thumbnail.Time.TotalSeconds:0.###} s, in {watch.ElapsedMilliseconds} ms";
+            _status = null;
+        }
+        catch (Exception ex) when (ex is InvalidDataException or NotSupportedException or IOException)
+        {
+            _status = $"{e.File.Name}: {ex.Message}";
+        }
+    }
+}

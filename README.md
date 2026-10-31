@@ -46,6 +46,7 @@ in between. That comparison is not measured here.
 | `tools/upstream-issue.sh` | Files `upstream.yml`'s weekly issues: a new StyleBro, or a new release of an encoder the committed samples come from |
 | `tools/ManagedCodecs.Fuzz`, `tools/fuzz.sh` | Fuzzing targets for SharpFuzz and AFL++ (see Malformed input) |
 | `tools/ManagedCodecs.Wasm`, `tools/wasm-check.sh` | The decoders on WebAssembly, checked against the native build (see WebAssembly) |
+| `tools/ManagedCodecs.Thumbnails.Blazor` | A Blazor WebAssembly page that probes and thumbnails a video picked in the browser with `ManagedCodecs.Thumbnails`, nothing uploaded (its README has the timings); CI publishes it |
 | `tools/aot-check.sh` | mcdec published with Native AOT, checked against the JIT build on every sample (see Native AOT) |
 | `tests/ManagedCodecs.Tests` | Unit tests and FFmpeg conformance tests (framemd5 for frames and packets) |
 | `benchmarks/ManagedCodecs.Benchmarks` | BenchmarkDotNet decode benchmark |
@@ -354,7 +355,8 @@ Console.WriteLine($"{info.Duration} {info.DisplayWidth}x{info.DisplayHeight} {in
 deflated by the BCL: no image library, native code or FFmpeg). For JPEG or WebP, hand `Pixels` to SkiaSharp or
 ImageSharp.
 
-- **Which frame:** the first shown at or after `At` from the file's start, decoded from the keyframe before it
+- **Which frame:** the one shown at `At` from the file's start as ffmpeg's `-ss` takes it (the time in the stream's
+  time base to the nearest unit, then the first frame at or after that), decoded from the keyframe before it
   (`IDemuxer.Seek`; AVI's H.264, which has no index to seek by, from the start). By default 10% into the video, at most
   10 s. `SkipDark` steps keyframe by keyframe past frames whose mean luma is under 10% of white (up to 10, then the
   brightest). Damaged streams decode on with concealment, and an undamaged frame is taken where there is one.
@@ -403,8 +405,10 @@ Node, and natively (`mcdec --hash`, a SHA-256 of each file's decoded frames and 
 output is the same. All 342 sample files agree, interpreted or compiled ahead of time, and CI's `wasm` job runs both
 on every pull request (until 0.2.2 it ran only the AOT build, and the interpreter's H.264 output was wrong from 0.2.0
 on, #206). The native build is the one checked against FFmpeg, so the wasm output matches
-FFmpeg as well. `tools/ManagedCodecs.Wasm` needs the `wasm-tools` workload (`dotnet workload install wasm-tools`),
-so it is not part of `ManagedCodecs.slnx`.
+FFmpeg as well. It does the same for `ManagedCodecs.Thumbnails` (`mcdec --thumbnail-hash`: each video file's probe
+facts and a small thumbnail's size, time and pixels), and all 362 MP4 and AVI files agree there too.
+`tools/ManagedCodecs.Wasm` needs the `wasm-tools` workload (`dotnet workload install wasm-tools`), so it is not part
+of `ManagedCodecs.slnx`. `tools/ManagedCodecs.Thumbnails.Blazor` is a browser page using the thumbnails package.
 
 On wasm, `Vector128` is accelerated (WebAssembly's 128-bit SIMD, on by default) and `Vector256` is not, so the paths
 written for ARM64 run there, such as the MJPEG `Vector128` IDCT and the H.264 deblocking transposes.

@@ -7,6 +7,9 @@
     <IsPackable>false</IsPackable>
     <!-- A benchmark tool: compile fully optimized code on first call, so short runs aren't timed on unoptimized code. -->
     <TieredCompilation>false</TieredCompilation>
+    <!-- ThumbnailOutput.cs and the thumbnail hash mode: not in the Unity build of mcdec (tools/ManagedCodecs.Cli.Unity), which
+         compiles these sources against a package without Thumbnails. -->
+    <DefineConstants>$(DefineConstants);THUMBNAILS</DefineConstants>
   </PropertyGroup>
 
   <ItemGroup>
@@ -14,6 +17,7 @@
     <ProjectReference Include="..\..\src\ManagedCodecs.Mjpeg\ManagedCodecs.Mjpeg.csproj" />
     <ProjectReference Include="..\..\src\ManagedCodecs.H264\ManagedCodecs.H264.csproj" />
     <ProjectReference Include="..\..\src\ManagedCodecs.Aac\ManagedCodecs.Aac.csproj" />
+    <ProjectReference Include="..\..\src\ManagedCodecs.Thumbnails\ManagedCodecs.Thumbnails.csproj" />
   </ItemGroup>
 
 </Project>

@@ -75,7 +75,7 @@ first frame 80 ms, the frame at 1 s 245 ms (24 frames decoded). Missing:
 ## Checking it
 
 - Probe: against `ffprobe -show_format -show_streams` on every sample and the realworld films (duration, size,
-  rotation, frame rate; `tools/realworld.py` grows a probe step).
+  rotation, frame rate, audio; `tools/realworld.py`).
 - Seek: the packets after a seek are the tail of `ReadPackets` from that keyframe, on every MP4 and AVI sample
   (including edited, fragmented and B-frame ones); the frame decoded at a time matches `ffmpeg -ss <t> -i ... -frames:v 1
   -f framemd5` (FFmpeg's accurate seek: decode from the keyframe before, drop until the time).
@@ -101,7 +101,10 @@ first frame 80 ms, the frame at 1 s 245 ms (24 frames decoded). Missing:
    (G, B and R planes) converts too. `VideoProbe` has no async twin: the demuxers open and read their indexes
    synchronously, and a probe reads nothing else; `CreateAsync` reads the packets asynchronously.
 5. A Blazor WebAssembly sample (`samples/` or `tools/`) that thumbnails a file picked in the browser, also the
-   WebAssembly check for the package.
+   WebAssembly check for the package. *Built:* `tools/ManagedCodecs.Thumbnails.Blazor` (CI publishes it trimmed;
+   run in headless Chromium for the pull request, not in CI), and the WebAssembly check is `tools/wasm-check.sh`'s,
+   every sample's probe and thumbnail against the native build; `tools/realworld.py` probes and thumbnails the films.
+   Matching FFmpeg on Sintel's trailer moved `At` to FFmpeg's rounding of `-ss` (the nearest time-base unit).
 
 ## Decisions
 

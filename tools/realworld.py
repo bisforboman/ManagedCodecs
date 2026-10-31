@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Decodes real public films (Blender's open movies, CC-BY: real H.264 and AAC from real encoders, where every sample
 in samples/ is a test pattern) with mcdec and with FFmpeg, and fails unless every video frame is identical and the
-audio is within 2^-17, the conformance tests' tolerance. The films are pinned by SHA-256 and cached in
+audio is within 2^-17, the conformance tests' tolerance. It also probes each film and makes its thumbnail
+(ManagedCodecs.Thumbnails, mcdec --thumbnail) and fails unless the facts are ffprobe's and the thumbnail is within
+the tests' band of FFmpeg's scaler at the same size and time. The films are pinned by SHA-256 and cached in
 samples/realworld/ (gitignored).
 
 Usage (from the repository root, after a Release build of tools/ManagedCodecs.Cli):
@@ -11,6 +13,7 @@ Usage (from the repository root, after a Release build of tools/ManagedCodecs.Cl
 
 import argparse
 import hashlib
+import json
 import os
 import subprocess
 import sys
@@ -25,6 +28,11 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CACHE = os.path.join(ROOT, "samples", "realworld")
 MCDEC = os.path.join(ROOT, "tools", "ManagedCodecs.Cli", "bin", "Release", "net10.0", "mcdec.dll")
 TOLERANCE = 2.0 ** -17
+# The thumbnail's band (tests/ManagedCodecs.Tests/Thumbnails/RgbaImageTests.cs, x64): FFmpeg's fast YUV to RGB path
+# comes out 0 to 3 levels below ours, its area scaler at most 1 above.
+FFMPEG_BELOW = 3
+FFMPEG_ABOVE = 1
+SCALE = "area+accurate_rnd+full_chroma_int+full_chroma_inp"
 
 # name: (url, sha256, what it is). Add a line (download once, `sha256sum` it) and a matrix entry in realworld.yml. A
 # film served in a .zip is extracted (the archive's one file); its SHA-256 is the film's, not the archive's.
@@ -109,13 +117,73 @@ def ffmpeg(*args):
     return result.stdout
 
 
+def compare_thumbnail(path, work):
+    """The probe and thumbnail cell of a film's line, and whether they matched."""
+    raw = os.path.join(work, "thumbnail.rgba")
+    run = subprocess.run(["dotnet", MCDEC, "--thumbnail", path, raw], capture_output=True, text=True, check=False)
+    if run.returncode != 0:
+        return f"mcdec --thumbnail failed: {run.stderr.strip().splitlines()[-1] if run.stderr.strip() else run.returncode}", False
+    # "thumbnail WxH at T, probe D WxH rotation R fps F audio RATE CHANNELS", times in ticks (100 ns).
+    words = run.stdout.split()
+    width, height = map(int, words[1].split("x"))
+    duration = int(words[5]) / 1e7
+    coded = tuple(map(int, words[6].split("x")))
+    rotation, fps, rate, channels = int(words[8]), float(words[10]), int(words[12]), int(words[13])
+
+    probe = json.loads(ffprobe(path))
+    video = next(s for s in probe["streams"] if s["codec_type"] == "video")
+    audio = next((s for s in probe["streams"] if s["codec_type"] == "audio"), None)
+    num, den = map(int, video["avg_frame_rate"].split("/"))
+    side = next((d for d in video.get("side_data_list", []) if "rotation" in d), {})
+    problems = []
+    if abs(duration - float(probe["format"]["duration"])) > 1.5e-6:
+        problems.append(f"duration {duration} against ffprobe's {probe['format']['duration']}")
+    if coded != (video["width"], video["height"]):
+        problems.append(f"size {coded} against ffprobe's {video['width']}x{video['height']}")
+    if rotation != int(side.get("rotation", 0)) % 360:
+        problems.append(f"rotation {rotation} against ffprobe's {side.get('rotation', 0)}")
+    if den and abs(fps - num / den) > 1e-6:
+        problems.append(f"{fps} frames a second against ffprobe's average {video['avg_frame_rate']}")
+    if audio and (rate, channels) != (int(audio["sample_rate"]), audio["channels"]):
+        problems.append(f"audio {rate} Hz {channels} channels against ffprobe's {audio['sample_rate']} {audio['channels']}")
+    if problems:
+        return "probe: " + "; ".join(problems), False
+
+    if coded[0] % 2 or coded[1] % 2:
+        # FFmpeg's scaler leaves its fast path at an odd size and interpolates chroma (make-samples.sh, thumb.rgba).
+        return f"probe as ffprobe; thumbnail {width}x{height} not compared (odd size {coded[0]}x{coded[1]})", True
+
+    # The time VideoThumbnail takes by default: 10% in, at most 10 s, from the file's start (ffmpeg -ss counts so too).
+    at = min(round(duration * 1e7) // 10, 10 * 10**7) / 1e7
+    theirs = np.frombuffer(ffmpeg("-ss", f"{at:.7f}", "-i", path, "-map", "0:v:0", "-frames:v", "1", "-vf",
+                                  f"format=rgba,scale={width}:{height}:flags={SCALE},format=rgba", "-f", "rawvideo", "-"), dtype=np.uint8)
+    ours = np.fromfile(raw, dtype=np.uint8)
+    os.remove(raw)
+    if len(ours) != len(theirs):
+        return f"thumbnail {len(ours)} bytes, FFmpeg's {len(theirs)}", False
+    below = ours.astype(np.int16) - theirs.astype(np.int16)
+    if below.max() > FFMPEG_BELOW or below.min() < -FFMPEG_ABOVE:
+        return f"thumbnail {width}x{height} at {at} s: FFmpeg {int(below.max())} below to {int(-below.min())} above ours", False
+    return f"probe as ffprobe; thumbnail {width}x{height} at {at} s within the band", True
+
+
+def ffprobe(path):
+    entries = ("format=duration,start_time:stream=codec_type,width,height,avg_frame_rate,sample_rate,channels"
+               ":stream_side_data=rotation")
+    result = subprocess.run(["ffprobe", "-v", "error", "-of", "json", "-show_entries", entries, path],
+                            capture_output=True, check=False)
+    if result.returncode != 0:
+        fail(f"ffprobe {path} failed:\n{result.stderr.decode(errors='replace')}")
+    return result.stdout
+
+
 def compare(name, work):
     """A report line, and whether the film matched."""
     path = fetch(name)
     prefix = os.path.join(work, name)
     run = subprocess.run(["dotnet", MCDEC, "--dump", path, prefix], capture_output=True, text=True, check=False)
     if run.returncode != 0:
-        return f"| `{name}` | mcdec failed | {run.stderr.strip().splitlines()[-1] if run.stderr.strip() else run.returncode} | |", False
+        return f"| `{name}` | mcdec failed | {run.stderr.strip().splitlines()[-1] if run.stderr.strip() else run.returncode} | | |", False
     print(run.stdout.strip(), flush=True)
 
     ok = True
@@ -144,7 +212,9 @@ def compare(name, work):
             audio = f"ours {len(ours)} values, FFmpeg's {len(theirs)}; largest difference {largest:.3g}"
         os.remove(prefix + ".audio.f32")
 
-    return f"| `{name}` | {'match' if ok else '**differs**'} | {video} | {audio} |", ok
+    thumbnail, thumbnail_ok = compare_thumbnail(path, work)
+    ok &= thumbnail_ok
+    return f"| `{name}` | {'match' if ok else '**differs**'} | {video} | {audio} | {thumbnail} |", ok
 
 
 def main():
@@ -164,7 +234,7 @@ def main():
     if unknown:
         fail(f"unknown films: {', '.join(unknown)} (--list shows them)")
     os.makedirs(args.work, exist_ok=True)
-    lines = ["| Film | Result | Video | Audio |", "| --- | --- | --- | --- |"]
+    lines = ["| Film | Result | Video | Audio | Probe and thumbnail |", "| --- | --- | --- | --- | --- |"]
     all_ok = True
     for name in names:
         line, ok = compare(name, args.work)

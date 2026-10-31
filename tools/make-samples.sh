@@ -684,9 +684,10 @@ for f in samples/*.mp4 samples/*.avi; do
 done
 # name.atNNNN.thumb.rgba: as name.thumb.rgba, the first frame shown at NNNN ms from the file's start (ffmpeg's -ss
 # before -i, counted from the start time as ThumbnailOptions.At is), for VideoThumbnail.Create: between keyframes, on
-# one, in a fragmented file that starts late, past an empty edit, MJPEG, and in the fade-in.
+# one, in a fragmented file that starts late, past an empty edit, MJPEG, and in the fade-in. testsrc-420.avi:610 is a
+# quarter frame past 600 in a 1/25 time base: FFmpeg rescales -ss to the nearest unit, so the frame at 600 ms.
 for s in h264-bframes.mp4:1200 h264-bframes.mp4:960 fmp4-base-moof.mp4:200 h264-edit-gap.mp4:500 testsrc-420.avi:600 \
-  h264-fade-in.mp4:400; do
+  testsrc-420.avi:610 h264-fade-in.mp4:400; do
   f=samples/${s%%:*}; ms=${s##*:}
   ff -ss "$(printf '%d.%03d' $((ms / 1000)) $((ms % 1000)))" -idct simple -i "$f" -map 0:v:0 -frames:v 1 \
     -vf "format=rgba,scale=max(1\\,trunc(iw*3/8)):max(1\\,trunc(ih*3/8)):flags=area+accurate_rnd+full_chroma_int+full_chroma_inp,format=rgba" \

@@ -38,3 +38,19 @@ else
   echo "WebAssembly (AOT: $aot) output differs from the native output (lines above: < native, > wasm)." >&2
   exit 1
 fi
+
+# The Thumbnails package the same way: each MP4 and AVI file's probe and thumbnail (ThumbnailOutput), the pixels
+# hashed, against the native ones.
+videos=$(echo "$files" | tr ' ' '\n' | grep -E '\.(mp4|avi)$')
+# shellcheck disable=SC2086
+dotnet tools/ManagedCodecs.Cli/bin/Release/net10.0/mcdec.dll --thumbnail-hash $videos > "$work/native-thumbnails.txt"
+# shellcheck disable=SC2086
+node "$bundle/main.mjs" --thumbnails $videos > "$work/wasm-thumbnails-stdout.txt" 2> "$work/wasm-thumbnails-stderr.txt" ||
+  { cat "$work/wasm-thumbnails-stdout.txt" "$work/wasm-thumbnails-stderr.txt" >&2; echo "The WebAssembly thumbnail run failed." >&2; exit 1; }
+grep -v '^MONO_WASM:' "$work/wasm-thumbnails-stdout.txt" > "$work/wasm-thumbnails.txt" || true
+if diff "$work/native-thumbnails.txt" "$work/wasm-thumbnails.txt"; then
+  echo "WebAssembly (AOT: $aot) and native thumbnails agree on all $(wc -l < "$work/native-thumbnails.txt") files."
+else
+  echo "WebAssembly (AOT: $aot) thumbnails differ from the native ones (lines above: < native, > wasm)." >&2
+  exit 1
+fi

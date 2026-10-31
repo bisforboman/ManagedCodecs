@@ -170,7 +170,7 @@ jobs:
 
   # The decoders on WebAssembly (browser-wasm, run by Node), compiled ahead of time as a web app would ship them and
   # interpreted, as the runtime runs them without AOT: tools/wasm-check.sh decodes every sample there and natively and
-  # fails unless the output is the same. The interpreter's SIMD differs from the AOT code's (it narrowed comparison
+  # fails unless the output is the same, and does the same for each video file's probe and thumbnail. The interpreter's SIMD differs from the AOT code's (it narrowed comparison
   # masks with saturation, #206), so each needs its own run. It takes the samples from the build job rather than
   # installing FFmpeg too.
   wasm:
@@ -196,6 +196,7 @@ jobs:
         run: |
           dotnet tool restore
           dotnet tool run bro format tools/ManagedCodecs.Wasm/ManagedCodecs.Wasm.csproj --verify-no-changes
+          dotnet tool run bro format tools/ManagedCodecs.Thumbnails.Blazor/ManagedCodecs.Thumbnails.Blazor.csproj --verify-no-changes
 
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -207,6 +208,12 @@ jobs:
 
       - name: The same, interpreted (with SIMD, the runtime's default)
         run: tools/wasm-check.sh
+
+      # The Blazor WebAssembly sample of ManagedCodecs.Thumbnails (outside the solution as the wasm project is): a
+      # trimmed publish with warnings as errors, so a trimming warning from the packages fails here. Not opened in a
+      # browser; wasm-check.sh above checks the package's output on browser-wasm.
+      - name: Publish the Blazor thumbnails sample
+        run: dotnet publish tools/ManagedCodecs.Thumbnails.Blazor -c Release -warnaserror
 
   # Native AOT, which README and the packages promise: tools/aot-check.sh publishes mcdec with it (warnings as errors,
   # so a trimming or AOT warning from the libraries fails here) and decodes every sample with it and with the JIT

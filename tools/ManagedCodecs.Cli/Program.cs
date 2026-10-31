@@ -12,13 +12,15 @@ using ManagedCodecs.Mjpeg;
 //   ffmpeg -benchmark -threads 1 -stream_loop 9 -i samples/h264-bench-720p.mp4 -f null -
 if (args.Length == 0 || args.Contains("-h") || args.Contains("--help"))
 {
-    Console.WriteLine("usage: mcdec <file> [--loops N] [--threads N] [--borrow-frames] [--zero-copy] [--conceal] | mcdec --hash [--loops N] <file>... | mcdec --dump <file> <prefix>");
+    Console.WriteLine("usage: mcdec <file> [--loops N] [--threads N] [--borrow-frames] [--zero-copy] [--conceal] | mcdec --hash [--loops N] <file>... | mcdec --dump <file> <prefix> | mcdec --thumbnail-hash <file>... | mcdec --thumbnail <file> <out.rgba>");
     Console.WriteLine("  Demuxes and decodes the file's video and audio N times (default 1), like ffmpeg -stream_loop N-1.");
     Console.WriteLine("  --threads N: decode up to N H.264 pictures, or HE-AAC channels, at once, each on a thread of its own (default 1).");
     Console.WriteLine("  --borrow-frames: H.264 frames point into the decoder's pictures instead of being copied out.");
     Console.WriteLine("  --zero-copy: MJPEG images are decoded straight into their frames' (MCU-padded) planes.");
     Console.WriteLine("  --conceal: H.264 conceals damaged and lost pictures (H264Decoder.ConcealErrors) instead of failing on them.");
     Console.WriteLine("  --hash: prints a SHA-256 of each file's decoded output instead (tools/wasm-check.sh compares them).");
+    Console.WriteLine("  --thumbnail-hash <file>...: prints each file's VideoProbe facts and a small thumbnail's size, time and SHA-256 (tools/wasm-check.sh compares them).");
+    Console.WriteLine("  --thumbnail: writes the file's thumbnail (480 x 480 at most) as raw RGBA and prints its size and time and the file's VideoProbe facts; tools/realworld.py compares them.");
     Console.WriteLine("  --dump: writes <prefix>.video.md5 (each frame's MD5, as ffmpeg -f framemd5) and <prefix>.audio.f32 (as -f f32le); tools/realworld.py compares them.");
     return args.Length == 0 ? 1 : 0;
 }
@@ -35,6 +37,33 @@ if (args[0] == "--dump")
     return 0;
 }
 
+#if THUMBNAILS
+if (args[0] == "--thumbnail-hash")
+{
+    // --thumbnail-hash <file>...: each file's probe and thumbnail line (ThumbnailOutput), as tools/ManagedCodecs.Wasm
+    // prints it on WebAssembly with --thumbnails; tools/wasm-check.sh compares them.
+    foreach (var file in args.Skip(1))
+    {
+        Console.WriteLine(ThumbnailOutput.Line(file, File.ReadAllBytes(file)));
+    }
+
+    return 0;
+}
+
+if (args[0] == "--thumbnail")
+{
+    // --thumbnail <file> <out.rgba>: the file's thumbnail as raw RGBA, and its facts on stdout (tools/realworld.py).
+    if (args.Length < 3)
+    {
+        Console.Error.WriteLine("--thumbnail needs a file and an output path.");
+        return 2;
+    }
+
+    Console.WriteLine(ThumbnailOutput.Write(args[1], args[2]));
+    return 0;
+}
+
+#endif
 if (args[0] == "--hash")
 {
     // --hash [--loops N] <file>...: N decodes of each file after reading it, their mean time on stderr, as

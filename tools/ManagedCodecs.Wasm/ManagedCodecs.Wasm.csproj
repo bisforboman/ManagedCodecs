@@ -10,10 +10,12 @@
     <RootNamespace>ManagedCodecs.Wasm</RootNamespace>
     <IsPackable>false</IsPackable>
     <WasmMainJSPath>main.mjs</WasmMainJSPath>
+    <DefineConstants>$(DefineConstants);THUMBNAILS</DefineConstants>
   </PropertyGroup>
 
   <ItemGroup>
     <Compile Include="..\ManagedCodecs.Cli\OutputHash.cs" Link="OutputHash.cs" />
+    <Compile Include="..\ManagedCodecs.Cli\ThumbnailOutput.cs" Link="ThumbnailOutput.cs" />
   </ItemGroup>
 
   <ItemGroup>
@@ -21,6 +23,7 @@
     <ProjectReference Include="..\..\src\ManagedCodecs.Mjpeg\ManagedCodecs.Mjpeg.csproj" />
     <ProjectReference Include="..\..\src\ManagedCodecs.H264\ManagedCodecs.H264.csproj" />
     <ProjectReference Include="..\..\src\ManagedCodecs.Aac\ManagedCodecs.Aac.csproj" />
+    <ProjectReference Include="..\..\src\ManagedCodecs.Thumbnails\ManagedCodecs.Thumbnails.csproj" />
   </ItemGroup>
 
 </Project>

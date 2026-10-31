@@ -12,9 +12,16 @@ what that runtime gives. What it uses that netstandard2.1 lacks (counted in src/
 - **SIMD**: `System.Runtime.Intrinsics` is not in netstandard2.1 at all. There are 564 uses of `Vector128`/`Vector256` and
   107 of `Sse2`/`Avx2`/`AdvSimd`/`Ssse3`, in 11 files. Every one of those fast paths has a scalar reference that a test
   compares with it (the repository's rule), so the scalar code exists already.
-- **Runtime features**: static abstract interface members (2 files, the zip interleaves of `VectorZip`, vector code
-  only) and one `[InlineArray]` (a fixed buffer or an array does the same).
-- **Library APIs**: polyfills cover them. A trial build of ManagedCodecs.Core for netstandard2.1, with the vector file
+- **Runtime features**: generic math, the one that matters. H.264's sample code is generic over the sample type
+  (`PictureDecoder<TPixel>` and its helpers, `where TPixel : unmanaged, IBinaryInteger<TPixel>`: 26 constraints, 37
+  `TPixel.CreateTruncating` and 30 `int.CreateTruncating` calls in Transform, Intra and InterPrediction, Deblock and
+  Samples). Generic math needs static abstract interface members, which Mono and IL2CPP cannot run (CS8919, "Target
+  runtime doesn't support static abstract members in interfaces"), so no polyfill helps: the scalar H.264 code
+  itself must change. The uses are conversions only, no arithmetic on `TPixel`, so the change is mechanical (below).
+  The others are small: static abstract members in `VectorZip` (vector code only), one `[InlineArray]` and two ref
+  fields (a fixed buffer or an array does the same), the non-generic `TaskCompletionSource` (4 uses).
+- **Library APIs**: polyfills cover them (and `SkipLocalsInit`, 54 uses, by an attribute of that name; `Unsafe` comes
+  from the System.Runtime.CompilerServices.Unsafe package, a dependency the Unity package then carries). A trial build of ManagedCodecs.Core for netstandard2.1, with the vector file
   left out, failed only on `IsExternalInit` (records, init accessors), `ArgumentOutOfRangeException.ThrowIfNegative`
   and its siblings, `ArgumentNullException.ThrowIfNull` and `GC.AllocateUninitializedArray`. The other projects
   (`ReadExactly`, `Math.Clamp`, `BitOperations`, `System.Threading.Lock`, collection expressions) still need the same
@@ -63,6 +70,10 @@ at about 6. That rules out large video for Unity and leaves cutscenes at modest 
 
 ## Work, one pull request each
 
+0. **H.264 without generic math**, before the rest and in the net10.0 build: the constraint becomes `unmanaged`, and
+   the conversions go through `Samples` helpers that dispatch on `typeof(TPixel) == typeof(byte)` with `Unsafe.As`,
+   which the JIT folds per instantiation as it folds the byte SIMD paths' checks today. It rewrites the hot path, so
+   it is a speed pull request: a draft until `compare.yml` (two runs) shows no regression on x64 and ARM64.
 1. **The build**: `src/ManagedCodecs.Unity`, the `#if NET` guards, the polyfills, the InlineArray change. Then the
    real speed of the scalar build on CoreCLR and on Mono (mcdec's samples, measured as in README's Benchmarking),
    written into README before anything ships. If it is far off the proxy, that comes back to the owner first.
@@ -73,6 +84,9 @@ at about 6. That rules out large video for Unity and leaves cutscenes at modest 
 
 Asked with the multiple-choice prompt; the owner took each proposal (2026-10-31).
 
+- **Generic math. Decided** (asked once the first trial build of the whole tree found it): rewrite H.264's `TPixel`
+  conversions first, as pull request 0. The alternatives were a Unity build without H.264 at first, and parking Unity
+  until it ships CoreCLR.
 - **Sharing the sources. Decided:** one linked assembly, `ManagedCodecs.Unity.dll`, from the existing sources with
   `#if NET` around the vector paths. The alternative was multi-targeting each project (net10.0;netstandard2.1), which
   puts both builds into every package rather than a separate one.

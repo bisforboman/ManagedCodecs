@@ -119,6 +119,8 @@ file first.
   A worktree made before a sample was generated has no link to it: a new theory row then reads "no data". References
   generated inside a worktree (a new `.audioframes.csv`) go with it when it is removed: generate them in the main
   checkout's `samples/` too, and link them, or the next worktree reads "no data" for them.
+  A new kind of reference (a new suffix) needs its line in .gitignore in the same commit: else `git add -A` in a
+  worktree commits the links, which dangle in CI and fail make-samples.sh where it writes through them.
 - The cloud sandbox reaches download.blender.org but not archive.org or test-videos.co.uk (CI reaches all three).
 - Temporary instrumentation (coverage counters, traces): commit the real work first. `git checkout <file>` to
   remove the instrumentation otherwise also throws away the file's other uncommitted changes, and so does

@@ -34,6 +34,9 @@ run time.
 - H.264 deeper than 8 bits decodes faster on x64 with AVX2, bit for bit as before: 3.1 to 5.3% off
   `h264-10bit-b.mp4`'s steady frame on GitHub's x64 runner in two `compare.yml` runs against main (ARM64 runs the same
   code as before). Motion compensation's interpolation takes eight lanes a vector there, where it took four.
+- H.264 deeper than 8 bits deblocks faster again, bit for bit as before: 3.2 to 4.3% off `h264-10bit-b.mp4`'s
+  steady frame and 2.3 to 2.8% off `h264-10bit-motion.mp4` on GitHub's x64 and ARM64 runners in two `compare.yml` runs
+  against main. An edge's samples and filter parameters stay in vectors, where they went through buffers on the stack.
 
 ### Fixed
 

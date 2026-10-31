@@ -11,10 +11,15 @@ player: no seeking, no pause, Escape quits.
   drops late ones, through one `Texture2D` (`SetData` each frame).
 - Audio goes to a `DynamicSoundEffectInstance` as 16-bit stereo (more channels downmixed to the first two).
 - The window title shows the decode and conversion time per frame, the number a game's frame budget cares about.
-- Colour: frames carry no colour metadata yet, so H.264 converts as limited range with BT.709 from 720 lines and
-  BT.601 below, MJPEG as full range BT.601. Checked against FFmpeg's scaler (`scale=in_color_matrix=...:in_range=tv:
-  flags=neighbor+full_chroma_int+accurate_rnd`, nearest-neighbour chroma as here): within 2 levels for 8-bit samples,
-  1 for 10-bit (mean 0.1 to 0.2).
+- Colour: each frame converts by its own `ColorMatrix` and `ColorRange` (BT.601, BT.709, BT.2020, SMPTE 240M; limited
+  or full), and where the stream and its container say nothing, as players assume: BT.709 from 720 lines, BT.601
+  below, limited range (MJPEG frames say full range BT.601). Checked against FFmpeg's scaler
+  (`scale=in_color_matrix=...:in_range=...:flags=neighbor+full_chroma_int+accurate_rnd`, nearest-neighbour chroma as
+  here) on the first frame of `h264-color-bt709`, `-bt2020-pq`, `-hlg-sar`, `h264-colr-only` and `testsrc-420.avi`:
+  within 2 levels for 8-bit samples (1 for 10-bit when first measured), mean under 0.3. The transfer is not
+  converted: PQ and HLG show dim and flat, as without tone mapping.
+- Shape: each frame is drawn at its `SampleAspectRatio` (anamorphic video wider than its samples), and turned by the
+  stream's `Rotation` (phone video), counter-clockwise as FFmpeg's command line turns it.
 - A shader would convert faster than the CPU, but MonoGame's effect compiler (mgfxc) needs Wine on Linux, so it is
   left for when the CPU conversion turns out to be the bottleneck.
 

@@ -187,6 +187,7 @@ public class InterPredictionTests
         }
     }
 
+#if !UNITY_BUILD
     /// <summary>
     /// The 8-bit vector weighted prediction (<see cref="InterPrediction.WeightOne"/>, <see cref="InterPrediction.WeightBoth"/>)
     /// against the definition, on random samples, weights and offsets over their whole ranges (explicit weights -128 to
@@ -219,7 +220,9 @@ public class InterPredictionTests
             Assert.True(expected.AsSpan().SequenceEqual(actual), $"{width}x{height} at ({x},{y}) in {stride}x{maxY + 1}");
         }
     }
+#endif
 
+#if !UNITY_BUILD
     [Fact]
     public void VectorWeights_MatchReference()
     {
@@ -255,7 +258,9 @@ public class InterPredictionTests
             Assert.Equal(expected, actual);
         }
     }
+#endif
 
+#if !UNITY_BUILD
     /// <summary>
     /// The deep-sample window copy widens 8 samples a step: every width a window row takes, from starts where the
     /// plane holds a whole vector and from ones near its end where only the scalar tail may read.
@@ -283,4 +288,5 @@ public class InterPredictionTests
             }
         }
     }
+#endif
 }

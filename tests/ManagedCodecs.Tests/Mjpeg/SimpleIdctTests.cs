@@ -13,6 +13,7 @@ public class SimpleIdctTests
 
     public static TheoryData<string> Distributions() => new("full-range", "sparse", "dc-rows");
 
+#if !UNITY_BUILD
     [Theory]
     [MemberData(nameof(Distributions))]
     public void Avx2_MatchesScalar(string distribution)
@@ -32,7 +33,9 @@ public class SimpleIdctTests
             Assert.True(expected.AsSpan().SequenceEqual(actual), $"Block {i} ({distribution}) differs: [{string.Join(", ", block)}]");
         }
     }
+#endif
 
+#if !UNITY_BUILD
     /// <summary>
     /// The <see cref="System.Runtime.Intrinsics.Vector128"/> path (ARM64's, and x64's without AVX2)
     /// is called directly, so it runs here too whatever the machine prefers.
@@ -51,6 +54,7 @@ public class SimpleIdctTests
             Assert.True(expected.AsSpan().SequenceEqual(actual), $"Block {i} ({distribution}) differs: [{string.Join(", ", block)}]");
         }
     }
+#endif
 
     [Fact]
     public void DcOnly_MatchesScalarForEveryDcValue()

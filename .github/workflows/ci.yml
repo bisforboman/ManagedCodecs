@@ -83,6 +83,11 @@ jobs:
         env:
           DOTNET_EnableHWIntrinsic: 0
 
+      # The Unity build (src/ManagedCodecs.Unity, netstandard2.1, the scalar paths; docs/decisions/2026-10-31-unity-netstandard.md):
+      # the same tests against it, here on CoreCLR, the vector paths' own tests left out.
+      - name: Test the Unity build
+        run: dotnet test tests/ManagedCodecs.Tests -c Release -p:UnityBuild=true
+
       - name: Test MJPEG without AVX2 (the Vector128 IDCT, which ARM64 runs)
         run: dotnet test ManagedCodecs.slnx -c Release --no-build --filter FullyQualifiedName~Mjpeg
         env:
@@ -223,3 +228,38 @@ jobs:
 
       - name: Native AOT, x86-64-v3, against the JIT
         run: tools/aot-check.sh x86-64-v3
+
+  # The Unity build on Mono 6.12 (mono-project.com's: Ubuntu's 6.8 cannot load netstandard2.1 assemblies), the runtime
+  # family Unity's Mono is built on: tools/unity-check.sh decodes every sample there and with the net10.0 build, fails
+  # unless the output is the same, and prints the times (in the job summary). IL2CPP needs a Unity install and is not
+  # tested here. Samples from the build job.
+  unity:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Install Mono 6.12
+        run: |
+          sudo gpg --homedir /tmp --no-default-keyring --keyring /usr/share/keyrings/mono-official-archive-keyring.gpg \
+            --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys 3FA7E0328081BFF6A14DA29AA6A19B38D3D831EF
+          echo "deb [signed-by=/usr/share/keyrings/mono-official-archive-keyring.gpg] https://download.mono-project.com/repo/ubuntu stable-focal main" \
+            | sudo tee /etc/apt/sources.list.d/mono-official-stable.list
+          sudo apt-get update -q
+          sudo apt-get install -y -q mono-runtime mono-devel
+          mono --version | head -1
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: samples
+          path: samples
+
+      # shell: bash runs it with pipefail, so the script's failure is not lost in tee's success.
+      - name: Decode every sample on Mono and compare with the net10.0 build
+        shell: bash
+        run: tools/unity-check.sh | tee -a "$GITHUB_STEP_SUMMARY"

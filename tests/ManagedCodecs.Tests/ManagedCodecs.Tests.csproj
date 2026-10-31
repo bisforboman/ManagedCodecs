@@ -21,7 +21,18 @@
     <None Include="Fuzz\Findings\**" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
-  <ItemGroup>
+  <!-- -p:UnityBuild=true: the same tests against the Unity build (src/ManagedCodecs.Unity, netstandard2.1, the scalar
+       paths), as ci.yml runs them; tests of the vector paths themselves are left out (UNITY_BUILD). -->
+  <PropertyGroup Condition="'$(UnityBuild)' == 'true'">
+    <DefineConstants>$(DefineConstants);UNITY_BUILD</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(UnityBuild)' == 'true'">
+    <Compile Remove="**\VectorZipTests.cs" />
+    <ProjectReference Include="..\..\src\ManagedCodecs.Unity\ManagedCodecs.Unity.csproj" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(UnityBuild)' != 'true'">
     <ProjectReference Include="..\..\src\ManagedCodecs.Core\ManagedCodecs.Core.csproj" />
     <ProjectReference Include="..\..\src\ManagedCodecs.Containers\ManagedCodecs.Containers.csproj" />
     <ProjectReference Include="..\..\src\ManagedCodecs.Mjpeg\ManagedCodecs.Mjpeg.csproj" />

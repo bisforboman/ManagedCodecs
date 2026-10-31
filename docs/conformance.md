@@ -11,6 +11,22 @@ stream's height, so the decoder needs `new MjpegDecoder(video)`), woven with the
 order FFmpeg takes for AVI, which does not tell it (`FirstFieldOnTop` gives the other; the AVI1 segment's field
 byte is ignored, as by FFmpeg). Packets of one field are not decoded (FFmpeg decodes none either).
 
+Each frame's colour properties and aspect ratio are compared with `ffprobe -show_frames` frame by frame (`name.color`,
+as for H.264). T.81 leaves them open; JFIF implies BT.601 YCbCr in full range with centred chroma. FFmpeg's decoder
+(6.1.1), found with patched samples where its encoder writes nothing to tell:
+
+- Every frame is `Bt470BG` (BT.601) with `Center` chroma, gray ones too; primaries and transfer unspecified.
+- YCbCr is full range, unless a "CS=ITU601" comment came (the whole comment, to a terminating zero), which FFmpeg's
+  encoder writes for limited range (`mjpeg-limited-range`; FFmpeg decodes it to yuv420p, tv). Gray is unspecified
+  (`gray.avi`, ImageMagick's; FFmpeg's encoder writes no gray).
+- The aspect ratio is the JFIF header's Xdensity:Ydensity whatever its units (300 by 150 dots an inch gave 2:1),
+  unknown with a 0 in either or without JFIF (`mjpeg-sar`, 2:1).
+- Both are kept for the rest of the stream: a stream whose first image alone had the comment, or a JFIF density of
+  3:2, gave tv, or 3:2, for every frame; a later JFIF replaces the ratio. `MjpegColorTests` covers these.
+
+As for H.264, ffprobe's ratio prefers the container's (AVI's 'vprp', MP4's 'pasp'); FFmpeg's muxers write it from the
+same source as the JFIF density, so on the samples they agree.
+
 ## Real films
 
 Every sample above is a test pattern encoded to isolate a feature. `tools/realworld.py` (nightly, `realworld.yml`, a job

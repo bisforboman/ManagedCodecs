@@ -30,6 +30,12 @@ public sealed class MjpegDecoder : IVideoDecoder
     // The stream's height, from the container; 0 when unknown (no field detection).
     private readonly int _streamHeight;
 
+    // What earlier images said of the samples' meaning, kept for later ones as FFmpeg keeps them: a JFIF density's
+    // aspect ratio (each JFIF segment replaces it), and FFmpeg's encoder's "CS=ITU601" comment, limited range (once
+    // seen, for good).
+    private Rational _aspectRatio = new(0, 1);
+    private bool _limitedRange;
+
     /// <summary>A decoder that knows nothing of the stream's height, so it takes every image as a whole frame, never as a field.</summary>
     public MjpegDecoder()
     {
@@ -107,7 +113,61 @@ public sealed class MjpegDecoder : IVideoDecoder
     {
         var frame = DecodeFrame(packet);
         frame.PictureType = PictureType.I;
+        SetColor(frame);
         return frame;
+    }
+
+    /// <summary>
+    /// The frame's colour properties as FFmpeg's decoder gives them (T.81 leaves them open; JFIF says YCbCr with
+    /// BT.601's matrix, full range, chroma centred): BT.470BG (BT.601) and centred chroma whatever the image; full range
+    /// for YCbCr unless a "CS=ITU601" comment came (FFmpeg's encoder writes it for limited range), unspecified for gray;
+    /// the last JFIF density's aspect ratio, in lowest terms.
+    /// </summary>
+    private void SetColor(VideoFrame frame)
+    {
+        frame.ColorMatrix = ColorMatrix.Bt470BG;
+        frame.ChromaLocation = ChromaLocation.Center;
+        frame.ColorRange = frame.Format == PixelFormat.Gray8 ? ColorRange.Unspecified : _limitedRange ? ColorRange.Limited : ColorRange.Full;
+        frame.SampleAspectRatio = _aspectRatio;
+    }
+
+    /// <summary>
+    /// An APP0 segment: a JFIF header's density ("JFIF\0", version, units, Xdensity, Ydensity) as the aspect ratio
+    /// Xdensity:Ydensity, whatever its units (FFmpeg's reading; 0 in either unknown). Other APP0 segments (AVI1) are
+    /// left alone.
+    /// </summary>
+    private void ReadApp0(ReadOnlySpan<byte> payload)
+    {
+        if (payload.Length < 12 || !payload.StartsWith("JFIF\0"u8))
+        {
+            return;
+        }
+
+        int x = (payload[8] << 8) | payload[9];
+        int y = (payload[10] << 8) | payload[11];
+        _aspectRatio = AspectRatioOf(x, y);
+    }
+
+    /// <summary>Xdensity:Ydensity in lowest terms, 0:1 (unknown) if either is 0.</summary>
+    internal static Rational AspectRatioOf(int x, int y)
+    {
+        if (x <= 0 || y <= 0)
+        {
+            return new(0, 1);
+        }
+
+        int gcd = (int)System.Numerics.BigInteger.GreatestCommonDivisor(x, y);
+        return new(x / gcd, y / gcd);
+    }
+
+    /// <summary>A COM segment: "CS=ITU601" (to a terminating zero, if any) marks limited range, as FFmpeg reads it.</summary>
+    private void ReadComment(ReadOnlySpan<byte> payload)
+    {
+        int zero = payload.IndexOf((byte)0);
+        if ((zero < 0 ? payload : payload[..zero]).SequenceEqual("CS=ITU601"u8))
+        {
+            _limitedRange = true;
+        }
     }
 
     private VideoFrame DecodeFrame(ReadOnlySpan<byte> packet)
@@ -170,6 +230,12 @@ public sealed class MjpegDecoder : IVideoDecoder
                     break;
                 case JpegMarker.Dht:
                     ParseHuffmanTables(payload);
+                    break;
+                case JpegMarker.App0:
+                    ReadApp0(payload);
+                    break;
+                case JpegMarker.Com:
+                    ReadComment(payload);
                     break;
                 case JpegMarker.Dri:
                     if (payload.Length < 2)

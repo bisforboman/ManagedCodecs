@@ -236,12 +236,14 @@ internal sealed class SequenceParameterSet
 
         var range = ColorRange.Unspecified;
         var (primaries, transfer, matrix) = (ColorPrimaries.Unspecified, ColorTransfer.Unspecified, ColorMatrix.Unspecified);
+        bool colourSent = false;
         if (r.ReadFlag())
         {
             r.ReadBits(3); // video_format
             range = r.ReadFlag() ? ColorRange.Full : ColorRange.Limited; // video_full_range_flag
             if (r.ReadFlag())
             {
+                colourSent = true;
                 primaries = VideoSignal.PrimariesOf((int)r.ReadBits(8));
                 transfer = VideoSignal.TransferOf((int)r.ReadBits(8));
                 matrix = VideoSignal.MatrixOf((int)r.ReadBits(8));
@@ -255,7 +257,7 @@ internal sealed class SequenceParameterSet
             r.ReadUe(); // chroma_sample_loc_type_bottom_field
         }
 
-        var signal = new VideoSignal(range, primaries, transfer, matrix, location, aspectRatio);
+        var signal = new VideoSignal(range, primaries, transfer, matrix, location, aspectRatio, RangeSent: range != ColorRange.Unspecified, ColourSent: colourSent);
 
         if (r.ReadFlag())
         {

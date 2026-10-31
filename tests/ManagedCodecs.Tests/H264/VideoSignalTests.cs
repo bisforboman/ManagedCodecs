@@ -29,7 +29,7 @@ public class VideoSignalTests
     {
         var signal = Parse(new Vui(AspectIdc: 255, SarWidth: 64, SarHeight: 45, FullRange: true, Primaries: 9, Transfer: 16, Matrix: 9, ChromaLocType: 2)).Signal;
         Assert.Equal(
-            new VideoSignal(ColorRange.Full, ColorPrimaries.Bt2020, ColorTransfer.Smpte2084, ColorMatrix.Bt2020Ncl, ChromaLocation.TopLeft, new(64, 45)),
+            new VideoSignal(ColorRange.Full, ColorPrimaries.Bt2020, ColorTransfer.Smpte2084, ColorMatrix.Bt2020Ncl, ChromaLocation.TopLeft, new(64, 45), RangeSent: true, ColourSent: true),
             signal);
     }
 
@@ -38,7 +38,7 @@ public class VideoSignalTests
     public void RangeWithoutColourDescription()
     {
         var signal = Parse(new Vui(FullRange: false, Primaries: null)).Signal;
-        Assert.Equal(VideoSignal.None with { Range = ColorRange.Limited, Location = ChromaLocation.Left }, signal);
+        Assert.Equal(VideoSignal.None with { Range = ColorRange.Limited, Location = ChromaLocation.Left, RangeSent = true }, signal);
     }
 
     /// <summary>Table E-1 by aspect_ratio_idc; 0, the reserved 17 to 254, and an Extended_SAR with a zero unspecified; an Extended_SAR in lowest terms.</summary>
@@ -105,7 +105,7 @@ public class VideoSignalTests
     public void UndefinedCodePoints_InTheVui()
     {
         var signal = Parse(new Vui(FullRange: true, Primaries: 200, Transfer: 100, Matrix: 15, ChromaLocType: 6)).Signal;
-        Assert.Equal(VideoSignal.None with { Range = ColorRange.Full }, signal);
+        Assert.Equal(VideoSignal.None with { Range = ColorRange.Full, RangeSent = true, ColourSent = true }, signal);
     }
 
     /// <summary>The frame takes the signal, the aspect ratio checked against its size.</summary>

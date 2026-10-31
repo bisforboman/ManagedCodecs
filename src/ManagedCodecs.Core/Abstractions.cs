@@ -99,7 +99,37 @@ public sealed record VideoStreamInfo(
     long FrameCount,
     Rational TimeBase,
     ReadOnlyMemory<byte> CodecPrivate,
-    int StreamIndex);
+    int StreamIndex)
+{
+    /// <summary>
+    /// The samples' range as the container says it (MP4's 'colr' of type 'nclx'), <see cref="ColorRange.Unspecified"/>
+    /// where it says nothing. A decoder given this stream takes it for frames whose bitstream does not say (as FFmpeg's).
+    /// </summary>
+    public ColorRange ColorRange { get; init; }
+
+    /// <summary>The colour primaries as the container says them (MP4's 'colr', 'nclx' or QuickTime's 'nclc').</summary>
+    public ColorPrimaries ColorPrimaries { get; init; } = ColorPrimaries.Unspecified;
+
+    /// <summary>The transfer characteristics as the container says them (MP4's 'colr').</summary>
+    public ColorTransfer ColorTransfer { get; init; } = ColorTransfer.Unspecified;
+
+    /// <summary>The YCbCr to RGB matrix as the container says it (MP4's 'colr').</summary>
+    public ColorMatrix ColorMatrix { get; init; } = ColorMatrix.Unspecified;
+
+    /// <summary>
+    /// The sample aspect ratio as the container says it (MP4's 'pasp'), in lowest terms; 0:1 where it says nothing. A
+    /// decoder given this stream gives its frames this ratio where there is one, as ffprobe shows frames (FFmpeg's
+    /// <c>av_guess_sample_aspect_ratio</c> prefers the container's).
+    /// </summary>
+    public Rational SampleAspectRatio { get; init; } = new(0, 1);
+
+    /// <summary>
+    /// How far to turn the frames counter-clockwise to show them, in degrees: 0, 90, 180 or 270, from MP4's track and
+    /// movie matrices ('tkhd', 'mvhd'), as ffprobe's display matrix <c>rotation</c> (-90 there is 270 here). 0 for a
+    /// matrix that turns by another angle or mirrors. The decoders do not turn frames.
+    /// </summary>
+    public int Rotation { get; init; }
+}
 
 /// <summary>Basic facts about a container's audio stream.</summary>
 /// <param name="Codec">One of <see cref="CodecIds"/> when recognized, otherwise the container's own tag.</param>

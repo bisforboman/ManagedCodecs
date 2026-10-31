@@ -98,6 +98,10 @@ done
 # The MJPEG remux is decoded end to end; H.264 with B-frames needs the edit list right, MPEG-4 Part 2 carries its
 # codec private data in esds, faststart puts moov before mdat, and the delayed one starts with an empty edit.
 ff -i samples/testsrc-420.avi -c copy samples/mjpeg-420.mp4
+# MJPEG with a 'colr' (name.color): its primaries and transfer reach the frames, its range and matrix do not (the
+# JPEG decoder's own).
+ff -i samples/testsrc-420.avi -c copy -color_primaries bt709 -color_trc smpte2084 -colorspace bt709 -color_range tv \
+  samples/mjpeg-colr.mp4
 ff -f lavfi -i testsrc2=size=320x240:rate=25 -t 2 -c:v libx264 -bf 2 -g 12 samples/h264-bframes.mp4
 ff -f lavfi -i testsrc2=size=320x240:rate=30000/1001 -t 2 -c:v libx264 -bf 0 -movflags +faststart samples/h264-faststart.mp4
 ff -f lavfi -i testsrc2=size=320x240:rate=25 -t 1 -c:v mpeg4 -bf 2 samples/mpeg4-bframes.mp4
@@ -275,6 +279,18 @@ ff -f lavfi -i testsrc2=size=320x240:rate=25 -t 0.2 "${H[@]}" -color_range pc -c
 ff -f lavfi -i testsrc2=size=320x240:rate=25,setsar=16/11 -t 0.2 "${H[@]}" -colorspace smpte170m -color_primaries smpte170m \
   -color_trc arib-std-b67 samples/h264-color-hlg-sar.mp4
 ff -f lavfi -i testsrc2=size=320x240:rate=25,setsar=64/45 -t 0.2 "${H[@]}" samples/h264-sar-extended.mp4
+# The container's say (VideoStreamInfo, and frames where the stream says nothing; name.display for the ratio and
+# rotation): a 'colr' with no colour description in the VUI (frames take the container's), one against the VUI's (the
+# VUI wins), a 'pasp' of 4:3 over a VUI of 64:45 (ffprobe shows the container's; tools/mp4-pasp.py, FFmpeg's muxer
+# copies the VUI's), a track matrix turning by 90, 180 and 270 degrees, and MJPEG with a 'colr' (its primaries and
+# transfer, which JPEG has none of; mjpeg-colr, above).
+ff -i samples/h264-high-default.mp4 -c copy -color_primaries bt709 -color_trc bt709 -colorspace bt709 -color_range tv \
+  samples/h264-colr-only.mp4
+ff -i samples/h264-color-bt709.mp4 -c copy -color_primaries bt2020 -color_trc smpte2084 -colorspace bt2020nc \
+  -color_range pc samples/h264-colr-conflict.mp4
+cp samples/h264-sar-extended.mp4 samples/h264-pasp-conflict.mp4
+python3 tools/mp4-pasp.py samples/h264-pasp-conflict.mp4 4 3
+for r in 90 180 270; do ff -display_rotation $r -i samples/h264-high-default.mp4 -c copy "samples/h264-rotate-$r.mp4"; done
 # ---- H.264 High 4:2:2 ----
 # 4:2:2 chroma (chroma_format_idc 2): 8x16 chroma blocks of eight 4x4 blocks, a 2x4 chroma DC transform at QP_C + 3,
 # CAVLC's chroma DC tables for nC = -2 and CABAC's chroma DC contexts for 8 coefficients, plane and DC intra
@@ -598,10 +614,11 @@ ff -i samples/aac-fdk-pce.aac -c copy samples/aac-fdk-pce-remux.mp4
 # them: aac-edit-trim and the samples with several edits). name.trim.f32: decoded audio as
 # FFmpeg gives it by default, trimmed by the edit list. -idct simple: FFmpeg's C IDCT for JPEG, the arithmetic the MJPEG
 # decoder follows; its default picks by CPU, the same results on x64 (SSE2) but not on ARM64 (NEON rounds otherwise).
-for f in samples/*.avi samples/*.mp4; do ff -idct simple -i "$f" -f framemd5 "${f%.*}.framemd5"; done
+# -noautorotate: FFmpeg's command line turns frames by a track's rotation (h264-rotate-*), which decoders do not.
+for f in samples/*.avi samples/*.mp4; do ff -idct simple -noautorotate -i "$f" -f framemd5 "${f%.*}.framemd5"; done
 # Monochrome H.264 (by the name): FFmpeg decodes it to 4:2:0 with flat chroma, so the references take its Y plane
 # alone, as it is (extractplanes; -pix_fmt gray would rescale a limited-range stream's samples to full range).
-for f in samples/*gray*.mp4; do ff -i "$f" -vf extractplanes=y -f framemd5 "${f%.*}.framemd5"; done
+for f in samples/*gray*.mp4; do ff -noautorotate -i "$f" -vf extractplanes=y -f framemd5 "${f%.*}.framemd5"; done
 # h264-negative-ctts-last is for the demuxer alone: FFmpeg drops the frame whose pts goes back, which the decoder,
 # outputting by picture order, keeps.
 rm samples/h264-negative-ctts-last.framemd5
@@ -619,6 +636,13 @@ for f in samples/*.avi samples/*.mp4; do
   t=$(ffprobe -v error -select_streams v:0 -show_entries stream=field_order:frame=interlaced_frame,top_field_first -of csv "$f" \
     | cut -d, -f1-3)
   if [ -n "$t" ]; then echo "$t" > "${f%.*}.interlacing"; fi
+done
+# name.display: the video stream's sample aspect ratio and rotation as ffprobe lists them ("sample_aspect_ratio=4:3",
+# "rotation=-90"; the ratio the container's where it has one, else the decoder's), for VideoStreamInfo.SampleAspectRatio
+# and Rotation.
+for f in samples/*.mp4; do
+  t=$(ffprobe -v error -select_streams v:0 -of default=nw=1 -show_entries stream=sample_aspect_ratio:stream_side_data=rotation "$f")
+  if [ -n "$t" ]; then echo "$t" > "${f%.*}.display"; fi
 done
 # name.color: each decoded video frame's colour properties and sample aspect ratio as ffprobe lists them, one a line in
 # output order ("color_range=tv|color_space=bt709|..."), for VideoFrame.ColorRange, ColorPrimaries, ColorTransfer,

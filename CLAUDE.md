@@ -111,6 +111,9 @@ file first.
 
 ## Gotchas (each cost time once)
 
+- `ffmpeg -i` turns decoded frames by an MP4 track's rotation (autorotate, on by default): frame references take
+  `-noautorotate` (make-samples.sh), or a rotated sample's frames differ after the first.
+
 - A worktree has no generated samples: link them with `ln -s <main checkout>/samples/*.* samples/`, without `-f`
   (`ln -sf samples/*` once replaced the tracked `samples/README.md` with a link, and linked directories into themselves).
   A worktree made before a sample was generated has no link to it: a new theory row then reads "no data". References

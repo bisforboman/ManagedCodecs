@@ -74,6 +74,9 @@ public sealed class H264Decoder : IVideoDecoder
     private int _containerWidth;
     private int _containerHeight;
 
+    // The container's colour properties and aspect ratio, which frames take where their SPS says nothing; null without one.
+    private VideoStreamInfo? _stream;
+
     /// <param name="codecPrivate">The AVCDecoderConfigurationRecord ('avcC') from the container.</param>
     public H264Decoder(ReadOnlySpan<byte> codecPrivate)
     {
@@ -94,13 +97,16 @@ public sealed class H264Decoder : IVideoDecoder
     /// A decoder for a demuxed stream. Its frames take the container's picture size (MP4's sample entry) where that
     /// crops the stream's visible area only at the right and bottom, within its last macroblock column and row, as
     /// FFmpeg's decoder does (an Apple-encoded 640x360 film stores 640x359): with no SPS cropping at the top or left,
-    /// a size no larger than the SPS's and the same once each is rounded up to a multiple of 16.
+    /// a size no larger than the SPS's and the same once each is rounded up to a multiple of 16. They take the
+    /// container's colour properties where the SPS's VUI does not send its own (a range, or a colour description), and
+    /// the container's aspect ratio where it has one, as ffprobe shows FFmpeg's frames.
     /// </summary>
     public H264Decoder(VideoStreamInfo stream)
         : this(stream.CodecPrivate.Span)
     {
         _containerWidth = stream.Width;
         _containerHeight = stream.Height;
+        _stream = stream;
     }
 
     /// <summary>
@@ -501,7 +507,7 @@ public sealed class H264Decoder : IVideoDecoder
         frame.IsTopFieldFirst = job.Interlacing.TopFieldFirst;
         frame.FieldOrder = job.Interlacing.Order;
         frame.IsCodedAsFields = job.Interlacing.CodedAsFields;
-        state.Sps.Signal.Apply(frame);
+        state.Sps.Signal.Apply(frame, _stream);
         frames.AddRange(_output.Add(frame, picture.Poc, job.Restart, ReorderDepth(state.Sps), borrow ? picture : null));
     }
 

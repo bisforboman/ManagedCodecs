@@ -177,6 +177,16 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.Containers/Mp4/Mp4Demuxer.cs",
          find="ptsOffsets[i] = checked(ptsOffsets[i] + dtsShift);", replace="",
          tests="FullyQualifiedName~Mp4"),
+    # FFmpeg's mov_fix_index: the first pts shown, less leading empty edits, moves to 0 (discarded samples don't count).
+    dict(file="src/ManagedCodecs.Containers/Mp4/Mp4Demuxer.cs",
+         find="samples.Dts[i] -= late;", replace="",
+         tests="FullyQualifiedName~Mp4"),
+    dict(file="src/ManagedCodecs.Containers/Mp4/Mp4Demuxer.cs",
+         find="if ((samples.Flags[i] & SampleTable.Discard) == 0)", replace="if (true)",
+         tests="FullyQualifiedName~Mp4"),
+    dict(file="src/ManagedCodecs.Containers/Mp4/Mp4Demuxer.cs",
+         find="firstShown - edits[0].Start;", replace="firstShown;",
+         tests="FullyQualifiedName~Mp4"),
     # QuickTime audio: the esds inside a 'wave' box.
     dict(file="src/ManagedCodecs.Containers/Mp4/Mp4Demuxer.cs",
          find="|| (FindChild(children, Box.Wave, out var wave) && FindChild(wave, Box.Esds, out esds))", replace="",

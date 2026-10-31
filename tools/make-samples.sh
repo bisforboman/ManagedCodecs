@@ -526,8 +526,16 @@ python3 -I tools/mp4-edit-list.py samples/aac-edits.mp4 0 510:1024,310:72000
 python3 -I tools/mp4-edit-list.py samples/aac-edits-empty.mp4 0 500:1024,200:-1,300:72704
 ff -f lavfi -i testsrc2=size=320x240:rate=25 -t 2 -c:v libx264 -bf 2 -g 12 samples/h264-edits.mp4
 cp samples/h264-edits.mp4 samples/h264-edit-end.mp4
+for e in zero gap empty-zero; do cp samples/h264-edits.mp4 samples/h264-edit-$e.mp4; done
 python3 -I tools/mp4-edit-list.py samples/h264-edits.mp4 0 200:1024,240:9216
 python3 -I tools/mp4-edit-list.py samples/h264-edit-end.mp4 0 1000:1024
+# Edits whose shown frames start after the edit's start, which FFmpeg's muxer never writes (it sets media time to the first
+# composition offset): FFmpeg then moves every timestamp of the track back so that the smallest pts of a frame shown
+# (discarded ones don't count), less any empty edits, is 0 (mov_fix_index). Media time 0 with the first pts at 1024;
+# 1280, past the first frame (discarded), the next shown at 1536; and an empty edit before a media time of 0.
+python3 -I tools/mp4-edit-list.py samples/h264-edit-zero.mp4 0 2000:0
+python3 -I tools/mp4-edit-list.py samples/h264-edit-gap.mp4 0 1500:1280
+python3 -I tools/mp4-edit-list.py samples/h264-edit-empty-zero.mp4 0 200:-1,2000:0
 ff -f lavfi -i "testsrc2=size=320x240:rate=25" -f lavfi -i "sine=frequency=330:sample_rate=48000:duration=2" -t 2 -c:v libx264 -bf 2 -g 12 -c:a aac -ac 2 -aac_pns 0 samples/h264-audio-edits.mp4
 python3 -I tools/mp4-edit-list.py samples/h264-audio-edits.mp4 0 400:1024,400:15360
 python3 -I tools/mp4-edit-list.py samples/h264-audio-edits.mp4 1 400:1024,400:48500

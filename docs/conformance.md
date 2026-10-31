@@ -73,6 +73,11 @@ it rewrites those of the packets an edit goes back for. FFmpeg's reading, which 
   the movie's timescale, runs past it: aac-fdk-pce-remux).
 - An empty edit after a real one plays the media from its start for its duration, FFmpeg reading its media time, -1,
   as a time like any other (the spec has it as a gap).
+- Where the first pts shown (of a frame not discarded), less the empty edits before the first real one, comes after 0,
+  every time of the track moves back so that it is 0 (FFmpeg's `mov_fix_index`): an edit whose media time is before
+  the first composition offset, which FFmpeg's muxer never writes (it sets the first offset as the media time), but
+  other muxers do (Caminandes: Gran Dillama, media time 0 and a first offset of 1000; issue #252).
+  `h264-edit-zero`, `h264-edit-gap` (past a discarded first frame, which doesn't count) and `h264-edit-empty-zero`.
 
 Negative composition offsets: in the `moov`'s own `ctts` (`h264-negative-ctts`, `-movflags negative_cts_offsets`
 unfragmented), FFmpeg moves every dts back by the most negative offset (of all entries but the last two), so the pts

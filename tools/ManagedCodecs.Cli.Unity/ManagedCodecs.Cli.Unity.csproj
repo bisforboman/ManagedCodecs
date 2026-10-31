@@ -11,6 +11,9 @@
     <RootNamespace>ManagedCodecs.Cli</RootNamespace>
     <IsPackable>false</IsPackable>
     <NoWarn>$(NoWarn);CS1591</NoWarn>
+    <!-- A netstandard2.1 build doesn't copy its package dependencies (System.Runtime.CompilerServices.Unsafe) to the
+         output; Mono loads them from beside mcdec.dll. -->
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
   </PropertyGroup>
 
   <ItemGroup>

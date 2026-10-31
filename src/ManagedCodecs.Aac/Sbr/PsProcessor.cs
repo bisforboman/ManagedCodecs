@@ -901,8 +901,8 @@ internal sealed class PsProcessor
     /// alpha = arctan(2 c rho / (c^2 - 1)) / 2 taken in [0, pi / 2], mu = sqrt(1 + (4 rho^2 - 4) / (c + 1 / c)^2) and
     /// gamma = arctan(sqrt((1 - mu) / (1 + mu))): h11 = sqrt(2) cos(alpha) cos(gamma), h12 = sqrt(2) sin(alpha) cos(gamma),
     /// h21 = -sqrt(2) sin(alpha) sin(gamma), h22 = sqrt(2) cos(alpha) sin(gamma). The angles' sines and cosines come by
-    /// half-angle identities and square roots alone, which are exact on every platform (CLAUDE.md, HE-AAC: Math's
-    /// trigonometry differs in its last bit on WebAssembly). Rho is taken as at least 0.05, as FFmpeg takes it: without
+    /// half-angle identities and square roots alone, which are exact on every platform (src/ManagedCodecs.Aac/CLAUDE.md,
+    /// HE-AAC: Math's trigonometry differs in its last bit on WebAssembly). Rho is taken as at least 0.05, as FFmpeg takes it: without
     /// that the Rb sample (heaacv2-rb, its ICC down to index 7, rho -1) was up to 0.3 off FFmpeg's output.
     /// </summary>
     internal static void MatrixRb(double right, double rho, out double h11, out double h12, out double h21, out double h22)

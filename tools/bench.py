@@ -14,6 +14,7 @@ the 720p sample with 4 threads against 1.
 Usage (from the repository root, after tools/make-samples.sh and a Release build of tools/ManagedCodecs.Cli):
   tools/bench.py --runs 5 --report bench.md --json bench.json
   tools/bench.py --base <other mcdec.dll> --runs 5 --report compare.md
+  tools/bench.py --base <net10.0 mcdec.dll> --mcdec <netstandard2.1 mcdec.dll> --runtime mono  (the Unity build on Mono)
 """
 
 import argparse
@@ -80,11 +81,15 @@ def frames(output):
     return int(match.group(1)) + int(match.group(2))
 
 
+# The runtime each .dll runs on: dotnet, or what --runtime gives the --mcdec build (mono for the Unity build).
+RUNTIMES = {}
+
+
 def mcdec(dll, path, loops, threads=1):
     """Wall time per decoded frame in microseconds (the whole process, and the last loop's when loops > 1), and the
     frames per loop."""
     # A .dll runs on the runtime; anything else is a native executable (a Native AOT publish of mcdec).
-    command = (["dotnet", dll] if dll.endswith(".dll") else [dll]) + [path, "--loops", str(loops)]
+    command = ([RUNTIMES.get(dll, "dotnet"), dll] if dll.endswith(".dll") else [dll]) + [path, "--loops", str(loops)]
     if threads != 1:
         command += ["--threads", str(threads)]
     output = run(command)
@@ -145,6 +150,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--mcdec", default="tools/ManagedCodecs.Cli/bin/Release/net10.0/mcdec.dll")
     parser.add_argument("--base", help="another mcdec.dll to compare with, instead of FFmpeg")
+    parser.add_argument("--runtime", default="dotnet", help="what runs the --mcdec .dll (mono for the Unity build's)")
     parser.add_argument("--runs", type=int, default=5)
     parser.add_argument("--samples", default="samples")
     parser.add_argument("--only", nargs="*", help="sample names to run (default: all)")
@@ -152,6 +158,7 @@ def main():
     parser.add_argument("--json", help="JSON record to write")
     args = parser.parse_args()
 
+    RUNTIMES[args.mcdec] = args.runtime
     samples = [s for s in SAMPLES if not args.only or s[0] in args.only]
     record = {
         "date": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),

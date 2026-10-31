@@ -264,3 +264,13 @@ jobs:
       - name: Decode every sample on Mono and compare with the net10.0 build
         shell: bash
         run: tools/unity-check.sh | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # unity-check.sh's times are one cold pass each, Mono's JIT included. This is README's Benchmarking list as
+      # compare.yml times it (interleaved runs, medians), the Unity build on Mono against the net10.0 build: its
+      # "steady" column, the last loop, is what a long file costs a frame (docs/decisions/2026-10-31-unity-netstandard.md).
+      - name: Time the Unity build on Mono against the net10.0 build
+        shell: bash
+        run: |
+          tools/bench.py --base tools/ManagedCodecs.Cli/bin/Release/net10.0/mcdec.dll \
+            --mcdec tools/ManagedCodecs.Cli.Unity/bin/Release/netstandard2.1/mcdec.dll --runtime mono --runs 3 --report unity-bench.md
+          { echo "### Mono ($(mono --version | head -1)) against net10.0, steady"; echo; cat unity-bench.md; } >> "$GITHUB_STEP_SUMMARY"

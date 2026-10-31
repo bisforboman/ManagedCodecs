@@ -64,9 +64,36 @@ The scalar build itself, `ManagedCodecs.Unity.dll`, under a copy of mcdec on Cor
 | heaac-5.1 | 129 ms | 129 ms | 1.0 |
 
 So 1 to 3.4 times, not the proxy's 10: that one did run software `Vector128`. All 246 samples (libx264, OpenH264, JM,
-MJPEG, AAC, HE-AAC) decode to the same SHA-256 as the net10.0 build. Mono is still unmeasured: Ubuntu's Mono 6.8
-cannot run netstandard2.1 assemblies (`MissingMethodException` on `ReadOnlySpan<T>`'s indexer, its facade too old),
-and the cloud sandbox cannot reach mono-project.com's 6.12, so the Mono job of pull request 2 measures it on CI.
+MJPEG, AAC, HE-AAC) decode to the same SHA-256 as the net10.0 build. Ubuntu's Mono 6.8 cannot run netstandard2.1
+assemblies (`MissingMethodException` on `ReadOnlySpan<T>`'s indexer, its facade too old), and the cloud sandbox cannot
+reach mono-project.com's 6.12, so the Mono job of pull request 2 measures it on CI.
+
+## Measured (pull request 2): Mono
+
+Mono 6.12 from mono-project.com on GitHub's x64 runner, one thread: the same mcdec on the Unity build under `mono`
+against the net10.0 build (ci.yml's `unity` job, `tools/bench.py --runtime mono`; medians of 3 interleaved runs, the
+"steady" last loop). Every sample decodes to the same output as the net10.0 build there (`tools/unity-check.sh`).
+
+| Sample | net10.0 (ms a frame) | Mono 6.12 (ms a frame) | Mono / net10.0 |
+| --- | ---: | ---: | ---: |
+| h264-bench-720p (1280x720, 1 I, 49 P) | 4.22 | 79.8 | 18.9 |
+| h264-p-refs (320x240, P frames, CAVLC) | 0.30 | 3.89 | 12.8 |
+| h264-b-pyramid (320x240, CABAC, B frames) | 0.72 | 6.45 | 9.0 |
+| h264-high-default (320x240, libx264's High defaults) | 0.59 | 5.75 | 9.8 |
+| h264-10bit-b (320x240, High 10) | 0.99 | 7.04 | 7.1 |
+| h264-mbaff-default (320x240, MBAFF) | 1.05 | 7.53 | 7.2 |
+| h264-high-motion (320x240, QP 22, fast motion) | 4.15 | 21.6 | 5.2 |
+| testsrc-420.avi (320x240 MJPEG) | 0.23 | 1.05 | 4.5 |
+| noise-q1.avi (MJPEG, highest quality) | 0.89 | 3.42 | 3.8 |
+| aac-stereo-48k (a frame: 1024 samples, 21 ms) | 0.018 | 0.096 | 5.3 |
+| aac-5.1 | 0.065 | 0.33 | 5.0 |
+| heaac-5.1 (a frame: 2048 samples, 43 ms) | 0.30 | 2.84 | 9.5 |
+| heaacv2-stereo | 0.12 | 0.99 | 8.1 |
+
+Far past the proxy's 10 on 720p H.264, and 5 to 9.5 times for audio, where CoreCLR's scalar build was even: Mono's JIT
+is the cost, not the missing vectors. In absolute terms the record's conclusion holds: AAC takes 0.5 to 1.5% of a core
+in real time and HE-AAC 2 to 7%, MJPEG and 320x240 H.264 play (1 to 22 ms a frame), and 720p H.264 runs at 12.5 frames
+a second on one thread (1080p would be a few). Unity's own Mono fork and IL2CPP (through C++) are not measured.
 
 ## The design
 
@@ -118,3 +145,7 @@ Asked with the multiple-choice prompt; the owner took each proposal (2026-10-31)
   rather than its user.
 - **Speed. Decided:** measure the real scalar build on CoreCLR and Mono in the first pull request and put the result
   in README before the package ships. The alternative was to ship with the proxy's range.
+- **Shipping at Mono's speed. Decided** (asked once the Mono job measured it, since it is far off the proxy): ship,
+  with the measured numbers in the package's page, README and here, and the scope stated (audio, MJPEG and small
+  cutscenes; not HD H.264). The alternatives were holding the package for a Mono speed round (on a Mono that isn't
+  Unity's), and a package without H.264.

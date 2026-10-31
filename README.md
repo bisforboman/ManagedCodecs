@@ -32,7 +32,7 @@ in between. That comparison is not measured here.
 | `src/ManagedCodecs.Containers` | `AviDemuxer`, `Mp4Demuxer`, `AdtsDemuxer` (raw .aac), and `Demuxer.Open` to pick one by content |
 | `src/ManagedCodecs.Mjpeg` | `MjpegDecoder`: baseline/extended Huffman JPEG, interlaced AVI1, bit-exact with FFmpeg |
 | `src/ManagedCodecs.H264` | `H264Decoder`: Constrained Baseline, Main, High, High 10, High 4:2:2 and High 4:4:4 Predictive profile H.264 (CAVLC, CABAC, I/P/B, weighted prediction, 8x8 transform, scaling matrices, deblocking, monochrome, 4:2:0, 4:2:2 and 4:4:4, also as separate colour planes, 8 to 14 bits, lossless, progressive and interlaced), bit-exact |
-| `src/ManagedCodecs.Unity` | The netstandard2.1 build for Unity (Mono, IL2CPP): every decoder's sources in one assembly, without the vector paths, 1 to 3.4 times slower on CoreCLR; not packed yet (docs/decisions/2026-10-31-unity-netstandard.md) |
+| `src/ManagedCodecs.Unity` | The netstandard2.1 build for Unity (Mono, IL2CPP): every decoder's sources in one assembly, without the vector paths, 1 to 3.4 times slower on CoreCLR; the `ManagedCodecs.Unity` package (see Unity) |
 | `src/ManagedCodecs.Aac` | `AacDecoder`: AAC LC (mono to 7.1, M/S, intensity, PNS, TNS), within 3e-7 of FFmpeg's float output; HE-AAC (spectral band replication) |
 | `src/Shared` | Source files linked into several codec projects (the VLC decoder) |
 | `tools/ManagedCodecs.Cli` | `mcdec`: decodes a file and times it, to compare with `ffmpeg -benchmark` (`--threads N` for H.264 frame threading and HE-AAC's channels) |
@@ -122,6 +122,8 @@ each depends on the others at exactly its own version, and NuGet reports a mix (
 ```
 dotnet add package ManagedCodecs
 ```
+
+For Unity (Mono, IL2CPP), `ManagedCodecs.Unity` instead (see Unity, below).
 
 Building from source requires the .NET 10 SDK. The tests also need samples made with FFmpeg (with libx264) and ImageMagick:
 
@@ -307,6 +309,22 @@ hour each of `mjpeg` and `aac` after that (17 and 18 million inputs) found nothi
 minutes of `h264` seeded with the long-term field samples alone (4.4 million inputs, with and without concealment)
 found nothing, and `ReferenceListTests` marks random field pictures with random memory management operations and
 checks the lists after each.
+
+### Unity
+
+`ManagedCodecs.Unity` is the same sources built for .NET Standard 2.1, which Unity's runtimes (Mono and IL2CPP, Unity
+2021.2 or later) load: one assembly, `ManagedCodecs.Unity.dll`, with every decoder and demuxer, and
+`System.Runtime.CompilerServices.Unsafe` as its one dependency. .NET Standard 2.1 has no
+`System.Runtime.Intrinsics`, so the vector paths are left out (`#if NET`) and their scalar references run. The
+output is the same to the bit: CI runs the whole test suite against this assembly on CoreCLR, and decodes every sample
+on Mono 6.12 (`tools/unity-check.sh`), comparing the output with the net10.0 build's. IL2CPP is not tested; it needs a
+Unity install. On Mono 6.12 (one thread, GitHub's x64 runner) it takes 4 to 19 times the net10.0 build's time:
+H.264 4 to 22 ms a 320x240 frame and 80 ms a 720p one (12.5 frames a second), MJPEG 1 to 3.4 ms a 320x240 frame,
+AAC 0.5 to 1.5% of a core in real time and HE-AAC 2 to 7%; so audio, MJPEG and small cutscenes, not HD H.264 on one
+thread. On CoreCLR the scalar build takes 1 to 3.4 times the other packages' time
+(docs/decisions/2026-10-31-unity-netstandard.md has both tables). WebGL builds have no threads,
+so `H264Decoder.Threads` stays at 1 there. The package holds the same types as the others, so a project references one
+or the other, never both. Its nuget.org page is `src/ManagedCodecs.Unity/PACKAGE.md`.
 
 ### WebAssembly
 

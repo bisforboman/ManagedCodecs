@@ -33,7 +33,9 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
 - **Public API**: Microsoft.CodeAnalysis.PublicApiAnalyzers lists every src/ package's public API in its
   `PublicAPI.Shipped.txt` (the last release's) and `PublicAPI.Unshipped.txt` (changes since, a removal as
   `*REMOVED*<line>`); a public member that isn't listed fails the build (RS0016, RS0017). Adding one:
-  `dotnet format analyzers src/<project> --diagnostics RS0016 --severity info` writes its lines into Unshipped. Every
+  `dotnet format analyzers src/<project> --diagnostics RS0016 --severity info` writes its lines into Unshipped. `src/ManagedCodecs.Unity` compiles
+  every package's sources, so a public change goes into its PublicAPI files too (the same command on it; CI checks
+  that its lines are the other packages' together, `tools/unity-public-api.py`). Every
   public change is an API decision, and from 0.1.0 a breaking one waits for the next minor version: CHANGELOG says it
   under "Unreleased". Package validation (Directory.Build.props, the `Pack` step in ci.yml) compares each package with
   `PackageValidationBaselineVersion` on nuget.org (the last release) and fails on a break (CP0002 and others); a

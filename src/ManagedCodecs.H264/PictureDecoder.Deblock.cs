@@ -1058,7 +1058,13 @@ internal sealed partial class PictureDecoder<TPixel>
     [SkipLocalsInit]
     private static void FilterEdgeVector16(ushort[] plane, int q0, int across, int along, int length, ReadOnlySpan<byte> strengths, int segmentShift, int indexA, int alpha, int beta, bool chroma, int bitDepth)
     {
+        if (FilterEdgeRegisters16(plane, q0, across, along, length, strengths, segmentShift, indexA, alpha, beta, chroma, bitDepth))
+        {
+            return;
+        }
+
         Span<short> taps = stackalloc short[(8 * 16) + 16];
+
         int firstTap = chroma ? 2 : 0;
         int lastTap = chroma ? 5 : 7;
         for (int k = firstTap; k <= lastTap; k++)
@@ -1097,6 +1103,153 @@ internal sealed partial class PictureDecoder<TPixel>
                 plane[start + (i * along)] = (ushort)row[i];
             }
         }
+    }
+
+    /// <summary>
+    /// <see cref="FilterEdgeVector16"/> with the taps in registers, eight positions at a time: a horizontal edge's rows
+    /// load as they are, a vertical edge's through an 8x8 transpose (p3 .. q3 side by side in a row). False, with
+    /// nothing changed, where the edge doesn't fit (a length not a multiple of 8, or rows outside the plane).
+    /// </summary>
+    private static bool FilterEdgeRegisters16(ushort[] plane, int q0, int across, int along, int length, ReadOnlySpan<byte> strengths, int segmentShift, int indexA, int alpha, int beta, bool chroma, int bitDepth)
+    {
+        bool columns = across == 1;
+        int reach = chroma && !columns ? 2 : 4;
+        int first = columns ? q0 - 4 : q0 - (reach * across);
+        int last = columns ? q0 - 4 + ((length - 1) * along) + 8 : q0 + ((reach - 1) * across) + length;
+        if (length % 8 != 0 || (!columns && along != 1) || first < 0 || last > plane.Length)
+        {
+            return false;
+        }
+
+        var maxV = Vector128.Create((short)((1 << bitDepth) - 1));
+        var alphaV = Vector128.Create((short)alpha);
+        var betaV = Vector128.Create((short)beta);
+        ref short origin = ref Unsafe.As<ushort, short>(ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(plane), q0));
+        for (int h = 0; h < length; h += 8)
+        {
+            EdgeLanes t = default;
+            ref short at = ref Unsafe.Add(ref origin, columns ? h * along : h);
+            if (columns)
+            {
+                ref short row = ref Unsafe.Subtract(ref at, 4);
+                t.P3 = Vector128.LoadUnsafe(ref row);
+                t.P2 = Vector128.LoadUnsafe(ref row, (nuint)along);
+                t.P1 = Vector128.LoadUnsafe(ref row, (nuint)(2 * along));
+                t.P0 = Vector128.LoadUnsafe(ref row, (nuint)(3 * along));
+                t.Q0 = Vector128.LoadUnsafe(ref row, (nuint)(4 * along));
+                t.Q1 = Vector128.LoadUnsafe(ref row, (nuint)(5 * along));
+                t.Q2 = Vector128.LoadUnsafe(ref row, (nuint)(6 * along));
+                t.Q3 = Vector128.LoadUnsafe(ref row, (nuint)(7 * along));
+                Transpose(ref t);
+            }
+            else
+            {
+                t.P1 = Vector128.LoadUnsafe(ref Unsafe.Subtract(ref at, 2 * across));
+                t.P0 = Vector128.LoadUnsafe(ref Unsafe.Subtract(ref at, across));
+                t.Q0 = Vector128.LoadUnsafe(ref at);
+                t.Q1 = Vector128.LoadUnsafe(ref at, (nuint)across);
+                if (!chroma)
+                {
+                    t.P3 = Vector128.LoadUnsafe(ref Unsafe.Subtract(ref at, 4 * across));
+                    t.P2 = Vector128.LoadUnsafe(ref Unsafe.Subtract(ref at, 3 * across));
+                    t.Q2 = Vector128.LoadUnsafe(ref at, (nuint)(2 * across));
+                    t.Q3 = Vector128.LoadUnsafe(ref at, (nuint)(3 * across));
+                }
+            }
+
+            var (bs, tc0) = SegmentParameters(strengths, h, segmentShift, indexA, bitDepth - 8);
+            if (!FilterLanes(ref t, bs, tc0, alphaV, betaV, chroma, maxV))
+            {
+                continue;
+            }
+
+            // The changed taps clipped as StoreTap does; the others are samples already, which the clip keeps.
+            t.P2 = Vector128.Clamp(t.P2, Vector128<short>.Zero, maxV);
+            t.P1 = Vector128.Clamp(t.P1, Vector128<short>.Zero, maxV);
+            t.P0 = Vector128.Clamp(t.P0, Vector128<short>.Zero, maxV);
+            t.Q0 = Vector128.Clamp(t.Q0, Vector128<short>.Zero, maxV);
+            t.Q1 = Vector128.Clamp(t.Q1, Vector128<short>.Zero, maxV);
+            t.Q2 = Vector128.Clamp(t.Q2, Vector128<short>.Zero, maxV);
+            if (columns)
+            {
+                Transpose(ref t);
+                ref short row = ref Unsafe.Subtract(ref at, 4);
+                t.P3.StoreUnsafe(ref row);
+                t.P2.StoreUnsafe(ref row, (nuint)along);
+                t.P1.StoreUnsafe(ref row, (nuint)(2 * along));
+                t.P0.StoreUnsafe(ref row, (nuint)(3 * along));
+                t.Q0.StoreUnsafe(ref row, (nuint)(4 * along));
+                t.Q1.StoreUnsafe(ref row, (nuint)(5 * along));
+                t.Q2.StoreUnsafe(ref row, (nuint)(6 * along));
+                t.Q3.StoreUnsafe(ref row, (nuint)(7 * along));
+                continue;
+            }
+
+            t.P0.StoreUnsafe(ref Unsafe.Subtract(ref at, across));
+            t.Q0.StoreUnsafe(ref at);
+            if (!chroma)
+            {
+                t.P2.StoreUnsafe(ref Unsafe.Subtract(ref at, 3 * across));
+                t.P1.StoreUnsafe(ref Unsafe.Subtract(ref at, 2 * across));
+                t.Q1.StoreUnsafe(ref at, (nuint)across);
+                t.Q2.StoreUnsafe(ref at, (nuint)(2 * across));
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>bS and tC0 (scaled by 2^<paramref name="tcShift"/>) of lanes <paramref name="lane"/> .. + 7, as <see cref="SetLanes"/> sets them.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static (Vector128<short> Bs, Vector128<short> Tc0) SegmentParameters(ReadOnlySpan<byte> strengths, int lane, int segmentShift, int indexA, int tcShift)
+    {
+        int s = lane >> segmentShift;
+        short b0 = strengths[s];
+        short b1 = strengths[s + 1];
+        if (segmentShift == 2)
+        {
+            short t0 = Tc0Of(b0, indexA);
+            short t1 = Tc0Of(b1, indexA);
+            return (Vector128.Create(b0, b0, b0, b0, b1, b1, b1, b1), Vector128.Create(t0, t0, t0, t0, t1, t1, t1, t1) << tcShift);
+        }
+
+        short b2 = strengths[s + 2];
+        short b3 = strengths[s + 3];
+        short u0 = Tc0Of(b0, indexA);
+        short u1 = Tc0Of(b1, indexA);
+        short u2 = Tc0Of(b2, indexA);
+        short u3 = Tc0Of(b3, indexA);
+        return (Vector128.Create(b0, b0, b1, b1, b2, b2, b3, b3), Vector128.Create(u0, u0, u1, u1, u2, u2, u3, u3) << tcShift);
+    }
+
+    /// <summary>The eight taps' lanes swapped with the taps: row k of an 8x8 block of 16-bit samples becomes column k.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void Transpose(ref EdgeLanes t)
+    {
+        var t0 = NativeZip.Low(t.P3.AsUInt16(), t.P2.AsUInt16()).AsUInt32();
+        var t1 = NativeZip.High(t.P3.AsUInt16(), t.P2.AsUInt16()).AsUInt32();
+        var t2 = NativeZip.Low(t.P1.AsUInt16(), t.P0.AsUInt16()).AsUInt32();
+        var t3 = NativeZip.High(t.P1.AsUInt16(), t.P0.AsUInt16()).AsUInt32();
+        var t4 = NativeZip.Low(t.Q0.AsUInt16(), t.Q1.AsUInt16()).AsUInt32();
+        var t5 = NativeZip.High(t.Q0.AsUInt16(), t.Q1.AsUInt16()).AsUInt32();
+        var t6 = NativeZip.Low(t.Q2.AsUInt16(), t.Q3.AsUInt16()).AsUInt32();
+        var t7 = NativeZip.High(t.Q2.AsUInt16(), t.Q3.AsUInt16()).AsUInt32();
+        var u0 = NativeZip.Low(t0, t2).AsUInt64();
+        var u1 = NativeZip.High(t0, t2).AsUInt64();
+        var u2 = NativeZip.Low(t1, t3).AsUInt64();
+        var u3 = NativeZip.High(t1, t3).AsUInt64();
+        var u4 = NativeZip.Low(t4, t6).AsUInt64();
+        var u5 = NativeZip.High(t4, t6).AsUInt64();
+        var u6 = NativeZip.Low(t5, t7).AsUInt64();
+        var u7 = NativeZip.High(t5, t7).AsUInt64();
+        t.P3 = NativeZip.Low(u0, u4).AsInt16();
+        t.P2 = NativeZip.High(u0, u4).AsInt16();
+        t.P1 = NativeZip.Low(u1, u5).AsInt16();
+        t.P0 = NativeZip.High(u1, u5).AsInt16();
+        t.Q0 = NativeZip.Low(u2, u6).AsInt16();
+        t.Q1 = NativeZip.High(u2, u6).AsInt16();
+        t.Q2 = NativeZip.Low(u3, u7).AsInt16();
+        t.Q3 = NativeZip.High(u3, u7).AsInt16();
     }
 
     /// <summary>

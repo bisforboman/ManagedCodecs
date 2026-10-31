@@ -1,6 +1,6 @@
 # Thumbnails and probing without FFmpeg (2026-10-31)
 
-A design for issue #253, with the decisions it needs from the owner (below); no code yet. The job: "give me a thumbnail
+A design for issue #253, decided (below); no code yet. The job: "give me a thumbnail
 and the basic facts of this uploaded video" in a web back end, serverless function or Blazor WebAssembly app that cannot
 run FFmpeg, on files nobody has vetted.
 
@@ -90,16 +90,16 @@ first frame 80 ms, the frame at 1 s 245 ms (24 frames decoded). Missing:
 
 ## Decisions
 
-Open, for the owner (recommendation first):
+Decided by the owner (2026-10-31), each as recommended:
 
-- **Own package or a sample.** Recommended: its own package, `ManagedCodecs.Thumbnails`; the alternative is a sample
-  in the repository that callers copy, which spares the API commitment but leaves the conversion and seeking untested
-  by the package checks.
-- **Image encoder by default.** Recommended: PNG written here plus raw RGBA, no image library dependency. Alternatives:
-  a SkiaSharp adapter in the box (JPEG and WebP, but native code), or ImageSharp (licence).
-- **Seek in Core.** Recommended: `IDemuxer.Seek` as a defaulted interface member in 0.5.0 with the colour metadata.
-  Alternative: seeking only inside the thumbnail package (no public API in Core, but nobody else gets it). Package
+- **Own package or a sample. Decided:** its own package, `ManagedCodecs.Thumbnails`, at the version every package has.
+  A sample callers copy would spare the API commitment but leave the conversion and seeking untested by the package's
+  checks.
+- **Image encoder by default. Decided:** PNG written here plus raw RGBA, no image library dependency. Not a SkiaSharp
+  adapter in the box (JPEG and WebP, but native code) nor ImageSharp (its licence); adapters can come later if asked.
+- **Seek in Core. Decided:** `IDemuxer.Seek` as a defaulted interface member in 0.5.0, with the colour metadata,
+  implemented by `Mp4Demuxer` and `AviDemuxer`, rather than seeking inside the thumbnail package only. Package
   validation may flag the new interface member even with a default body; the 0.5.0 PR's `dotnet pack` shows it, and
   the suppression file covers a deliberate change in a minor version.
-- **When.** Recommended: after the colour metadata lands (it is the thumbnails' prerequisite), so 0.5.0 carries
-  colour, seek and the first thumbnail package together.
+- **When. Decided:** after the colour metadata lands (the thumbnails' prerequisite), so 0.5.0 carries colour, seek and
+  the first thumbnail package together.

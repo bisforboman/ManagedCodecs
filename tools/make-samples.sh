@@ -661,6 +661,16 @@ for f in samples/*.mp4; do
   ffprobe -v error -show_packets -show_data_hash MD5 -show_entries packet=stream_index,pts,dts,duration,size,flags,data_hash \
     -of csv=p=0 "$f" > "${f%.mp4}.packets.csv"
 done
+# name.seekNNNN.framemd5: the first video frame FFmpeg's accurate seek gives at NNNN ms, for IDemuxer.Seek (-ss before
+# -i: from the keyframe at or before the time, the frames shown before it dropped; -seek_timestamp 1: the time is the
+# packets' own, not counted from the file's start time). Between keyframes, on one, in a fragmented file that starts
+# late, in a file with an empty edit, and in MJPEG.
+for s in h264-bframes.mp4:1200 h264-bframes.mp4:960 h264-bframes.mp4:1000 fmp4-base-moof.mp4:1200 \
+  h264-edit-gap.mp4:1000 testsrc-420.avi:600; do
+  f=samples/${s%%:*}; ms=${s##*:}
+  ff -seek_timestamp 1 -ss "$(printf '%d.%03d' $((ms / 1000)) $((ms % 1000)))" -idct simple -noautorotate -i "$f" -map 0:v:0 \
+    -frames:v 1 -f framemd5 "${f%.*}.seek$ms.framemd5"
+done
 # Raw AAC: packets as FFmpeg's demuxer gives them (whole ADTS frames), and every decoded sample (no edit list).
 for f in samples/*.aac; do
   ff -copyts -i "$f" -c copy -f framemd5 "${f%.aac}.packets.framemd5"

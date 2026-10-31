@@ -20,6 +20,11 @@ run time.
   and on Mono 6.12 4 to 19 times the time of the other packages on .NET 10 (audio, MJPEG and small
   cutscenes play; 720p H.264 runs at 12.5 frames a second on one thread). It holds the same types as the other packages, so reference
   one or the other (README, Unity; docs/decisions/2026-10-31-unity-netstandard.md).
+- `IDemuxer.Seek(pts, streamIndex)`: the next read starts at the keyframe at or before a time, the other stream at the
+  same instant, its packets those a read from the start gives from there (README, Decoding a file). `Mp4Demuxer` seeks in
+  every file, `AviDemuxer` in MJPEG; other demuxers throw `NotSupportedException` (a default interface member, so an
+  implementation of `IDemuxer` outside this library still compiles). New public API: the next release is a minor
+  version (docs/decisions/2026-10-31-thumbnails.md, pull request 1).
 - Every package carries THIRD-PARTY-NOTICES.md: the BSD-2-Clause and Apache-2.0 notices of OpenH264 and libxaac, from
   which some of the specifications' constant tables were transcribed (H.264's CABAC tables; HE-AAC's QMF window, SBR
   noise table and parametric stereo's 34-band tables). The code and its license are unchanged.

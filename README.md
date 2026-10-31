@@ -205,6 +205,22 @@ using var demuxer = new Mp4Demuxer(File.OpenRead("video.mp4"), MediaTypes.Video)
 long bytes = demuxer.ReadPacketInfo().Sum(p => (long)p.Size);
 ```
 
+`Seek(pts, streamIndex)` moves where the next read starts: at the keyframe at or before `pts` (in that stream's time
+base), the other stream at the same instant. The packets are those a read from the start gives from there, so decode
+them with a new decoder (or one flushed) and drop the frames shown before the time, as FFmpeg's `-ss` does. MP4 seeks
+in every file, fragmented and edited ones too, by its sample tables; AVI in MJPEG, every frame of which is a keyframe
+(other codecs in AVI need the 'idx1' index, not read yet, and throw `NotSupportedException`, as raw AAC does).
+
+```csharp
+using var demuxer = Demuxer.Open("video.mp4");
+var video = demuxer.Video!;
+long pts = 10 * video.TimeBase.Denominator / video.TimeBase.Numerator; // 10 s
+demuxer.Seek(pts, video.StreamIndex);
+var decoder = new H264Decoder(video);
+var frame = demuxer.ReadPackets().Where(p => p.StreamIndex == video.StreamIndex)
+    .SelectMany(p => decoder.Decode(p)).First(f => f.Pts >= pts);
+```
+
 The same asynchronously, for servers and UI threads: `ReadPacketsAsync`, `DecodeAsync` and `FlushAsync` are on the
 interfaces (with defaults, so other implementations keep working). With `Threads` above 1, `H264Decoder.DecodeAsync`
 awaits the pictures being decoded where `Decode` would block the calling thread; a cancelled token stops the waiting,

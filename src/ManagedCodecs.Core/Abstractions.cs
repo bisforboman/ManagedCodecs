@@ -167,6 +167,21 @@ public interface IDemuxer : IDisposable
     /// synchronously and yields the thread and checks cancellation between them.
     /// </summary>
     IAsyncEnumerable<Packet> ReadPacketsAsync(CancellationToken cancellationToken = default) => AsyncPackets.Of(ReadPackets(), cancellationToken);
+
+    /// <summary>
+    /// Moves where reading starts: the next <see cref="ReadPackets"/> (or another read started after this call) begins
+    /// at the keyframe at or before <paramref name="pts"/> of the stream <paramref name="streamIndex"/>, and the file's
+    /// other stream at the same instant. A time before the first keyframe starts at the beginning, one past the end at
+    /// the last keyframe. The packets are those a read from the start gives from there, each stream's in its order and
+    /// with the same values (<see cref="Packet.Sequence"/> too), so a decoder for them starts afresh (a new one, or one
+    /// flushed) and the frames shown before <paramref name="pts"/> are dropped by whoever wants that time, as FFmpeg's
+    /// <c>-ss</c> drops them. This default, for a demuxer that cannot seek, throws.
+    /// </summary>
+    /// <param name="pts">A presentation time in the stream's <c>TimeBase</c>.</param>
+    /// <param name="streamIndex">The stream the time belongs to: <see cref="VideoStreamInfo.StreamIndex"/> or <see cref="AudioStreamInfo.StreamIndex"/>.</param>
+    /// <exception cref="ArgumentOutOfRangeException">No stream of the demuxer has <paramref name="streamIndex"/>.</exception>
+    /// <exception cref="NotSupportedException">The demuxer, or this stream's codec in it, cannot seek.</exception>
+    void Seek(long pts, int streamIndex) => throw new NotSupportedException("This demuxer cannot seek.");
 }
 
 /// <summary>

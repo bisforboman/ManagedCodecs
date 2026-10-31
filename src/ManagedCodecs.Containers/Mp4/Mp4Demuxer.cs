@@ -49,6 +49,10 @@ public sealed class Mp4Demuxer : IDemuxer
     private readonly SampleTable _video;
     private readonly SampleTable _audio;
 
+    // Where each track's samples start, 0 until a Seek moves them.
+    private int _videoStart;
+    private int _audioStart;
+
     /// <summary>Reads the file's headers ('moov' and, in fragmented files, every 'moof'); packets are read from the stream later, by <see cref="ReadPackets"/>.</summary>
     /// <param name="stream">A seekable stream holding the file, which <see cref="Dispose"/> disposes.</param>
     /// <exception cref="ArgumentException">The stream is not seekable.</exception>
@@ -261,6 +265,42 @@ public sealed class Mp4Demuxer : IDemuxer
     /// <inheritdoc cref="AviDemuxer.ReadPacketsAsync"/>
     public IAsyncEnumerable<Packet> ReadPacketsAsync(CancellationToken cancellationToken = default) => ReadSteps.RunAsync(_stream, Steps(), "MP4", cancellationToken);
 
+    /// <inheritdoc/>
+    /// <remarks>
+    /// Times are those of the packets, edits applied, so a time a packet of the stream has finds it. The keyframe is
+    /// the last one in decode order whose pts is at or before <paramref name="pts"/>: then every frame shown from that
+    /// time on decodes from it (a frame with an earlier pts than its keyframe's, a leading B frame of an open GOP, is not
+    /// shown from that time). The other track starts the same way at the same instant; every audio sample is a
+    /// keyframe.
+    /// </remarks>
+    public void Seek(long pts, int streamIndex)
+    {
+        var (seeked, other, seekedBase, otherBase) =
+            _video.Count > 0 && Video is { } video && streamIndex == video.StreamIndex ? (_video, _audio, video.TimeBase, Audio?.TimeBase)
+            : _audio.Count > 0 && Audio is { } audio && streamIndex == audio.StreamIndex ? (_audio, _video, audio.TimeBase, Video?.TimeBase)
+            : throw new ArgumentOutOfRangeException(nameof(streamIndex), streamIndex, "No video or audio stream of the file has this index.");
+
+        int start = seeked.KeyframeAtOrBefore(pts);
+        int otherStart = otherBase is { } b ? other.KeyframeAtOrBefore(Rescale(pts, seekedBase, b)) : 0;
+        (_videoStart, _audioStart) = ReferenceEquals(seeked, _video) ? (start, otherStart) : (otherStart, start);
+    }
+
+    // A time in one time base in another, rounded down (the sample at or before it is wanted).
+    private static long Rescale(long value, Rational from, Rational to)
+    {
+        long mul = (long)from.Numerator * to.Denominator;
+        long div = (long)from.Denominator * to.Numerator;
+#if NET
+        Int128 product = (Int128)value * mul;
+        var quotient = product / div;
+        return (long)(product % div != 0 && (product < 0) != (div < 0) ? quotient - 1 : quotient);
+#else
+        var product = (System.Numerics.BigInteger)value * mul;
+        var quotient = System.Numerics.BigInteger.Divide(product, div);
+        return (long)(!(product % div).IsZero && (product.Sign < 0) != (div < 0) ? quotient - 1 : quotient);
+#endif
+    }
+
     /// <summary>
     /// The packets <see cref="ReadPackets"/> gives, in its order and with its values, without their data: from the sample
     /// tables alone, with no read of the file and nothing allocated a packet.
@@ -282,13 +322,14 @@ public sealed class Mp4Demuxer : IDemuxer
 
     // The two tracks' samples in file order, which is how they are interleaved on disk, each track's in its own order
     // (the next sample is whichever track's next one lies first in the file; an edit can go back to earlier samples),
-    // with each track's packet sequence number; empty samples are left out.
+    // with each track's packet sequence number; empty samples are left out. Each track starts where a Seek put it, its
+    // packets numbered as they are from the start.
     private IEnumerable<(SampleTable Track, int Index, long Sequence)> Samples()
     {
-        int v = 0;
-        int a = 0;
-        long videoPackets = 0;
-        long audioPackets = 0;
+        int v = _videoStart;
+        int a = _audioStart;
+        long videoPackets = _video.PacketsBefore(v);
+        long audioPackets = _audio.PacketsBefore(a);
         for (int i = 0; v < _video.Count || a < _audio.Count; i++)
         {
             bool fromVideo = a == _audio.Count || (v < _video.Count && _video.Offsets[v] <= _audio.Offsets[a]);
@@ -596,6 +637,39 @@ public sealed class Mp4Demuxer : IDemuxer
         public long Pts(int index) => Dts[index] + PtsOffsets[index];
 
         public bool IsKeyframe(int index) => (Flags[index] & Keyframe) != 0;
+
+        /// <summary>The packets before sample <paramref name="index"/> (empty samples give none).</summary>
+        public long PacketsBefore(int index)
+        {
+            long count = 0;
+            for (int i = 0; i < index; i++)
+            {
+                if (Sizes[i] != 0)
+                {
+                    count++;
+                }
+            }
+
+            return count;
+        }
+
+        /// <summary>
+        /// The last keyframe in decode order whose pts is at or before <paramref name="pts"/>, of the samples that make
+        /// packets; the first sample when none is.
+        /// </summary>
+        public int KeyframeAtOrBefore(long pts)
+        {
+            int found = 0;
+            for (int i = 0; i < Count; i++)
+            {
+                if (Sizes[i] != 0 && IsKeyframe(i) && Pts(i) <= pts)
+                {
+                    found = i;
+                }
+            }
+
+            return found;
+        }
     }
 
     /// <summary>

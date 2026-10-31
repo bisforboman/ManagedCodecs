@@ -106,8 +106,13 @@ public sealed class AviDemuxer : IDemuxer
                 Duration = header.Length,
             };
         }
-        catch (Exception e) when (Malformed.IsMalformedInput(e))
+        catch (Exception e)
         {
+            if (!Malformed.IsMalformedInput(e))
+            {
+                throw;
+            }
+
             throw Malformed.Wrap(e, "AVI");
         }
     }

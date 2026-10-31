@@ -7,6 +7,18 @@ using ManagedCodecs.Cli;
 // (tools/wasm-check.sh compares the two), and on stderr how long a decode takes here; with --thumbnails, each file's
 // probe and thumbnail line instead, as `mcdec --thumbnail-hash` does.
 //   node main.mjs [--thumbnails] [--loops N] <file>...   (from the AppBundle directory; files are read through Node)
+if (args.Length > 0 && args[0] == "--outcomes")
+{
+    // --outcomes <target> <file>...: each file's outcome under the fuzzer's target (Targets.Outcome), as
+    // `ManagedCodecs.Fuzz --outcomes` prints it natively.
+    foreach (var file in args.Skip(2))
+    {
+        Console.WriteLine($"{file}: {ManagedCodecs.Fuzz.Targets.Outcome(args[1], Convert.FromBase64String(Host.ReadFile(file)))}");
+    }
+
+    return 0;
+}
+
 int loops = 1;
 var files = args.ToList();
 bool thumbnails = files.Count > 0 && files[0] == "--thumbnails";

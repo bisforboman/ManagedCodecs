@@ -15,8 +15,12 @@ The repository's CLAUDE.md (process, core idea, cross-cutting gotchas) applies t
   0xFFFF becomes 0), so narrow only values the narrower type holds, comparison masks as signed lanes
   (`NarrowMasks`; dotnet/runtime#136688). Such a bug shows only after warm-up, so a file can decode right alone and wrong after others:
   find it with a probe that runs the vector function against its scalar reference many thousand times in the bundle.
-- Compiled ahead of time (`wasm-check.sh aot`, .NET 10.0.13), a method that caught an exception through a filter
-  (`catch (Exception e) when (...)`) read its string argument as empty afterwards, in the catch and after it
-  (`ThumbnailOutput.Line`'s name); the interpreter and the native build kept it, and a plain `catch` that rethrows the
-  others did too. The decoders' own filters (H.264's `when (ConcealErrors)`) run on error paths the samples don't
-  reach under AOT: suspect this first if one misbehaves there.
+- Compiled ahead of time (`wasm-check.sh aot`, .NET 10.0.13), a method whose exception filter
+  (`catch (Exception e) when (...)`) had caught an exception read its arguments wrong afterwards, in the catch and after
+  it: a string as empty, an int as 1 (`this` too, and an iterator's captured arguments, which live behind it); its
+  locals were kept, and so were arguments read in the filter itself. The interpreter and the native build were right,
+  and a plain `catch` that rethrows what it doesn't handle kept everything. `Demuxer.Open`'s filter then disposed a
+  garbage stream, and the fuzz finding mp4-stsz-size-overflow brought the runtime down (a Mono assertion,
+  class-accessors.c). The libraries have no filters since (`ExceptionFilterTests` fails on one), and wasm-check.sh
+  replays the fuzz findings, the error paths, on WebAssembly against native. A minimal repro, eight cases, took one
+  AOT publish of a scratch console.

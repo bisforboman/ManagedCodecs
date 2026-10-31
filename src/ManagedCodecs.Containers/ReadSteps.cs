@@ -51,8 +51,13 @@ internal static class ReadSteps
 
                 packet = step.Packet.Value;
             }
-            catch (Exception e) when (Malformed.IsMalformedInput(e))
+            catch (Exception e)
             {
+                if (!Malformed.IsMalformedInput(e))
+                {
+                    throw;
+                }
+
                 throw Malformed.Wrap(e, format);
             }
 

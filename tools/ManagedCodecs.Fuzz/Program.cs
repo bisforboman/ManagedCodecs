@@ -7,10 +7,22 @@ using SharpFuzz;
 // fuzz <target>                  under afl-fuzz (tools/fuzz.sh): reads each input from stdin, SharpFuzz reports back.
 // fuzz <target> <file>...        runs the target on files, letting any exception out: reproduces a finding.
 // fuzz --seeds <samples> <dir>   writes a seed corpus per target from the samples, in <dir>/<target>/.
-if (args.Length == 0 || (args[0] != "--seeds" && !Targets.Names.Contains(args[0])))
+if (args.Length == 0 || (args[0] is not "--seeds" and not "--outcomes" && !Targets.Names.Contains(args[0])))
 {
-    Console.Error.WriteLine($"usage: fuzz <{string.Join('|', Targets.Names)}> [file...] | fuzz --seeds <samples dir> <out dir>");
+    Console.Error.WriteLine($"usage: fuzz <{string.Join('|', Targets.Names)}> [file...] | fuzz --seeds <samples dir> <out dir> | fuzz --outcomes <target> <file>...");
     return 2;
+}
+
+if (args[0] == "--outcomes")
+{
+    // fuzz --outcomes <target> <file>...: each file's outcome (Targets.Outcome), as tools/ManagedCodecs.Wasm prints it on
+    // WebAssembly; tools/wasm-check.sh compares them.
+    foreach (var file in args.Skip(2))
+    {
+        Console.WriteLine($"{file}: {Targets.Outcome(args[1], File.ReadAllBytes(file))}");
+    }
+
+    return 0;
 }
 
 if (args[0] == "--seeds")

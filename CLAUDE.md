@@ -18,15 +18,18 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
 
 - **PR pipeline**: work on a branch, push, open a PR, and turn auto-merge on at once (as in ShotDetector; needs
   "Allow auto-merge" in the repository settings). Drafts excepted, and a PR the owner must decide on says so in its
-  body and waits for the answer. Don't push to main directly; once branch protection is on it requires `build`
-  (ci.yml) and `mutation` (mutation.yml, which reports on docs-only PRs too).
+  body and waits for the answer. Release PRs are excepted too: they never get auto-merge, the owner merges them
+  (merging publishes to nuget.org, where a version can be unlisted but never deleted; the `release` environment
+  waits for the owner's approval as well). Don't push to main directly; branch protection requires `build`,
+  `build-arm64`, `wasm` and `aot` (ci.yml) and `mutation` (mutation.yml, which reports on docs-only PRs too).
 - **Releases**: CHANGELOG.md's "## Unreleased" section collects what is merged and not released (add a line there in a
   PR a consumer would notice); a release is a PR that renames it to "## X.Y.Z – date" (from 0.1.0: a public API change
   only in a new minor version, a patch only fixes), and `release.yml` then tests, packs every package at that version, publishes to nuget.org (trusted
   publishing) and tags it. Every package has the one version. The release PR also runs `tools/ship-public-api.py`
-  (each package's PublicAPI.Unshipped.txt into its Shipped) and sets `PackageValidationBaselineVersion`
-  (Directory.Build.props) to the last version on nuget.org, deleting any `CompatibilitySuppressions.xml` that only
-  covered breaks up to it.
+  (each package's PublicAPI.Unshipped.txt into its Shipped). Once `release.yml` has published, a PR of its own sets
+  `PackageValidationBaselineVersion` (Directory.Build.props) to the new version (the release PR can't: its version
+  is not on nuget.org while its checks run), deleting any `CompatibilitySuppressions.xml` that only covered breaks up
+  to it; until then a member the release added could be removed unnoticed.
 - **Public API**: Microsoft.CodeAnalysis.PublicApiAnalyzers lists every src/ package's public API in its
   `PublicAPI.Shipped.txt` (the last release's) and `PublicAPI.Unshipped.txt` (changes since, a removal as
   `*REMOVED*<line>`); a public member that isn't listed fails the build (RS0016, RS0017). Adding one:
@@ -48,7 +51,9 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
   with the advisor's recommendation first, rather than inviting the user to ask; a stop the user chose ends with that
   prompt too, never with a list of what is left.
 - **Before pushing**: `tools/make-samples.sh` (once; needs ffmpeg with libx264 and ImageMagick) and
-  `dotnet test ManagedCodecs.slnx`; for SIMD changes also with `DOTNET_EnableHWIntrinsic=0` (CI runs both).
+  `dotnet test ManagedCodecs.slnx`; for SIMD changes also with `DOTNET_EnableHWIntrinsic=0` (CI runs both), and
+  `tools/aot-check.sh` and `tools/aot-check.sh x86-64-v3` (Native AOT against the JIT on every sample, about a minute
+  each; CI's `aot` job).
 - **New feature, new sample**: add it to tools/make-samples.sh with a comment saying what it isolates, and check
   that it really exercises the feature (the AAC decoder's `Statistics`, `ffmpeg -bsf:v trace_headers` for H.264)
   before relying on it. Encoders often never emit a tool (libx264: no ref list modification, I_PCM, B partitions

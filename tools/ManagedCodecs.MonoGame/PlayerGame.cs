@@ -9,8 +9,8 @@ namespace ManagedCodecs.MonoGame;
 /// <summary>
 /// Plays a file into a texture: the newest decoded frame that is due by a clock started at the first frame, drawn
 /// letterboxed to the window at its sample aspect ratio and turned by the stream's rotation (phone video); audio
-/// submitted to a dynamic sound as it comes. Escape quits. The window title shows the
-/// decode and conversion time per frame, the number a game's frame budget cares about.
+/// submitted to a dynamic sound as it comes. Escape quits. The window title shows the decoding's and the RGBA
+/// conversion's time per frame (means over the run, on the decoding thread), what a game's frame budget cares about.
 /// </summary>
 internal sealed class PlayerGame : Game
 {
@@ -75,6 +75,11 @@ internal sealed class PlayerGame : Game
                 break;
             }
 
+            if (due is not null)
+            {
+                _source.Return(due);
+            }
+
             due = _next;
             _next = null;
         }
@@ -90,10 +95,12 @@ internal sealed class PlayerGame : Game
 
             _texture.SetData(due.Pixels);
             _aspect = due.AspectRatio;
+            _source.Return(due);
         }
 
-        var (count, milliseconds) = _source.DecodeStatistics;
-        Window.Title = $"mcplay: {_source.VideoStream.Width}x{_source.VideoStream.Height}, {count} frames, {milliseconds:F1} ms a frame to decode and convert";
+        var (count, decode) = _source.DecodeStatistics;
+        var (_, convert) = _source.ConvertStatistics;
+        Window.Title = $"mcplay: {_source.VideoStream.Width}x{_source.VideoStream.Height}, {count} frames, ms a frame: decode {decode:F1}, RGBA conversion {convert:F1}";
         base.Update(gameTime);
     }
 

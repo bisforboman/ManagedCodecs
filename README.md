@@ -57,7 +57,7 @@ Every decoder is checked against FFmpeg, on samples generated to isolate one fea
 writes a feature, unit tests and hand-built or rewritten streams cover it. [docs/conformance.md](docs/conformance.md)
 says feature by feature which encoder made the samples (libx264, OpenH264, JM) and what is not checked. Every night
 the [real-world check](https://github.com/bisforboman/ManagedCodecs/actions/workflows/realworld.yml)
-(`tools/realworld.py`) decodes six of Blender's open movies, real H.264 and AAC from real encoders, against FFmpeg:
+(`tools/realworld.py`) decodes six of Blender's open movies, real H.264 and AAC from real encoders, and four cameras' MJPEG against FFmpeg:
 every frame identical, the audio within 2^-17. On every pull request (docs-only ones skip its steps) the
 [mutation check](https://github.com/bisforboman/ManagedCodecs/actions/workflows/mutation.yml)
 (`tools/mutation/mutate.py`) breaks, one at a time, the guards a passing test could miss (the frame threading waits,
@@ -357,6 +357,9 @@ deflated by the BCL: no image library, native code or FFmpeg) and `SaveJpeg`/`To
 4:2:0, `quality` 1 to 100 as libjpeg's, 85 by default; docs/decisions/2026-11-01-thumbnails-jpeg.md). For WebP, hand
 `Pixels` to SkiaSharp or ImageSharp.
 
+- **What it can't read:** HEVC, VP9 and AV1 throw `NotSupportedException` (so do `VideoProbe.Read` and the demuxers).
+  That includes iPhone videos: iPhones record HEVC by default ("High Efficiency" in the camera's format settings; "Most
+  Compatible" records H.264).
 - **Which frame:** the one shown at `At` from the file's start as ffmpeg's `-ss` takes it (the time in the stream's
   time base to the nearest unit, then the first frame at or after that), decoded from the keyframe before it
   (`IDemuxer.Seek`; AVI's H.264, which has no index to seek by, from the start). By default 10% into the video, at most

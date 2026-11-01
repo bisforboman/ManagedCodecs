@@ -15,12 +15,21 @@ run time.
 
 ### Added
 
-- MJPEG decodes 4:1:1 and 4:4:0 images (camera layouts: luma 4x1 against chroma 1x1, and 1x2 against 1x1 or 2x2
-  against 2x1), as the new `PixelFormat.Yuv411P` and `PixelFormat.Yuv440P`, where it threw NotSupportedException.
-  `RgbaConverter` and `VideoThumbnail` convert them. Code that switches over `PixelFormat` sees two new values.
 - Thumbnails: `Thumbnail.SaveJpeg(Stream, int quality = 85)` and `Thumbnail.ToJpeg(int quality = 85)`, a baseline
   JPEG written here (JFIF, 4:2:0, Annex K's tables, `quality` as libjpeg's), beside the PNG
   (docs/decisions/2026-11-01-thumbnails-jpeg.md).
+
+## 0.6.0 – 2026-11-01
+
+MJPEG from real cameras: the 4:1:1 and 4:4:0 layouts cameras write, as two new pixel formats, damaged images decoded
+as FFmpeg decodes them, the other AVI FourCCs for MJPEG, and old QuickTime files that start with a preview. New public
+API (two `PixelFormat` values), hence a minor version; code built against 0.5 keeps working.
+
+### Added
+
+- MJPEG decodes 4:1:1 and 4:4:0 images (camera layouts: luma 4x1 against chroma 1x1, and 1x2 against 1x1 or 2x2
+  against 2x1), as the new `PixelFormat.Yuv411P` and `PixelFormat.Yuv440P`, where it threw NotSupportedException.
+  `RgbaConverter` and `VideoThumbnail` convert them. Code that switches over `PixelFormat` sees two new values.
 
 ### Changed
 
@@ -33,6 +42,8 @@ run time.
 
 ### Fixed
 
+- `Demuxer.Open` recognises old QuickTime files that start with a `pnot` preview box and no `ftyp` (a Nikon Coolpix's
+  MJPEG, for one), where it threw NotSupportedException.
 - AVI: MJPEG under the other FourCCs capture cards, editors and cameras write (AVI1, dmb1, JPGL, LJPG, IJPG, ACDV,
   QIVG, SLMJ, CJPG, JPEG, MMJP, MVJP, MJPA; any case) is read as MJPEG, as FFmpeg reads it, where only MJPG was.
 

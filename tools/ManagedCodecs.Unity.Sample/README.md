@@ -23,8 +23,9 @@ build; whether Unity runs it as intended needs a Unity install, which nobody has
 - A thread of its own demuxes and decodes ahead (`MediaSource`, as mcplay: H.264 with frame threading, up to 4
   threads) and converts each frame to RGBA on the CPU (`YuvToRgba`, by the frame's own matrix and range).
 - `Update` shows the newest frame due by a clock started at the first frame and drops late ones, through one
-  `Texture2D` (`RGBA32`, `LoadRawTextureData` and `Apply`). Unity's textures start at the bottom row, so the material
-  flips the image (`mainTextureScale` y -1) instead of turning every frame over in memory.
+  `Texture2D` (`RGBA32`, `LoadRawTextureData` and `Apply`), handing each frame's pixels back to `MediaSource.Return`
+  once copied or dropped, for a later frame (no new array each frame). Unity's textures start at the bottom row, so the
+  material flips the image (`mainTextureScale` y -1) instead of turning every frame over in memory.
 - Audio streams through an `AudioClip` (`AudioClip.Create` with a reader callback, which runs on Unity's audio thread)
   as 16-bit stereo turned to floats, made once the first audio gives the rate.
 - Not for WebGL: it has no threads, and the decoder thread is the sample's design. On Android, StreamingAssets lie in
@@ -49,8 +50,10 @@ What nobody has checked yet, and how. Report on issue #254 (or a new issue), one
    one with IL2CPP (Player settings, Scripting Backend). An Android or iOS build is a bonus (IL2CPP only on iOS; on
    Android read the file into a `MemoryStream` first, see above).
 4. **Record**, for each run: the Unity version, the backend, the CPU, and the last line the sample logs (every 5 seconds
-   and on stopping): `ManagedCodecsVideo: 1280x720, 1500 frames shown, 3 dropped, RGBA conversion 4.1 ms a frame`. A
-   frame is dropped when a later one was already due, so a steadily growing count means playback doesn't keep up.
+   and on stopping):
+   `ManagedCodecsVideo: 1280x720, 1500 frames shown, 3 dropped, ms a frame: decode 21.7, RGBA conversion 4.1`. A frame
+   is dropped when a later one was already due, so a steadily growing count means playback doesn't keep up; the two
+   times (means over the run) say which of decoding and conversion is short of the frame's duration.
    Also whether the picture is upright and its colours right (compare with VLC), whether the sound plays without
    gaps and in sync, and the first error in the console, if any (an IL2CPP build error or a `MissingMethodException`
    above all: those are what Mono and IL2CPP could do differently from CoreCLR).

@@ -6,7 +6,9 @@ is not checked, feature by feature. The README's Status section has the summary 
 ## MJPEG
 
 Baseline (and extended Huffman) JPEG, bit-exact against FFmpeg: 4:2:0, 4:2:2, 4:4:4, gray, restart markers, missing
-DHT. Interlaced AVI1 frames too (two JPEG fields per packet, recognized as FFmpeg does by being less than 3/4 of the
+DHT. 4:1:1 and 4:4:0 (cameras' layouts, which FFmpeg's encoder doesn't write) on ImageMagick's images: luma 4x1
+against chroma 1x1, 1x2 against 1x1 and 2x2 against 2x1, at 322x238 so the quarter-wide chroma rounds up; FFmpeg
+gives yuvj411p and yuvj440p, `PixelFormat.Yuv411P` and `Yuv440P` here. Interlaced AVI1 frames too (two JPEG fields per packet, recognized as FFmpeg does by being less than 3/4 of the
 stream's height, so the decoder needs `new MjpegDecoder(video)`), woven with the first field on the odd rows, the
 order FFmpeg takes for AVI, which does not tell it (`FirstFieldOnTop` gives the other; the AVI1 segment's field
 byte is ignored, as by FFmpeg). Packets of one field are not decoded (FFmpeg decodes none either).
@@ -122,7 +124,8 @@ of its own (without them, 10 levels at colour edges). It is not the reference ev
 conversion to RGBA was up to 87 levels from the definition and from its own 8-bit route, so those references reduce to
 8 bits first (within 3), and at an odd width or height it leaves the fast path for one that interpolates chroma (up to
 194 levels apart at an edge): those two samples, the container crops, have no FFmpeg reference, and the odd sizes are
-checked against the definition only.
+checked against the definition only. So does 4:1:1 and 4:4:0 at any size (mjpeg-411, mjpeg-440 and mjpeg-440-2x2,
+6 levels apart at the first pixel that differed), likewise checked against the definition only.
 
 `VideoThumbnail.Create` is checked end to end against the same FFmpeg chain and band: at `At` zero on every sample
 whose pixels are square (FFmpeg's chain scales the coded size, `Create` the size as shown), and at times into six

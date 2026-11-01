@@ -63,7 +63,7 @@ every frame identical, the audio within 2^-17. On every pull request (docs-only 
 (`tools/mutation/mutate.py`) breaks, one at a time, the guards a passing test could miss (the frame threading waits,
 and code that reproduces FFmpeg's reading where it differs from the spec), and needs a test to fail for each.
 
-- **MJPEG**: baseline and extended Huffman JPEG in 4:2:0, 4:2:2, 4:4:4 and gray, restart markers, missing Huffman
+- **MJPEG**: baseline and extended Huffman JPEG in 4:2:0, 4:2:2, 4:4:4, 4:1:1, 4:4:0 and gray, restart markers, missing Huffman
   tables, interlaced AVI1 frames; bit-exact. A vector IDCT (AVX2, and `Vector128` for ARM64 and WebAssembly), and
   output straight into the frame's planes (`ZeroCopy`).
 - **H.264**: Constrained Baseline to High 4:4:4 Predictive. CAVLC and CABAC; I, P and B pictures; weighted

@@ -1,1 +1,3 @@
 #nullable enable
+ManagedCodecs.PixelFormat.Yuv411P = 20 -> ManagedCodecs.PixelFormat
+ManagedCodecs.PixelFormat.Yuv440P = 21 -> ManagedCodecs.PixelFormat

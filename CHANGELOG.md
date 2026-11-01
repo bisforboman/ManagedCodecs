@@ -11,7 +11,10 @@ share internals, so each depends on the others at exactly its own version (`[X]`
 then reports a mix of versions (NU1107, or NU1608 for a newer one referenced directly) rather than letting it fail at
 run time.
 
-## Unreleased
+## 0.7.0 – 2026-11-01
+
+Thumbnails as JPEG: `Thumbnail.SaveJpeg` and `ToJpeg` write a baseline JPEG in managed code, beside the PNG. New public
+API (two `Thumbnail` methods), hence a minor version; code built against 0.6 keeps working.
 
 ### Added
 

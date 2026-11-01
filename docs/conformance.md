@@ -82,6 +82,17 @@ and the audio as floats (`-f f32le`, within 2^-17). The films, pinned by SHA-256
   picture, deblocking off, and 640x359 in its sample entry (see H.264, The container's picture size); AAC LC at
   44.1 kHz.
 
+And four cameras' own MJPEG from archive.org (each licence on its item's page; the files are only downloaded), where
+every MJPEG sample above is FFmpeg's or ImageMagick's encoder:
+
+- Three digital cameras' AVIs, a Canon PowerShot's among them: 320x240 at 15 and 640x480 at 30 frames a second, 31
+  to 97 s, 4:2:2, with 8- and 16-bit PCM audio, which is not decoded (nor read by `VideoProbe`, so not probed).
+- A Nikon Coolpix's QuickTime file: 320x240 MJPEG (`jpeg`) at 15 frames a second, 33 s, starting with a `pnot`
+  preview box and no `ftyp`, which `Demuxer.Open` didn't recognise until it was added.
+
+All four matched FFmpeg frame for frame at once (3978 frames); none uses 4:1:1 or 4:4:0, which the samples above
+cover (`mjpeg-411`, `mjpeg-440`).
+
 The first run found the three differences those sections describe; the H.264 video itself matched on all three. Of
 the three films added later, two matched at once; the third's frames were FFmpeg's but for its last row, which FFmpeg
 crops by the container's size.

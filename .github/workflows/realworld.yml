@@ -28,6 +28,10 @@ jobs:
           - caminandes_gran_dillama.mp4
           - BigBuckBunny_320x180.mp4
           - BigBuckBunny_640x360.m4v
+          - lucy_loop_mjpeg.avi
+          - spinning_skull_mjpeg.avi
+          - canon_mvi_5143_mjpeg.avi
+          - nikon_dscn0520_mjpeg.mov
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 

@@ -99,6 +99,22 @@ public class Mp4DemuxerTests
     }
 
     /// <summary>
+    /// Old QuickTime files (a Nikon Coolpix's in realworld.py) start with a 'pnot' preview box and no 'ftyp': the file
+    /// above with its 'ftyp' renamed, the same size, so every offset holds.
+    /// </summary>
+    [Fact]
+    public void DemuxerOpen_RecognizesQuickTimeStartingWithAPreview()
+    {
+        var file = TinyMp4();
+        Encoding.ASCII.GetBytes("pnot").CopyTo(file, 4);
+
+        using var demuxer = Demuxer.Open(new MemoryStream(file));
+
+        Assert.IsType<Mp4Demuxer>(demuxer);
+        Assert.Equal(SampleData, demuxer.ReadPackets().Where(p => p.StreamIndex == demuxer.Video!.StreamIndex).Select(p => p.Data.ToArray()));
+    }
+
+    /// <summary>
     /// A fragmented file built by hand for what FFmpeg's muxer never writes: track fragments without
     /// a base offset (the first starts at its 'moof', the next where the previous one's data
     /// ended), no 'tfdt' (samples continue from the track's last one), 'trex' defaults, a second

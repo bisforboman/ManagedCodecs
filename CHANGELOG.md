@@ -30,6 +30,8 @@ run time.
 
 ### Fixed
 
+- `Demuxer.Open` recognises old QuickTime files that start with a `pnot` preview box and no `ftyp` (a Nikon Coolpix's
+  MJPEG, for one), where it threw NotSupportedException.
 - AVI: MJPEG under the other FourCCs capture cards, editors and cameras write (AVI1, dmb1, JPGL, LJPG, IJPG, ACDV,
   QIVG, SLMJ, CJPG, JPEG, MMJP, MVJP, MJPA; any case) is read as MJPEG, as FFmpeg reads it, where only MJPG was.
 

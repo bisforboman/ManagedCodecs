@@ -205,7 +205,9 @@ public sealed class MjpegDecoder : IVideoDecoder
         int height = first.Header.Height;
         if (!IsField(height))
         {
-            return first.Rented ? new VideoFrame(first.Header.Width, height, first.Format, first.Buffers, first.BufferStrides, _framePool) : first.ToVideoFrame(_framePool);
+            var whole = first.Rented ? new VideoFrame(first.Header.Width, height, first.Format, first.Buffers, first.BufferStrides, _framePool) : first.ToVideoFrame(_framePool);
+            whole.IsDamaged = first.Damaged;
+            return whole;
         }
 
         // A field: weave it into a frame of twice its height (each field writes every other row of it), then decode the
@@ -223,7 +225,10 @@ public sealed class MjpegDecoder : IVideoDecoder
         int second = packet[end..].IndexOf(SecondImageStart);
         if (second < 0)
         {
-            throw new NotSupportedException("An interlaced packet with one field (the second field is not in the same packet) is not supported.");
+            // A first field cut short (its scan ran to the packet's end): damaged, and FFmpeg's decoder gives no frame.
+            throw first.Damaged
+                ? new InvalidDataException("The interlaced packet's first field is cut short, and its second field is missing.")
+                : new NotSupportedException("An interlaced packet with one field (the second field is not in the same packet) is not supported.");
         }
 
         var other = DecodeImage(packet[(end + second)..], out _);
@@ -233,10 +238,26 @@ public sealed class MjpegDecoder : IVideoDecoder
         }
 
         other.WriteField(frame, FirstFieldOnTop ? 1 : 0);
+        frame.IsDamaged = first.Damaged || other.Damaged;
         return frame;
     }
 
     private static ReadOnlySpan<byte> SecondImageStart => [0xFF, JpegMarker.Soi];
+
+    /// <summary>
+    /// Refuses an image whose packet (from its first byte, what comes before the SOI marker included) holds less than a
+    /// quarter of a byte for each 8x8 block of its size rounded up to whole blocks, as FFmpeg's decoder refuses it
+    /// (found by measuring where it stops giving a frame, at four sizes and layouts; T.81 has no such limit). It drops
+    /// a frame cut short within its first blocks rather than showing it nearly empty.
+    /// </summary>
+    private static void CheckPacketSize(JpegFrameHeader header, int packetLength)
+    {
+        long blocks = (long)((header.Width + 7) / 8) * ((header.Height + 7) / 8);
+        if ((long)packetLength * 4 < blocks)
+        {
+            throw new InvalidDataException($"The packet's {packetLength} bytes are too few for a {header.Width}x{header.Height} image.");
+        }
+    }
 
     // An image of less than 3/4 of the stream's height is a field, as FFmpeg tells them.
     private bool IsField(int height) => _streamHeight != 0 && height < _streamHeight * 3 / 4;
@@ -283,6 +304,7 @@ public sealed class MjpegDecoder : IVideoDecoder
                     {
                         // A frame decoded in place takes planes of its own from the pool; else the decoder's buffers.
                         var header = JpegFrameHeader.Parse(segment.Marker, payload);
+                        CheckPacketSize(header, packet.Length);
                         frame = new FrameState(header, _previous, ZeroCopy && !IsField(header.Height) ? _framePool : null);
                         _previous = frame.Rented ? null : frame;
                     }
@@ -294,7 +316,8 @@ public sealed class MjpegDecoder : IVideoDecoder
                         throw new InvalidDataException("SOS before SOF.");
                     }
 
-                    DecodeScan(frame, payload, packet.Slice(segment.EntropyDataOffset, segment.EntropyDataLength), restartInterval);
+                    int scanEnd = segment.EntropyDataOffset + segment.EntropyDataLength;
+                    DecodeScan(frame, payload, packet[segment.EntropyDataOffset..scanEnd], JpegBitReader.Tail(packet[scanEnd..]), restartInterval);
                     sawScan = true;
                     break;
                 default:
@@ -315,6 +338,16 @@ public sealed class MjpegDecoder : IVideoDecoder
         if (!sawScan)
         {
             throw new InvalidDataException("No SOS segment found.");
+        }
+
+        // A component no scan reached (an image cut before its scan): 0, not the last frame's samples in the buffer.
+        for (int i = 0; i < frame.Buffers.Length; i++)
+        {
+            if (!frame.Scanned[i])
+            {
+                frame.Buffers[i].AsSpan().Clear();
+                frame.Damaged = true;
+            }
         }
 
         end = segments[^1].PayloadOffset; // just past the EOI marker
@@ -363,7 +396,12 @@ public sealed class MjpegDecoder : IVideoDecoder
         }
     }
 
-    private void DecodeScan(FrameState frame, ReadOnlySpan<byte> header, ReadOnlySpan<byte> data, int restartInterval)
+    /// <summary>
+    /// Decodes one scan. A scan whose data runs out (a camera's cut frame) is decoded as FFmpeg's decoder decodes it:
+    /// up to the MCU after which more bits were read than the data holds, or up to the block whose code is not valid,
+    /// the rest of the scan's blocks left at 0 and the frame marked damaged.
+    /// </summary>
+    private void DecodeScan(FrameState frame, ReadOnlySpan<byte> header, ReadOnlySpan<byte> data, ReadOnlySpan<byte> tail, int restartInterval)
     {
         int count = header.Length > 0 ? header[0] : 0;
         if (count is < 1 or > 4 || header.Length < 4 + (2 * count))
@@ -376,6 +414,7 @@ public sealed class MjpegDecoder : IVideoDecoder
         {
             byte id = header[1 + (2 * i)];
             int index = frame.IndexOf(id);
+            frame.Scanned[index] = true;
             int dc = header[2 + (2 * i)] >> 4;
             int ac = header[2 + (2 * i)] & 0x0F;
             var component = frame.Header.Components[index];
@@ -409,7 +448,7 @@ public sealed class MjpegDecoder : IVideoDecoder
             mcusY = frame.McusY;
         }
 
-        var reader = new JpegBitReader(data);
+        var reader = new JpegBitReader(data, tail);
         Span<int> predictors = stackalloc int[count];
         predictors.Fill(DcPredictorReset);
         Span<short> block = stackalloc short[64];
@@ -426,27 +465,85 @@ public sealed class MjpegDecoder : IVideoDecoder
 
             int mx = mcu % mcusX;
             int my = mcu / mcusX;
-
-            for (int i = 0; i < count; i++)
+            int blockInMcu = 0;
+            try
             {
-                ref readonly var sc = ref scan[i];
+                for (int i = 0; i < count; i++)
+                {
+                    ref readonly var sc = ref scan[i];
+                    var plane = frame.Buffers[sc.FrameIndex];
+                    int stride = frame.BufferStrides[sc.FrameIndex];
+
+                    if (count == 1)
+                    {
+                        DecodeBlock(ref reader, in sc, ref predictors[i], block, plane.AsSpan((my * 8 * stride) + (mx * 8)), stride);
+                        continue;
+                    }
+
+                    var component = frame.Header.Components[sc.FrameIndex];
+                    for (int v = 0; v < component.VerticalSampling; v++)
+                    {
+                        for (int h = 0; h < component.HorizontalSampling; h++)
+                        {
+                            int x = ((mx * component.HorizontalSampling) + h) * 8;
+                            int y = ((my * component.VerticalSampling) + v) * 8;
+                            DecodeBlock(ref reader, in sc, ref predictors[i], block, plane.AsSpan((y * stride) + x), stride);
+                            blockInMcu++;
+                        }
+                    }
+                }
+            }
+            catch (InvalidDataException)
+            {
+                // A code that is not valid, or coefficients past the block's end (damaged data, or what follows a cut
+                // scan's data): FFmpeg's decoder stops the scan there and gives the frame, this block on left at 0.
+                ClearScanFrom(frame, scan, mcusX, mcusY, mcu, blockInMcu);
+                return;
+            }
+
+            if (reader.Overread)
+            {
+                ClearScanFrom(frame, scan, mcusX, mcusY, mcu + 1, 0);
+                return;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Sets the scan's blocks from block <paramref name="firstBlock"/> of MCU <paramref name="firstMcu"/> on (in the
+    /// scan's order) to 0, as FFmpeg's decoder leaves the part of a frame a cut scan does not reach, and marks the frame
+    /// damaged.
+    /// </summary>
+    private static void ClearScanFrom(FrameState frame, ScanComponent[] scan, int mcusX, int mcusY, int firstMcu, int firstBlock)
+    {
+        frame.Damaged = true;
+        for (int mcu = firstMcu; mcu < mcusX * mcusY; mcu++)
+        {
+            int mx = mcu % mcusX;
+            int my = mcu / mcusX;
+            int blockInMcu = 0;
+            foreach (var sc in scan)
+            {
                 var plane = frame.Buffers[sc.FrameIndex];
                 int stride = frame.BufferStrides[sc.FrameIndex];
-
-                if (count == 1)
-                {
-                    DecodeBlock(ref reader, in sc, ref predictors[i], block, plane.AsSpan((my * 8 * stride) + (mx * 8)), stride);
-                    continue;
-                }
-
                 var component = frame.Header.Components[sc.FrameIndex];
-                for (int v = 0; v < component.VerticalSampling; v++)
+                int across = scan.Length == 1 ? 1 : component.HorizontalSampling;
+                int down = scan.Length == 1 ? 1 : component.VerticalSampling;
+                for (int v = 0; v < down; v++)
                 {
-                    for (int h = 0; h < component.HorizontalSampling; h++)
+                    for (int h = 0; h < across; h++, blockInMcu++)
                     {
-                        int x = ((mx * component.HorizontalSampling) + h) * 8;
-                        int y = ((my * component.VerticalSampling) + v) * 8;
-                        DecodeBlock(ref reader, in sc, ref predictors[i], block, plane.AsSpan((y * stride) + x), stride);
+                        if (mcu == firstMcu && blockInMcu < firstBlock)
+                        {
+                            continue;
+                        }
+
+                        int x = ((mx * across) + h) * 8;
+                        int y = ((my * down) + v) * 8;
+                        for (int row = 0; row < 8; row++)
+                        {
+                            plane.AsSpan(((y + row) * stride) + x, 8).Clear();
+                        }
                     }
                 }
             }
@@ -543,6 +640,7 @@ public sealed class MjpegDecoder : IVideoDecoder
             }
 
             int count = header.Components.Count;
+            Scanned = new bool[count];
             BufferStrides = new int[count];
             var sizes = new int[count];
             for (int i = 0; i < count; i++)
@@ -570,6 +668,12 @@ public sealed class MjpegDecoder : IVideoDecoder
 
         /// <summary>Whether the buffers are rented for an output frame (decoding in place) rather than the decoder's own.</summary>
         public bool Rented { get; }
+
+        /// <summary>A scan ran past its data: what it did not reach is 0 (<see cref="ClearScanFrom"/>).</summary>
+        public bool Damaged { get; set; }
+
+        /// <summary>Which components a scan has covered.</summary>
+        public bool[] Scanned { get; }
 
         public JpegFrameHeader Header { get; }
 

@@ -43,13 +43,16 @@ internal static class JpegMarkerReader
 {
     public static List<JpegSegment> ReadSegments(ReadOnlySpan<byte> data)
     {
-        if (data.Length < 2 || data[0] != 0xFF || data[1] != JpegMarker.Soi)
+        // Bytes before the SOI marker (cameras' padding or headers of their own) are skipped, as FFmpeg's decoder skips
+        // them.
+        int soi = data.IndexOf([(byte)0xFF, JpegMarker.Soi]);
+        if (soi < 0)
         {
             throw new InvalidDataException("Missing SOI marker.");
         }
 
-        var segments = new List<JpegSegment> { new(JpegMarker.Soi, 2, 0) };
-        int pos = 2;
+        var segments = new List<JpegSegment> { new(JpegMarker.Soi, soi + 2, 0) };
+        int pos = soi + 2;
 
         while (pos < data.Length)
         {
@@ -110,7 +113,10 @@ internal static class JpegMarkerReader
             }
         }
 
-        throw new InvalidDataException("Missing EOI marker.");
+        // The data ended without an EOI marker (a camera's cut frame): taken as there, as FFmpeg's decoder takes it ("EOI
+        // missing, emulating"); a scan cut short is decoded as far as its data goes (MjpegDecoder).
+        segments.Add(new(JpegMarker.Eoi, data.Length, 0));
+        return segments;
     }
 
     /// <summary>

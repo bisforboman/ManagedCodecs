@@ -154,8 +154,10 @@ On WebAssembly, `tools/wasm-check.sh` compares each video sample's probe facts a
 `SkipDark`; its pixels hashed, not its PNG, whose deflated bytes are the runtime's zlib's) with the native build's,
 interpreted and compiled ahead of time: all 362 agree. `tools/realworld.py` probes and thumbnails the films too: the
 facts against ffprobe (duration, size, rotation, average frame rate, audio rate and channels), the thumbnail at the
-size `Create` chose against FFmpeg's chain at that size and the same default time, in the same band; Big Buck Bunny
-640x359, an odd height, is probed but its thumbnail not compared (FFmpeg's general path, as above).
+size `Create` chose against FFmpeg's chain at that size and the same default time, in the same band but one level wider
+below (Caminandes, BT.709 at a quarter of 1080p, reaches 4 at 44 values: FFmpeg's conversion is up to 3.26 below the
+exact one there, ours within 0.97); Big Buck Bunny 640x359, an odd height, is probed but its thumbnail not compared
+(FFmpeg's general path, as above).
 
 `VideoStreamInfo`'s colour properties, aspect ratio and rotation are the container's, as FFmpeg's mov demuxer reads
 them (6.1.1): the visual sample entry's 'colr' ('nclx', its full range flag clear meaning limited; QuickTime's 'nclc',

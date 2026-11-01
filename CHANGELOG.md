@@ -11,6 +11,13 @@ share internals, so each depends on the others at exactly its own version (`[X]`
 then reports a mix of versions (NU1107, or NU1608 for a newer one referenced directly) rather than letting it fail at
 run time.
 
+## Unreleased
+
+### Fixed
+
+- AVI: MJPEG under the other FourCCs capture cards, editors and cameras write (AVI1, dmb1, JPGL, LJPG, IJPG, ACDV,
+  QIVG, SLMJ, CJPG, JPEG, MMJP, MVJP, MJPA; any case) is read as MJPEG, as FFmpeg reads it, where only MJPG was.
+
 ## 0.5.0 – 2026-11-01
 
 Two new packages: ManagedCodecs.Thumbnails (a video file's facts as ffprobe gives them, and a thumbnail) and

@@ -358,9 +358,12 @@ public sealed class AviDemuxer : IDemuxer
         return isVideo;
     }
 
+    // The MJPEG FourCCs are those FFmpeg's AVI demuxer reads as MJPEG, ignoring case as it does (each checked with
+    // `ffmpeg -c copy -tag:v X` and ffprobe): capture cards, editors and cameras write others than MJPG.
     private static string NormalizeCodec(string fourCC) => fourCC.ToUpperInvariant() switch
     {
-        "MJPG" => CodecIds.Mjpeg,
+        "MJPG" or "AVI1" or "DMB1" or "JPGL" or "LJPG" or "IJPG" or "ACDV" or "QIVG" or "SLMJ" or "CJPG" or "JPEG" or "MMJP"
+            or "MVJP" or "MJPA" => CodecIds.Mjpeg,
         "H264" or "X264" or "AVC1" => CodecIds.H264,
         _ => fourCC,
     };

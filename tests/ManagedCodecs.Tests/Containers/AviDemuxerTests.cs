@@ -28,6 +28,34 @@ public class AviDemuxerTests
     }
 
     /// <summary>
+    /// The FourCCs FFmpeg's AVI demuxer reads as MJPEG (each checked with `ffmpeg -c copy -tag:v X` and ffprobe), in any
+    /// case as it matches them; others are left as they are. samples/mjpeg-fourcc-dmb1.avi decodes one against FFmpeg.
+    /// </summary>
+    [Theory]
+    [InlineData("MJPG", "MJPG")]
+    [InlineData("mjpg", "MJPG")]
+    [InlineData("AVI1", "MJPG")]
+    [InlineData("dmb1", "MJPG")]
+    [InlineData("JPGL", "MJPG")]
+    [InlineData("LJPG", "MJPG")]
+    [InlineData("IJPG", "MJPG")]
+    [InlineData("ACDV", "MJPG")]
+    [InlineData("QIVG", "MJPG")]
+    [InlineData("SLMJ", "MJPG")]
+    [InlineData("CJPG", "MJPG")]
+    [InlineData("jpeg", "MJPG")]
+    [InlineData("MMJP", "MJPG")]
+    [InlineData("MVJP", "MJPG")]
+    [InlineData("mjpa", "MJPG")]
+    [InlineData("MJPB", "MJPB")] // MJPEG-B, another codec
+    [InlineData("XVID", "XVID")]
+    public void MapsMjpegFourCCs(string fourCC, string codec)
+    {
+        using var demuxer = new AviDemuxer(new MemoryStream(TinyAvi(fourCC: fourCC)));
+        Assert.Equal(codec, demuxer.Video.Codec);
+    }
+
+    /// <summary>
     /// An empty video chunk is a dropped frame: no packet comes out for it, but it takes its tick, as in FFmpeg, so the
     /// packets after it are a frame later.
     /// </summary>
@@ -128,7 +156,7 @@ public class AviDemuxerTests
         Assert.Equal(new Rational(0, 1), none.Video!.SampleAspectRatio);
     }
 
-    private static byte[] TinyAvi(bool dropFrame = false, byte[]? vprp = null)
+    private static byte[] TinyAvi(bool dropFrame = false, byte[]? vprp = null, string fourCC = "MJPG")
     {
         var avih = new byte[56];
         BinaryPrimitives.WriteUInt32LittleEndian(avih.AsSpan(0), 40_000); // microseconds per frame = 25 fps
@@ -143,7 +171,7 @@ public class AviDemuxerTests
 
         var videoStrf = new byte[40];
         BinaryPrimitives.WriteUInt32LittleEndian(videoStrf.AsSpan(0), 40);
-        Encoding.ASCII.GetBytes("MJPG").CopyTo(videoStrf, 16);
+        Encoding.ASCII.GetBytes(fourCC).CopyTo(videoStrf, 16);
 
         var audioStrh = new byte[56];
         Encoding.ASCII.GetBytes("auds").CopyTo(audioStrh, 0);

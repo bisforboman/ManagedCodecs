@@ -23,4 +23,5 @@ The repository's CLAUDE.md (process, core idea, cross-cutting gotchas) applies t
   garbage stream, and the fuzz finding mp4-stsz-size-overflow brought the runtime down (a Mono assertion,
   class-accessors.c). The libraries have no filters since (`ExceptionFilterTests` fails on one), and wasm-check.sh
   replays the fuzz findings, the error paths, on WebAssembly against native. A minimal repro, eight cases, took one
-  AOT publish of a scratch console.
+  AOT publish of a scratch console; it is dotnet/runtime#136780 (filed 2026-11-01). Filters can come back once a .NET
+  release fixes it and wasm-check.sh aot passes with them.

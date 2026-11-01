@@ -24,7 +24,7 @@ public class YuvToRgbaTests
     [MemberData(nameof(Layouts))]
     public void EightBitPath_MatchesTheReference(PixelFormat format, int width, int height)
     {
-        var random = new Random((int)format * 1000 + width);
+        var random = new Random(((int)format * 1000) + width);
         using var frame = new VideoFrame(width, height, format);
         for (int plane = 0; plane < format.PlaneCount(); plane++)
         {

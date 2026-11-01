@@ -30,6 +30,9 @@ ff -f lavfi -i testsrc2=size=320x240:rate=25,setsar=2/1 -t 0.2 -c:v mjpeg -pix_f
 # 16:9, a sample ratio of 4:3 at 320x240, over JFIF's 2:1. ffprobe shows the container's, and so do the frames.
 cp samples/mjpeg-sar.avi samples/mjpeg-vprp-conflict.avi
 python3 tools/avi-vprp.py samples/mjpeg-vprp-conflict.avi 16 9
+# Another FourCC than MJPG, as capture cards and editors write (dmb1, Matrox): the AVI demuxer maps the ones FFmpeg's
+# reads as MJPEG (AviDemuxerTests lists them), here in lower case as written.
+ff -i samples/mjpeg-sar.avi -c copy -tag:v dmb1 samples/mjpeg-fourcc-dmb1.avi
 # Noise at the highest quality: large coefficients exercise the IDCT's full range
 ff -f lavfi -i testsrc2=size=320x240:rate=25,noise=alls=60:allf=t -t 1 -c:v mjpeg -pix_fmt yuvj420p -q:v 1 samples/noise-q1.avi
 # A dropped frame: with MP3 alongside, FFmpeg's muxer writes an empty '00dc' chunk after the first frame while

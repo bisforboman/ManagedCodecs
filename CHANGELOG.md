@@ -11,7 +11,11 @@ share internals, so each depends on the others at exactly its own version (`[X]`
 then reports a mix of versions (NU1107, or NU1608 for a newer one referenced directly) rather than letting it fail at
 run time.
 
-## Unreleased
+## 0.6.0 – 2026-11-01
+
+MJPEG from real cameras: the 4:1:1 and 4:4:0 layouts cameras write, as two new pixel formats, damaged images decoded
+as FFmpeg decodes them, the other AVI FourCCs for MJPEG, and old QuickTime files that start with a preview. New public
+API (two `PixelFormat` values), hence a minor version; code built against 0.5 keeps working.
 
 ### Added
 

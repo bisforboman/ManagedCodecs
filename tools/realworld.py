@@ -28,9 +28,11 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CACHE = os.path.join(ROOT, "samples", "realworld")
 MCDEC = os.path.join(ROOT, "tools", "ManagedCodecs.Cli", "bin", "Release", "net10.0", "mcdec.dll")
 TOLERANCE = 2.0 ** -17
-# The thumbnail's band (tests/ManagedCodecs.Tests/Thumbnails/RgbaImageTests.cs, x64): FFmpeg's fast YUV to RGB path
-# comes out 0 to 3 levels below ours, its area scaler at most 1 above.
-FFMPEG_BELOW = 3
+# The thumbnail's band: the tests' (tests/ManagedCodecs.Tests/Thumbnails/RgbaImageTests.cs, x64), FFmpeg's fast YUV to
+# RGB path 0 to 3 levels below ours and its area scaler at most 1 above, but one level wider below. Caminandes (BT.709,
+# 1920x1080 to 480x270) reaches 4 at 44 of its 388800 values, the same frame: against the exact conversion and average,
+# ours is within 0.97 and FFmpeg's up to 3.26 below (2.94 at full size), so the rounded gap reaches 4.
+FFMPEG_BELOW = 4
 FFMPEG_ABOVE = 1
 SCALE = "area+accurate_rnd+full_chroma_int+full_chroma_inp"
 

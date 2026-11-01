@@ -2,8 +2,8 @@ namespace ManagedCodecs.Thumbnails;
 
 /// <summary>
 /// A video frame as a small 8-bit RGBA image, upright (<see cref="VideoThumbnail.Create(Stream, ThumbnailOptions?, CancellationToken)"/>):
-/// <see cref="Pixels"/> for an image library of the caller's (JPEG or WebP through SkiaSharp or ImageSharp), or
-/// <see cref="SavePng(Stream)"/> without one.
+/// <see cref="SavePng(Stream)"/> or <see cref="SaveJpeg(Stream, int)"/> without an image library, or <see cref="Pixels"/>
+/// for one of the caller's (WebP through SkiaSharp or ImageSharp).
 /// </summary>
 public sealed class Thumbnail
 {
@@ -23,7 +23,7 @@ public sealed class Thumbnail
 
     /// <summary>
     /// The pixels, row by row from the top, 4 bytes each: R, G, B and A (always 255). The array is the thumbnail's own,
-    /// not a copy: changing it changes what <see cref="SavePng(Stream)"/> writes.
+    /// not a copy: changing it changes what <see cref="SavePng(Stream)"/> and <see cref="SaveJpeg(Stream, int)"/> write.
     /// </summary>
     public byte[] Pixels { get; }
 
@@ -42,6 +42,28 @@ public sealed class Thumbnail
     {
         using var memory = new MemoryStream();
         SavePng(memory);
+        return memory.ToArray();
+    }
+
+    /// <summary>
+    /// Writes the thumbnail to <paramref name="destination"/> as a baseline JPEG file (JFIF; YCbCr, chroma halved both
+    /// ways, the standard's example tables).
+    /// </summary>
+    /// <param name="destination">The stream to write to.</param>
+    /// <param name="quality">1 to 100 (default 85): the standard's example quantization tables scaled as libjpeg's
+    /// <c>-quality</c> scales them, 50 taking them as they are.</param>
+    public void SaveJpeg(Stream destination, int quality = 85)
+    {
+        ArgumentNullException.ThrowIfNull(destination);
+        Jpeg.Write(destination, Pixels, Width, Height, quality);
+    }
+
+    /// <summary>The thumbnail as the bytes of a JPEG file (<see cref="SaveJpeg(Stream, int)"/>).</summary>
+    /// <param name="quality">1 to 100 (default 85).</param>
+    public byte[] ToJpeg(int quality = 85)
+    {
+        using var memory = new MemoryStream();
+        SaveJpeg(memory, quality);
         return memory.ToArray();
     }
 }

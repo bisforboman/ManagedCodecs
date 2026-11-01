@@ -238,7 +238,7 @@ public class PngTests
         return pb <= pc ? b : c;
     }
 
-    private static string? FindOnPath(string name) =>
+    internal static string? FindOnPath(string name) =>
         (Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator)
             .Select(directory => Path.Combine(directory, name))
             .FirstOrDefault(File.Exists);

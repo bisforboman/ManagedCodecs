@@ -389,6 +389,46 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.Mjpeg/MjpegDecoder.cs",
          find="frame.ColorPrimaries = _stream?.ColorPrimaries ?? ColorPrimaries.Unspecified;", replace="frame.ColorPrimaries = ColorPrimaries.Unspecified;",
          tests="DisplayName~mjpeg-colr"),
+    # Damaged images as FFmpeg's decoder decodes them (src/ManagedCodecs.Mjpeg/CLAUDE.md, measured against it): a cut
+    # scan stops after the MCU that read past the data, which is still decoded (mjpeg-cut*) ...
+    dict(file="src/ManagedCodecs.Mjpeg/MjpegDecoder.cs",
+         find="ClearScanFrom(frame, scan, mcusX, mcusY, mcu + 1, 0);", replace="ClearScanFrom(frame, scan, mcusX, mcusY, mcu, 0);",
+         tests="DisplayName~mjpeg-cut"),
+    # ... the frame marked damaged ...
+    dict(file="src/ManagedCodecs.Mjpeg/MjpegDecoder.cs",
+         find="frame.Damaged = true;\n        for (int mcu = firstMcu;", replace="for (int mcu = firstMcu;",
+         tests="FullyQualifiedName~MjpegDecoderTests"),
+    # ... a code that is not valid stops it too, the frame given, not refused ...
+    dict(file="src/ManagedCodecs.Mjpeg/MjpegDecoder.cs",
+         find="ClearScanFrom(frame, scan, mcusX, mcusY, mcu, blockInMcu);\n                return;", replace="throw;",
+         tests="FullyQualifiedName~MjpegDecoderTests"),
+    # ... the 0xFF of the marker after the data is read as data (mjpeg-cut-eoi), and with a fill byte before the
+    # marker, the marker's code after it (mjpeg-cut-ff-eoi) ...
+    dict(file="src/ManagedCodecs.Mjpeg/JpegBitReader.cs",
+         find="        if (marker.IsEmpty)\n        {\n            return [];", replace="        if (marker.Length >= 0)\n        {\n            return [];",
+         tests="DisplayName~mjpeg-cut-eoi"),
+    dict(file="src/ManagedCodecs.Mjpeg/JpegBitReader.cs",
+         find="return fill >= 2 && fill < marker.Length ? marker.Slice(fill - 1, 2) : marker[..1];", replace="return marker[..1];",
+         tests="DisplayName~mjpeg-cut-ff-eoi"),
+    # ... a lone 0xFF ending the packet is not data but fill (mjpeg-cut-stuffed) ...
+    dict(file="src/ManagedCodecs.Mjpeg/JpegBitReader.cs",
+         find="                        b = 0;\n                        _dataBits -= 8;\n", replace="",
+         tests="DisplayName~mjpeg-cut-stuffed"),
+    # ... bytes before the SOI marker are skipped, a missing EOI emulated (mjpeg-junk) ...
+    dict(file="src/ManagedCodecs.Mjpeg/JpegMarkerReader.cs",
+         find="int soi = data.IndexOf([(byte)0xFF, JpegMarker.Soi]);", replace="int soi = data.StartsWith([(byte)0xFF, JpegMarker.Soi]) ? 0 : -1;",
+         tests="DisplayName~mjpeg-junk"),
+    dict(file="src/ManagedCodecs.Mjpeg/JpegMarkerReader.cs",
+         find="segments.Add(new(JpegMarker.Eoi, data.Length, 0));", replace="if (data.Length >= 0) { throw new InvalidDataException(\"Missing EOI marker.\"); }",
+         tests="DisplayName~mjpeg-junk"),
+    # ... and a packet of less than a quarter byte an 8x8 block is refused (no stream reaches it whole).
+    dict(file="src/ManagedCodecs.Mjpeg/MjpegDecoder.cs",
+         find="if ((long)packetLength * 4 < blocks)", replace="if ((long)packetLength * 4 < 0)",
+         tests="FullyQualifiedName~MjpegDecoderTests"),
+    # A component no scan reached is 0, not the last frame's samples (no sample is non-interleaved).
+    dict(file="src/ManagedCodecs.Mjpeg/MjpegDecoder.cs",
+         find="                frame.Buffers[i].AsSpan().Clear();\n", replace="",
+         tests="FullyQualifiedName~MjpegDecoderTests"),
     # ---- Thumbnails: the RGB conversion's defaults, FFmpeg's scaler's rather than the spec's (which leaves them open):
     # a matrix not said (or one the scaler doesn't know) is BT.601, a range not said limited, except MJPEG's, full as
     # FFmpeg converts its grey frames (gray.avi).

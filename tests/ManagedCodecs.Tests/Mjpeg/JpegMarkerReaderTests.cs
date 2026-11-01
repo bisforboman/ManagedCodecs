@@ -53,12 +53,29 @@ public class JpegMarkerReaderTests
         Assert.Throws<InvalidDataException>(() => JpegMarkerReader.ReadSegments(new byte[] { 0x00, 0x01 }));
     }
 
+    /// <summary>Data that ends without an EOI marker (a camera's cut frame) ends as if one were there, as FFmpeg reads it.</summary>
     [Fact]
-    public void ReadSegments_RejectsMissingEoi()
+    public void ReadSegments_TakesTheEndForAMissingEoi()
     {
         var data = TinyGrayJpeg()[..^2];
 
-        Assert.Throws<InvalidDataException>(() => JpegMarkerReader.ReadSegments(data));
+        var segments = JpegMarkerReader.ReadSegments(data);
+
+        Assert.Equal(JpegMarker.Eoi, segments[^1].Marker);
+        Assert.Equal(data.Length, segments[^1].PayloadOffset);
+        Assert.Equal(data.Length - 31, segments[3].EntropyDataLength); // the scan runs to the end
+    }
+
+    /// <summary>Bytes before the SOI marker (cameras' padding or headers of their own) are skipped, as FFmpeg skips them.</summary>
+    [Fact]
+    public void ReadSegments_SkipsBytesBeforeSoi()
+    {
+        byte[] junk = [0x00, 0xFF, 0x00, 0xFF, 0xE0, 0x41];
+        var segments = JpegMarkerReader.ReadSegments([.. junk, .. TinyGrayJpeg()]);
+
+        Assert.Equal(JpegMarker.Soi, segments[0].Marker);
+        Assert.Equal(junk.Length + 2, segments[0].PayloadOffset);
+        Assert.Equal(new JpegSegment(JpegMarker.Sof0, junk.Length + 12, 9), segments[2]);
     }
 
     [Fact]

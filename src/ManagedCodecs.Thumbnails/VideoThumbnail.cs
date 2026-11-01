@@ -192,7 +192,24 @@ public static class VideoThumbnail
                 (_target, _waitingForKeyframe) = (packet.Pts, false);
             }
 
-            foreach (var frame in _decoder.Decode(packet))
+            IReadOnlyList<VideoFrame> frames;
+            try
+            {
+                frames = _decoder.Decode(packet);
+            }
+            catch (InvalidDataException)
+            {
+                // An MJPEG packet damaged beyond decoding (MjpegDecoder refuses it, as FFmpeg's decoder gives no
+                // frame): on to the next. H.264 conceals its damage instead.
+                if (_video.Codec != CodecIds.Mjpeg)
+                {
+                    throw;
+                }
+
+                return false;
+            }
+
+            foreach (var frame in frames)
             {
                 Take(frame);
             }

@@ -13,6 +13,15 @@ run time.
 
 ## Unreleased
 
+### Changed
+
+- MJPEG decodes damaged images as FFmpeg does, where it threw InvalidDataException: bytes before the SOI marker are
+  skipped, a missing EOI marker is taken as there, and a scan cut short or damaged gives the frame decoded as far as
+  its data goes, the rest 0 and `VideoFrame.IsDamaged` set. A packet too small for its image (under a quarter byte an
+  8x8 block) is refused, as FFmpeg gives no frame for it, and an interlaced packet whose first field is cut short is
+  InvalidDataException, not NotSupportedException. `VideoThumbnail` and `mcdec --dump` skip a refused packet
+  (docs/conformance.md, MJPEG).
+
 ### Fixed
 
 - AVI: MJPEG under the other FourCCs capture cards, editors and cameras write (AVI1, dmb1, JPGL, LJPG, IJPG, ACDV,

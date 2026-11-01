@@ -101,6 +101,47 @@ PY
   rm "$fields"
 done
 
+# Damaged frames as cameras and capture cards write them, FFmpeg's decoder the oracle (src/ManagedCodecs.Mjpeg/CLAUDE.md):
+# testsrc-420's frames, rewritten in Python. A frame cut short or damaged mid-scan is the second of three, between
+# clean ones: FFmpeg leaves what such a scan does not reach as its frame buffer was, 0 in a buffer it has not used
+# before (its second frame's) but an earlier frame's samples in a reused one, where the decoder leaves 0. mjpeg-cut:
+# cut at 2/3, no EOI; mjpeg-cut-eoi: cut at 1/3, an EOI after it; mjpeg-cut-stuffed: cut after the 0xFF of a stuffed
+# pair (FF 00); mjpeg-cut-ff-eoi: the same with an EOI after it (a fill byte before the marker, FF FF D9);
+# mjpeg-cut-stuffed-eoi: cut after a stuffed pair, an EOI after it. mjpeg-junk: frames that decode whole,
+# bytes before the SOI marker (the second) and no EOI marker (the third). (No sample of a byte damaged mid-scan: FFmpeg
+# decodes on through the codes that are not valid, its tables' own reading, so it matches only up to the first such
+# code; MjpegDecoderTests covers it.)
+damaged=$(mktemp -d)
+ff -i samples/testsrc-420.avi -frames:v 4 -c:v copy -f image2 "$damaged/f%02d.jpg"
+python3 -I - "$damaged" <<'PY'
+import os, sys
+folder = sys.argv[1]
+frames = [open(os.path.join(folder, f'f{i:02d}.jpg'), 'rb').read() for i in range(1, 5)]
+def at(d, fraction):
+    sos = d.find(b'\xff\xda')
+    start = sos + 2 + int.from_bytes(d[sos + 2:sos + 4], 'big')
+    return start + int((len(d) - 2 - start) * fraction)
+def stuffed(d, fraction):
+    # The 0xFF of the first stuffed pair (FF 00) from there on.
+    return d.index(b'\xff\x00', at(d, fraction))
+samples = {
+    'mjpeg-cut': [frames[0], frames[1][:at(frames[1], 2 / 3)], frames[2]],
+    'mjpeg-cut-eoi': [frames[0], frames[1][:at(frames[1], 1 / 3)] + b'\xff\xd9', frames[2]],
+    'mjpeg-cut-stuffed': [frames[0], frames[1][:stuffed(frames[1], 1 / 2) + 1], frames[2]],
+    'mjpeg-cut-ff-eoi': [frames[0], frames[1][:stuffed(frames[1], 1 / 2) + 1] + b'\xff\xd9', frames[2]],
+    'mjpeg-cut-stuffed-eoi': [frames[0], frames[1][:stuffed(frames[1], 1 / 2) + 2] + b'\xff\xd9', frames[2]],
+    'mjpeg-junk': [frames[0], b'\0\0\0\0camera' + frames[1], frames[2][:-2], frames[3]],
+}
+for name, packets in samples.items():
+    os.makedirs(os.path.join(folder, name))
+    for i, packet in enumerate(packets):
+        open(os.path.join(folder, name, f'f{i + 1:02d}.jpg'), 'wb').write(packet)
+PY
+for name in mjpeg-cut mjpeg-cut-eoi mjpeg-cut-stuffed mjpeg-cut-ff-eoi mjpeg-cut-stuffed-eoi mjpeg-junk; do
+  ff -framerate 25 -i "$damaged/$name/f%02d.jpg" -c:v copy "samples/$name.avi"
+done
+rm -r "$damaged"
+
 # ---- MP4 for the demuxer ----
 # The MJPEG remux is decoded end to end; H.264 with B-frames needs the edit list right, MPEG-4 Part 2 carries its
 # codec private data in esds, faststart puts moov before mdat, and the delayed one starts with an empty edit.

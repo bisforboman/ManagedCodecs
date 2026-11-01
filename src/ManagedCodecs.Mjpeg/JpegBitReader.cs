@@ -4,7 +4,9 @@ namespace ManagedCodecs.Mjpeg;
 
 /// <summary>
 /// MSB-first bit reader over entropy-coded scan data. Removes 0xFF00 byte stuffing and stops
-/// at any marker; past the end of the data (or at a marker) it supplies zero bits.
+/// at any marker; past the end of the data (or at a marker) it supplies zero bits. As FFmpeg's decoder reads a scan
+/// that runs past its data (a cut frame): after the data, the bytes <see cref="Tail"/> gives for the marker that ends
+/// it, before the zeros; a restart marker's 0xFF is data; a lone 0xFF ending the packet is not.
 /// </summary>
 internal ref struct JpegBitReader
 {
@@ -12,12 +14,46 @@ internal ref struct JpegBitReader
     private int _pos;
     private ulong _buffer; // valid bits are left-aligned
     private int _count;
+    private readonly ReadOnlySpan<byte> _tail;
+    private int _tailIndex;
     private bool _atMarker;
+    private long _dataBits; // bits of the data put into the buffer (not the zeros after it)
+    private long _fedBits; // bits put into the buffer, the zeros after the data too (those read: _fedBits - _count)
 
-    public JpegBitReader(ReadOnlySpan<byte> data)
+    public JpegBitReader(ReadOnlySpan<byte> data, ReadOnlySpan<byte> tail = default)
     {
         _data = data;
+        _tail = tail;
     }
+
+    /// <summary>
+    /// The bytes FFmpeg's decoder reads, as data, after a scan's data that a marker ends (<paramref name="marker"/>,
+    /// from its first 0xFF): one 0xFF, and the marker's code after it where a 0xFF fill byte came before the marker
+    /// ("FF FF D9"); none where the packet ended. Measured on cut frames against FFmpeg's output, not derived: what its
+    /// reader takes past the unescaped scan.
+    /// </summary>
+    public static ReadOnlySpan<byte> Tail(ReadOnlySpan<byte> marker)
+    {
+        if (marker.IsEmpty)
+        {
+            return [];
+        }
+
+        int fill = 0;
+        while (fill < marker.Length && marker[fill] == 0xFF)
+        {
+            fill++;
+        }
+
+        // Slices of the marker: its last fill byte and its code, or its first 0xFF.
+        return fill >= 2 && fill < marker.Length ? marker.Slice(fill - 1, 2) : marker[..1];
+    }
+
+    /// <summary>
+    /// Whether more bits were read than the data holds (zeros past its end): where FFmpeg's decoder stops a scan
+    /// ("overread"), the rest of the image left at 0.
+    /// </summary>
+    public readonly bool Overread => _fedBits - _count > _dataBits;
 
     /// <summary>Returns the next <paramref name="n"/> bits (1..16) without consuming them.</summary>
     public int Peek(int n)
@@ -63,6 +99,7 @@ internal ref struct JpegBitReader
         _buffer = 0;
         _count = 0;
         _atMarker = false;
+        _fedBits = _dataBits; // the buffered bits are dropped, not read
 
         // Skip to the next marker. Valid streams are already there (only padding bits remain).
         while (_pos + 1 < _data.Length && !(_data[_pos] == 0xFF && _data[_pos + 1] is not 0x00 and not 0xFF))
@@ -96,6 +133,8 @@ internal ref struct JpegBitReader
                 _buffer |= next >> _count;
                 _pos += bytes;
                 _count += bytes * 8;
+                _dataBits += bytes * 8;
+                _fedBits += bytes * 8;
                 return;
             }
         }
@@ -112,21 +151,37 @@ internal ref struct JpegBitReader
                     {
                         _pos += 2;
                     }
+                    else if (_pos + 1 < _data.Length)
+                    {
+                        // A marker (a restart marker, in the scan): leave it for ConsumeRestartMarker; its 0xFF is
+                        // data, zeros follow.
+                        _atMarker = true;
+                    }
                     else
                     {
-                        // A marker: leave it for ConsumeRestartMarker and feed zeros.
+                        // A lone 0xFF ending the packet: not data.
                         _atMarker = true;
                         b = 0;
+                        _dataBits -= 8;
                     }
                 }
                 else
                 {
                     _pos++;
                 }
+
+                _dataBits += 8;
+            }
+            else if (!_atMarker && _tailIndex < _tail.Length)
+            {
+                // What FFmpeg's decoder reads after the data (Tail), then zeros.
+                b = _tail[_tailIndex++];
+                _dataBits += 8;
             }
 
             _buffer |= b << (56 - _count);
             _count += 8;
+            _fedBits += 8;
         }
     }
 }

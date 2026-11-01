@@ -31,6 +31,7 @@ public static class OutputDump
         using var samples = audioDecoder is null ? null : new BinaryWriter(File.Create(prefix + ".audio.f32"));
         var packed = new MemoryStream();
         int videoFrames = 0;
+        int refused = 0;
         long audioSamples = 0;
 
         void AddVideo(IReadOnlyList<VideoFrame> frames)
@@ -49,7 +50,22 @@ public static class OutputDump
         {
             if (packet.StreamIndex == video?.StreamIndex && videoDecoder is not null)
             {
-                AddVideo(videoDecoder.Decode(packet));
+                if (videoDecoder is MjpegDecoder)
+                {
+                    // An MJPEG packet the decoder refuses (damaged beyond decoding) gives no frame, as FFmpeg skips it.
+                    try
+                    {
+                        AddVideo(videoDecoder.Decode(packet));
+                    }
+                    catch (InvalidDataException)
+                    {
+                        refused++;
+                    }
+                }
+                else
+                {
+                    AddVideo(videoDecoder.Decode(packet));
+                }
             }
             else if (packet.StreamIndex == audio?.StreamIndex && audioDecoder is not null)
             {
@@ -71,7 +87,7 @@ public static class OutputDump
             AddVideo(videoDecoder.Flush());
         }
 
-        Console.WriteLine($"{Path.GetFileName(path)}: {videoFrames} video frames ({video?.Codec ?? "none"}{(video is not null && videoDecoder is null ? ", no decoder" : "")}), "
+        Console.WriteLine($"{Path.GetFileName(path)}: {videoFrames} video frames ({video?.Codec ?? "none"}{(video is not null && videoDecoder is null ? ", no decoder" : "")}{(refused > 0 ? $", {refused} packets refused" : "")}), "
             + $"{audioSamples} audio samples a channel ({audio?.Codec ?? "none"}{(audio is not null && audioDecoder is null ? ", no decoder" : "")})");
     }
 }

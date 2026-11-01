@@ -31,6 +31,35 @@ and its frames read 4:3. `AviDemuxer` reads 'vprp' as FFmpeg's avidec does: the 
 Y in the low word) over the frame's (dwFrameWidthInPixels over dwFrameHeightInLines), none with a zero anywhere or a
 chunk of 36 bytes or fewer (`AviDemuxerTests`; `DisplayTests` compares every AVI with ffprobe's stream).
 
+Damaged images, as cameras and capture cards write them, decode as FFmpeg's decoder (6.1.1) decodes them, found by
+measuring its output, which T.81 does not cover (src/ManagedCodecs.Mjpeg/CLAUDE.md has how):
+
+- Bytes before the SOI marker are skipped; data that ends without an EOI marker ends there (`mjpeg-junk`).
+- A scan cut short is decoded up to the MCU after which more bits were read than its data holds (the zeros past it,
+  FFmpeg's "overread"), that MCU included. After the data come the 0xFF of the marker that ends it, and that marker's
+  code too where a 0xFF fill byte came before it ("FF FF D9"); a lone 0xFF ending the packet is not data. A code that
+  is not valid stops the scan at its block. The frame is `IsDamaged`, the rest of its scan 0 (`mjpeg-cut`,
+  `-cut-eoi`, `-cut-stuffed`, `-cut-ff-eoi`, `-cut-stuffed-eoi`, each cut frame between clean ones).
+- A packet of less than a quarter byte for each 8x8 block of the image (its size rounded up to whole blocks; what
+  comes before SOI counts) is refused with InvalidDataException, as FFmpeg gives no frame for it (measured at gray
+  322x238 and 640x480, 4:2:0 1280x720 and 1282x722, 4:4:4 1280x720). An interlaced packet whose first field is cut
+  short (so no second field follows) is refused too, where FFmpeg gives none.
+
+Checked beyond the samples by cutting frames of seven layouts (4:2:2, 4:4:4, an odd size, restart markers, the Annex K
+tables, gray, noise) at 14 places each, with and without an EOI after the cut: 362 of 364 frames as FFmpeg's, and 27 of
+28 frames damaged mid-scan. Where they differ:
+
+- FFmpeg leaves what a cut scan does not reach as its frame buffer was: 0 in a buffer it has not used before, an
+  earlier frame's samples in a reused one, which depends on its buffer pool. The decoder leaves 0, so the samples put
+  each cut frame second, where FFmpeg's buffer is new.
+- A cut ending on the 0xFF of a stuffed pair with an EOI after it, in the two layouts with the Annex K tables
+  (testsrc-rst and -stdhuff; testsrc-420's, mjpeg-cut-ff-eoi, matches): what FFmpeg reads past such data.
+- Damage mid-scan matches only up to the first code that is not valid: FFmpeg decodes on through some of them (its
+  tables' own reading), and after an error in a scan with restart markers it starts again at some of the later ones.
+  `MjpegDecoderTests` covers such a frame (damaged, the part before the damage as the undamaged frame's).
+- After an interlaced packet it refuses for a cut first field, FFmpeg pairs fields across packets, so its next frame
+  is not that packet's two fields; the decoder's is.
+
 ## Real films
 
 Every sample above is a test pattern encoded to isolate a feature. `tools/realworld.py` (nightly, `realworld.yml`, a job

@@ -49,8 +49,10 @@ What nobody has checked yet, and how. Report on issue #254 (or a new issue), one
    one with IL2CPP (Player settings, Scripting Backend). An Android or iOS build is a bonus (IL2CPP only on iOS; on
    Android read the file into a `MemoryStream` first, see above).
 4. **Record**, for each run: the Unity version, the backend, the CPU, and the last line the sample logs (every 5 seconds
-   and on stopping): `ManagedCodecsVideo: 1280x720, 1500 frames shown, 3 dropped, RGBA conversion 4.1 ms a frame`. A
-   frame is dropped when a later one was already due, so a steadily growing count means playback doesn't keep up.
+   and on stopping):
+   `ManagedCodecsVideo: 1280x720, 1500 frames shown, 3 dropped, ms a frame: decode 21.7, RGBA conversion 4.1`. A frame
+   is dropped when a later one was already due, so a steadily growing count means playback doesn't keep up; the two
+   times (means over the run) say which of decoding and conversion is short of the frame's duration.
    Also whether the picture is upright and its colours right (compare with VLC), whether the sound plays without
    gaps and in sync, and the first error in the console, if any (an IL2CPP build error or a `MissingMethodException`
    above all: those are what Mono and IL2CPP could do differently from CoreCLR).

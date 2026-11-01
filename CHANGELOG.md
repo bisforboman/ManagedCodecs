@@ -11,7 +11,12 @@ share internals, so each depends on the others at exactly its own version (`[X]`
 then reports a mix of versions (NU1107, or NU1608 for a newer one referenced directly) rather than letting it fail at
 run time.
 
-## Unreleased
+## 0.5.0 – 2026-11-01
+
+Two new packages: ManagedCodecs.Thumbnails (a video file's facts as ffprobe gives them, and a thumbnail) and
+ManagedCodecs.Unity (every decoder and demuxer, and the thumbnails, for .NET Standard 2.1, which Unity's Mono and
+IL2CPP load). Also seeking in demuxers, each frame's colour metadata, stream durations, and faster AAC, HE-AAC and
+deep H.264. New public API, hence a minor version; code built against 0.4 keeps working.
 
 ### Added
 

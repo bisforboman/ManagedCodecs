@@ -32,7 +32,7 @@ in between. That comparison is not measured here.
 | `src/ManagedCodecs.Containers` | `AviDemuxer`, `Mp4Demuxer`, `AdtsDemuxer` (raw .aac), and `Demuxer.Open` to pick one by content |
 | `src/ManagedCodecs.Mjpeg` | `MjpegDecoder`: baseline/extended Huffman JPEG, interlaced AVI1, bit-exact with FFmpeg |
 | `src/ManagedCodecs.H264` | `H264Decoder`: Constrained Baseline, Main, High, High 10, High 4:2:2 and High 4:4:4 Predictive profile H.264 (CAVLC, CABAC, I/P/B, weighted prediction, 8x8 transform, scaling matrices, deblocking, monochrome, 4:2:0, 4:2:2 and 4:4:4, also as separate colour planes, 8 to 14 bits, lossless, progressive and interlaced), bit-exact |
-| `src/ManagedCodecs.Thumbnails` | `VideoProbe`: a video file's duration, displayed size, codecs and rotation as ffprobe reports them, without decoding; `VideoThumbnail`: a frame as a small upright RGBA image or PNG; the `ManagedCodecs.Thumbnails` package (see Probing a video, Thumbnails; docs/decisions/2026-10-31-thumbnails.md) |
+| `src/ManagedCodecs.Thumbnails` | `VideoProbe`: a video file's duration, displayed size, codecs and rotation as ffprobe reports them, without decoding; `VideoThumbnail`: a frame as a small upright RGBA image, PNG or JPEG; the `ManagedCodecs.Thumbnails` package (see Probing a video, Thumbnails; docs/decisions/2026-10-31-thumbnails.md) |
 | `src/ManagedCodecs.Unity` | The netstandard2.1 build for Unity (Mono, IL2CPP): every decoder's sources (and Thumbnails') in one assembly, without the vector paths, 1 to 3.4 times slower on CoreCLR; the `ManagedCodecs.Unity` package (see Unity) |
 | `src/ManagedCodecs.Aac` | `AacDecoder`: AAC LC (mono to 7.1, M/S, intensity, PNS, TNS), within 3e-7 of FFmpeg's float output; HE-AAC (spectral band replication) |
 | `src/Shared` | Source files linked into several codec projects (the VLC decoder) |
@@ -352,9 +352,10 @@ Console.WriteLine($"{info.Duration} {info.DisplayWidth}x{info.DisplayHeight} {in
 ### Thumbnails
 
 `VideoThumbnail.Create(stream, options)` takes one frame of an MP4 or AVI file (H.264 or MJPEG) and gives a
-`Thumbnail`: its RGBA pixels upright, `Width`, `Height`, the frame's `Time`, and `SavePng`/`ToPng` (a PNG written here,
-deflated by the BCL: no image library, native code or FFmpeg). For JPEG or WebP, hand `Pixels` to SkiaSharp or
-ImageSharp.
+`Thumbnail`: its RGBA pixels upright, `Width`, `Height`, the frame's `Time`, `SavePng`/`ToPng` (a PNG written here,
+deflated by the BCL: no image library, native code or FFmpeg) and `SaveJpeg`/`ToJpeg` (a baseline JPEG written here,
+4:2:0, `quality` 1 to 100 as libjpeg's, 85 by default; docs/decisions/2026-11-01-thumbnails-jpeg.md). For WebP, hand
+`Pixels` to SkiaSharp or ImageSharp.
 
 - **Which frame:** the one shown at `At` from the file's start as ffmpeg's `-ss` takes it (the time in the stream's
   time base to the nearest unit, then the first frame at or after that), decoded from the keyframe before it
@@ -379,7 +380,7 @@ await request.Body.CopyToAsync(buffer); // MP4's index can follow its data: the 
 buffer.Position = 0;
 
 var thumbnail = await VideoThumbnail.CreateAsync(buffer, new ThumbnailOptions { MaxWidth = 480 }, cancellationToken);
-thumbnail.SavePng(response.Body);
+thumbnail.SavePng(response.Body); // or thumbnail.SaveJpeg(response.Body, quality: 85)
 ```
 
 ### Unity

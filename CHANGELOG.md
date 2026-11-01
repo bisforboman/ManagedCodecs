@@ -13,6 +13,12 @@ run time.
 
 ## Unreleased
 
+### Added
+
+- Thumbnails: `Thumbnail.SaveJpeg(Stream, int quality = 85)` and `Thumbnail.ToJpeg(int quality = 85)`, a baseline
+  JPEG written here (JFIF, 4:2:0, Annex K's tables, `quality` as libjpeg's), beside the PNG
+  (docs/decisions/2026-11-01-thumbnails-jpeg.md).
+
 ### Changed
 
 - MJPEG decodes damaged images as FFmpeg does, where it threw InvalidDataException: bytes before the SOI marker are

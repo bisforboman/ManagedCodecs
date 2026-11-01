@@ -133,7 +133,11 @@ time, not the next (testsrc-420.at610, a quarter frame past 600 ms in AVI's 1/25
 at 5.2208 s in 1/24, below: the frame at 5.2083). `SkipDark` is checked on
 h264-fade-in (a keyframe every 0.2 s: the frame at 0.4 s is the first at 10% of white's mean luma). The PNG files are
 read back by a reader the tests have from the PNG spec (chunk CRCs bit by bit, inflate, the five filters undone) and,
-where ffmpeg is installed (CI), by FFmpeg's PNG decoder, to the byte. The fuzzer's `thumbnail` target probes and
+where ffmpeg is installed (CI), by FFmpeg's PNG decoder, to the byte. The JPEG files (`JpegTests`) are checked piece by
+piece against T.81 (the forward DCT within 0.05 of A.3.3's definitional sum, Table F.1's categories, Annex K.1's
+tables at quality 50, byte stuffing) and read back by the MJPEG decoder and, where ffmpeg is installed, FFmpeg's,
+within PSNR floors set from libjpeg at the same quality and subsampling (which gets the same figures on the test
+pictures); one file's SHA-256 is pinned, the arithmetic being integer so every runtime writes it. The fuzzer's `thumbnail` target probes and
 thumbnails whole files, and `MalformedInputTests` replays every container finding through it.
 
 On WebAssembly, `tools/wasm-check.sh` compares each video sample's probe facts and a thumbnail (160 x 160 at most,

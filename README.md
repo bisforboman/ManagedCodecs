@@ -356,6 +356,9 @@ Console.WriteLine($"{info.Duration} {info.DisplayWidth}x{info.DisplayHeight} {in
 deflated by the BCL: no image library, native code or FFmpeg). For JPEG or WebP, hand `Pixels` to SkiaSharp or
 ImageSharp.
 
+- **What it can't read:** HEVC, VP9 and AV1 throw `NotSupportedException` (so do `VideoProbe.Read` and the demuxers).
+  That includes iPhone videos: iPhones record HEVC by default ("High Efficiency" in the camera's format settings; "Most
+  Compatible" records H.264).
 - **Which frame:** the one shown at `At` from the file's start as ffmpeg's `-ss` takes it (the time in the stream's
   time base to the nearest unit, then the first frame at or after that), decoded from the keyframe before it
   (`IDemuxer.Seek`; AVI's H.264, which has no index to seek by, from the start). By default 10% into the video, at most

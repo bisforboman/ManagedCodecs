@@ -70,6 +70,8 @@ internal sealed record JpegFrameHeader(byte Marker, int Precision, int Width, in
                 (2, 2) => PixelFormat.Yuv420P,
                 (2, 1) => PixelFormat.Yuv422P,
                 (1, 1) => PixelFormat.Yuv444P,
+                (4, 1) => PixelFormat.Yuv411P,
+                (1, 2) => PixelFormat.Yuv440P,
                 _ => throw Unsupported(),
             };
         }

@@ -264,9 +264,9 @@ public class RgbaImageTests
             return (grey, grey, grey);
         }
 
-        var (chromaWidth, chromaHeight) = format.PlaneSize(1, frame.Width, frame.Height);
-        int cx = chromaWidth < frame.Width ? x / 2 : x;
-        int cy = chromaHeight < frame.Height ? y / 2 : y;
+        var (shiftX, shiftY) = format.ChromaShift();
+        int cx = x >> shiftX;
+        int cy = y >> shiftY;
         double cb = (Sample(frame, 1, cx, cy) / scale) - 128;
         double cr = (Sample(frame, 2, cx, cy) / scale) - 128;
         if (!full)

@@ -85,8 +85,8 @@ internal sealed class YuvToRgba
         int down = 16 + shift;
         int round = 1 << (down - 1);
         var (chromaWidth, chromaHeight) = gray ? (width, height) : format.PlaneSize(1, width, height);
-        int xShift = chromaWidth < width ? 1 : 0;
-        int yShift = chromaHeight < height ? 1 : 0;
+        int xShift = Shift(width, chromaWidth);
+        int yShift = Shift(height, chromaHeight);
         for (int y = 0; y < height; y++)
         {
             var luma = frame.GetRow(0, y);
@@ -107,6 +107,18 @@ internal sealed class YuvToRgba
                 row[(x * 4) + 3] = 255;
             }
         }
+    }
+
+    /// <summary>The shift that rounds <paramref name="full"/> up to <paramref name="sub"/>: 1 for half, 2 for a quarter (4:1:1).</summary>
+    private static int Shift(int full, int sub)
+    {
+        int shift = 0;
+        while (-(-full >> shift) > sub)
+        {
+            shift++;
+        }
+
+        return shift;
     }
 
     private static int Sample(Span<byte> row, int x, bool deep) => deep ? MemoryMarshal.Cast<byte, ushort>(row)[x] : row[x];

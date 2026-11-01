@@ -12,10 +12,6 @@
     <Description>The ManagedCodecs decoders (H.264, MJPEG, AAC LC and HE-AAC; AVI, MP4 and ADTS) and video probing and thumbnails for Unity and other .NET Standard 2.1 runtimes: one assembly, the scalar build, bit-exact with the other packages' output, in pure managed C#.</Description>
     <PackageTags>$(PackageTags);unity;netstandard</PackageTags>
     <DefineConstants>$(DefineConstants);MANAGEDCODECS_H264</DefineConstants>
-    <!-- No release of this package on nuget.org yet, so package validation has no baseline to compare with (the
-         one in Directory.Build.props is the other packages'); the pull request that sets the baseline after its first
-         release removes this line. -->
-    <PackageValidationBaselineVersion></PackageValidationBaselineVersion>
     <!-- CS1574: doc comments of the shared sources name vector members and APIs this build leaves out. -->
     <NoWarn>$(NoWarn);CS1574</NoWarn>
   </PropertyGroup>

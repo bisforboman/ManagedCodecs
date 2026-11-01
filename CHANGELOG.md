@@ -13,6 +13,12 @@ run time.
 
 ## Unreleased
 
+### Added
+
+- MJPEG decodes 4:1:1 and 4:4:0 images (camera layouts: luma 4x1 against chroma 1x1, and 1x2 against 1x1 or 2x2
+  against 2x1), as the new `PixelFormat.Yuv411P` and `PixelFormat.Yuv440P`, where it threw NotSupportedException.
+  `RgbaConverter` and `VideoThumbnail` convert them. Code that switches over `PixelFormat` sees two new values.
+
 ### Changed
 
 - MJPEG decodes damaged images as FFmpeg does, where it threw InvalidDataException: bytes before the SOI marker are

@@ -24,7 +24,24 @@ public class PixelFormatTests
             }
         }
 
+        // MJPEG's two layouts H.264 has no chroma_format_idc for.
+        Assert.True(seen.Add(PixelFormat.Yuv411P));
+        Assert.True(seen.Add(PixelFormat.Yuv440P));
         Assert.Equal(Enum.GetValues<PixelFormat>().Length, seen.Count);
+    }
+
+    [Theory]
+    [InlineData(PixelFormat.Yuv411P, 5, 5, 2, 5)]
+    [InlineData(PixelFormat.Yuv411P, 8, 3, 2, 3)]
+    [InlineData(PixelFormat.Yuv411P, 1, 1, 1, 1)]
+    [InlineData(PixelFormat.Yuv440P, 5, 5, 5, 3)]
+    [InlineData(PixelFormat.Yuv440P, 3, 4, 3, 2)]
+    public void PlaneSize_RoundsMjpegsLayoutsUp(PixelFormat format, int width, int height, int chromaWidth, int chromaHeight)
+    {
+        Assert.Equal((8, 1, 3), (format.BitDepth(), format.BytesPerSample(), format.PlaneCount()));
+        Assert.Equal((width, height), format.PlaneSize(0, width, height));
+        Assert.Equal((chromaWidth, chromaHeight), format.PlaneSize(1, width, height));
+        Assert.Equal((chromaWidth, chromaHeight), format.PlaneSize(2, width, height));
     }
 
     [Theory]

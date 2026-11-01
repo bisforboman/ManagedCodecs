@@ -102,7 +102,7 @@ public sealed class ManagedCodecsVideo : MonoBehaviour
     // dropped steadily mean decoding (or the RGBA conversion, timed on its own) is slower than real time.
     private void Report()
     {
-        var (_, convert) = _source!.DecodeStatistics;
+        var (_, convert) = _source!.ConvertStatistics;
         Debug.Log($"ManagedCodecsVideo: {_source.VideoStream.Width}x{_source.VideoStream.Height}, {_shown} frames shown, {_dropped} dropped, RGBA conversion {convert:F1} ms a frame");
     }
 

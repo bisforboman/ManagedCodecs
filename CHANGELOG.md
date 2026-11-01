@@ -11,6 +11,14 @@ share internals, so each depends on the others at exactly its own version (`[X]`
 then reports a mix of versions (NU1107, or NU1608 for a newer one referenced directly) rather than letting it fail at
 run time.
 
+## Unreleased
+
+### Added
+
+- Thumbnails: `Thumbnail.SaveJpeg(Stream, int quality = 85)` and `Thumbnail.ToJpeg(int quality = 85)`, a baseline
+  JPEG written here (JFIF, 4:2:0, Annex K's tables, `quality` as libjpeg's), beside the PNG
+  (docs/decisions/2026-11-01-thumbnails-jpeg.md).
+
 ## 0.6.0 – 2026-11-01
 
 MJPEG from real cameras: the 4:1:1 and 4:4:0 layouts cameras write, as two new pixel formats, damaged images decoded

@@ -59,7 +59,7 @@ first frame 80 ms, the frame at 1 s 245 ms (24 frames decoded). Missing:
   level of the definition, the scaling exact, FFmpeg 0 to 3 levels below and 1 above (docs/conformance.md, where its
   exceptions are). No vector path yet: at 720p the scalar conversion and scaling take about 13 ms, against about 33 ms
   to decode a frame on the same machine.
-- **Image output: PNG, written here**, with the BCL's `ZLibStream` (deflate is in .NET itself: no dependency, AOT and
+- **Image output: PNG, written here** (JPEG too since 2026-11-01: [2026-11-01-thumbnails-jpeg.md](2026-11-01-thumbnails-jpeg.md)), with the BCL's `ZLibStream` (deflate is in .NET itself: no dependency, AOT and
   WebAssembly safe). Raw RGBA for callers who want JPEG or WebP through SkiaSharp or ImageSharp themselves. No image
   library as a dependency: SkiaSharp is native code (against the point of the library and not on every WebAssembly
   setup), ImageSharp's Six Labors Split License is not plain Apache-2.0. Adapter packages can come later if asked.

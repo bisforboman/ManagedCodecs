@@ -19,7 +19,7 @@ var info = VideoProbe.Read(buffer);
 
 buffer.Position = 0;
 var thumbnail = await VideoThumbnail.CreateAsync(buffer, new ThumbnailOptions { MaxWidth = 480 }, cancellationToken);
-thumbnail.SavePng(output); // or thumbnail.Pixels (RGBA) to an image library for JPEG or WebP
+thumbnail.SavePng(output); // or thumbnail.SaveJpeg(output, quality: 85), or thumbnail.Pixels (RGBA) to an image library for WebP
 ```
 
 - **The thumbnail:** the frame shown at `ThumbnailOptions.At`, as ffmpeg's `-ss` takes it (by default 10% in, at most 10 s; with

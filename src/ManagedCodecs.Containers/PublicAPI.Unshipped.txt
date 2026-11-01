@@ -1,5 +1,1 @@
 #nullable enable
-ManagedCodecs.Containers.AdtsDemuxer.ReadPacketInfo() -> System.Collections.Generic.IEnumerable<ManagedCodecs.PacketInfo>!
-ManagedCodecs.Containers.AviDemuxer.ReadPacketInfo() -> System.Collections.Generic.IEnumerable<ManagedCodecs.PacketInfo>!
-ManagedCodecs.Containers.AviDemuxer.Seek(long pts, int streamIndex) -> void
-ManagedCodecs.Containers.Mp4Demuxer.Seek(long pts, int streamIndex) -> void

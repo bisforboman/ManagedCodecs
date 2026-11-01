@@ -22,8 +22,8 @@ internal sealed class MediaSource : IDisposable
     private readonly IAudioDecoder? _audio;
     private readonly Thread _thread;
     private readonly CancellationTokenSource _stop = new();
-    private long _decoded;
-    private long _decodeTicks;
+    private long _converted;
+    private long _convertTicks;
 
     public MediaSource(string path)
     {
@@ -51,8 +51,11 @@ internal sealed class MediaSource : IDisposable
 
     public BlockingCollection<(int SampleRate, short[] Samples)> Audio { get; } = new(boundedCapacity: 32);
 
-    /// <summary>Video frames decoded and converted so far, and the time spent on each (milliseconds, mean).</summary>
-    public (long Count, double Milliseconds) DecodeStatistics => (_decoded, _decoded == 0 ? 0 : _decodeTicks * 1000.0 / System.Diagnostics.Stopwatch.Frequency / _decoded);
+    /// <summary>
+    /// Video frames converted to RGBA so far, and the time each took (milliseconds, mean): the conversion and its
+    /// buffer, not the decoding, which runs before (and with H.264 frame threading, across frames).
+    /// </summary>
+    public (long Count, double Milliseconds) ConvertStatistics => (_converted, _converted == 0 ? 0 : _convertTicks * 1000.0 / System.Diagnostics.Stopwatch.Frequency / _converted);
 
     public void Start() => _thread.Start();
 
@@ -112,8 +115,8 @@ internal sealed class MediaSource : IDisposable
             var sar = frame.SampleAspectRatio;
             double aspect = sar.Numerator > 0 ? sar.Numerator / (double)sar.Denominator : 1;
             frame.Dispose();
-            _decodeTicks += System.Diagnostics.Stopwatch.GetTimestamp() - start;
-            _decoded++;
+            _convertTicks += System.Diagnostics.Stopwatch.GetTimestamp() - start;
+            _converted++;
             Frames.Add(new RgbaFrame(time, width, height, pixels, aspect), token);
         }
     }

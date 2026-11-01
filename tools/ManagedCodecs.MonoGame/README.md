@@ -10,7 +10,7 @@ player: no seeking, no pause, Escape quits.
   to RGBA on the CPU (`YuvToRgba`); the game loop shows the newest frame due by a clock started at the first frame and
   drops late ones, through one `Texture2D` (`SetData` each frame).
 - Audio goes to a `DynamicSoundEffectInstance` as 16-bit stereo (more channels downmixed to the first two).
-- The window title shows the decode and conversion time per frame, the number a game's frame budget cares about.
+- The window title shows the RGBA conversion's time per frame (the decoding, on its own thread, is not in it).
 - Colour: each frame converts by its own `ColorMatrix` and `ColorRange` (BT.601, BT.709, BT.2020, SMPTE 240M; limited
   or full), and where the stream and its container say nothing, as players assume: BT.709 from 720 lines, BT.601
   below, limited range (MJPEG frames say full range BT.601). Checked against FFmpeg's scaler

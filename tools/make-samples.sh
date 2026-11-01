@@ -46,6 +46,19 @@ ff -f lavfi -i testsrc2=size=322x238:rate=25 -t 1 -pix_fmt gray "$frames/f%02d.p
 "$magick_cmd" "$frames"/f*.png -colorspace Gray -type Grayscale -quality 90 "$frames/f%02d.jpg"
 ff -framerate 25 -i "$frames/f%02d.jpg" -c:v copy samples/gray.avi
 rm -rf "$frames"
+# 4:1:1 and 4:4:0 (cameras' layouts FFmpeg's encoder doesn't write; ImageMagick encodes the frames): mjpeg-411 with
+# luma 4x1 and chroma 1x1 (yuvj411p), mjpeg-440 1x2 and 1x1 (yuvj440p), mjpeg-440-2x2 the same ratio as 2x2 and 2x1.
+# 322x238 so the quarter-wide chroma rounds up (81 of 80.5) and the MCUs overhang the picture.
+frames=$(mktemp -d)
+ff -f lavfi -i testsrc2=size=322x238:rate=25 -t 0.2 "$frames/f%02d.png"
+for layout in 411:4x1,1x1,1x1 440:1x2,1x1,1x1 440-2x2:2x2,2x1,2x1; do
+  mkdir "$frames/${layout%%:*}"
+  for png in "$frames"/f*.png; do
+    "$magick_cmd" "$png" -sampling-factor "${layout#*:}" -quality 90 "$frames/${layout%%:*}/$(basename "${png%.png}").jpg"
+  done
+  ff -framerate 25 -i "$frames/${layout%%:*}/f%02d.jpg" -c:v copy "samples/mjpeg-${layout%%:*}.avi"
+done
+rm -rf "$frames"
 # Interlaced MJPEG (AVI1, as capture cards write it): each packet holds a frame's two fields as two JPEG images, each
 # with an AVI1 APP0 segment, in a stream twice their height. FFmpeg's encoder refuses interlacing, so it encodes the
 # fields of a top-field-first source as images of their own, and Python pairs them into packets (field bytes 1, 2)
@@ -714,13 +727,15 @@ done
 #   14 bits to RGBA was up to 87 levels from the definition (and from its own 8-bit route), the 8-bit route within 3.
 # - Not an odd width or height (the container crops): there swscale leaves its fast path, which takes the nearest
 #   chroma sample as RgbaConverter does, for its general one, which interpolates chroma (up to 194 levels apart at a
-#   colour edge). RgbaImageTests checks odd sizes against the definition instead.
+#   colour edge). RgbaImageTests checks odd sizes against the definition instead, and 4:1:1 and 4:4:0 (mjpeg-411,
+#   mjpeg-440*), which take the general path at any size (6 levels from ours at the first pixel that differed).
 for f in samples/*.mp4 samples/*.avi; do
   case $f in samples/jm-planes*) continue ;; esac
   IFS=, read -r codec width height pix <<< \
     "$(ffprobe -v error -select_streams v:0 -of csv=p=0 -show_entries stream=codec_name,width,height,pix_fmt "$f")"
   case $codec in h264 | mjpeg) ;; *) continue ;; esac
   if (( width % 2 || height % 2 )); then continue; fi
+  case $pix in yuvj411p | yuvj440p) continue ;; esac
   case $pix in yuv4[24][024]p[0-9]*) eight="format=${pix:0:7}," ;; gray[0-9]*) eight="format=gray," ;; *) eight="" ;; esac
   ff -idct simple -i "$f" -map 0:v:0 -frames:v 1 \
     -vf "${eight}format=rgba,scale=max(1\\,trunc(iw*3/8)):max(1\\,trunc(ih*3/8)):flags=area+accurate_rnd+full_chroma_int+full_chroma_inp,format=rgba" \

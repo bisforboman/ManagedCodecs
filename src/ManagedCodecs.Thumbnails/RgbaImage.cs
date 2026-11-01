@@ -335,8 +335,8 @@ internal sealed class RgbaConverter
         }
 
         var (chromaWidth, chromaHeight) = format.PlaneSize(1, frame.Width, frame.Height);
-        int shiftX = chromaWidth < width ? 1 : 0;
-        int chromaY = chromaHeight < frame.Height ? y >> 1 : y;
+        int shiftX = Shift(width, chromaWidth);
+        int chromaY = y >> Shift(frame.Height, chromaHeight);
         var cb = frame.GetRow(1, chromaY);
         var cr = frame.GetRow(2, chromaY);
 
@@ -429,6 +429,18 @@ internal sealed class RgbaConverter
             pixel[1] = Clamp(luminance - (_cbToG * cb) - (_crToG * cr));
             pixel[2] = Clamp(luminance + (_cbToB * cb));
         }
+    }
+
+    /// <summary>The shift that rounds <paramref name="full"/> up to <paramref name="sub"/>: 1 for half, 2 for a quarter (4:1:1).</summary>
+    private static int Shift(int full, int sub)
+    {
+        int shift = 0;
+        while (-(-full >> shift) > sub)
+        {
+            shift++;
+        }
+
+        return shift;
     }
 
     private static byte Clamp(int value)

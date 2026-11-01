@@ -21,6 +21,12 @@
     <None Include="Fuzz\Findings\**" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
+  <!-- mcplay's colour conversion (tools/ManagedCodecs.MonoGame, also the Unity sample's), its fast path against its
+       reference by YuvToRgbaTests. -->
+  <ItemGroup>
+    <Compile Include="..\..\tools\ManagedCodecs.MonoGame\YuvToRgba.cs" Link="MonoGame\YuvToRgba.cs" />
+  </ItemGroup>
+
   <!-- -p:UnityBuild=true: the same tests against the Unity build (src/ManagedCodecs.Unity, netstandard2.1, the scalar
        paths), as ci.yml runs them; tests of the vector paths themselves are left out (UNITY_BUILD). -->
   <PropertyGroup Condition="'$(UnityBuild)' == 'true'">

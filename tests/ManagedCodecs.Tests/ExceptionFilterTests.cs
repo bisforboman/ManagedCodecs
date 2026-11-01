@@ -8,7 +8,7 @@ namespace ManagedCodecs.Tests;
 /// as 1): <c>Demuxer.Open</c>'s filter then disposed a garbage stream and an MP4 fuzz finding brought the runtime down
 /// (a Mono assertion); H.264's <c>when (ConcealErrors)</c> reads its <c>current</c> picture after the catch too. A plain
 /// <see langword="catch"/> that rethrows what it doesn't handle keeps them (tools/ManagedCodecs.Wasm/CLAUDE.md;
-/// tools/wasm-check.sh replays the fuzz findings there).
+/// tools/wasm-check.sh replays the fuzz findings there; dotnet/runtime#136780).
 /// </summary>
 public class ExceptionFilterTests
 {

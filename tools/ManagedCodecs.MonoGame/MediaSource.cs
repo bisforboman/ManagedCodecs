@@ -13,7 +13,9 @@ internal sealed record RgbaFrame(double Time, int Width, int Height, byte[] Pixe
 /// <summary>
 /// Demuxes and decodes a file on a thread of its own, ahead of playback: video frames converted to RGBA, audio as
 /// interleaved 16-bit stereo (MonoGame's dynamic sound takes mono or stereo; more channels are downmixed to the first
-/// two). Both queues are bounded, so the decoder waits when playback falls behind.
+/// two). Both queues are bounded, so the decoder waits when playback falls behind. A frame's pixels come back through
+/// <see cref="Return"/> once shown or dropped, and the next frame of the size is converted into them: a 720p frame's
+/// 3.6 MB would otherwise be a new array on the large object heap each frame, a gen 2 collection every few.
 /// </summary>
 internal sealed class MediaSource : IDisposable
 {
@@ -22,6 +24,11 @@ internal sealed class MediaSource : IDisposable
     private readonly IAudioDecoder? _audio;
     private readonly Thread _thread;
     private readonly CancellationTokenSource _stop = new();
+
+    // Pixel arrays given back, for the frames to come. Frames holds at most 8 and a player keeps one or two, so a few
+    // spare cover the steady state; more are left to the collector.
+    private readonly ConcurrentBag<byte[]> _spare = [];
+    private const int SpareLimit = 4;
     private long _decoded;
     private long _decodeTicks;
     private long _converted;
@@ -50,6 +57,18 @@ internal sealed class MediaSource : IDisposable
     public AudioStreamInfo? AudioStream { get; }
 
     public BlockingCollection<RgbaFrame> Frames { get; } = new(boundedCapacity: 8);
+
+    /// <summary>
+    /// Gives a frame's pixels back for a later frame to be converted into, once they are no longer read (copied into a
+    /// texture, or the frame dropped). Optional: a frame not returned is collected as usual. Return each frame once.
+    /// </summary>
+    public void Return(RgbaFrame frame)
+    {
+        if (_spare.Count < SpareLimit)
+        {
+            _spare.Add(frame.Pixels);
+        }
+    }
 
     public BlockingCollection<(int SampleRate, short[] Samples)> Audio { get; } = new(boundedCapacity: 32);
 
@@ -133,7 +152,7 @@ internal sealed class MediaSource : IDisposable
         {
             long start = System.Diagnostics.Stopwatch.GetTimestamp();
             var (width, height) = (frame.Width, frame.Height);
-            var pixels = new byte[width * height * 4];
+            var pixels = Rent(width * height * 4);
             YuvToRgba.For(frame).Convert(frame, pixels);
             double time = frame.Pts * (double)timeBase.Numerator / timeBase.Denominator;
             var sar = frame.SampleAspectRatio;
@@ -143,6 +162,21 @@ internal sealed class MediaSource : IDisposable
             _converted++;
             Frames.Add(new RgbaFrame(time, width, height, pixels, aspect), token);
         }
+    }
+
+    // A returned array of the length if there is one (a spare of another size, from before the stream changed size, is
+    // dropped), else a new one.
+    private byte[] Rent(int length)
+    {
+        while (_spare.TryTake(out var pixels))
+        {
+            if (pixels.Length == length)
+            {
+                return pixels;
+            }
+        }
+
+        return new byte[length];
     }
 
     private static short[] Interleave(AudioFrame frame)

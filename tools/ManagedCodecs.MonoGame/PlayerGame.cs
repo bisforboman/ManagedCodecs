@@ -75,6 +75,11 @@ internal sealed class PlayerGame : Game
                 break;
             }
 
+            if (due is not null)
+            {
+                _source.Return(due);
+            }
+
             due = _next;
             _next = null;
         }
@@ -90,6 +95,7 @@ internal sealed class PlayerGame : Game
 
             _texture.SetData(due.Pixels);
             _aspect = due.AspectRatio;
+            _source.Return(due);
         }
 
         var (count, decode) = _source.DecodeStatistics;

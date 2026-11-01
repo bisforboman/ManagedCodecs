@@ -8,7 +8,9 @@ player: no seeking, no pause, Escape quits.
 
 - A thread of its own demuxes and decodes ahead (H.264 with frame threading, up to 4 threads) and converts each frame
   to RGBA on the CPU (`YuvToRgba`); the game loop shows the newest frame due by a clock started at the first frame and
-  drops late ones, through one `Texture2D` (`SetData` each frame).
+  drops late ones, through one `Texture2D` (`SetData` each frame). A frame's pixels go back to `MediaSource.Return`
+  once uploaded or dropped and the next frame is converted into them: a new 3.6 MB array per 720p frame meant a gen 2
+  collection every 8 frames or so (31 in 240 frames of a 720p clip, 2 with the arrays reused).
 - Audio goes to a `DynamicSoundEffectInstance` as 16-bit stereo (more channels downmixed to the first two).
 - The window title shows the decoding's and the RGBA conversion's time per frame, means over the run on the decoding
   thread. The decoding's is the time in the decoder's calls over the frames they returned: with H.264 frame threading

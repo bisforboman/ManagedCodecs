@@ -79,6 +79,7 @@ public sealed class ManagedCodecsVideo : MonoBehaviour
             if (due is not null)
             {
                 _dropped++;
+                _source.Return(due);
             }
 
             due = _next;
@@ -88,6 +89,7 @@ public sealed class ManagedCodecsVideo : MonoBehaviour
         if (due is not null)
         {
             Show(due);
+            _source.Return(due);
             _shown++;
         }
 

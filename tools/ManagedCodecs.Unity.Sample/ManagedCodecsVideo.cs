@@ -24,6 +24,9 @@ public sealed class ManagedCodecsVideo : MonoBehaviour
     private RgbaFrame? _next;
     private float _start = -1;
     private int _audioRate;
+    private int _shown;
+    private int _dropped;
+    private float _lastReport;
 
     private void Start()
     {
@@ -73,6 +76,11 @@ public sealed class ManagedCodecsVideo : MonoBehaviour
         RgbaFrame? due = null;
         while (_next is not null && _next.Time <= Time.time - _start)
         {
+            if (due is not null)
+            {
+                _dropped++;
+            }
+
             due = _next;
             _next = _source.Frames.TryTake(out var frame) ? frame : null;
         }
@@ -80,7 +88,22 @@ public sealed class ManagedCodecsVideo : MonoBehaviour
         if (due is not null)
         {
             Show(due);
+            _shown++;
         }
+
+        if (Time.time - _lastReport >= 5)
+        {
+            _lastReport = Time.time;
+            Report();
+        }
+    }
+
+    // Whether playback keeps up: a frame is dropped when a later one was due by the time it could be shown, so frames
+    // dropped steadily mean decoding (or the RGBA conversion, timed on its own) is slower than real time.
+    private void Report()
+    {
+        var (_, convert) = _source!.DecodeStatistics;
+        Debug.Log($"ManagedCodecsVideo: {_source.VideoStream.Width}x{_source.VideoStream.Height}, {_shown} frames shown, {_dropped} dropped, RGBA conversion {convert:F1} ms a frame");
     }
 
     // A Texture2D of the frame's size, filled with its RGBA rows. Unity's textures start at the bottom row, so the
@@ -133,5 +156,13 @@ public sealed class ManagedCodecsVideo : MonoBehaviour
         }
     }
 
-    private void OnDestroy() => _source?.Dispose();
+    private void OnDestroy()
+    {
+        if (_source is not null && _shown > 0)
+        {
+            Report();
+        }
+
+        _source?.Dispose();
+    }
 }

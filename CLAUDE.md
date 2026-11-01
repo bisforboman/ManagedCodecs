@@ -21,7 +21,7 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
   body and waits for the answer. Release PRs are excepted too: they never get auto-merge, the owner merges them
   (merging publishes to nuget.org, where a version can be unlisted but never deleted; the `release` environment
   waits for the owner's approval as well). Don't push to main directly; branch protection requires `build`,
-  `build-arm64`, `wasm` and `aot` (ci.yml) and `mutation` (mutation.yml, which reports on docs-only PRs too).
+  `build-arm64`, `wasm`, `aot` and `unity` (ci.yml) and `mutation` (mutation.yml, which reports on docs-only PRs too).
 - **Releases**: CHANGELOG.md's "## Unreleased" section collects what is merged and not released (add a line there in a
   PR a consumer would notice); a release is a PR that renames it to "## X.Y.Z – date" (from 0.1.0: a public API change
   only in a new minor version, a patch only fixes), and `release.yml` then tests, packs every package at that version, publishes to nuget.org (trusted

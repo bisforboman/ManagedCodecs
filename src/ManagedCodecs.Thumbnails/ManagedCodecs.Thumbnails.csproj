@@ -8,10 +8,6 @@
     <Description>Thumbnails (PNG or RGBA) and the basic facts (duration, displayed size, codecs, rotation) of a video file without FFmpeg, in pure managed C#, for web back ends, serverless functions and WebAssembly.</Description>
     <PackageTags>$(PackageTags);thumbnail;probe;ffprobe</PackageTags>
     <IsAotCompatible>true</IsAotCompatible>
-    <!-- No release of this package on nuget.org yet, so package validation has no baseline to compare with (the one in
-         Directory.Build.props is the other packages'); the pull request that sets the baseline after its first release
-         removes this line. -->
-    <PackageValidationBaselineVersion></PackageValidationBaselineVersion>
   </PropertyGroup>
 
   <!-- Its own page on nuget.org in place of the shared PACKAGE.md (Directory.Build.props). -->

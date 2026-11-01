@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Decodes real public films (Blender's open movies, CC-BY: real H.264 and AAC from real encoders, where every sample
-in samples/ is a test pattern) with mcdec and with FFmpeg, and fails unless every video frame is identical and the
+in samples/ is a test pattern, and cameras' own MJPEG from archive.org) with mcdec and with FFmpeg, and fails unless every video frame is identical and the
 audio is within 2^-17, the conformance tests' tolerance. It also probes each film and makes its thumbnail
 (ManagedCodecs.Thumbnails, mcdec --thumbnail) and fails unless the facts are ffprobe's and the thumbnail is within
 the tests' band of FFmpeg's scaler at the same size and time. The films are pinned by SHA-256 and cached in
@@ -61,6 +61,24 @@ FILMS = {
         "https://download.blender.org/peach/bigbuckbunny_movies/BigBuckBunny_320x180.mp4.zip",
         "f78f39603e6774907f2faafabf26a667f4a6fc31769ec304a8a8f7c62d280508",
         "Big Buck Bunny, the whole film: 320x180 H.264 Constrained Baseline muxed by FFmpeg in 2008 (Lavf52), 10 minutes, deblocking off, stereo AAC LC at 48 kHz"),
+    # Cameras' own MJPEG, not FFmpeg's: the films above are all H.264. Each item's licence is on its archive.org page;
+    # the files are only downloaded here, never redistributed.
+    "lucy_loop_mjpeg.avi": (
+        "https://archive.org/download/MarcCanterLucyLoop/JUly4_003.avi",
+        "9e2b696601ba5396e5cdb7a760facbdcac07eb95bfd00b24ff913e0a0cf37e8c",
+        "A digital camera's AVI (CC BY-SA 2.5): 320x240 MJPEG 4:2:2 at 15 frames a second, 97 s, 8-bit PCM audio at 11 kHz (not decoded)"),
+    "spinning_skull_mjpeg.avi": (
+        "https://archive.org/download/Flickr-5946839923/The_Deadly_Spinning_Skull-5946839923.avi",
+        "d259c2ad9cbf0270a4e3bac6a97dbea29604ee1b35b94fc1471981a841e54b57",
+        "A digital camera's AVI (CC BY 2.0): 640x480 MJPEG 4:2:2 at 30 frames a second, 37 s, 8-bit PCM audio at 11 kHz (not decoded)"),
+    "canon_mvi_5143_mjpeg.avi": (
+        "https://archive.org/download/Flickr-3688286227/mvi_5143.avi-3688286227.avi",
+        "923231c3e2436ee36921d77c84bd96b5f83d35b88f4968dd53339684bb608b51",
+        "A Canon PowerShot's MVI AVI (CC BY-NC-ND 2.0): 640x480 MJPEG 4:2:2 at 30 frames a second, 31 s, 16-bit PCM audio (not decoded)"),
+    "nikon_dscn0520_mjpeg.mov": (
+        "https://archive.org/download/CassandraDuganOurLazyCats/DSCN0520.MOV",
+        "9705257be90dc1ad8b185609b90575f54d7a57a379567c1d97f1a419f7b07f57",
+        "A Nikon Coolpix's QuickTime file (CC BY-NC-SA 2.0): 320x240 MJPEG 4:2:2 ('jpeg') at 15 frames a second, 33 s, no audio, a 'pnot' preview box first"),
 }
 
 
@@ -144,7 +162,8 @@ def compare_thumbnail(path, work):
         problems.append(f"rotation {rotation} against ffprobe's {side.get('rotation', 0)}")
     if den and abs(fps - num / den) > 1e-6:
         problems.append(f"{fps} frames a second against ffprobe's average {video['avg_frame_rate']}")
-    if audio and (rate, channels) != (int(audio["sample_rate"]), audio["channels"]):
+    # VideoProbe doesn't read AVI's audio (VideoInfo.Audio says so): the camera AVIs' PCM is not compared.
+    if audio and not path.endswith(".avi") and (rate, channels) != (int(audio["sample_rate"]), audio["channels"]):
         problems.append(f"audio {rate} Hz {channels} channels against ffprobe's {audio['sample_rate']} {audio['channels']}")
     if problems:
         return "probe: " + "; ".join(problems), False

@@ -58,5 +58,6 @@ public static class Demuxer
 
     private static bool IsTopLevelBox(ReadOnlySpan<byte> type) =>
         type.SequenceEqual("ftyp"u8) || type.SequenceEqual("moov"u8) || type.SequenceEqual("mdat"u8)
-        || type.SequenceEqual("free"u8) || type.SequenceEqual("skip"u8) || type.SequenceEqual("wide"u8);
+        || type.SequenceEqual("free"u8) || type.SequenceEqual("skip"u8) || type.SequenceEqual("wide"u8)
+        || type.SequenceEqual("pnot"u8);
 }

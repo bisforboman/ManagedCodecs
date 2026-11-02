@@ -1,3 +1,1 @@
 #nullable enable
-ManagedCodecs.Thumbnails.Thumbnail.SaveJpeg(System.IO.Stream! destination, int quality = 85) -> void
-ManagedCodecs.Thumbnails.Thumbnail.ToJpeg(int quality = 85) -> byte[]!

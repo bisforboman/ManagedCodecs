@@ -13,8 +13,10 @@ ManagedCodecs.Thumbnails.AudioInfo.SampleRate.init -> void
 ManagedCodecs.Thumbnails.Thumbnail
 ManagedCodecs.Thumbnails.Thumbnail.Height.get -> int
 ManagedCodecs.Thumbnails.Thumbnail.Pixels.get -> byte[]!
+ManagedCodecs.Thumbnails.Thumbnail.SaveJpeg(System.IO.Stream! destination, int quality = 85) -> void
 ManagedCodecs.Thumbnails.Thumbnail.SavePng(System.IO.Stream! destination) -> void
 ManagedCodecs.Thumbnails.Thumbnail.Time.get -> System.TimeSpan
+ManagedCodecs.Thumbnails.Thumbnail.ToJpeg(int quality = 85) -> byte[]!
 ManagedCodecs.Thumbnails.Thumbnail.ToPng() -> byte[]!
 ManagedCodecs.Thumbnails.Thumbnail.Width.get -> int
 ManagedCodecs.Thumbnails.ThumbnailOptions

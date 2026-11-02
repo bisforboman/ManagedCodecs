@@ -1,0 +1,83 @@
+# Measuring speed
+
+How to time a change and find where the time goes, and the traps that cost time once. The tools themselves
+(`mcdec`, `tools/compare.sh`, `tools/bench.py`, `benchmark.yml`, `compare.yml`, BenchmarkDotNet) and the current
+ratios are in README's [Benchmarking](../README.md#benchmarking) section; why mcdec turns tiered compilation off is in
+its [Startup and the JIT](../README.md#startup-and-the-jit).
+
+## Wall clock
+
+- Judge decoding by the "steady" columns (mcdec's last loop), not the whole-process ratio, which on short clips is
+  mostly .NET's startup and JIT (README). The steady columns are noisier on short clips: compare medians.
+- Short samples are mostly JIT and warm-up: time them at 100 loops or more (`jm-paff-b`, 10 frames, once took nearly
+  twice as long a frame at 20 loops as at 100).
+- Cloud VMs are noisy: compare before and after on one machine, repeat runs, and don't trust one number.
+  `compare.yml` (dispatch it on the branch) times a branch against its base on hosted x64 and ARM64 runners, quieter
+  than a cloud VM. `benchmark.yml` keeps the history on the `benchmarks` branch: a ratio moving there across runs is a
+  regression, one run's number is not.
+- Comparing two builds: interleave their runs and alternate which goes first. With the same one first in every pair,
+  an A/A test of one build against itself once showed a 10% "regression". `tools/bench.py --base <mcdec.dll>` does
+  this.
+- mcdec already runs with tiered compilation off (its project file). `DOTNET_TieredCompilation=0` only matters for
+  another host (a scratch console, a test), where JIT tiering otherwise adds to the noise.
+- Changes of 1 to 2% are below the noise: count instructions instead (below).
+
+## Is the gain real?
+
+- A gain larger than the changed functions' share of the frame is noise, however consistent: check that ceiling
+  before believing an A/B. Two streams agreeing on -9 and -10% for the vector inverse transforms were noise, and the
+  change was reverted; timed by wall clock later, the transforms are 2.5 to 2.8 times faster per block but about 2% of
+  a frame, so about 1.5% in all (docs/conformance.md, H.264, Performance notes).
+- Inlining a hot callee moves its perf share into its callers rather than removing it: judge such a change by the
+  share of a function it leaves alone (`ResidualBlock`), which rises if the total fell.
+- perf shares move by about a point between runs of one build (the HF generator read 6.7, 7.6 and 8.0% of 5.1 HE-AAC
+  on three runs): profile the builds before and after back to back, and take a difference under a point as noise.
+- Don't rank hot spots by `dotnet-trace`'s thread-time sampling: its samples land at safe points, and it put 23 to 48%
+  of H.264 decoding in `Picture.ReportProgress`'s lock, whose removal changed nothing. Stopwatch timers around a
+  decoder's stages (in a scratch copy, never pushed) and microbenchmarks of the hot functions ranked them instead.
+
+## Where the time goes: perf
+
+`perf` (apt's linux-tools-generic; run `/usr/lib/linux-tools-*/perf`) samples optimized code by function:
+
+```
+DOTNET_PerfMapEnabled=1 DOTNET_EnableWriteXorExecute=0 perf record -e cpu-clock -F 4000 \
+  dotnet tools/ManagedCodecs.Cli/bin/Release/net10.0/mcdec.dll <file> --loops 100
+perf report --no-children --sort symbol
+```
+
+Without `EnableWriteXorExecute=0` the JIT's code shows as bare addresses. A function's share falling between builds
+confirms a gain the wall clock can't separate from noise. With `-g` (frame pointers work for JIT code) and
+`DOTNET_ReadyToRun=0` (so CoreLib's helpers such as `SpanHelpers.Memmove` have names), samples can be assigned to a
+decoder's stages (docs/notes/h264-speed-gap-2026-10.md, Method).
+
+`profile.yml` runs perf on the hosted x64 and ARM64 runners on one sample: the only profile of ARM64 code. On x64,
+`DOTNET_EnableAVX2=0` runs the 128-bit paths ARM64 takes.
+
+Hardware counters (`perf stat -e cycles,instructions`): GitHub's ARM64 runner has them, the x64 runner and the cloud VM
+do not (`<not supported>`), and the x64 runner's 4 vCPUs are 2 cores with SMT. `perf record -e context-switches -g`
+works everywhere and shows where threads block.
+
+## How many instructions: callgrind
+
+Callgrind repeats to about 1e-6, so it resolves what the wall clock can't. It does not see cache effects. Take loops N
+minus loops 1 for the steady decode.
+
+Use a **Native AOT build of mcdec**: its code is compiled before valgrind sees it, so callgrind counts optimized code,
+and its speed is the JIT build's (docs/notes/h264-speed-gap-2026-10.md, Method):
+
+```
+dotnet publish tools/ManagedCodecs.Cli -c Release -r linux-x64 -p:PublishAot=true -p:IlcInstructionSet=x86-64-v3 -o <dir>
+valgrind --tool=callgrind <dir>/mcdec <file> --loops N
+```
+
+About a minute for 150 frames of 720p. The AOT compiler inlines a little differently from the JIT, so counts per
+function differ; totals per stage do not depend on it. `--dump-instr=yes` with `objdump -d` of the binary classifies
+the executed instructions (vector, divisions, calls, branches).
+
+Not the JIT build: under valgrind (seen on runtime 10.0.13) the JIT's full-optimization compiles fail and fall back to
+MinOpts, where every span index is a call (the QMF FFT's profile, all MinOpts, was 7 times the native instruction
+count). Counts and shares taken that way (`valgrind --tool=callgrind --smc-check=all dotnet <mcdec.dll> ...`) are of
+unoptimized code; `DOTNET_JitDisasmSummary=1 DOTNET_JitStdOutFile=<file>` under valgrind lists each method's level.
+Cachegrind on the JIT build still gives useful miss counts: MinOpts adds stack traffic, but reads and writes the
+pictures and tables as optimized code does.

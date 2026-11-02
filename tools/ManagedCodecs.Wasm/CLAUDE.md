@@ -15,7 +15,7 @@ The repository's CLAUDE.md (process, core idea, cross-cutting gotchas) applies t
   0xFFFF becomes 0), so narrow only values the narrower type holds, comparison masks as signed lanes
   (`NarrowMasks`; dotnet/runtime#136688). Such a bug shows only after warm-up, so a file can decode right alone and wrong after others:
   find it with a probe that runs the vector function against its scalar reference many thousand times in the bundle.
-- Compiled ahead of time (`wasm-check.sh aot`, .NET 10.0.13), a method whose exception filter
+- Compiled ahead of time (`wasm-check.sh aot`; seen on .NET 10.0.13), a method whose exception filter
   (`catch (Exception e) when (...)`) had caught an exception read its arguments wrong afterwards, in the catch and after
   it: a string as empty, an int as 1 (`this` too, and an iterator's captured arguments, which live behind it); its
   locals were kept, and so were arguments read in the filter itself. The interpreter and the native build were right,

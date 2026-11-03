@@ -20,7 +20,8 @@ namespace ManagedCodecs.Aac;
 /// goes through it, an LFE without a high band. Parametric stereo (HE-AAC v2) makes a mono stream stereo
 /// (<see cref="Channels"/>). Every packet yields its samples whole, encoder priming included; the container's timestamps (negative
 /// for priming) and the last packet's duration say what to trim, and <see cref="Decode(Packet)"/> drops what
-/// <see cref="Packet.SkipSamples"/> says, running on into the next packets if it is more than one packet's. Without one,
+/// <see cref="Packet.SkipSamples"/> says, running on into the next packets if it is more than one packet's, and the last
+/// <see cref="Packet.SkipEndSamples"/> of the packet. Without a SkipSamples,
 /// it drops FAAC's encoder delay, 1024 samples, after an access unit that names FAAC as its encoder, as FFmpeg does.
 /// </remarks>
 public sealed class AacDecoder : IAudioDecoder
@@ -150,7 +151,8 @@ public sealed class AacDecoder : IAudioDecoder
             _pendingSkip = skip - dropped;
         }
 
-        var output = frame.DropStart(dropped);
+        // The end's padding (Matroska's DiscardPadding), from what is left after the start's.
+        var output = frame.Drop(dropped, packet.Discard ? 0 : packet.SkipEndSamples);
         output.Pts = packet.Pts + SamplesToTime(dropped);
         return output;
     }

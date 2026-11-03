@@ -38,20 +38,25 @@ public sealed class AudioFrame
     /// </summary>
     public long Pts { get; set; }
 
-    /// <summary>This frame without its first <paramref name="count"/> samples (all of them if it has fewer).</summary>
-    internal AudioFrame DropStart(int count)
+    /// <summary>
+    /// This frame without its first <paramref name="start"/> samples and its last <paramref name="end"/> (all of them if
+    /// it has fewer).
+    /// </summary>
+    internal AudioFrame Drop(int start, int end)
     {
-        ArgumentOutOfRangeException.ThrowIfNegative(count);
-        if (count == 0)
+        ArgumentOutOfRangeException.ThrowIfNegative(start);
+        ArgumentOutOfRangeException.ThrowIfNegative(end);
+        if (start == 0 && end == 0)
         {
             return this;
         }
 
-        int start = Math.Min(count, SampleCount);
-        var trimmed = new AudioFrame(SampleRate, Channels, SampleCount - start);
+        int first = Math.Min(start, SampleCount);
+        int count = Math.Max(0, SampleCount - first - end);
+        var trimmed = new AudioFrame(SampleRate, Channels, count);
         for (int c = 0; c < Channels; c++)
         {
-            Samples[c].AsSpan(start).CopyTo(trimmed.Samples[c]);
+            Samples[c].AsSpan(first, count).CopyTo(trimmed.Samples[c]);
         }
 
         return trimmed;

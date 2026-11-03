@@ -11,7 +11,7 @@ namespace ManagedCodecs.Tests.Containers;
 /// </summary>
 public class DisplayTests
 {
-    public static TheoryData<string> Samples() => [.. TestSamples.WithReference(".display").Where(name => name.EndsWith(".mp4", StringComparison.Ordinal) || name.EndsWith(".avi", StringComparison.Ordinal))];
+    public static TheoryData<string> Samples() => [.. TestSamples.WithReference(".display").Where(name => name.EndsWith(".mp4", StringComparison.Ordinal) || name.EndsWith(".avi", StringComparison.Ordinal) || name.EndsWith(".mkv", StringComparison.Ordinal))];
 
     [Theory]
     [MemberData(nameof(Samples))]

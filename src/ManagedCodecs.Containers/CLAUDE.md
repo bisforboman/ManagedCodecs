@@ -18,9 +18,12 @@ The repository's CLAUDE.md (process, core idea, cross-cutting gotchas) applies t
 - In fragmented MP4, FFmpeg's packet durations are not the file's: its demuxer leaves them unset and libavformat
   fills in the codec frame size (1024 for AAC). Compare with FFmpeg's next dts instead (Mp4ConformanceTests does).
 - Matroska: FFmpeg's muxer writes only SimpleBlocks, never lacing or BlockGroups, and no DefaultDuration for audio;
-  `tools/mkv-rewrite.py` rewrites its files (`--lace xiph|ebml|fixed`, `--block-groups`, `--unknown-size`; `--dump`
-  prints a file's elements). Fixed-size lacing needs frames of one size: PCM. FFmpeg's own Matroska reading shows only
-  under `ffprobe -fflags +nofillin+noparse`: by default libavformat fills in durations (AAC's from the frame size) and
+  `tools/mkv-rewrite.py` rewrites its files (`--lace xiph|ebml|fixed`, `--block-groups`, `--unknown-size`, `--zlib`,
+  `--discard-padding NS`; `--dump` prints a file's elements). FFmpeg's muxer writes DiscardPadding for Opus only (from
+  the encoder's side data), and a rotation as a Projection's roll. Fixed-size lacing needs frames of one size: PCM.
+  FFmpeg's own Matroska reading shows only under `ffprobe -fflags +nofillin+noparse`: by default libavformat fills in durations (AAC's from the frame size) and
   decode times, and marks every audio packet a keyframe, and the Opus parser reads durations from the packets.
 - Matroska decode times: FFmpeg's come from the H.264 SPS's reorder depth (`has_b_frames`), not from the file; the
   demuxer doesn't parse the SPS and takes the fewest frames that work, so its dts can be later than FFmpeg's.
+- .NET's DeflateStream returns what it inflated from a zlib frame cut short, without an error: the Adler-32 after the
+  data is what catches it (as zlib's own inflate does).

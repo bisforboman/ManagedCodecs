@@ -33,6 +33,11 @@ internal static class Ebml
     public const uint Range = 0x55B9;
     public const uint TransferCharacteristics = 0x55BA;
     public const uint Primaries = 0x55BB;
+    public const uint Projection = 0x7670;
+    public const uint ProjectionType = 0x7671;
+    public const uint ProjectionPoseYaw = 0x7673;
+    public const uint ProjectionPosePitch = 0x7674;
+    public const uint ProjectionPoseRoll = 0x7675;
     public const uint Audio = 0xE1;
     public const uint SamplingFrequency = 0xB5;
     public const uint OutputSamplingFrequency = 0x78B5;
@@ -51,6 +56,7 @@ internal static class Ebml
     public const uint Block = 0xA1;
     public const uint BlockDuration = 0x9B;
     public const uint ReferenceBlock = 0xFB;
+    public const uint DiscardPadding = 0x75A2;
     public const uint Cues = 0x1C53BB6B;
     public const uint Chapters = 0x1043A770;
     public const uint Tags = 0x1254C367;
@@ -152,6 +158,14 @@ internal static class Ebml
         }
 
         return value;
+    }
+
+    /// <summary>A signed integer element's value: 0 to 8 bytes, big-endian two's complement.</summary>
+    public static long Int(ReadOnlySpan<byte> payload)
+    {
+        ulong value = UInt(payload);
+        int bits = 8 * payload.Length;
+        return bits is 0 or 64 ? (long)value : (long)(value << (64 - bits)) >> (64 - bits);
     }
 
     /// <summary>An unsigned integer element's value that a long holds (a duration, a delay).</summary>

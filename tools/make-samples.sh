@@ -700,6 +700,12 @@ ff -f lavfi -i testsrc2=size=160x120:rate=25 -f lavfi -i sine=frequency=440:samp
   -g 12 -c:a pcm_s16le "$pcm"
 python3 tools/mkv-rewrite.py "$pcm" samples/mkv-lace-fixed.mkv --lace fixed --unknown-size
 rm "$pcm"
+# The video's frames and CodecPrivate compressed with zlib (ContentCompAlgo 0), as mkvmerge's --compression writes them.
+python3 tools/mkv-rewrite.py samples/mkv-h264-aac.mkv samples/mkv-zlib.mkv --zlib
+# AAC whose last block has a DiscardPadding of 10 ms (480 samples at 48 kHz), which FFmpeg's decoder drops from its end.
+python3 tools/mkv-rewrite.py samples/mkv-h264-aac.mkv samples/mkv-aac-padding.mkv --discard-padding 10000000
+# A display rotation, which FFmpeg's muxer writes as a Projection's ProjectionPoseRoll (90, 180 and -90 degrees).
+for r in 90 180 270; do ff -i "samples/h264-rotate-$r.mp4" -c copy "samples/mkv-h264-rotate-$r.mkv"; done
 
 # ---- FFmpeg's references ----
 # name.framemd5: decoded frames. name.packets.csv: demuxed packets as ffprobe lists them (the demuxer's own timestamps,
@@ -734,7 +740,7 @@ done
 # name.display: the video stream's sample aspect ratio and rotation as ffprobe lists them (MP4 and AVI) ("sample_aspect_ratio=4:3",
 # "rotation=-90"; the ratio the container's where it has one, else the decoder's), for VideoStreamInfo.SampleAspectRatio
 # and Rotation.
-for f in samples/*.mp4 samples/*.avi; do
+for f in samples/*.mp4 samples/*.avi samples/*.mkv; do
   t=$(ffprobe -v error -select_streams v:0 -of default=nw=1 -show_entries stream=sample_aspect_ratio:stream_side_data=rotation "$f")
   if [ -n "$t" ]; then echo "$t" > "${f%.*}.display"; fi
 done
@@ -831,6 +837,8 @@ done
 for f in samples/mkv-h264-aac.mkv samples/mkv-h264-live.mkv samples/mkv-lace-xiph.mkv samples/mkv-lace-ebml.mkv; do
   ff -i "$f" -map 0:a:0 -f f32le "${f%.mkv}.f32"
 done
+# Its DiscardPadding: name.trim.f32, decoded audio as FFmpeg gives it by default, without the padding.
+ff -i samples/mkv-aac-padding.mkv -map 0:a:0 -f f32le samples/mkv-aac-padding.trim.f32
 # HE-AAC: name.sbr.f32, decoded audio as FFmpeg gives it by default: at the SBR rate, without the encoder delay an MP4
 # file's iTunSMPB tag gives (ADTS has none), and in stereo for a mono stream (FFmpeg's decoder assumes parametric
 # stereo could come).

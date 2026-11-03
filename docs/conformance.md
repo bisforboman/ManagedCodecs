@@ -238,9 +238,15 @@ time base, rate, channels and the file's duration with `ffprobe -show_streams` (
 B-frames and AAC (CodecDelay), the same written live (no Cues, no Duration), VP9 and Opus in WebM, MJPEG with a display
 aspect ratio and a Colour element, and three that tools/mkv-rewrite.py rewrites into what FFmpeg's muxer never writes:
 Xiph and EBML lacing of the AAC frames with the video in BlockGroups, and fixed-size lacing of PCM in clusters of
-unknown size. MatroskaDemuxerTests builds files for the rest: header stripping, Xiph sizes of 255 and over, EBML
-differences in two bytes, a lace whose duration doesn't divide evenly, the old AAC Codec IDs without a CodecPrivate,
-files broken off, and every byte of a file changed (InvalidDataException or NotSupportedException, nothing else).
+unknown size; and with the video's frames and CodecPrivate compressed with zlib (mkv-zlib), and AAC whose last block
+has a DiscardPadding (mkv-aac-padding, whose decoded audio, `.trim.f32`, is FFmpeg's without the padding). The
+rotated H.264 samples remuxed (mkv-h264-rotate-*: a Projection's ProjectionPoseRoll, as FFmpeg writes a rotation)
+check `Rotation` with DisplayTests, and Opus's DiscardPadding (webm-vp9-opus's last packet) `SkipEndSamples` against
+FFmpeg's skip-samples side data. MatroskaDemuxerTests builds files for the rest: header stripping, a zlib frame cut
+short (its Adler-32, which .NET's inflater doesn't check, fails), Xiph sizes of 255 and over, EBML differences in two
+bytes, a lace whose duration doesn't divide evenly, a negative DiscardPadding (samples at the start) and its rounding,
+a Projection with a yaw or another angle (no rotation), the old AAC Codec IDs without a CodecPrivate, files broken
+off, and every byte of a file changed (InvalidDataException or NotSupportedException, nothing else).
 The H.264 and MJPEG samples are also decoded frame by frame against FFmpeg (H264ConformanceTests, MjpegConformanceTests:
 bit-exact, threads and the async API too), and the AAC ones sample by sample (AacConformanceTests).
 
@@ -253,6 +259,8 @@ Where FFmpeg differs from what the file says, it is followed:
   rounds down, the remainder to the later frames, and each frame's timestamp is the one before plus its share.
 - With no DisplayWidth and DisplayHeight the sample aspect ratio is 1:1 (their defaults are the pixel size); with a
   DisplayUnit of 3 (a display aspect ratio, as FFmpeg's muxer writes) the ratio is computed the same way.
+- DiscardPadding, in nanoseconds, becomes samples at the track's rate rounded to nearest: a positive one at the end of
+  the block's last frame (`SkipEndSamples`), a negative one at the start of its first (`SkipSamples`).
 - Every frame of a keyframe block is a keyframe, as ffprobe shows audio (libavformat marks intra-only codecs' packets;
   FFmpeg's demuxer itself marks only a lace's first frame).
 

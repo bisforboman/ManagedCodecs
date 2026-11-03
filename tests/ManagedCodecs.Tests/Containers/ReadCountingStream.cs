@@ -6,7 +6,7 @@ internal sealed class ReadCountingStream(byte[] data) : MemoryStream(data, writa
     public List<int> Reads { get; } = [];
 
     /// <summary>A packet without its data, as <c>ReadPacketInfo</c> describes it.</summary>
-    public static PacketInfo InfoOf(Packet p) => new(p.StreamIndex, p.Sequence, p.Data.Length, p.IsKeyframe, p.Dts, p.Pts, p.Duration, p.SkipSamples, p.Discard);
+    public static PacketInfo InfoOf(Packet p) => new(p.StreamIndex, p.Sequence, p.Data.Length, p.IsKeyframe, p.Dts, p.Pts, p.Duration, p.SkipSamples, p.Discard) { SkipEndSamples = p.SkipEndSamples };
 
     public override int Read(byte[] buffer, int offset, int count)
     {

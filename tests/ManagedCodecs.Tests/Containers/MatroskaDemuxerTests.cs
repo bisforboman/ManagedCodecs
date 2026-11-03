@@ -43,15 +43,63 @@ public class MatroskaDemuxerTests
         Assert.Equal(4, Assert.Single(demuxer.ReadPacketInfo()).Size);
     }
 
-    /// <summary>zlib compression and encryption of a track it exposes are refused as not supported.</summary>
+    /// <summary>bzlib and LZO compression and encryption of a track it exposes are refused as not supported.</summary>
     [Theory]
-    [InlineData(0, 0)] // zlib
+    [InlineData(0, 1)] // bzlib
+    [InlineData(0, 2)] // LZO
     [InlineData(1, 3)] // encrypted
     public void RefusesOtherContentEncodings(int type, int algorithm)
     {
         var encodings = Element(0x6D80, Element(0x6240, UInt(0x5033, type), Element(0x5034, UInt(0x4254, algorithm))));
         var file = File(Tracks(Video(1, "V_MJPEG", [], extra: encodings)), Cluster(0, SimpleBlock(1, 0, keyframe: true, [1])));
         Assert.Throws<NotSupportedException>(() => new MatroskaDemuxer(new MemoryStream(file)));
+    }
+
+    /// <summary>zlib (ContentCompAlgo 0) of the frames and the CodecPrivate (scope 3) is inflated; ReadPacketInfo gives the inflated sizes.</summary>
+    [Fact]
+    public void InflatesZlib()
+    {
+        var encodings = Element(0x6D80, Element(0x6240, UInt(0x5032, 3), Element(0x5034, UInt(0x4254, 0))));
+        byte[] frame = [.. Filled(300, 9), 1, 2, 3];
+        var file = File(Tracks(Video(1, "V_MJPEG", Zlib([7, 8, 9]), extra: encodings)), Cluster(0, SimpleBlock(1, 0, keyframe: true, Zlib(frame))));
+        using var demuxer = new MatroskaDemuxer(new MemoryStream(file));
+
+        Assert.Equal(new byte[] { 7, 8, 9 }, demuxer.Video!.CodecPrivate.ToArray());
+        Assert.Equal(frame, Assert.Single(demuxer.ReadPackets()).Data.ToArray());
+        Assert.Equal(frame.Length, Assert.Single(demuxer.ReadPacketInfo()).Size);
+    }
+
+    /// <summary>A zlib frame that isn't one (no zlib header, or deflate data cut short) is malformed: InvalidDataException.</summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void RefusesBrokenZlib(bool cut)
+    {
+        var encodings = Element(0x6D80, Element(0x6240, Element(0x5034, UInt(0x4254, 0))));
+        byte[] data = cut ? Zlib(Filled(5000, 3))[..10] : [1, 2, 3, 4];
+        var file = File(Tracks(Video(1, "V_MJPEG", [], extra: encodings)), Cluster(0, SimpleBlock(1, 0, keyframe: true, data)));
+        using var demuxer = new MatroskaDemuxer(new MemoryStream(file));
+        Assert.Throws<InvalidDataException>(() => demuxer.ReadPackets().ToList());
+    }
+
+    /// <summary>
+    /// The Projection's roll, as FFmpeg writes a display rotation, is the rotation counter-clockwise (-90 is 270); another
+    /// angle, a yaw or pitch (a mirror) or another projection type gives 0.
+    /// </summary>
+    [Theory]
+    [InlineData(0, 0.0, 90.0, 90)]
+    [InlineData(0, 0.0, -90.0, 270)]
+    [InlineData(0, 0.0, 180.0, 180)]
+    [InlineData(0, 0.0, 45.0, 0)]
+    [InlineData(0, 180.0, 0.0, 0)]
+    [InlineData(1, 0.0, 90.0, 0)]
+    public void ReadsTheProjectionsRotation(int type, double yaw, double roll, int rotation)
+    {
+        var projection = Element(0x7670, UInt(0x7671, type), Float(0x7673, yaw), Float(0x7675, roll));
+        var video = Element(0xE0, UInt(0xB0, 64), UInt(0xBA, 48), projection);
+        var file = File(Tracks(Element(0xAE, UInt(0xD7, 1), UInt(0x83, 1), Text(0x86, "V_MJPEG"), video)), Cluster(0, SimpleBlock(1, 0, keyframe: true, [1])));
+        using var demuxer = new MatroskaDemuxer(new MemoryStream(file));
+        Assert.Equal(rotation, demuxer.Video!.Rotation);
     }
 
     /// <summary>
@@ -100,6 +148,28 @@ public class MatroskaDemuxerTests
             Cluster(0, Element(0xA0, Block(0xA1, 1, 0, 0, [1]), UInt(0x9B, 33)), Element(0xA0, Block(0xA1, 1, 33, 0, [2]), UInt(0x9B, 34), Element(0xFB, [0xDF]))));
         using var demuxer = new MatroskaDemuxer(new MemoryStream(file));
         Assert.Equal([(true, 0L, 33L), (false, 33, 34)], demuxer.ReadPackets().Select(p => (p.IsKeyframe, p.Pts, p.Duration)));
+    }
+
+    /// <summary>
+    /// DiscardPadding in nanoseconds, at the track's rate and rounded to nearest: positive drops samples from the end of
+    /// the block's last frame, negative from the start of its first (FFmpeg's skip-samples side data).
+    /// </summary>
+    [Theory]
+    [InlineData(13_500_000, 0, 648)]
+    [InlineData(-10_000_000, 480, 0)]
+    [InlineData(10_400, 0, 0)] // 0.4992 samples: rounds to none
+    [InlineData(10_500, 0, 1)] // 0.504 samples: rounds to one
+    public void ReadsDiscardPadding(long nanoseconds, int start, int end)
+    {
+        byte[] padding = new byte[8];
+        BinaryPrimitives.WriteInt64BigEndian(padding, nanoseconds);
+        var file = File(
+            Tracks(Audio(1, "A_OPUS", 48000, 2)),
+            Cluster(0, SimpleBlock(1, 0, keyframe: true, [1]), Element(0xA0, Block(0xA1, 1, 20, 0x80, [2]), Element(0x75A2, padding))));
+        using var demuxer = new MatroskaDemuxer(new MemoryStream(file));
+        var packets = demuxer.ReadPackets().ToList();
+        Assert.Equal([(0, 0), (start, end)], packets.Select(p => (p.SkipSamples, p.SkipEndSamples)));
+        Assert.Equal(packets.Select(ReadCountingStream.InfoOf), demuxer.ReadPacketInfo());
     }
 
     /// <summary>A file that breaks off inside a block ends at the block before, as FFmpeg's does.</summary>
@@ -261,6 +331,17 @@ public class MatroskaDemuxerTests
         BinaryPrimitives.WriteInt16BigEndian(header.AsSpan(1), time);
         header[3] = (byte)flags;
         return Element(id, [.. header, .. payload]);
+    }
+
+    private static byte[] Zlib(byte[] data)
+    {
+        using var output = new MemoryStream();
+        using (var zlib = new System.IO.Compression.ZLibStream(output, System.IO.Compression.CompressionLevel.Optimal))
+        {
+            zlib.Write(data);
+        }
+
+        return output.ToArray();
     }
 
     private static byte[] Filled(int count, byte value) => Enumerable.Repeat(value, count).ToArray();

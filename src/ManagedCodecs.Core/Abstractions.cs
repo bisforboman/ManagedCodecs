@@ -63,7 +63,15 @@ public readonly record struct Packet(
     long Pts,
     long Duration,
     int SkipSamples = 0,
-    bool Discard = false);
+    bool Discard = false)
+{
+    /// <summary>
+    /// Audio: how many decoded samples (per channel) at the end of this packet come after the presentation ends, such as
+    /// the padding an encoder adds to fill its last frame (Matroska's DiscardPadding); the decoder drops them, after
+    /// <see cref="SkipSamples"/>. 0 for none.
+    /// </summary>
+    public int SkipEndSamples { get; init; }
+}
 
 /// <summary>
 /// A <see cref="Packet"/> without its data: what a demuxer knows of it from the container's index alone, for a caller that
@@ -79,7 +87,11 @@ public readonly record struct PacketInfo(
     long Pts,
     long Duration,
     int SkipSamples = 0,
-    bool Discard = false);
+    bool Discard = false)
+{
+    /// <summary>The packet's <see cref="Packet.SkipEndSamples"/>.</summary>
+    public int SkipEndSamples { get; init; }
+}
 
 /// <summary>Basic facts about a container's video stream.</summary>
 /// <param name="Codec">
@@ -243,8 +255,9 @@ public interface IAudioDecoder
 
     /// <summary>
     /// Decodes one packet and drops its first <see cref="Packet.SkipSamples"/> samples (those past its own from the next
-    /// packets'), so the output starts where the container says presentation starts, or all of them for a
-    /// <see cref="Packet.Discard"/> packet. A packet can come out empty.
+    /// packets'), so the output starts where the container says presentation starts, and its last
+    /// <see cref="Packet.SkipEndSamples"/>, or all of them for a <see cref="Packet.Discard"/> packet. A packet can come
+    /// out empty.
     /// </summary>
     AudioFrame Decode(Packet packet);
 }

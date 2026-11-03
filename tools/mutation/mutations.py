@@ -227,8 +227,8 @@ MUTATIONS = [
          tests="FullyQualifiedName~Matroska"),
     # A BlockGroup with a ReferenceBlock is no keyframe.
     dict(file="src/ManagedCodecs.Containers/Matroska/MatroskaDemuxer.cs",
-         find="AddBlock(blockStart, blockSize, clusterTime, keyframe: !referenced, duration);",
-         replace="AddBlock(blockStart, blockSize, clusterTime, keyframe: true, duration);",
+         find="AddBlock(blockStart, blockSize, clusterTime, keyframe: !referenced, duration, discardPadding);",
+         replace="AddBlock(blockStart, blockSize, clusterTime, keyframe: true, duration, discardPadding);",
          tests="FullyQualifiedName~Matroska"),
     # Without DisplayWidth and DisplayHeight the ratio is 1:1 (they default to the pixel size), as FFmpeg reads it.
     dict(file="src/ManagedCodecs.Containers/Matroska/MatroskaDemuxer.cs",
@@ -238,6 +238,27 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.Containers/Matroska/MatroskaDemuxer.cs",
          find="if (entry.Slot == slot && entry.Keyframe && entry.Pts <= pts)", replace="if (entry.Slot == slot && entry.Keyframe && entry.Pts < pts)",
          tests="FullyQualifiedName~SeekTests"),
+
+    # DiscardPadding: positive at the end of the block's last frame, negative at the start of its first ...
+    dict(file="src/ManagedCodecs.Containers/Matroska/MatroskaDemuxer.cs",
+         find="int skipEnd = f == frames - 1 && padding > 0 ? padding : 0;", replace="int skipEnd = 0;",
+         tests="FullyQualifiedName~Matroska|DisplayName~mkv-aac-padding"),
+    # ... in samples rounded to nearest, as FFmpeg's av_rescale_q.
+    dict(file="src/ManagedCodecs.Containers/Matroska/MatroskaDemuxer.cs",
+         find="long samples = ((magnitude * sampleRate) + 500_000_000) / 1_000_000_000;", replace="long samples = magnitude * sampleRate / 1_000_000_000;",
+         tests="FullyQualifiedName~Matroska"),
+    # The AAC decoder drops the end's samples.
+    dict(file="src/ManagedCodecs.Aac/AacDecoder.cs",
+         find="var output = frame.Drop(dropped, packet.Discard ? 0 : packet.SkipEndSamples);", replace="var output = frame.Drop(dropped, 0);",
+         tests="DisplayName~mkv-aac-padding"),
+    # A zlib frame's Adler-32 is checked (a frame cut short inflates without an error otherwise).
+    dict(file="src/ManagedCodecs.Containers/Matroska/MatroskaDemuxer.cs",
+         find="if (zlib.Length < 6 || BinaryPrimitives.ReadUInt32BigEndian(zlib.AsSpan(zlib.Length - 4)) != ((b << 16) | a))", replace="if (zlib.Length < 6)",
+         tests="FullyQualifiedName~MatroskaDemuxerTests"),
+    # The Projection's roll is the rotation, -90 as 270.
+    dict(file="src/ManagedCodecs.Containers/Matroska/MatroskaDemuxer.cs",
+         find="return (((int)roll % 360) + 360) % 360;", replace="return (int)roll;",
+         tests="FullyQualifiedName~Matroska|DisplayName~mkv-h264-rotate"),
 
     # A stream's duration as FFmpeg gives it (VideoProbe's against ffprobe's): an edit lasts no longer than the samples it
     # takes (JM's field-picture files) ...

@@ -2,6 +2,7 @@
 """Rewrites a Matroska file FFmpeg wrote into the forms its muxer never writes, for MatroskaDemuxer's tests.
 
     tools/mkv-rewrite.py in.mkv out.mkv [--lace xiph|ebml|fixed] [--lace-frames N] [--block-groups] [--unknown-size]
+                         [--discard-padding NS] [--zlib]
     tools/mkv-rewrite.py --dump in.mkv
 
 --lace: puts each run of up to N (default 4) consecutive blocks of the audio track in one cluster into one laced
@@ -11,19 +12,25 @@ timestamps from it.
 --block-groups: writes the video track's blocks as BlockGroups (a Block, BlockDuration from the track's
 DefaultDuration, and a ReferenceBlock for each block that is not a keyframe) instead of SimpleBlocks.
 --unknown-size: writes the Segment and every Cluster with the unknown size (all ones), as a live stream does.
+--discard-padding NS: writes the audio track's last block as a BlockGroup with a DiscardPadding of NS nanoseconds (an
+encoder's padding at the end, which the decoder drops; FFmpeg's muxer writes it for Opus alone).
+--zlib: compresses the video track's frames and CodecPrivate with zlib (a ContentEncoding of ContentCompAlgo 0, scope
+3), as mkvmerge's --compression zlib does.
 
-A rewritten Tracks or Cluster loses its CRC-32 element, which would no longer hold. The SeekHead and the Cues are left out (their positions would no longer hold), so the result has no Cues either.
+A rewritten Tracks or Cluster loses its CRC-32 element, which would no longer hold. The SeekHead and the Cues are left
+out (their positions would no longer hold), so the result has no Cues either.
 --dump prints the element tree (IDs, sizes, the values of small numbers and the blocks' headers).
 """
 
 import argparse
 import struct
+import zlib
 import sys
 
 SEGMENT, SEEKHEAD, INFO, TRACKS, CLUSTER, CUES, VOID = 0x18538067, 0x114D9B74, 0x1549A966, 0x1654AE6B, 0x1F43B675, 0x1C53BB6B, 0xEC
 TRACKENTRY, TRACKNUMBER, TRACKTYPE, DEFAULTDURATION = 0xAE, 0xD7, 0x83, 0x23E383
 TIMESTAMP, SIMPLEBLOCK, BLOCKGROUP, BLOCK, BLOCKDURATION, REFERENCEBLOCK = 0xE7, 0xA3, 0xA0, 0xA1, 0x9B, 0xFB
-TIMESTAMPSCALE, CRC32 = 0x2AD7B1, 0xBF
+TIMESTAMPSCALE, CRC32, CODECPRIVATE, DISCARDPADDING = 0x2AD7B1, 0xBF, 0x63A2, 0x75A2
 MASTERS = {SEGMENT, SEEKHEAD, INFO, TRACKS, TRACKENTRY, CLUSTER, CUES, BLOCKGROUP, 0xE0, 0xE1, 0x4DBB, 0xBB, 0xB7, 0x55B0,
            0x1254C367, 0x7373, 0x67C8, 0x63C0, 0x6D80, 0x6240, 0x5034}
 UNKNOWN = -1
@@ -172,6 +179,10 @@ def rewrite(data, args):
                     times.append(base + block_header(data, q)[1])
         added_default = (times[1] - times[0]) * scale
 
+    # The audio blocks left, so that --discard-padding finds the last.
+    args.audio_left = sum(1 for eid, p, stop, _ in children if eid == CLUSTER
+                          for cid, q, e, _ in elements(data, p, stop) if cid == SIMPLEBLOCK and block_header(data, q)[0] == audio)
+
     out = b""
     for eid, p, stop, _ in children:
         if eid in (SEEKHEAD, CUES):
@@ -184,6 +195,8 @@ def rewrite(data, args):
                 payload = bytes(data[q:e])
                 if added_default is not None and uint(data, *next((r, s) for f, r, s, _ in elements(data, q, e) if f == TRACKNUMBER)) == audio:
                     payload += uint_element(DEFAULTDURATION, added_default)
+                if args.zlib and uint(data, *next((r, s) for f, r, s, _ in elements(data, q, e) if f == TRACKNUMBER)) == video:
+                    payload = zlib_track(data, q, e)
                 entries += element(cid, payload)
             out += element(TRACKS, entries)
         elif eid == CLUSTER:
@@ -192,6 +205,15 @@ def rewrite(data, args):
             out += element(eid, bytes(data[p:stop]))
     # The EBML header as it is.
     return bytes(data[:seg_element]) + element(SEGMENT, out, unknown=args.unknown_size)
+
+
+def zlib_track(data, start, end):
+    """A TrackEntry's payload with its CodecPrivate compressed and a ContentEncodings saying so (zlib, scope 3)."""
+    payload = b""
+    for fid, r, e, _ in elements(data, start, end):
+        payload += element(fid, zlib.compress(bytes(data[r:e]), 9) if fid == CODECPRIVATE else bytes(data[r:e]))
+    encoding = uint_element(0x5032, 3) + uint_element(0x5033, 0) + element(0x5034, uint_element(0x4254, 0))
+    return payload + element(0x6D80, element(0x6240, encoding))
 
 
 def rewrite_cluster(data, p, stop, args, video, audio, tracks, scale):
@@ -219,6 +241,12 @@ def rewrite_cluster(data, p, stop, args, video, audio, tracks, scale):
             if flags & 0x06:
                 raise SystemExit("the input already laces")
             frame = bytes(data[payload_start:e])
+            if args.discard_padding and track == audio:
+                args.audio_left -= 1
+                if args.audio_left == 0:
+                    block = vint(track) + struct.pack(">h", timestamp) + bytes([flags & 0x0F]) + frame
+                    body += element(BLOCKGROUP, element(BLOCK, block) + sint_element(DISCARDPADDING, args.discard_padding))
+                    continue
             if args.lace and track == audio:
                 pending.append((timestamp, flags, frame))
                 continue
@@ -231,6 +259,9 @@ def rewrite_cluster(data, p, stop, args, video, audio, tracks, scale):
                     group += sint_element(REFERENCEBLOCK, (previous_video if previous_video is not None else timestamp) - timestamp or -1)
                 body += element(BLOCKGROUP, group)
                 previous_video = timestamp
+                continue
+            if args.zlib and track == video:
+                body += element(SIMPLEBLOCK, bytes(data[q:payload_start]) + zlib.compress(frame, 9))
                 continue
             body += element(SIMPLEBLOCK, bytes(data[q:e]))
         elif cid != CRC32:
@@ -249,6 +280,8 @@ def main():
     parser.add_argument("--lace-frames", type=int, default=4)
     parser.add_argument("--block-groups", action="store_true")
     parser.add_argument("--unknown-size", action="store_true")
+    parser.add_argument("--zlib", action="store_true")
+    parser.add_argument("--discard-padding", type=int, default=0)
     args = parser.parse_args()
     with open(args.input, "rb") as f:
         data = f.read()

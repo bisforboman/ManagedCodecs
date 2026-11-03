@@ -67,6 +67,9 @@ public class MatroskaConformanceTests
                     (theirs[i].Pts, theirs[i].Size, theirs[i].IsKeyframe, theirs[i].Md5),
                     (p.Pts, p.Data.Length, p.IsKeyframe, FrameMd5.Hash(p.Data.Span)));
 
+                // DiscardPadding, as FFmpeg's skip-samples side data (samples to drop at the start and the end).
+                Assert.Equal((theirs[i].SkipStart, theirs[i].SkipEnd), (p.SkipSamples, p.SkipEndSamples));
+
                 // A duration the file gives (a BlockDuration, the DefaultDuration); else, for audio, up to the next
                 // frame, and the last frame's as the one before.
                 long duration = filed[i].Duration != Unset ? filed[i].Duration
@@ -134,7 +137,8 @@ public class MatroskaConformanceTests
 
     /// <summary>
     /// <see cref="MatroskaDemuxer.ReadPacketInfo"/> gives <see cref="MatroskaDemuxer.ReadPackets"/>'s packets (checked
-    /// against FFmpeg's above) without their data, in the same order, and reads nothing from the file to do it.
+    /// against FFmpeg's above) without their data, in the same order, and reads nothing from the file to do it (but a
+    /// zlib-compressed track's frames).
     /// </summary>
     [Theory]
     [MemberData(nameof(Samples))]
@@ -147,7 +151,9 @@ public class MatroskaConformanceTests
 
         stream.Reads.Clear();
         Assert.Equal(expected, demuxer.ReadPacketInfo());
-        Assert.Empty(stream.Reads);
+
+        // A zlib-compressed track's frames are read and inflated for their sizes (mkv-zlib's video).
+        Assert.Equal(sampleName.Contains("zlib", StringComparison.Ordinal), stream.Reads.Count > 0);
     }
 
     /// <summary>The codec each sample's tracks map to: CodecIds where there is one, Matroska's Codec ID otherwise.</summary>
@@ -190,8 +196,11 @@ public class MatroskaConformanceTests
 
     private const long Unset = long.MinValue;
 
-    /// <summary>A line of <c>ffprobe -show_packets -of csv=p=0</c>: stream, pts, dts, duration, size, flags, then the hash if asked.</summary>
-    private sealed record ProbedPacket(int StreamIndex, long Pts, long Dts, long Duration, int Size, bool IsKeyframe, string? Md5)
+    /// <summary>
+    /// A line of <c>ffprobe -show_packets -of csv=p=0</c>: stream, pts, dts, duration, size, flags, then the hash if asked
+    /// and side data (skip samples: "Skip Samples", at the start, at the end, then two reasons).
+    /// </summary>
+    private sealed record ProbedPacket(int StreamIndex, long Pts, long Dts, long Duration, int Size, bool IsKeyframe, string? Md5, int SkipStart, int SkipEnd)
     {
         public static ProbedPacket Parse(string line)
         {
@@ -204,7 +213,9 @@ public class MatroskaConformanceTests
                 Number(f[3]),
                 int.Parse(f[4], CultureInfo.InvariantCulture),
                 f[5][0] == 'K',
-                f.Length > 6 ? f[6]["MD5:".Length..] : null);
+                f.Length > 6 ? f[6]["MD5:".Length..] : null,
+                f.Length > 9 && f[7] == "Skip Samples" ? int.Parse(f[8], CultureInfo.InvariantCulture) : 0,
+                f.Length > 9 && f[7] == "Skip Samples" ? int.Parse(f[9], CultureInfo.InvariantCulture) : 0);
         }
     }
 }

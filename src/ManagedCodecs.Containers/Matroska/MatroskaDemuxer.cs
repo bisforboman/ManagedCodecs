@@ -29,15 +29,18 @@ namespace ManagedCodecs.Containers;
 /// the frame duration. Without reordering dts equals pts.
 /// </para>
 /// <para>
-/// Header stripping (ContentCompression algorithm 3) is undone. Not supported: other content encodings (zlib, bzlib,
-/// LZO and encryption) of the exposed tracks, a TrackTimestampScale other than 1, a Tracks element after the first
-/// Cluster, further tracks, and the display rotation (<see cref="VideoStreamInfo.Rotation"/> is 0).
+/// Header stripping (ContentCompression algorithm 3) is undone, and zlib (algorithm 0) of the frames or the CodecPrivate
+/// inflated. Not supported: other content encodings (bzlib, LZO and encryption) of the exposed tracks, a TrackTimestampScale other than 1, a Tracks element after the first
+/// Cluster, and further tracks.
 /// </para>
 /// </remarks>
 public sealed class MatroskaDemuxer : IDemuxer
 {
     // Bounds the index built from a file that claims an absurd number of blocks.
     private const int MaxPackets = 1 << 26;
+
+    // Bounds what one zlib-compressed frame or CodecPrivate inflates to.
+    private const int MaxInflated = 1 << 28;
 
     // Bounds the elements read whole (EBML header, Info, Tracks).
     private const int MaxHeaderElement = 1 << 24;
@@ -107,6 +110,7 @@ public sealed class MatroskaDemuxer : IDemuxer
                     ColorTransfer = video.Transfer,
                     ColorMatrix = video.Matrix,
                     SampleAspectRatio = video.AspectRatio,
+                    Rotation = video.Rotation,
                     Duration = duration,
                 };
             }
@@ -164,7 +168,8 @@ public sealed class MatroskaDemuxer : IDemuxer
     /// The packets <see cref="ReadPackets"/> gives, in its order and with its values, without their data: from the index
     /// built at opening, with no read of the file.
     /// </summary>
-    public IEnumerable<PacketInfo> ReadPacketInfo() => Malformed.Guard(Selected().Select(Info), "Matroska");
+    /// <remarks>A zlib-compressed track's frames are read and inflated for their sizes, which the file does not give.</remarks>
+    public IEnumerable<PacketInfo> ReadPacketInfo() => ReadSteps.RunInfo(_stream, Steps(withData: false), "Matroska");
 
     /// <inheritdoc/>
     /// <remarks>
@@ -220,20 +225,86 @@ public sealed class MatroskaDemuxer : IDemuxer
     }
 
     private PacketInfo Info(Entry entry) =>
-        new(_tracks[entry.Slot]!.StreamIndex, entry.Sequence, _tracks[entry.Slot]!.Prefix.Length + entry.Size, entry.Keyframe, entry.Dts, entry.Pts, entry.Duration);
+        new(_tracks[entry.Slot]!.StreamIndex, entry.Sequence, _tracks[entry.Slot]!.Prefix.Length + entry.Size, entry.Keyframe, entry.Dts, entry.Pts, entry.Duration, entry.SkipStart)
+        {
+            SkipEndSamples = entry.SkipEnd,
+        };
 
-    // Each frame's read (after the bytes header stripping took off, put back), then its packet.
-    private IEnumerable<ReadStep> Steps()
+    // Each frame's read (after the bytes header stripping took off, put back, or inflated), then its packet; without the
+    // data, its description alone (a zlib-compressed frame still read, for its size).
+    private IEnumerable<ReadStep> Steps(bool withData = true)
     {
         foreach (var entry in Selected())
         {
             var info = Info(entry);
-            var prefix = _tracks[entry.Slot]!.Prefix;
-            var data = new byte[info.Size];
-            prefix.CopyTo(data);
-            yield return ReadStep.Read(entry.Offset, data.AsMemory(prefix.Length));
-            yield return ReadStep.Yield(new Packet(info.StreamIndex, info.Sequence, data, info.IsKeyframe, info.Dts, info.Pts, info.Duration));
+            var track = _tracks[entry.Slot]!;
+            byte[] data;
+            if (track.Zlib)
+            {
+                var compressed = new byte[entry.Size];
+                yield return ReadStep.Read(entry.Offset, compressed);
+                data = Inflate(compressed);
+                info = info with { Size = data.Length };
+            }
+            else if (!withData)
+            {
+                yield return ReadStep.Describe(info);
+                continue;
+            }
+            else
+            {
+                data = new byte[info.Size];
+                track.Prefix.CopyTo(data);
+                yield return ReadStep.Read(entry.Offset, data.AsMemory(track.Prefix.Length));
+            }
+
+            yield return withData
+                ? ReadStep.Yield(new Packet(info.StreamIndex, info.Sequence, data, info.IsKeyframe, info.Dts, info.Pts, info.Duration, info.SkipSamples) { SkipEndSamples = info.SkipEndSamples })
+                : ReadStep.Describe(info);
         }
+    }
+
+    /// <summary>
+    /// A zlib stream's data (RFC 1950: a two-byte header, deflate data, then the Adler-32 of the data, checked), at most
+    /// <see cref="MaxInflated"/> bytes.
+    /// </summary>
+    private static byte[] Inflate(byte[] zlib)
+    {
+        if (zlib.Length < 2 || (zlib[0] & 0x0F) != 8 || (((zlib[0] << 8) | zlib[1]) % 31) != 0 || (zlib[1] & 0x20) != 0)
+        {
+            throw new InvalidDataException("A Matroska frame is not a zlib stream (or one with a preset dictionary).");
+        }
+
+        using var deflate = new System.IO.Compression.DeflateStream(new MemoryStream(zlib, 2, zlib.Length - 2), System.IO.Compression.CompressionMode.Decompress);
+        using var output = new MemoryStream();
+        var buffer = new byte[1 << 16];
+        int read;
+        while ((read = deflate.Read(buffer, 0, buffer.Length)) > 0)
+        {
+            if (output.Length + read > MaxInflated)
+            {
+                throw new InvalidDataException($"A zlib-compressed Matroska frame inflates to more than {MaxInflated} bytes.");
+            }
+
+            output.Write(buffer, 0, read);
+        }
+
+        // The Adler-32 of the data, after the deflate data (big-endian): a frame cut short or damaged fails it, as in zlib.
+        var inflated = output.ToArray();
+        uint a = 1;
+        uint b = 0;
+        foreach (byte value in inflated)
+        {
+            a = (a + value) % 65521;
+            b = (b + a) % 65521;
+        }
+
+        if (zlib.Length < 6 || BinaryPrimitives.ReadUInt32BigEndian(zlib.AsSpan(zlib.Length - 4)) != ((b << 16) | a))
+        {
+            throw new InvalidDataException("A zlib-compressed Matroska frame is damaged or cut short (its Adler-32 does not match).");
+        }
+
+        return inflated;
     }
 
     // Decode times for a video track (entries in decode order): its presentation times sorted, delayed by the fewest
@@ -302,7 +373,7 @@ public sealed class MatroskaDemuxer : IDemuxer
     }
 
     /// <summary>One frame: where its data is, the track slot (0 video, 1 audio), and its packet's values.</summary>
-    private readonly record struct Entry(long Offset, int Size, int Slot, long Sequence, long Pts, long Dts, long Duration, bool Keyframe);
+    private readonly record struct Entry(long Offset, int Size, int Slot, long Sequence, long Pts, long Dts, long Duration, bool Keyframe, int SkipStart = 0, int SkipEnd = 0);
 
     /// <summary>What the demuxer keeps of a TrackEntry.</summary>
     private sealed class TrackEntry
@@ -331,6 +402,12 @@ public sealed class MatroskaDemuxer : IDemuxer
         /// <summary>The bytes header stripping took off the start of every frame.</summary>
         public byte[] Prefix { get; set; } = [];
 
+        /// <summary>Whether each frame is compressed with zlib (ContentCompAlgo 0).</summary>
+        public bool Zlib { get; set; }
+
+        /// <summary>Whether the CodecPrivate is compressed with zlib.</summary>
+        public bool ZlibCodecPrivate { get; set; }
+
         /// <summary>Why the track cannot be read (a content encoding), null where it can.</summary>
         public string? Unsupported { get; set; }
 
@@ -353,6 +430,9 @@ public sealed class MatroskaDemuxer : IDemuxer
         public ColorTransfer Transfer { get; set; } = ColorTransfer.Unspecified;
 
         public ColorMatrix Matrix { get; set; } = ColorMatrix.Unspecified;
+
+        /// <summary>Degrees to turn the frames counter-clockwise, from the Projection.</summary>
+        public int Rotation { get; set; }
 
         public double SamplingFrequency { get; set; } = 8000;
 
@@ -560,6 +640,11 @@ public sealed class MatroskaDemuxer : IDemuxer
                 throw new NotSupportedException($"A TrackTimestampScale of {track.TimestampScale} is not supported.");
             }
 
+            if (track.ZlibCodecPrivate)
+            {
+                track.CodecPrivate = Inflate(track.CodecPrivate);
+            }
+
             // av_rescale_q's rounding (to nearest, halves away from zero) of nanoseconds into the time base.
             track.CodecDelayTicks = (track.CodecDelay + (TimestampScale / 2)) / TimestampScale;
             track.Codec = NormalizeCodec(track.CodecId);
@@ -663,10 +748,51 @@ public sealed class MatroskaDemuxer : IDemuxer
                     case Ebml.Colour:
                         ReadColour(payload, track);
                         break;
+                    case Ebml.Projection:
+                        track.Rotation = ProjectionRotation(payload);
+                        break;
                     default:
                         break;
                 }
             }
+        }
+
+        // Projection (RFC 9559 5.1.4.1.28.41): a rectangular picture (ProjectionType 0) turned in its plane by
+        // ProjectionPoseRoll degrees, as FFmpeg's muxer writes a display rotation (its roll is ffprobe's rotation: 90, -90,
+        // -180), counter-clockwise; 0 for another angle or projection, or a yaw or pitch (a mirror), as MP4's matrices.
+        private static int ProjectionRotation(ReadOnlySpan<byte> projection)
+        {
+            ulong type = 0;
+            double yaw = 0;
+            double pitch = 0;
+            double roll = 0;
+            while (Ebml.NextChild(ref projection, out uint id, out var payload))
+            {
+                switch (id)
+                {
+                    case Ebml.ProjectionType:
+                        type = Ebml.UInt(payload);
+                        break;
+                    case Ebml.ProjectionPoseYaw:
+                        yaw = Ebml.Float(payload);
+                        break;
+                    case Ebml.ProjectionPosePitch:
+                        pitch = Ebml.Float(payload);
+                        break;
+                    case Ebml.ProjectionPoseRoll:
+                        roll = Ebml.Float(payload);
+                        break;
+                    default:
+                        break;
+                }
+            }
+
+            if (type != 0 || yaw != 0 || pitch != 0 || roll % 90 != 0 || roll is < -360 or > 360)
+            {
+                return 0;
+            }
+
+            return (((int)roll % 360) + 360) % 360;
         }
 
         // Colour (RFC 9559 5.1.4.1.28.x): the codes are ISO/IEC 23001-8's (H.273), as MP4's 'colr'; Range 1 is
@@ -771,11 +897,17 @@ public sealed class MatroskaDemuxer : IDemuxer
                 {
                     track.Prefix = settings;
                 }
+                else if (type == 0 && compression && algorithm == 0 && scope is >= 1 and <= 3)
+                {
+                    // zlib: the frames (scope 1), the CodecPrivate (2), or both.
+                    track.Zlib = (scope & 1) != 0;
+                    track.ZlibCodecPrivate = (scope & 2) != 0;
+                }
                 else
                 {
                     track.Unsupported = type != 0
                         ? "Encrypted Matroska tracks are not supported."
-                        : $"Matroska content compression {algorithm} (scope {scope}) is not supported; only header stripping of the frames.";
+                        : $"Matroska content compression {algorithm} (scope {scope}) is not supported; only zlib, and header stripping of the frames.";
                 }
             }
 
@@ -875,7 +1007,7 @@ public sealed class MatroskaDemuxer : IDemuxer
                 }
                 else if (id == Ebml.SimpleBlock)
                 {
-                    AddBlock(payloadStart, size, clusterTime, keyframe: null, blockDuration: 0);
+                    AddBlock(payloadStart, size, clusterTime, keyframe: null, blockDuration: 0, discardPadding: 0);
                 }
                 else if (id == Ebml.BlockGroup)
                 {
@@ -893,6 +1025,7 @@ public sealed class MatroskaDemuxer : IDemuxer
             long blockStart = -1;
             long blockSize = 0;
             long duration = 0;
+            long discardPadding = 0;
             bool referenced = false;
             for (long pos = start; pos < end && TryHeader(pos, out uint id, out long size, out int headerLength);)
             {
@@ -914,19 +1047,23 @@ public sealed class MatroskaDemuxer : IDemuxer
                 {
                     referenced = true;
                 }
+                else if (id == Ebml.DiscardPadding)
+                {
+                    discardPadding = Ebml.Int(_window.At(payloadStart, Ebml.Bytes(size)));
+                }
 
                 pos = payloadStart + size;
             }
 
             if (blockStart >= 0)
             {
-                AddBlock(blockStart, blockSize, clusterTime, keyframe: !referenced, duration);
+                AddBlock(blockStart, blockSize, clusterTime, keyframe: !referenced, duration, discardPadding);
             }
         }
 
         // A block's frames (RFC 9559 10, Block Structure; 10.3 lacing): track number, timestamp (relative to the
         // Cluster's), flags, then the lace's frame count and sizes. keyframe: null for a SimpleBlock (its flag says).
-        private void AddBlock(long start, long size, long clusterTime, bool? keyframe, long blockDuration)
+        private void AddBlock(long start, long size, long clusterTime, bool? keyframe, long blockDuration, long discardPadding)
         {
             var head = _window.At(start, (int)Math.Min(size, Window.Size));
             if (!Ebml.TryReadSize(head, out long number, out int numberLength) || head.Length < numberLength + 3)
@@ -1035,13 +1172,26 @@ public sealed class MatroskaDemuxer : IDemuxer
                 : 0;
             long pts = checked(clusterTime + relative - track.CodecDelayTicks);
             long offset = start + pos;
+
+            // DiscardPadding: nanoseconds of padding at the block's end (positive) or start (negative), in samples at the
+            // track's rate, rounded to nearest as FFmpeg's av_rescale_q; the lace's last frame or first frame drops them.
+            int padding = slot == 1 && discardPadding != 0 && track.SampleRate > 0 ? PaddingSamples(discardPadding, track.SampleRate) : 0;
             for (int f = 0; f < frames; f++)
             {
                 long share = (duration * (f + 1) / frames) - (duration * f / frames);
-                Entries.Add(new Entry(offset, sizes[f], slot, _sequences[slot]++, pts, pts, share, isKeyframe));
+                int skipStart = f == 0 && padding < 0 ? -padding : 0;
+                int skipEnd = f == frames - 1 && padding > 0 ? padding : 0;
+                Entries.Add(new Entry(offset, sizes[f], slot, _sequences[slot]++, pts, pts, share, isKeyframe, skipStart, skipEnd));
                 offset += sizes[f];
                 pts += share;
             }
+        }
+
+        private static int PaddingSamples(long nanoseconds, int sampleRate)
+        {
+            long magnitude = Math.Min(Math.Abs(nanoseconds), 1_000_000_000L * 3600);
+            long samples = ((magnitude * sampleRate) + 500_000_000) / 1_000_000_000;
+            return (int)Math.Min(samples, int.MaxValue) * Math.Sign(nanoseconds);
         }
 
         private static void Require(ReadOnlySpan<byte> head, int length, long start)

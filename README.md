@@ -83,7 +83,8 @@ and code that reproduces FFmpeg's reading where it differs from the spec), and n
   through SBR on several threads (`Threads`).
 - **Containers**: AVI (video), MP4 (video and audio tracks, fragmented files too, edit lists of several edits),
   Matroska and WebM (video and audio tracks, every kind of lacing, BlockGroups, live files of unknown size, header
-  stripping; VP9, AV1, Opus and other codecs this library doesn't decode by their Codec IDs) and raw AAC (ADTS), with
+  stripping and zlib, the display rotation, DiscardPadding; VP9, AV1, Opus and other codecs this library doesn't decode
+  by their Codec IDs) and raw AAC (ADTS), with
   packets and timestamps as FFmpeg's demuxers give them.
 - **Throughout**: an async API, malformed input that ends in `InvalidDataException` or `NotSupportedException`
   (fuzzed), and the same output on x64, ARM64 and WebAssembly, and under Native AOT (CI checks all of them).
@@ -99,8 +100,8 @@ and code that reproduces FFmpeg's reading where it differs from the spec), and n
   API); without concealment, a
   lost reference fails pictures up to the next IDR picture, not an MMCO 5 one (by design: the MMCO 5 picture itself
   would have to be decoded from lists that can no longer be trusted, so its marking never applies).
-- Matroska: zlib-compressed and encrypted tracks, a DiscardPadding's samples at the end (Opus), and the display
-  rotation (Projection) aren't read.
+- Matroska: encrypted, bzlib- and LZO-compressed tracks aren't read (no muxer at hand writes them), nor a projection
+  other than a flat picture turned by a quarter turn.
 - H.264 speed: 1.4 to 3.0 times FFmpeg's time on one thread in the steady state, interlaced video included (Benchmarking); at 720p
   every class sits at 2.2 to 2.8 times (CAVLC and CABAC, P and intra-only, High), so the gap is general rather than
   one class's (the CAVLC residual reader's compiled code is clean). MBAFF frames and field pictures find the pairs
@@ -288,8 +289,9 @@ default, 1, decodes on the calling thread, which WebAssembly in a browser needs;
 instructions than before frame threading existed (callgrind).
 
 `AacDecoder.Decode(packet)` returns one `AudioFrame`: the packet's 1024 samples per channel, less the
-`packet.SkipSamples` at its start. The MP4 demuxer sets those from the edit list, so encoder priming is dropped and the
-output matches FFmpeg's default (`Decode(packet.Data.Span)` gives all 1024).
+`packet.SkipSamples` at its start and the `packet.SkipEndSamples` at its end. The MP4 demuxer sets the first from the
+edit list, so encoder priming is dropped, and the Matroska demuxer both from a block's DiscardPadding (an encoder's
+padding of its last frame), so the output matches FFmpeg's default (`Decode(packet.Data.Span)` gives all 1024).
 
 `new AacDecoder(audio) { Threads = 4 }` puts up to four channels of an HE-AAC frame through the filterbank and SBR at
 once, on the thread pool; the samples are the same as with one thread (`ThreadsGiveTheSameSamples`). On a 4-core cloud

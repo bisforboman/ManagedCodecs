@@ -1,0 +1,13 @@
+; Godot's project file: opening this folder in the Godot 4.7 editor (.NET build) runs Main.tscn, which plays
+; res://video.mp4 (not committed: copy a video in). README.md.
+config_version=5
+
+[application]
+
+config/name="ManagedCodecs video"
+run/main_scene="res://Main.tscn"
+config/features=PackedStringArray("4.7", "C#")
+
+[dotnet]
+
+project/assembly_name="ManagedCodecs.Godot"

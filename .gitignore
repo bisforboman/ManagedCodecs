@@ -29,3 +29,7 @@ samples/realworld
 .claude/worktrees/
 fuzz-work/
 __pycache__/
+
+# Godot's import cache and build output (tools/ManagedCodecs.Godot), and the video the sample plays
+.godot/
+tools/ManagedCodecs.Godot/video.*

@@ -739,7 +739,7 @@ for f in samples/*.mp4 samples/*.avi; do
   if [ -n "$t" ]; then echo "$t" > "${f%.*}.display"; fi
 done
 # name.probe.json: the file's duration and its streams' facts as ffprobe reports them, for VideoProbe (Thumbnails).
-for f in samples/*.mp4 samples/*.avi; do
+for f in samples/*.mp4 samples/*.avi samples/*.mkv; do
   ffprobe -v error -of json -show_entries format=duration,start_time:stream=index,codec_type,codec_name,width,height,sample_aspect_ratio,r_frame_rate,avg_frame_rate,sample_rate,channels,duration:stream_side_data=rotation \
     "$f" > "${f%.*}.probe.json"
 done
@@ -755,7 +755,7 @@ done
 #   chroma sample as RgbaConverter does, for its general one, which interpolates chroma (up to 194 levels apart at a
 #   colour edge). RgbaImageTests checks odd sizes against the definition instead, and 4:1:1 and 4:4:0 (mjpeg-411,
 #   mjpeg-440*), which take the general path at any size (6 levels from ours at the first pixel that differed).
-for f in samples/*.mp4 samples/*.avi; do
+for f in samples/*.mp4 samples/*.avi samples/*.mkv; do
   case $f in samples/jm-planes*) continue ;; esac
   IFS=, read -r codec width height pix <<< \
     "$(ffprobe -v error -select_streams v:0 -of csv=p=0 -show_entries stream=codec_name,width,height,pix_fmt "$f")"
@@ -769,10 +769,11 @@ for f in samples/*.mp4 samples/*.avi; do
 done
 # name.atNNNN.thumb.rgba: as name.thumb.rgba, the first frame shown at NNNN ms from the file's start (ffmpeg's -ss
 # before -i, counted from the start time as ThumbnailOptions.At is), for VideoThumbnail.Create: between keyframes, on
-# one, in a fragmented file that starts late, past an empty edit, MJPEG, and in the fade-in. testsrc-420.avi:610 is a
+# one, in a fragmented file that starts late, past an empty edit, MJPEG, in the fade-in, and in Matroska (whose audio
+# starts before the video, at AAC's CodecDelay). testsrc-420.avi:610 is a
 # quarter frame past 600 in a 1/25 time base: FFmpeg rescales -ss to the nearest unit, so the frame at 600 ms.
 for s in h264-bframes.mp4:1200 h264-bframes.mp4:960 fmp4-base-moof.mp4:200 h264-edit-gap.mp4:500 testsrc-420.avi:600 \
-  testsrc-420.avi:610 h264-fade-in.mp4:400; do
+  testsrc-420.avi:610 h264-fade-in.mp4:400 mkv-h264-aac.mkv:1200; do
   f=samples/${s%%:*}; ms=${s##*:}
   ff -ss "$(printf '%d.%03d' $((ms / 1000)) $((ms % 1000)))" -idct simple -i "$f" -map 0:v:0 -frames:v 1 \
     -vf "format=rgba,scale=max(1\\,trunc(iw*3/8)):max(1\\,trunc(ih*3/8)):flags=area+accurate_rnd+full_chroma_int+full_chroma_inp,format=rgba" \
@@ -807,9 +808,9 @@ done
 # name.seekNNNN.framemd5: the first video frame FFmpeg's accurate seek gives at NNNN ms, for IDemuxer.Seek (-ss before
 # -i: from the keyframe at or before the time, the frames shown before it dropped; -seek_timestamp 1: the time is the
 # packets' own, not counted from the file's start time). Between keyframes, on one, in a fragmented file that starts
-# late, in a file with an empty edit, and in MJPEG.
+# late, in a file with an empty edit, in MJPEG, and in Matroska (SimpleBlocks; BlockGroups and laced audio).
 for s in h264-bframes.mp4:1200 h264-bframes.mp4:960 h264-bframes.mp4:1000 fmp4-base-moof.mp4:1200 \
-  h264-edit-gap.mp4:1000 testsrc-420.avi:600; do
+  h264-edit-gap.mp4:1000 testsrc-420.avi:600 mkv-h264-aac.mkv:1200 mkv-lace-xiph.mkv:1000; do
   f=samples/${s%%:*}; ms=${s##*:}
   ff -seek_timestamp 1 -ss "$(printf '%d.%03d' $((ms / 1000)) $((ms % 1000)))" -idct simple -noautorotate -i "$f" -map 0:v:0 \
     -frames:v 1 -f framemd5 "${f%.*}.seek$ms.framemd5"

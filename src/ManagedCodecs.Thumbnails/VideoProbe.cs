@@ -4,7 +4,7 @@ namespace ManagedCodecs.Thumbnails;
 
 /// <summary>
 /// The basic facts of a video file, as ffprobe reports them, without decoding a frame: <see cref="Read(Stream)"/> reads
-/// the container's headers and sample tables (MP4) or chunk headers (AVI) and nothing else.
+/// the container's headers and sample tables (MP4), block headers (Matroska) or chunk headers (AVI) and nothing else.
 /// </summary>
 public static class VideoProbe
 {
@@ -23,7 +23,7 @@ public static class VideoProbe
     /// position.
     /// </summary>
     /// <exception cref="ArgumentException">The stream is not seekable.</exception>
-    /// <exception cref="InvalidDataException">The file is not AVI or MP4, is malformed, or has no video stream.</exception>
+    /// <exception cref="InvalidDataException">The file is not AVI, MP4 or Matroska, is malformed, or has no video stream.</exception>
     /// <exception cref="NotSupportedException">The video is in a codec this library does not decode (HEVC, VP9, AV1, ...).</exception>
     public static VideoInfo Read(Stream stream)
     {
@@ -75,7 +75,8 @@ public static class VideoProbe
     /// As ffprobe's <c>format=duration</c> (FFmpeg's update_stream_timings): from the earliest stream start to the
     /// latest stream end, a stream starting at its first packet shown (packets an edit only decodes left out) and
     /// lasting its container duration (<see cref="VideoStreamInfo.Duration"/>), or to the end of its last packet where
-    /// the container gives none.
+    /// the container gives none. Matroska's: the Segment's Duration, or, in a file without one (a live recording, for
+    /// which ffprobe gives none), from the first packet shown to the end of the last.
     /// </summary>
     /// <returns>The duration, and the earliest stream's start in seconds (ffprobe's <c>format=start_time</c>).</returns>
     internal static (TimeSpan Duration, double Start) Timing(IDemuxer demuxer)
@@ -95,6 +96,7 @@ public static class VideoProbe
         {
             Mp4Demuxer mp4 => mp4.ReadPacketInfo(),
             AviDemuxer avi => avi.ReadPacketInfo(),
+            MatroskaDemuxer mkv => mkv.ReadPacketInfo(),
             _ => [],
         };
 
@@ -106,6 +108,9 @@ public static class VideoProbe
             }
         }
 
+        // Matroska's Duration is the Segment's (its streams' Duration carries it), which FFmpeg takes as the file's
+        // duration itself, from the earliest stream's start.
+        bool segmentDuration = demuxer is MatroskaDemuxer;
         double start = double.PositiveInfinity;
         double end = double.NegativeInfinity;
         foreach (var (timeBase, duration, first, last) in streams.Values)
@@ -116,7 +121,12 @@ public static class VideoProbe
             }
 
             start = Math.Min(start, first * timeBase.ToDouble());
-            end = Math.Max(end, (duration > 0 ? first + duration : last) * timeBase.ToDouble());
+            end = Math.Max(end, (duration > 0 && !segmentDuration ? first + duration : last) * timeBase.ToDouble());
+        }
+
+        if (segmentDuration && streams.Values.FirstOrDefault().Duration is > 0 and var segment && double.IsFinite(start))
+        {
+            return (Time(segment * streams.Values.First().TimeBase.ToDouble()), start);
         }
 
         return end > start ? (Time(end - start), start) : (TimeSpan.Zero, double.IsFinite(start) ? start : 0);

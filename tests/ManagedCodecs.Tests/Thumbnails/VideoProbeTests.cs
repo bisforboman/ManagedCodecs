@@ -41,7 +41,7 @@ public class VideoProbeTests
 
         foreach (var file in Directory.EnumerateFiles(directory).Order())
         {
-            if (Path.GetExtension(file) is ".avi" or ".mp4" && File.Exists(Path.ChangeExtension(file, ".probe.json"))
+            if (Path.GetExtension(file) is ".avi" or ".mp4" or ".mkv" && File.Exists(Path.ChangeExtension(file, ".probe.json"))
                 && TestSamples.CodecOf(Path.GetRelativePath(directory, file)) is CodecIds.H264 or CodecIds.Mjpeg)
             {
                 files.Add(Path.GetRelativePath(directory, file));
@@ -63,8 +63,12 @@ public class VideoProbeTests
 
         // AVI's audio is not read, so an AVI file lasts as long as its video stream (ffprobe's format duration also
         // counts the audio: avi-dropped-frame's MP3 runs half a second past the video).
+        // A Matroska file without a Segment Duration (written live) has none in ffprobe: there it is from the first packet
+        // ffprobe lists to the end of the last (name.packets.csv).
         var durationOf = name.EndsWith(".avi", StringComparison.Ordinal) ? video : root.GetProperty("format");
-        double duration = double.Parse(durationOf.GetProperty("duration").GetString()!, CultureInfo.InvariantCulture);
+        double duration = durationOf.TryGetProperty("duration", out var listed)
+            ? double.Parse(listed.GetString()!, CultureInfo.InvariantCulture)
+            : PacketSpan(name);
         Assert.True(Math.Abs(info.Duration.TotalSeconds - duration) < 1.5e-6, $"Duration {info.Duration.TotalSeconds:F6} s, ffprobe's {duration:F6} s.");
         Assert.Equal(video.GetProperty("width").GetInt32(), info.Width);
         Assert.Equal(video.GetProperty("height").GetInt32(), info.Height);
@@ -118,6 +122,15 @@ public class VideoProbeTests
                 Assert.True(Math.Abs(seconds - expected) < 1.5e-6, $"The {type} stream lasts {seconds:F6} s, ffprobe's {expected:F6} s.");
             }
         }
+    }
+
+    // From the earliest packet's pts to the latest end (pts + duration) in ffprobe's packet list, in the 1/1000 time base
+    // of a Matroska file.
+    private static double PacketSpan(string name)
+    {
+        var packets = File.ReadAllLines(TestSamples.ReferenceOf(name, ".packets.csv")).Select(line => line.Split(','))
+            .Select(f => (Pts: long.Parse(f[1], CultureInfo.InvariantCulture), Duration: long.Parse(f[3], CultureInfo.InvariantCulture))).ToList();
+        return (packets.Max(p => p.Pts + p.Duration) - packets.Min(p => p.Pts)) / 1000.0;
     }
 
     [Theory]

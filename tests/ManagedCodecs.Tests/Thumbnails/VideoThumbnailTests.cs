@@ -58,7 +58,7 @@ public class VideoThumbnailTests
     {
         var match = AtReference.Match(reference);
         string stem = match.Groups[1].Value;
-        string file = File.Exists(TestSamples.PathOf(stem + ".mp4")) ? stem + ".mp4" : stem + ".avi";
+        string file = new[] { ".mp4", ".mkv", ".avi" }.Select(extension => stem + extension).First(n => File.Exists(TestSamples.PathOf(n)) || n.EndsWith(".avi", StringComparison.Ordinal));
         var at = TimeSpan.FromMilliseconds(int.Parse(match.Groups[2].Value, System.Globalization.CultureInfo.InvariantCulture));
         var info = VideoProbe.Read(TestSamples.PathOf(file));
         var thumbnail = Compare(file, TestSamples.PathOf(reference), at, info);

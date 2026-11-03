@@ -227,8 +227,8 @@ MUTATIONS = [
          tests="FullyQualifiedName~Matroska"),
     # A BlockGroup with a ReferenceBlock is no keyframe.
     dict(file="src/ManagedCodecs.Containers/Matroska/MatroskaDemuxer.cs",
-         find="AddBlock(blockStart, blockSize, clusterTime, keyframe: !referenced, duration);",
-         replace="AddBlock(blockStart, blockSize, clusterTime, keyframe: true, duration);",
+         find="AddBlock(blockStart, blockSize, clusterTime, keyframe: !referenced, duration, discardPadding);",
+         replace="AddBlock(blockStart, blockSize, clusterTime, keyframe: true, duration, discardPadding);",
          tests="FullyQualifiedName~Matroska"),
     # Without DisplayWidth and DisplayHeight the ratio is 1:1 (they default to the pixel size), as FFmpeg reads it.
     dict(file="src/ManagedCodecs.Containers/Matroska/MatroskaDemuxer.cs",

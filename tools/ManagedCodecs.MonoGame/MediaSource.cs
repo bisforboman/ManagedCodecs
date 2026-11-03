@@ -35,8 +35,19 @@ internal sealed class MediaSource : IDisposable
     private long _convertTicks;
 
     public MediaSource(string path)
+        : this(Demuxer.Open(path))
     {
-        _demuxer = Demuxer.Open(path);
+    }
+
+    /// <summary>Plays a file held in a seekable stream (an engine's packed resources read into memory), which it disposes.</summary>
+    public MediaSource(Stream stream)
+        : this(Demuxer.Open(stream))
+    {
+    }
+
+    private MediaSource(IDemuxer demuxer)
+    {
+        _demuxer = demuxer;
         var video = _demuxer.Video ?? throw new NotSupportedException("The file has no video stream.");
         int threads = Math.Clamp(Environment.ProcessorCount - 1, 1, 4);
         _video = video.Codec switch

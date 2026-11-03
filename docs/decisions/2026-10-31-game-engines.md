@@ -61,3 +61,7 @@ The owner (2026-10-31), against the recommendation to keep it parked:
 - A Unity sample, `tools/ManagedCodecs.Unity.Sample`: a `MonoBehaviour` playing a video into a `Texture2D` and a
   streamed `AudioClip` with the `ManagedCodecs.Unity` package, on mcplay's decoding and colour conversion. CI compiles
   it for netstandard2.1 against stubs of the UnityEngine members it calls; nobody has run it in Unity yet.
+- A Godot sample, `tools/ManagedCodecs.Godot`: a `TextureRect` playing a video into an `ImageTexture` and an
+  `AudioStreamGenerator`, on mcplay's decoding and colour conversion, Godot 4.7 (.NET) on net10.0 with the packages as
+  they are. CI builds it with the Godot .NET SDK from nuget.org (Godot's real C# API, no stubs); nobody has run it in
+  Godot yet.

@@ -37,6 +37,7 @@ in between. That comparison is not measured here.
 | `src/ManagedCodecs.Aac` | `AacDecoder`: AAC LC (mono to 7.1, M/S, intensity, PNS, TNS), within 3e-7 of FFmpeg's float output; HE-AAC (spectral band replication) |
 | `src/Shared` | Source files linked into several codec projects (the VLC decoder) |
 | `tools/ManagedCodecs.Cli` | `mcdec`: decodes a file and times it, to compare with `ffmpeg -benchmark` (`--threads N` for H.264 frame threading and HE-AAC's channels) |
+| `tools/ManagedCodecs.Godot` | A Godot 4 (.NET) node that plays a video into an `ImageTexture` and an `AudioStreamGenerator` (mcplay's decoding and colour conversion, linked); CI builds it with the Godot .NET SDK, Godot has not run it |
 | `tools/ManagedCodecs.MonoGame` | `mcplay`: a MonoGame sample that plays a file into a texture, for in-game video (its README; issue #254) |
 | `tools/ManagedCodecs.Unity.Sample` | A Unity `MonoBehaviour` that plays a video into a `Texture2D` and an `AudioClip` with the `ManagedCodecs.Unity` package (mcplay's decoding and colour conversion, linked); CI compiles it against stubs of UnityEngine, Unity has not run it |
 | `tools/make-samples.sh` | Generates the test samples and FFmpeg's references |

@@ -56,6 +56,9 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
   `tools/aot-check.sh` and `tools/aot-check.sh x86-64-v3` (Native AOT against the JIT on every sample, a minute each;
   CI's `aot`). CI's `wasm` and `unity` jobs run `tools/wasm-check.sh` and `tools/unity-check.sh` (the Unity build on
   Mono 6.12+ against net10.0, every sample).
+- **Cloud sessions**: `.claude/hooks/session-start.sh` installs what is missing of the .NET 10 SDK, ffmpeg and
+  ImageMagick (Ubuntu's packages), restores the tools and the solution and sets `core.hooksPath`; it leaves
+  `tools/make-samples.sh` (about 6 minutes there) to you and says so while `samples/` has none.
 - **New feature, new sample**: add it to tools/make-samples.sh with a comment saying what it isolates, and check that
   it really exercises the feature (the AAC decoder's `Statistics`, `ffmpeg -bsf:v trace_headers`). Encoders often
   never emit a tool: which do, and the scripts that rewrite streams, are in the H.264 and AAC CLAUDE.md files. Cover

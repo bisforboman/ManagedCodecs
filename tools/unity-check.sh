@@ -17,7 +17,7 @@ trap 'rm -rf "$work"' EXIT
 dotnet build tools/ManagedCodecs.Cli -c Release -v q -nologo
 dotnet build tools/ManagedCodecs.Cli.Unity -c Release -v q -nologo -warnaserror
 
-files=$(ls samples/*.avi samples/*.mp4 samples/*.aac samples/heaac/*.mp4 samples/heaac/*.aac samples/jm/*.mp4 samples/openh264/*.mp4)
+files=$(ls samples/*.avi samples/*.mp4 samples/*.mkv samples/*.webm samples/*.aac samples/heaac/*.mp4 samples/heaac/*.aac samples/jm/*.mp4 samples/openh264/*.mp4)
 
 # shellcheck disable=SC2086
 dotnet tools/ManagedCodecs.Cli/bin/Release/net10.0/mcdec.dll --hash $files > "$work/net.txt" 2> "$work/net-stderr.txt" ||

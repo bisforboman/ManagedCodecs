@@ -19,7 +19,7 @@ public class AsyncReadTests
 
         foreach (var file in Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories).Order())
         {
-            if (Path.GetExtension(file) is ".avi" or ".mp4" or ".aac")
+            if (Path.GetExtension(file) is ".avi" or ".mp4" or ".mkv" or ".webm" or ".aac")
             {
                 files.Add(Path.GetRelativePath(directory, file));
             }

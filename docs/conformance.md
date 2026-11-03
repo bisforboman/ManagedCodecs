@@ -225,6 +225,42 @@ Elephants Dream (an Apple-made MOV, offsets down to -600 of a second's 600) had 
 its edit's end until the first was read that way. QuickTime files (`aac-quicktime`, FFmpeg's `-f mov`) put the AAC
 `esds` in a `wave` box of the sound description.
 
+## Matroska and WebM demuxing
+
+`MatroskaConformanceTests` compares every packet of every samples/*.mkv and *.webm with FFmpeg's demuxer: pts, size,
+MD5 and keyframe flag with `ffprobe -show_packets -show_data_hash MD5` (name.packets.csv), the durations the file gives
+with the same under `-fflags +nofillin+noparse` (name.packets.nofillin.csv: N/A where libavformat or a parser would
+fill one in), the CodecPrivate with name.packets.framemd5's extradata, and the streams' size, sample aspect ratio,
+time base, rate, channels and the file's duration with `ffprobe -show_streams` (name.streams). The samples: H.264 with
+B-frames and AAC (CodecDelay), the same written live (no Cues, no Duration), VP9 and Opus in WebM, MJPEG with a display
+aspect ratio and a Colour element, and three that tools/mkv-rewrite.py rewrites into what FFmpeg's muxer never writes:
+Xiph and EBML lacing of the AAC frames with the video in BlockGroups, and fixed-size lacing of PCM in clusters of
+unknown size. MatroskaDemuxerTests builds files for the rest: header stripping, Xiph sizes of 255 and over, EBML
+differences in two bytes, a lace whose duration doesn't divide evenly, the old AAC Codec IDs without a CodecPrivate,
+files broken off, and every byte of a file changed (InvalidDataException or NotSupportedException, nothing else).
+The H.264 and MJPEG samples are also decoded frame by frame against FFmpeg (H264ConformanceTests, MjpegConformanceTests:
+bit-exact, threads and the async API too), and the AAC ones sample by sample (AacConformanceTests).
+
+Where FFmpeg differs from what the file says, it is followed:
+
+- Timestamps are moved back by the track's CodecDelay, rounded to the nearest tick (Opus's 6.5 ms to 7), so AAC's and
+  Opus's first packets come at negative times; no `SkipSamples` (FFmpeg gives none for AAC in Matroska, and decodes
+  every sample of it, the encoder delay included).
+- A lace's duration is the DefaultDuration times its frames, in nanoseconds, then divided into ticks; each frame's share
+  rounds down, the remainder to the later frames, and each frame's timestamp is the one before plus its share.
+- With no DisplayWidth and DisplayHeight the sample aspect ratio is 1:1 (their defaults are the pixel size); with a
+  DisplayUnit of 3 (a display aspect ratio, as FFmpeg's muxer writes) the ratio is computed the same way.
+- Every frame of a keyframe block is a keyframe, as ffprobe shows audio (libavformat marks intra-only codecs' packets;
+  FFmpeg's demuxer itself marks only a lace's first frame).
+
+What isn't compared exactly: decode times, which Matroska doesn't store. FFmpeg derives them from the presentation
+times delayed by the reorder depth the H.264 SPS declares (libx264 with `-bf 2` declares 2 where 1 suffices); the
+demuxer takes the fewest frames that keep each dts at or before its pts, so its dts are at or after FFmpeg's, and the
+test checks that, that they never go back, and that none is after its pts. Audio frames without a duration in the
+file (FFmpeg's muxer writes no DefaultDuration for AAC; libavformat fills in 1024 samples' worth, rounded down) run
+to the track's next frame, which the test checks against FFmpeg's next pts; Opus's durations come from FFmpeg's
+parser, which reads the packets, so they too are compared that way.
+
 ## H.264
 
 ### Profiles and tools

@@ -4,7 +4,7 @@ using ManagedCodecs.H264;
 namespace ManagedCodecs.Tests.H264;
 
 /// <summary>
-/// Decodes every Constrained Baseline, Main and High profile H.264 sample (samples/*.mp4 with a .framemd5)
+/// Decodes every Constrained Baseline, Main and High profile H.264 sample (samples/*.mp4 and *.mkv with a .framemd5)
 /// and compares each frame's MD5, timestamp, picture type and interlacing, in output order, and the stream's field order,
 /// with FFmpeg's. See samples/README.md.
 /// Timestamps are compared from the first frame's, as FFmpeg's framemd5 moves them to start at 0.
@@ -80,7 +80,7 @@ public class H264ConformanceTests
         var colors = ColorReferences.Read(sampleName);
         Assert.True(colors is null || colors.Frames.Count == expected.Count, $"ffprobe lists {colors?.Frames.Count} frames' colour properties, framemd5 {expected.Count}.");
 
-        using var demuxer = Mp4Demuxer.Open(TestSamples.PathOf(sampleName));
+        using var demuxer = Demuxer.Open(TestSamples.PathOf(sampleName));
         var video = demuxer.Video!;
         var decoder = new H264Decoder(video) { BorrowFrames = borrowFrames, Threads = threads, RowDelay = rowDelay };
 
@@ -197,12 +197,12 @@ public class H264ConformanceTests
     /// <summary>H.264 in MP4 whose avcC says profile_idc 66 (Baseline), 77 (Main) or 100 (High).</summary>
     private static bool IsSupported(string name)
     {
-        if (!name.EndsWith(".mp4", StringComparison.Ordinal))
+        if (!name.EndsWith(".mp4", StringComparison.Ordinal) && !name.EndsWith(".mkv", StringComparison.Ordinal))
         {
             return false;
         }
 
-        using var demuxer = Mp4Demuxer.Open(TestSamples.PathOf(name));
+        using var demuxer = Demuxer.Open(TestSamples.PathOf(name));
         if (demuxer.Video is not { Codec: CodecIds.H264 } video)
         {
             return false;

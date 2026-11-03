@@ -3,7 +3,7 @@ using ManagedCodecs.Containers;
 namespace ManagedCodecs.Tests.Containers;
 
 /// <summary>
-/// <see cref="IDemuxer.Seek"/> of the MP4 and AVI demuxers: after a seek, each stream's packets are the tail of a read
+/// <see cref="IDemuxer.Seek"/> of the MP4, AVI and Matroska demuxers: after a seek, each stream's packets are the tail of a read
 /// from the start, from the last keyframe whose pts is at or before the time (the other stream's at the same instant),
 /// for every sample, at each keyframe's time, just after it, between keyframes, before the first and past the last.
 /// The decoded frame at a time is checked against FFmpeg's <c>-ss</c> in <see cref="SeekFrameTests"/>.
@@ -20,7 +20,7 @@ public class SeekTests
 
         foreach (var file in Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories).Order())
         {
-            if (Path.GetExtension(file) is ".avi" or ".mp4")
+            if (Path.GetExtension(file) is ".avi" or ".mp4" or ".mkv" or ".webm")
             {
                 files.Add(Path.GetRelativePath(directory, file));
             }
@@ -185,7 +185,8 @@ public class SeekTests
     {
         Mp4Demuxer mp4 => mp4.ReadPacketInfo(),
         AviDemuxer avi => avi.ReadPacketInfo(),
-        _ => throw new ArgumentException("An MP4 or AVI demuxer.", nameof(demuxer)),
+        MatroskaDemuxer mkv => mkv.ReadPacketInfo(),
+        _ => throw new ArgumentException("An MP4, AVI or Matroska demuxer.", nameof(demuxer)),
     };
 
     // Rounded down, by the definition, in BigInteger.

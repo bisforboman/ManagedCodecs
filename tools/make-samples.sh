@@ -675,6 +675,32 @@ ff -i samples/heaac-stereo-44k.mp4 -c copy samples/heaac-edit.mp4
 # the element into the AudioSpecificConfig.
 ff -i samples/aac-fdk-pce.aac -c copy samples/aac-fdk-pce-remux.mp4
 
+# ---- Matroska and WebM for the demuxer ----
+# FFmpeg's muxer writes SimpleBlocks only, never lacing, and gives AAC no DefaultDuration (its durations then run to the
+# next block); tools/mkv-rewrite.py rewrites its files into the rest.
+# H.264 with B-frames (no decode times in Matroska) and AAC, whose CodecDelay moves the audio's timestamps back; Cues.
+ff -f lavfi -i testsrc2=size=160x120:rate=25 -f lavfi -i sine=frequency=440:sample_rate=48000 -t 2 -c:v libx264 -bf 3 \
+  -g 12 -c:a aac -b:a 64k samples/mkv-h264-aac.mkv
+# Written as live: no Cues and no Duration.
+ff -f lavfi -i testsrc2=size=160x120:rate=25 -f lavfi -i sine=frequency=440:sample_rate=48000 -t 1 -c:v libx264 -bf 2 \
+  -g 12 -c:a aac -b:a 64k -live 1 samples/mkv-h264-live.mkv
+# WebM: VP9 and Opus, codecs kept by their Codec IDs (V_VP9, A_OPUS); Opus's CodecDelay is 6.5 ms.
+ff -f lavfi -i testsrc2=size=160x120:rate=25 -f lavfi -i sine=frequency=440:sample_rate=48000 -t 1 -c:v libvpx-vp9 -g 10 \
+  -deadline realtime -c:a libopus samples/webm-vp9-opus.webm
+# MJPEG (V_MJPEG) with a sample aspect ratio of 4:3, written as DisplayWidth and DisplayHeight, and the BT.709 colour
+# description in a Colour element.
+ff -f lavfi -i testsrc2=size=160x120:rate=25,setsar=4/3 -t 0.4 -c:v mjpeg -pix_fmt yuvj420p -q:v 5 -color_primaries bt709 \
+  -color_trc bt709 -colorspace bt709 samples/mkv-mjpeg-sar.mkv
+# Lacing (Xiph and EBML) of the AAC frames, and the video in BlockGroups (BlockDuration, ReferenceBlock); fixed-size
+# lacing needs frames of one size: PCM, in clusters of unknown size, as a live stream writes them.
+python3 tools/mkv-rewrite.py samples/mkv-h264-aac.mkv samples/mkv-lace-xiph.mkv --lace xiph --block-groups
+python3 tools/mkv-rewrite.py samples/mkv-h264-aac.mkv samples/mkv-lace-ebml.mkv --lace ebml --block-groups
+pcm=$(mktemp --suffix=.mkv)
+ff -f lavfi -i testsrc2=size=160x120:rate=25 -f lavfi -i sine=frequency=440:sample_rate=44100 -t 1 -c:v libx264 -bf 2 \
+  -g 12 -c:a pcm_s16le "$pcm"
+python3 tools/mkv-rewrite.py "$pcm" samples/mkv-lace-fixed.mkv --lace fixed --unknown-size
+rm "$pcm"
+
 # ---- FFmpeg's references ----
 # name.framemd5: decoded frames. name.packets.csv: demuxed packets as ffprobe lists them (the demuxer's own timestamps,
 # flags with discard, MD5 of the data); name.packets.framemd5 for the codec private data (and the ADTS packets).
@@ -683,7 +709,7 @@ ff -i samples/aac-fdk-pce.aac -c copy samples/aac-fdk-pce-remux.mp4
 # FFmpeg gives it by default, trimmed by the edit list. -idct simple: FFmpeg's C IDCT for JPEG, the arithmetic the MJPEG
 # decoder follows; its default picks by CPU, the same results on x64 (SSE2) but not on ARM64 (NEON rounds otherwise).
 # -noautorotate: FFmpeg's command line turns frames by a track's rotation (h264-rotate-*), which decoders do not.
-for f in samples/*.avi samples/*.mp4; do ff -idct simple -noautorotate -i "$f" -f framemd5 "${f%.*}.framemd5"; done
+for f in samples/*.avi samples/*.mp4 samples/*.mkv; do ff -idct simple -noautorotate -i "$f" -f framemd5 "${f%.*}.framemd5"; done
 # Monochrome H.264 (by the name): FFmpeg decodes it to 4:2:0 with flat chroma, so the references take its Y plane
 # alone, as it is (extractplanes; -pix_fmt gray would rescale a limited-range stream's samples to full range).
 for f in samples/*gray*.mp4; do ff -noautorotate -i "$f" -vf extractplanes=y -f framemd5 "${f%.*}.framemd5"; done
@@ -760,10 +786,23 @@ for f in samples/*.avi samples/*.mp4; do
     -show_entries frame=color_range,color_space,color_primaries,color_transfer,chroma_location,sample_aspect_ratio "$f")
   if [ -n "$t" ]; then echo "$t" > "${f%.*}.color"; fi
 done
-for f in samples/*.mp4; do
-  ff -copyts -i "$f" -c copy -f framemd5 "${f%.mp4}.packets.framemd5"
+for f in samples/*.mp4 samples/*.mkv samples/*.webm; do
+  ff -copyts -i "$f" -c copy -f framemd5 "${f%.*}.packets.framemd5"
   ffprobe -v error -show_packets -show_data_hash MD5 -show_entries packet=stream_index,pts,dts,duration,size,flags,data_hash \
-    -of csv=p=0 "$f" > "${f%.mp4}.packets.csv"
+    -of csv=p=0 "$f" > "${f%.*}.packets.csv"
+done
+# name.packets.nofillin.csv: the same as Matroska's demuxer gives them, without what libavformat fills in (durations
+# from the codec's frame size, decode times derived from presentation times) or its parsers read from the packets
+# (Opus's durations): N/A where the file says nothing.
+for f in samples/*.mkv samples/*.webm; do
+  ffprobe -v error -fflags +nofillin+noparse -show_packets -show_entries packet=stream_index,pts,dts,duration,size,flags -of csv=p=0 "$f" \
+    > "${f%.*}.packets.nofillin.csv"
+done
+# name.streams: a Matroska file's streams as ffprobe lists them (codec, size, aspect ratio, rate, channels) and the
+# file's duration, for MatroskaDemuxer's stream descriptions.
+for f in samples/*.mkv samples/*.webm; do
+  ffprobe -v error -of default=nw=1 -show_entries format=duration:stream=index,codec_type,width,height,sample_aspect_ratio,sample_rate,channels,color_range,color_primaries,color_transfer,color_space,time_base \
+    "$f" > "${f%.*}.streams"
 done
 # name.seekNNNN.framemd5: the first video frame FFmpeg's accurate seek gives at NNNN ms, for IDemuxer.Seek (-ss before
 # -i: from the keyframe at or before the time, the frames shown before it dropped; -seek_timestamp 1: the time is the
@@ -786,6 +825,10 @@ cp samples/jm-ref/* samples/
 for f in samples/aac-*.mp4 samples/h264-with-audio.mp4 samples/h264-audio-edits.mp4 samples/fmp4-*.mp4; do
   [[ $f == samples/aac-edit-trim.mp4 || $f == *edits* ]] || ff -ignore_editlist 1 -i "$f" -map 0:a:0 -f f32le "${f%.mp4}.f32"
   ff -i "$f" -map 0:a:0 -f f32le "${f%.mp4}.trim.f32"
+done
+# AAC in Matroska: every decoded sample, as FFmpeg gives them (its CodecDelay moves the timestamps but trims nothing).
+for f in samples/mkv-h264-aac.mkv samples/mkv-h264-live.mkv samples/mkv-lace-xiph.mkv samples/mkv-lace-ebml.mkv; do
+  ff -i "$f" -map 0:a:0 -f f32le "${f%.mkv}.f32"
 done
 # HE-AAC: name.sbr.f32, decoded audio as FFmpeg gives it by default: at the SBR rate, without the encoder delay an MP4
 # file's iTunSMPB tag gives (ADTS has none), and in stereo for a mono stream (FFmpeg's decoder assumes parametric

@@ -103,6 +103,8 @@ jobs:
           path: |
             samples/*.avi
             samples/*.mp4
+            samples/*.mkv
+            samples/*.webm
             samples/*.aac
             samples/jm/*.mp4
             samples/openh264/*.mp4

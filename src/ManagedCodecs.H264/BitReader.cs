@@ -99,44 +99,54 @@ internal sealed class BitReader
     /// <summary>Takes the position a <see cref="Cursor"/> from <see cref="Begin"/> reached.</summary>
     public void Commit(in Cursor cursor) => _position = cursor.Position;
 
-    /// <summary>The reads of <see cref="BitReader"/> on locals (<see cref="Begin"/>).</summary>
+    /// <summary>
+    /// The reads of <see cref="BitReader"/> on locals (<see cref="Begin"/>), through a 64-bit cache of the bits from the
+    /// position on: a peek is a shift of the cache, and the bytes are read again only once fewer than 32 of its bits are
+    /// left (each 8-byte read leaves at least 57 bits, the first byte's leading ones skipped).
+    /// </summary>
     public ref struct Cursor
     {
-#if NET
-        private readonly ref byte _data;
-#endif
+        // At most 25 bits used before a peek, so at least 57 - 25 = 32 of the cache's bits are left for it, and a
+        // peek's skip of up to 32 bits leaves _used below 64, the width a shift of the cache can take.
+        private const int MaxUsed = 25;
+
         private readonly byte[] _array;
         private readonly int _length;
 
+        // The cache's first bit, the 64 bits from it (MSB first) and how many of them have been read.
+        private long _start;
+        private ulong _cache;
+        private int _used;
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public Cursor(byte[] data, int length, long position)
         {
             _array = data;
-#if NET
-            _data = ref MemoryMarshal.GetArrayDataReference(data);
-#endif
             _length = length;
-            Position = position;
+            _start = position;
+            _cache = Load(position);
+            _used = 0;
         }
 
-#if !NET
-        // netstandard2.1's runtimes have no ref fields: the array's first element, found each time.
-        private readonly ref byte _data => ref MemoryMarshal.GetArrayDataReference(_array);
-#endif
+        public readonly long Position => _start + _used;
 
-        public long Position { readonly get; private set; }
-
+        /// <summary>Returns the next <paramref name="count"/> (1..32) bits without consuming them.</summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public readonly uint Peek(int count)
+        public uint Peek(int count)
         {
-            int bytePos = (int)(Position >> 3);
-            ulong word = (uint)bytePos + 8 <= (uint)_length
-                ? BinaryPrimitives.ReverseEndianness(Unsafe.ReadUnaligned<ulong>(ref Unsafe.Add(ref _data, bytePos)))
-                : PeekNearEnd(_array, _length, bytePos);
-            return (uint)((word << (int)(Position & 7)) >> (64 - count));
+            if (_used > MaxUsed)
+            {
+                _start += _used;
+                _used = 0;
+                _cache = Load(_start);
+            }
+
+            return (uint)((_cache << _used) >> (64 - count));
         }
 
+        /// <summary>Consumes <paramref name="count"/> bits, at most as many as the last <see cref="Peek"/> returned.</summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public void Skip(int count) => Position += count;
+        public void Skip(int count) => _used += count;
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public uint ReadBits(int count)
@@ -147,7 +157,7 @@ internal sealed class BitReader
             }
 
             uint value = Peek(count);
-            Position += count;
+            _used += count;
             return value;
         }
 
@@ -158,8 +168,19 @@ internal sealed class BitReader
         public int Read(Vlc vlc)
         {
             int value = vlc.Lookup(Peek(vlc.MaxLength), out int length);
-            Position += length;
+            _used += length;
             return value;
+        }
+
+        /// <summary>The 64 bits from bit <paramref name="position"/> on; past the RBSP's end they read as zero.</summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private readonly ulong Load(long position)
+        {
+            int bytePos = (int)(position >> 3);
+            ulong word = (uint)bytePos + 8 <= (uint)_length
+                ? BinaryPrimitives.ReverseEndianness(Unsafe.ReadUnaligned<ulong>(ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(_array), bytePos)))
+                : PeekNearEnd(_array, _length, bytePos);
+            return word << (int)(position & 7);
         }
     }
 

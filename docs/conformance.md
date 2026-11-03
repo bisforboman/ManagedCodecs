@@ -111,13 +111,16 @@ Decoding straight into the output frame: opt-in, `MjpegDecoder.ZeroCopy` (6% few
 
 ## MP4 demuxing
 
-`VideoProbe` (ManagedCodecs.Thumbnails) is checked against ffprobe on every MP4 and AVI sample with H.264 or MJPEG
+`VideoProbe` (ManagedCodecs.Thumbnails) is checked against ffprobe on every MP4, Matroska and AVI sample with H.264 or MJPEG
 video (make-samples.sh's name.probe.json): `format=duration` within 1.5 µs, width and height, sample aspect ratio,
 rotation, average frame rate and the audio stream's rate and channels. The duration is the streams' container
 durations as FFmpeg reads them: MP4's edits' length, but no longer than the samples they take (JM's field-picture
 files edit to the last field's pts, their samples lasting half a frame), else 'mdhd''s, or the samples' when longer (a
 fragmented file's 'mdhd' counts only the samples in 'moov'); AVI's 'strh' length, and AVI's audio, which the demuxer
-does not expose, is not counted (avi-dropped-frame's MP3 outlasts its video). H.264's size is the decoder's frame size
+does not expose, is not counted (avi-dropped-frame's MP3 outlasts its video); Matroska's Segment Duration, which
+FFmpeg takes as the file's own, from the earliest packet (AAC's, 21 ms before the video, at its CodecDelay), not each
+stream's start plus it; without one (mkv-h264-live) ffprobe gives no duration, and the probe's, from the first packet
+to the end of the last, is checked against ffprobe's packets. H.264's size is the decoder's frame size
 from the SPS, which can crop the container's.
 
 The thumbnails' pixels (`RgbaImage`, ManagedCodecs.Thumbnails) are each frame converted to RGBA at its own size (the
@@ -182,12 +185,12 @@ codec private data match FFmpeg, for video and audio tracks, fragmented files (m
 `ReadPacketInfo` is checked to be `ReadPackets`'s packets without their data, with no read of the file, and a demuxer of
 one track (`MediaTypes.Video` or `Audio`) to give that track's description and packets as one of both does. AVI's
 and ADTS's `ReadPacketInfo` are checked the same way on their samples: ADTS's with no read of the file, AVI's reading
-only chunk headers, 8 bytes each. `Seek` is checked on every MP4 and AVI sample (MJPEG), at each keyframe's time, one
+only chunk headers, 8 bytes each. `Seek` is checked on every MP4, Matroska and AVI sample (MJPEG), at each keyframe's time, one
 tick before and after it, between keyframes, before the first and past the last, in both streams: each stream's
 packets after it are the tail of a read from the start, from the last keyframe whose pts is at or before the time
 (`SeekTests`). The frame then shown at a time matches FFmpeg's accurate seek (`ffmpeg -seek_timestamp 1 -ss t -i ...
 -frames:v 1`, name.seekNNNN.framemd5) between keyframes, on one, in a fragmented file that starts late, past an empty
-edit and in MJPEG (`SeekFrameTests`). Audio is trimmed by the edit list as FFmpeg trims it: priming
+edit, in MJPEG and in Matroska (`SeekFrameTests`). Audio is trimmed by the edit list as FFmpeg trims it: priming
 skipped sample by sample, packets after the edit's end left out.
 
 Edit lists of several edits, which FFmpeg's muxer never writes, come from rewritten samples (`tools/mp4-edit-list.py`,

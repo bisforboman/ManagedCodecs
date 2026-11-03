@@ -13,7 +13,7 @@ run time.
 
 ## Unreleased
 
-Matroska and WebM demuxing. New public API (a new demuxer), hence the next minor version.
+Matroska and WebM demuxing, and thumbnails of Matroska files. New public API (a new demuxer), hence the next minor version.
 
 ### Added
 
@@ -22,6 +22,8 @@ Matroska and WebM demuxing. New public API (a new demuxer), hence the next minor
   files), header stripping, `ReadPacketInfo` and `Seek` (with Cues or without). H.264, MJPEG and AAC map to `CodecIds`;
   other codecs (VP9, AV1, Opus, Vorbis) keep their Matroska Codec IDs. Checked packet by packet against FFmpeg (#305;
   docs/decisions/2026-11-03-matroska-demuxer.md).
+- Thumbnails: `VideoProbe` and `VideoThumbnail` on Matroska files, checked against ffprobe and FFmpeg's `-ss`: the
+  duration is the Segment's, as FFmpeg's, from the earliest packet.
 
 ## 0.7.0 – 2026-11-01
 

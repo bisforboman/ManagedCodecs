@@ -99,9 +99,8 @@ and code that reproduces FFmpeg's reading where it differs from the spec), and n
   API); without concealment, a
   lost reference fails pictures up to the next IDR picture, not an MMCO 5 one (by design: the MMCO 5 picture itself
   would have to be decoded from lists that can no longer be trusted, so its marking never applies).
-- Matroska: `VideoProbe` and `VideoThumbnail` (Thumbnails) open it through `Demuxer.Open` but aren't checked against
-  ffprobe on it yet (FFmpeg's file duration there is the Segment's, not the streams'); zlib-compressed and encrypted tracks, a DiscardPadding's samples at the end (Opus), and
-  the display rotation (Projection) aren't read.
+- Matroska: zlib-compressed and encrypted tracks, a DiscardPadding's samples at the end (Opus), and the display
+  rotation (Projection) aren't read.
 - H.264 speed: 1.4 to 3.0 times FFmpeg's time on one thread in the steady state, interlaced video included (Benchmarking); at 720p
   every class sits at 2.2 to 2.8 times (CAVLC and CABAC, P and intra-only, High), so the gap is general rather than
   one class's (the CAVLC residual reader's compiled code is clean). MBAFF frames and field pictures find the pairs
@@ -340,7 +339,7 @@ checks the lists after each.
 
 ### Probing a video
 
-`ManagedCodecs.Thumbnails`'s `VideoProbe.Read(stream)` gives an MP4 or AVI file's facts without decoding a frame:
+`ManagedCodecs.Thumbnails`'s `VideoProbe.Read(stream)` gives an MP4, Matroska or AVI file's facts without decoding a frame:
 `Duration` as ffprobe's `format=duration`, the coded and the displayed size (stretched by the pixels' aspect ratio,
 wider above 1 and taller below, then turned by the rotation), codec, frame rate, rotation and the audio's codec, rate
 and channels. Each is checked against ffprobe on every sample (VideoProbeTests). The stream must be seekable (an MP4
@@ -348,7 +347,8 @@ file's index can follow its data): buffer an upload first. A codec this library 
 `NotSupportedException`, a file without video `InvalidDataException`; AVI's audio is not read, so an AVI lasts as long
 as its video. The duration comes from the streams' `Duration` (`VideoStreamInfo`, `AudioStreamInfo`), which the
 demuxers give as FFmpeg's stream duration: MP4's edits' length, capped at the samples they take, else the track's,
-AVI's stream header length.
+AVI's stream header length; a Matroska file's is its Segment's Duration, from its earliest packet, as FFmpeg's (a live
+recording without one: its packets').
 
 ```csharp
 var info = VideoProbe.Read("upload.mp4");
@@ -357,7 +357,7 @@ Console.WriteLine($"{info.Duration} {info.DisplayWidth}x{info.DisplayHeight} {in
 
 ### Thumbnails
 
-`VideoThumbnail.Create(stream, options)` takes one frame of an MP4 or AVI file (H.264 or MJPEG) and gives a
+`VideoThumbnail.Create(stream, options)` takes one frame of an MP4, Matroska or AVI file (H.264 or MJPEG) and gives a
 `Thumbnail`: its RGBA pixels upright, `Width`, `Height`, the frame's `Time`, `SavePng`/`ToPng` (a PNG written here,
 deflated by the BCL: no image library, native code or FFmpeg) and `SaveJpeg`/`ToJpeg` (a baseline JPEG written here,
 4:2:0, `quality` 1 to 100 as libjpeg's, 85 by default; docs/decisions/2026-11-01-thumbnails-jpeg.md). For WebP, hand

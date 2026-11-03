@@ -248,6 +248,10 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.Containers/Mp4/Mp4Demuxer.cs",
          find="return Math.Max(MediaDuration, total);", replace="return MediaDuration;",
          tests="FullyQualifiedName~VideoProbeTests"),
+    # ... and a Matroska file's is its Segment's Duration from the earliest packet, not each stream's start plus it.
+    dict(file="src/ManagedCodecs.Thumbnails/VideoProbe.cs",
+         find="bool segmentDuration = demuxer is MatroskaDemuxer;", replace="bool segmentDuration = false;",
+         tests="FullyQualifiedName~VideoProbeTests"),
     # The probe's H.264 frame size is the SPS's visible area or the container's crop of it, as the decoder's frames.
     dict(file="src/ManagedCodecs.H264/H264Decoder.cs",
          find="return TakesContainerSize(sps, stream.Width, stream.Height) ? (stream.Width, stream.Height) : (sps.Width, sps.Height);",

@@ -33,7 +33,7 @@ public class SeekFrameTests
         var match = SeekReference().Match(reference);
         string stem = match.Groups[1].Value;
         long milliseconds = long.Parse(match.Groups[2].Value, System.Globalization.CultureInfo.InvariantCulture);
-        string name = File.Exists(TestSamples.PathOf(stem + ".mp4")) ? stem + ".mp4" : stem + ".avi";
+        string name = new[] { ".mp4", ".mkv", ".avi" }.Select(extension => stem + extension).First(n => File.Exists(TestSamples.PathOf(n)) || n.EndsWith(".avi", StringComparison.Ordinal));
         var expected = FrameMd5.Parse(File.ReadLines(TestSamples.PathOf(reference))).Single(e => e.StreamIndex == 0);
 
         using var demuxer = Demuxer.Open(TestSamples.PathOf(name));

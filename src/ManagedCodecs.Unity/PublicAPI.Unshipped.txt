@@ -1,15 +1,1 @@
 #nullable enable
-ManagedCodecs.Containers.MatroskaDemuxer
-ManagedCodecs.Containers.MatroskaDemuxer.Audio.get -> ManagedCodecs.AudioStreamInfo?
-ManagedCodecs.Containers.MatroskaDemuxer.Dispose() -> void
-ManagedCodecs.Containers.MatroskaDemuxer.MatroskaDemuxer(System.IO.Stream! stream, bool leaveOpen = false) -> void
-ManagedCodecs.Containers.MatroskaDemuxer.ReadPacketInfo() -> System.Collections.Generic.IEnumerable<ManagedCodecs.PacketInfo>!
-ManagedCodecs.Containers.MatroskaDemuxer.ReadPackets() -> System.Collections.Generic.IEnumerable<ManagedCodecs.Packet>!
-ManagedCodecs.Containers.MatroskaDemuxer.ReadPacketsAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerable<ManagedCodecs.Packet>!
-ManagedCodecs.Containers.MatroskaDemuxer.Seek(long pts, int streamIndex) -> void
-ManagedCodecs.Containers.MatroskaDemuxer.Video.get -> ManagedCodecs.VideoStreamInfo?
-ManagedCodecs.Packet.SkipEndSamples.get -> int
-ManagedCodecs.Packet.SkipEndSamples.init -> void
-ManagedCodecs.PacketInfo.SkipEndSamples.get -> int
-ManagedCodecs.PacketInfo.SkipEndSamples.init -> void
-static ManagedCodecs.Containers.MatroskaDemuxer.Open(string! path) -> ManagedCodecs.Containers.MatroskaDemuxer!

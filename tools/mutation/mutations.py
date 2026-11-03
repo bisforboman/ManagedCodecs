@@ -199,7 +199,44 @@ MUTATIONS = [
          tests="FullyQualifiedName~SeekTests"),
     # The other stream starts at the same instant, not at its beginning.
     dict(file="src/ManagedCodecs.Containers/Mp4/Mp4Demuxer.cs",
-         find="int otherStart = otherBase is { } b ? other.KeyframeAtOrBefore(Rescale(pts, seekedBase, b)) : 0;", replace="int otherStart = 0;",
+         find="int otherStart = otherBase is { } b ? other.KeyframeAtOrBefore(Timestamps.Rescale(pts, seekedBase, b)) : 0;", replace="int otherStart = 0;",
+         tests="FullyQualifiedName~SeekTests"),
+
+    # ---- Matroska (as FFmpeg reads it)
+    # The track's CodecDelay moves its timestamps back (AAC's and Opus's first packets at negative times) ...
+    dict(file="src/ManagedCodecs.Containers/Matroska/MatroskaDemuxer.cs",
+         find="long pts = checked(clusterTime + relative - track.CodecDelayTicks);", replace="long pts = checked(clusterTime + relative);",
+         tests="FullyQualifiedName~Matroska"),
+    # ... rounded to the nearest tick (Opus's 6.5 ms to 7).
+    dict(file="src/ManagedCodecs.Containers/Matroska/MatroskaDemuxer.cs",
+         find="track.CodecDelayTicks = (track.CodecDelay + (TimestampScale / 2)) / TimestampScale;",
+         replace="track.CodecDelayTicks = track.CodecDelay / TimestampScale;",
+         tests="FullyQualifiedName~Matroska"),
+    # A lace's frames share its duration out, the remainder to the later ones.
+    dict(file="src/ManagedCodecs.Containers/Matroska/MatroskaDemuxer.cs",
+         find="long share = (duration * (f + 1) / frames) - (duration * f / frames);", replace="long share = duration / frames;",
+         tests="FullyQualifiedName~Matroska"),
+    # A lace's duration is the DefaultDuration times its frames, in nanoseconds before the division into ticks.
+    dict(file="src/ManagedCodecs.Containers/Matroska/MatroskaDemuxer.cs",
+         find=": track.DefaultDuration > 0 ? checked(track.DefaultDuration * frames) / TimestampScale",
+         replace=": track.DefaultDuration > 0 ? checked(track.DefaultDuration / TimestampScale * frames)",
+         tests="FullyQualifiedName~Matroska"),
+    # An unknown-size Cluster ends at the next top-level element.
+    dict(file="src/ManagedCodecs.Containers/Matroska/MatroskaDemuxer.cs",
+         find="if (unknownSize && Ebml.IsTopLevel(id))", replace="if (false)",
+         tests="FullyQualifiedName~Matroska"),
+    # A BlockGroup with a ReferenceBlock is no keyframe.
+    dict(file="src/ManagedCodecs.Containers/Matroska/MatroskaDemuxer.cs",
+         find="AddBlock(blockStart, blockSize, clusterTime, keyframe: !referenced, duration);",
+         replace="AddBlock(blockStart, blockSize, clusterTime, keyframe: true, duration);",
+         tests="FullyQualifiedName~Matroska"),
+    # Without DisplayWidth and DisplayHeight the ratio is 1:1 (they default to the pixel size), as FFmpeg reads it.
+    dict(file="src/ManagedCodecs.Containers/Matroska/MatroskaDemuxer.cs",
+         find="long displayWidth = track.DisplayWidth > 0 ? track.DisplayWidth : track.Width;", replace="long displayWidth = track.DisplayWidth;",
+         tests="FullyQualifiedName~Matroska"),
+    # Seeking starts at the last keyframe whose pts is at or before the time.
+    dict(file="src/ManagedCodecs.Containers/Matroska/MatroskaDemuxer.cs",
+         find="if (entry.Slot == slot && entry.Keyframe && entry.Pts <= pts)", replace="if (entry.Slot == slot && entry.Keyframe && entry.Pts < pts)",
          tests="FullyQualifiedName~SeekTests"),
 
     # A stream's duration as FFmpeg gives it (VideoProbe's against ffprobe's): an edit lasts no longer than the samples it

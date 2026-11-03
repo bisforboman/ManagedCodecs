@@ -1,8 +1,8 @@
 # ManagedCodecs
 
 Pure managed C# media codecs: no native binaries, Native AOT friendly, and running on WebAssembly too. Decoders for
-MJPEG, H.264 (Constrained Baseline up to High 4:4:4 Predictive), AAC LC and HE-AAC, with AVI, MP4 and raw AAC (ADTS)
-demuxing, every one checked against FFmpeg sample by sample: video **bit-exact**, AAC LC within 2^-17 of FFmpeg's float
+MJPEG, H.264 (Constrained Baseline up to High 4:4:4 Predictive), AAC LC and HE-AAC, with AVI, MP4, Matroska/WebM and raw
+AAC (ADTS) demuxing, every one checked against FFmpeg sample by sample: video **bit-exact**, AAC LC within 2^-17 of FFmpeg's float
 output. H.264 decodes
 on several threads if asked, and every decoder has an async API.
 
@@ -29,7 +29,7 @@ in between. That comparison is not measured here.
 | Project | What it holds |
 | --- | --- |
 | `src/ManagedCodecs.Core` | `VideoFrame`, `PixelFormat`, `Packet`, `Rational`, `IDemuxer`, `IVideoDecoder` |
-| `src/ManagedCodecs.Containers` | `AviDemuxer`, `Mp4Demuxer`, `AdtsDemuxer` (raw .aac), and `Demuxer.Open` to pick one by content |
+| `src/ManagedCodecs.Containers` | `AviDemuxer`, `Mp4Demuxer`, `MatroskaDemuxer` (Matroska and WebM), `AdtsDemuxer` (raw .aac), and `Demuxer.Open` to pick one by content |
 | `src/ManagedCodecs.Mjpeg` | `MjpegDecoder`: baseline/extended Huffman JPEG, interlaced AVI1, bit-exact with FFmpeg |
 | `src/ManagedCodecs.H264` | `H264Decoder`: Constrained Baseline, Main, High, High 10, High 4:2:2 and High 4:4:4 Predictive profile H.264 (CAVLC, CABAC, I/P/B, weighted prediction, 8x8 transform, scaling matrices, deblocking, monochrome, 4:2:0, 4:2:2 and 4:4:4, also as separate colour planes, 8 to 14 bits, lossless, progressive and interlaced), bit-exact |
 | `src/ManagedCodecs.Thumbnails` | `VideoProbe`: a video file's duration, displayed size, codecs and rotation as ffprobe reports them, without decoding; `VideoThumbnail`: a frame as a small upright RGBA image, PNG or JPEG; the `ManagedCodecs.Thumbnails` package (see Probing a video, Thumbnails; docs/decisions/2026-10-31-thumbnails.md) |
@@ -81,8 +81,10 @@ and code that reproduces FFmpeg's reading where it differs from the spec), and n
   docs/conformance.md). Parametric stereo (HE-AAC v2): 10, 20 and 34 bands, mixing procedures Ra and Rb,
   the phase parameters (IPD and OPD), a mono stream decoded to stereo; within 5e-4 of FFmpeg's output, 7e-6 on average. A frame's channels
   through SBR on several threads (`Threads`).
-- **Containers**: AVI (video), MP4 (video and audio tracks, fragmented files too, edit lists of several edits)
-  and raw AAC (ADTS), with packets and timestamps as FFmpeg's demuxers give them.
+- **Containers**: AVI (video), MP4 (video and audio tracks, fragmented files too, edit lists of several edits),
+  Matroska and WebM (video and audio tracks, every kind of lacing, BlockGroups, live files of unknown size, header
+  stripping; VP9, AV1, Opus and other codecs this library doesn't decode by their Codec IDs) and raw AAC (ADTS), with
+  packets and timestamps as FFmpeg's demuxers give them.
 - **Throughout**: an async API, malformed input that ends in `InvalidDataException` or `NotSupportedException`
   (fuzzed), and the same output on x64, ARM64 and WebAssembly, and under Native AOT (CI checks all of them).
 
@@ -97,6 +99,9 @@ and code that reproduces FFmpeg's reading where it differs from the spec), and n
   API); without concealment, a
   lost reference fails pictures up to the next IDR picture, not an MMCO 5 one (by design: the MMCO 5 picture itself
   would have to be decoded from lists that can no longer be trusted, so its marking never applies).
+- Matroska: `VideoProbe` and `VideoThumbnail` (Thumbnails) open it through `Demuxer.Open` but aren't checked against
+  ffprobe on it yet (FFmpeg's file duration there is the Segment's, not the streams'); zlib-compressed and encrypted tracks, a DiscardPadding's samples at the end (Opus), and
+  the display rotation (Projection) aren't read.
 - H.264 speed: 1.4 to 3.0 times FFmpeg's time on one thread in the steady state, interlaced video included (Benchmarking); at 720p
   every class sits at 2.2 to 2.8 times (CAVLC and CABAC, P and intra-only, High), so the gap is general rather than
   one class's (the CAVLC residual reader's compiled code is clean). MBAFF frames and field pictures find the pairs
@@ -203,8 +208,8 @@ properties, which FFmpeg's muxer writes), and nothing else of these.
 An MP4 file's tracks can be read one at a time: `new Mp4Demuxer(stream, MediaTypes.Video)` leaves the audio track out
 (no sample table, no packets, `Audio` null). Every demuxer's `ReadPacketInfo()` lists the packets without their data,
 each one's size, keyframe and discard flags and timestamps: a duration, a packet list or a bitrate graph needs nothing
-more. MP4's comes from the sample tables and ADTS's from the frames found on opening, neither reading the file; AVI's
-walks the 'movi' list reading each chunk's 8-byte header and skipping its data.
+more. MP4's comes from the sample tables, and Matroska's and ADTS's from the blocks and frames found on opening, none
+reading the file; AVI's walks the 'movi' list reading each chunk's 8-byte header and skipping its data.
 
 ```csharp
 using var demuxer = new Mp4Demuxer(File.OpenRead("video.mp4"), MediaTypes.Video);
@@ -214,7 +219,8 @@ long bytes = demuxer.ReadPacketInfo().Sum(p => (long)p.Size);
 `Seek(pts, streamIndex)` moves where the next read starts: at the keyframe at or before `pts` (in that stream's time
 base), the other stream at the same instant. The packets are those a read from the start gives from there, so decode
 them with a new decoder (or one flushed) and drop the frames shown before the time, as FFmpeg's `-ss` does. MP4 seeks
-in every file, fragmented and edited ones too, by its sample tables; AVI in MJPEG, every frame of which is a keyframe
+in every file, fragmented and edited ones too, by its sample tables; Matroska in every file, with Cues or without,
+by the blocks it found on opening; AVI in MJPEG, every frame of which is a keyframe
 (other codecs in AVI need the 'idx1' index, not read yet, and throw `NotSupportedException`, as raw AAC does).
 
 ```csharp

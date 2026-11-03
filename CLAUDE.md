@@ -1,6 +1,6 @@
 # ManagedCodecs
 
-Pure managed C# media decoders (MJPEG, H.264, AAC LC and HE-AAC; AVI, MP4 and ADTS demuxing; thumbnails), no native
+Pure managed C# media decoders (MJPEG, H.264, AAC LC and HE-AAC; AVI, MP4, Matroska/WebM and ADTS demuxing; thumbnails), no native
 binaries: Native AOT, WebAssembly and Unity too. What each decodes and what is open: README.md, not copied here.
 
 | Topic | Where |
@@ -88,7 +88,8 @@ Read the CLAUDE.md beside the code you work on, also for a codec's samples or to
   precision.
 - src/ManagedCodecs.Mjpeg: interlaced MJPEG, gray samples, damaged images (FFmpeg as the oracle), the packet-size rule,
   the aspect ratio ffprobe reports.
-- src/ManagedCodecs.Containers: MP4 timestamps and edit lists, fragmented MP4's packet durations.
+- src/ManagedCodecs.Containers: MP4 timestamps and edit lists, fragmented MP4's packet durations, what FFmpeg's
+  Matroska muxer never writes and what ffprobe fills in.
 - tools/ManagedCodecs.Fuzz: fuzzing with AFL++ and SharpFuzz, reproducing findings.
 - tools/ManagedCodecs.Wasm: the WebAssembly build and its runtime's bugs.
 

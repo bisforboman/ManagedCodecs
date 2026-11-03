@@ -1,4 +1,4 @@
-# Containers: notes for working on the AVI, MP4 and ADTS demuxers
+# Containers: notes for working on the AVI, MP4, Matroska and ADTS demuxers
 
 The repository's CLAUDE.md (process, core idea, cross-cutting gotchas) applies too.
 
@@ -17,3 +17,10 @@ The repository's CLAUDE.md (process, core idea, cross-cutting gotchas) applies t
   `ffprobe -show_packets -show_data_hash MD5` (make-samples.sh's `.packets.csv`).
 - In fragmented MP4, FFmpeg's packet durations are not the file's: its demuxer leaves them unset and libavformat
   fills in the codec frame size (1024 for AAC). Compare with FFmpeg's next dts instead (Mp4ConformanceTests does).
+- Matroska: FFmpeg's muxer writes only SimpleBlocks, never lacing or BlockGroups, and no DefaultDuration for audio;
+  `tools/mkv-rewrite.py` rewrites its files (`--lace xiph|ebml|fixed`, `--block-groups`, `--unknown-size`; `--dump`
+  prints a file's elements). Fixed-size lacing needs frames of one size: PCM. FFmpeg's own Matroska reading shows only
+  under `ffprobe -fflags +nofillin+noparse`: by default libavformat fills in durations (AAC's from the frame size) and
+  decode times, and marks every audio packet a keyframe, and the Opus parser reads durations from the packets.
+- Matroska decode times: FFmpeg's come from the H.264 SPS's reorder depth (`has_b_frames`), not from the file; the
+  demuxer doesn't parse the SPS and takes the fewest frames that work, so its dts can be later than FFmpeg's.

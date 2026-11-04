@@ -115,8 +115,9 @@ Decoding straight into the output frame: opt-in, `MjpegDecoder.ZeroCopy` (6% few
 video (make-samples.sh's name.probe.json): `format=duration` within 1.5 µs, width and height, sample aspect ratio,
 rotation, average frame rate and the audio stream's rate and channels. The duration is the streams' container
 durations as FFmpeg reads them: MP4's edits' length, but no longer than the samples they take (JM's field-picture
-files edit to the last field's pts, their samples lasting half a frame), else 'mdhd''s, or the samples' when longer (a
-fragmented file's 'mdhd' counts only the samples in 'moov'); AVI's 'strh' length, and AVI's audio, which the demuxer
+files edit to the last field's pts, their samples lasting half a frame), else the shorter of 'mdhd''s and the samples'
+(mp4-mdhd-duration: no edit list, the video's 'mdhd' shorter, the audio's longer), or the longer in a fragmented file
+(its 'mdhd' counts only the samples in 'moov'); AVI's 'strh' length, and AVI's audio, which the demuxer
 does not expose, is not counted (avi-dropped-frame's MP3 outlasts its video); Matroska's Segment Duration, which
 FFmpeg takes as the file's own, from the earliest packet (AAC's, 21 ms before the video, at its CodecDelay), not each
 stream's start plus it; without one (mkv-h264-live) ffprobe gives no duration, and the probe's, from the first packet

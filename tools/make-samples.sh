@@ -194,6 +194,20 @@ lowest = min(struct.unpack_from('>i', data, at + 16 + 8 * e)[0] for e in range(e
 struct.pack_into('>i', data, at + 16 + 8 * (entries - 1), lowest - 2048)
 open(sys.argv[1], 'wb').write(data)
 PY
+# No edit list (-use_editlist 0), and 'mdhd' durations that aren't the samples' sum, as an Android phone's files (#317):
+# the video's shorter, the audio's longer. FFmpeg's stream duration is the shorter of the two: the video's 'mdhd', the
+# audio's samples.
+ff -f lavfi -i "testsrc2=size=320x240:rate=25" -f lavfi -i "sine=frequency=330:sample_rate=48000" -t 1 \
+  -c:v libx264 -bf 2 -c:a aac -use_editlist 0 samples/mp4-mdhd-duration.mp4
+python3 -I - samples/mp4-mdhd-duration.mp4 <<'PY'
+import struct, sys
+data = bytearray(open(sys.argv[1], 'rb').read())
+video, audio = (i for i in range(len(data)) if data[i:i + 4] == b'mdhd')
+for at, change in ((video, -700), (audio, 1500)):
+    assert data[at + 4] == 0  # version 0: 32-bit duration after the times and the timescale
+    struct.pack_into('>I', data, at + 20, struct.unpack_from('>I', data, at + 20)[0] + change)
+open(sys.argv[1], 'wb').write(data)
+PY
 
 # ---- H.264 Constrained Baseline ----
 # Intra only without the deblocking filter (at several QPs), intra with the filter and with filter offsets, P frames

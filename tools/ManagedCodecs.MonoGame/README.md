@@ -33,7 +33,8 @@ renderer (`Xvfb :99 &`, `DISPLAY=:99`, and `ALSOFT_DRIVERS=null` for audio with 
 
 ## Measured
 
-Under Xvfb on the cloud VM (4 vCPUs of a 2.1 GHz Xeon, Mesa's llvmpipe drawing), the window title's means:
+Under Xvfb on the cloud VM (4 vCPUs of a 2.1 GHz Xeon, Mesa's llvmpipe drawing), the window title's means, with the
+conversion by tables on one thread (as it was then):
 
 | Video | Frames shown | Decode, ms a frame | RGBA conversion, ms a frame |
 |---|---|---:|---:|
@@ -41,5 +42,16 @@ Under Xvfb on the cloud VM (4 vCPUs of a 2.1 GHz Xeon, Mesa's llvmpipe drawing),
 | testsrc2 with noise (1920x1080, 30 fps, libx264 High CRF 20, and AAC, 37 Mbps) | 20 s played in 21 s with start-up | 9.0 | 18.9 |
 
 1080p30 keeps up, the noisy one with little to spare: decoding and conversion share the decoding thread, 28 of a
-frame's 33 ms there. The CPU conversion costs two to three times the decoding (H.264 frame threading spreads that
-over up to 4 threads; the conversion runs on one), so it is now the larger cost a shader would remove.
+frame's 33 ms there. That conversion was by tables on one thread. It is now by 128-bit vectors where chroma has half
+the width (4:2:0, 4:2:2), shared out over threads from about 512x512 (`YuvToRgba.Convert(VideoFrame, byte[])`), and
+checked byte for byte against the formula (YuvToRgbaTests):
+
+| Caminandes' frames (1080p, 4:2:0) | ms a frame |
+|---|---:|
+| Tables, one thread (before) | 6.3 to 6.7 |
+| Vectors, one thread | 3.4 to 3.8 |
+| Vectors, threads (what mcplay calls) | 1.8 to 2.0 |
+
+Converted alone, 120 decoded frames each three times (two runs of each, alternated). In mcplay, beside the decoder's
+threads and llvmpipe on the same 4 vCPUs, the title's conversion went from 11.0 and 12.7 ms a frame to 8.0 and 7.5
+(30 s of Caminandes, the same order alternated).

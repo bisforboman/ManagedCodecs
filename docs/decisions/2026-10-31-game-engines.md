@@ -69,3 +69,6 @@ The owner (2026-10-31), against the recommendation to keep it parked:
   24 fps, decoding 4.7 ms a frame and converting to RGBA 13.0 ms; a 37 Mbps 1080p30 clip keeps up too, 9.0 and
   18.9 ms. The CPU conversion, not the decoder, is the larger cost (tools/ManagedCodecs.MonoGame/README.md). The run
   found a crash without an audio device (OpenAL's NoAudioHardwareException), now caught: the video plays alone.
+- The RGBA conversion (mcplay's, linked into the Godot and Unity samples) by 128-bit vectors and over threads
+  (2026-11-04): Caminandes' 1080p frames from 6.5 ms to 1.9 ms each alone, from about 12 to 8 ms in mcplay beside the
+  decoder. Unity's netstandard2.1 build has no vectors and keeps the tables, on threads.

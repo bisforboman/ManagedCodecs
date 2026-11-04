@@ -1,6 +1,7 @@
 # H.264: motion vector prediction in frames without the generic lookup (2026-11-04)
 
-**Proposed, not decided.** A design for the owner to decide (Decisions, below), before any code. It follows
+**Closed, 2026-11-04: tried and dropped.** Under the JIT it gained about 0.1% of the frame, far below the 1% bar the
+owner set (Outcome, at the end). The design and decisions below are as they were decided, before the try. It follows
 `docs/notes/h264-speed-gap-2026-10.md` and the closed record `2026-10-28-h264-neighbour-context.md`, and it is meant
 to be different from what that record tried and dropped.
 
@@ -68,11 +69,43 @@ nothing under the JIT).
 
 ## Decisions
 
-1. **Whether to try it at all.** The record of 2026-10-28 decided against grids for frames, and this is not a grid,
-   but it is the same territory. Proposed: one measured attempt, dropped if the JIT build does not gain at least 1% on
-   the 720p streams.
-2. **Unchecked reads.** Proposed: a bounds check once a macroblock and `Unsafe` reads after it, as CABAC's significance
-   map does (#188), with the reference test above as the guard. The alternative is checked reads, giving up part of
-   the gain.
-3. **Scope.** Proposed: frames only. MBAFF frames and field pictures keep `AffNeighbor` with the pairs found once
+Asked with the multiple-choice prompt; the owner took each proposal (2026-11-04).
+
+1. **Whether to try it at all. Decided:** one measured attempt, dropped if the JIT build does not gain at least 1% on
+   both 720p streams (perf, the order alternating). The record of 2026-10-28 decided against grids for frames; this is
+   not a grid, but it is the same territory, hence the bar.
+2. **Unchecked reads. Decided:** a bounds check once a macroblock and `Unsafe` reads after it, as CABAC's
+   significance map does (#188), with the reference test above as the guard.
+3. **Scope. Decided:** frames only. MBAFF frames and field pictures keep `AffNeighbor` with the pairs found once
    (#177).
+
+## Outcome (2026-11-04)
+
+**Dropped: under the JIT, about 0.1% of the frame.** A prototype was built as designed: A to D found once an inter
+macroblock in frames (in `StartInterMacroblock`), a frames path in `MotionNeighbor` choosing the neighbour by (x, y)
+with no lookup, and unchecked reads behind a check once a picture that the arrays hold every macroblock. It decoded
+every H.264 sample bit-exact (1753 tests). The first build forgot that adaptive PAFF streams mix frame pictures with
+field pictures and MBAFF frames: the fields, still set from a frame picture, were read in the next one. A picture with
+pairs has to clear them.
+
+By instructions (Native AOT, callgrind, loops 3 minus loops 1), against main at 3f8b0d4:
+
+| Stream | Main | Prototype |
+| --- | ---: | ---: |
+| 720p libx264 default (CABAC, B) | 59.929 M | 59.165 M (-1.27%) |
+| `h264-bench-720p.mp4` (CAVLC, P) | 41.468 M | 41.217 M (-0.61%) |
+
+Of that, inlining mattered most. As first written, the frames path was called out of line (two prologues a call), and
+`BlockIndex` was not inlined: -0.34% and +0.1%. The unchecked reads gave 0.05%.
+
+Under the JIT (perf on the CABAC stream, six runs of each build, the order alternating, normalized by functions the
+change does not touch) there was no difference in the normalized totals beyond the noise: medians 3.137 (main) and
+3.166 (prototype). The touched functions' shares went from 6.58% of the samples to 6.47%: `MotionNeighbor` 2.45% to
+2.02%, less the new `FindMotionNeighbors` (0.20%) and slightly larger callers. The JIT's `MotionNeighbor` was already
+leaner than the AOT counts suggest (2.45% of the time against 4.8% of the AOT build's instructions), the same
+divergence as the `StoreMotion` experiment of 2026-10-28.
+
+So in frames the lookup is not where the motion bookkeeping's time goes under the JIT. What is left is spread over
+the reads, the `Motion` values passed between `MotionNeighbor` and `PredictMv`, and the stores. None of it
+looks like a change of its own.
+

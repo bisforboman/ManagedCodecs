@@ -23,6 +23,7 @@ internal sealed class PlayerGame : Game
     private RgbaFrame? _next;
     private double _aspect = 1;
     private bool _ended;
+    private bool _noAudio;
     private double _start;
 
     public PlayerGame(string path)
@@ -144,14 +145,31 @@ internal sealed class PlayerGame : Game
         base.Dispose(disposing);
     }
 
-    // Keeps a few buffers queued; the first audio frame sets the rate.
+    // Keeps a few buffers queued; the first audio frame sets the rate. Without an audio device (OpenAL finds none: a
+    // server, a container, a machine with sound off) the video plays alone, the audio taken and dropped so that its
+    // bounded queue doesn't stop the decoding thread.
     private void SubmitAudio()
     {
         while ((_sound is null || _sound.PendingBufferCount < 4) && _source.Audio.TryTake(out var chunk))
         {
+            if (_noAudio)
+            {
+                continue;
+            }
+
             if (_sound is null)
             {
-                _sound = new DynamicSoundEffectInstance(chunk.SampleRate, AudioChannels.Stereo);
+                try
+                {
+                    _sound = new DynamicSoundEffectInstance(chunk.SampleRate, AudioChannels.Stereo);
+                }
+                catch (NoAudioHardwareException e)
+                {
+                    Console.Error.WriteLine($"mcplay: no audio device, playing the video alone ({e.Message})");
+                    _noAudio = true;
+                    continue;
+                }
+
                 _sound.Play();
             }
 

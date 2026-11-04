@@ -11,7 +11,8 @@ player: no seeking, no pause, Escape quits.
   drops late ones, through one `Texture2D` (`SetData` each frame). A frame's pixels go back to `MediaSource.Return`
   once uploaded or dropped and the next frame is converted into them: a new 3.6 MB array per 720p frame meant a gen 2
   collection every 8 frames or so (31 in 240 frames of a 720p clip, 2 with the arrays reused).
-- Audio goes to a `DynamicSoundEffectInstance` as 16-bit stereo (more channels downmixed to the first two).
+- Audio goes to a `DynamicSoundEffectInstance` as 16-bit stereo (more channels downmixed to the first two). Without
+  an audio device (OpenAL finds none) the video plays alone, the audio decoded and dropped.
 - The window title shows the decoding's and the RGBA conversion's time per frame, means over the run on the decoding
   thread. The decoding's is the time in the decoder's calls over the frames they returned: with H.264 frame threading
   one call's time doesn't belong to one frame, so only a mean over many is meaningful.
@@ -27,4 +28,18 @@ player: no seeking, no pause, Escape quits.
 - A shader would convert faster than the CPU, but MonoGame's effect compiler (mgfxc) needs Wine on Linux, so it is
   left for when the CPU conversion turns out to be the bottleneck.
 
-CI builds it; it needs a window and a GPU to run, so it runs on a developer's machine, not in CI.
+CI builds it. It needs a window and OpenGL, so CI doesn't run it, but it runs headless under Xvfb with Mesa's software
+renderer (`Xvfb :99 &`, `DISPLAY=:99`, and `ALSOFT_DRIVERS=null` for audio with no device behind it).
+
+## Measured
+
+Under Xvfb on the cloud VM (4 vCPUs of a 2.1 GHz Xeon, Mesa's llvmpipe drawing), the window title's means:
+
+| Video | Frames shown | Decode, ms a frame | RGBA conversion, ms a frame |
+|---|---|---:|---:|
+| Caminandes: Gran Dillama (1920x1080, 24 fps, H.264 High and AAC, 6.9 Mbps) | 1290 in 54 s: all, in time | 4.7 | 13.0 |
+| testsrc2 with noise (1920x1080, 30 fps, libx264 High CRF 20, and AAC, 37 Mbps) | 20 s played in 21 s with start-up | 9.0 | 18.9 |
+
+1080p30 keeps up, the noisy one with little to spare: decoding and conversion share the decoding thread, 28 of a
+frame's 33 ms there. The CPU conversion costs two to three times the decoding (H.264 frame threading spreads that
+over up to 4 threads; the conversion runs on one), so it is now the larger cost a shader would remove.

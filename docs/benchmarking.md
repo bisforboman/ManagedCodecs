@@ -89,7 +89,8 @@ cannot. #312 passed it (1.9% of the frame by perf, 2.1% by count).
 What the count does see in both builds: a static array read from a hot method costs a class-initialization check and
 a load at every use, because mcdec compiles each method once, at its first call (tiered compilation off), often before
 the class's static constructor has run, and Native AOT checks the same way. Constant tables written as
-`static ReadOnlySpan<byte> X => [...]` don't pay it (#313: 2.8% of a CABAC frame, from `MpsNext` and `LpsNext`).
+`static ReadOnlySpan<byte> X => [...]` don't pay it (#313, `MpsNext` and `LpsNext`: 2.8% of a CABAC frame by count, about
+1.7% by perf).
 `DOTNET_ReadyToRun=0 DOTNET_JitDisasm=<method>` shows the JIT's code, checks included.
 
 Not the JIT build: under valgrind (seen on runtime 10.0.13) the JIT's full-optimization compiles fail and fall back to

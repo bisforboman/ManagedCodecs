@@ -72,3 +72,7 @@ The owner (2026-10-31), against the recommendation to keep it parked:
 - The RGBA conversion (mcplay's, linked into the Godot and Unity samples) by 128-bit vectors and over threads
   (2026-11-04): Caminandes' 1080p frames from 6.5 ms to 1.9 ms each alone, from about 12 to 8 ms in mcplay beside the
   decoder. Unity's netstandard2.1 build has no vectors and keeps the tables, on threads.
+- A shader conversion parked (the owner, 2026-11-04): dotnet-mgfxc 3.8.6.1, the latest, still refuses to compile
+  without Wine on Linux (MGFXC0001), and the CPU conversion is now about 2 ms a 1080p frame. Wine in CI, a committed
+  compiled shader and a third-party compiler (ShadowDusk) were the other options. Revisit when MonoGame compiles
+  shaders natively.

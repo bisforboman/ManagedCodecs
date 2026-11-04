@@ -9,6 +9,23 @@ namespace ManagedCodecs.Tests.H264;
 /// </summary>
 public class CabacTests
 {
+    // The engine's transitions are constant data; derived here from Table 9-45 and 9.3.3.2.1.1: a context is
+    // pStateIdx in bits 0-5 and valMPS in bit 6, an LPS at state 0 switches valMPS.
+    [Fact]
+    public void Transitions_MatchTable9_45()
+    {
+        for (int c = 0; c < 128; c++)
+        {
+            int state = c & 63;
+            int valMps = c & 64;
+            Assert.Equal(valMps | CabacTables.TransIdxMps[state], Cabac.MpsNext[c]);
+            Assert.Equal((state == 0 ? valMps ^ 64 : valMps) | CabacTables.TransIdxLps[state], Cabac.LpsNext[c]);
+        }
+
+        Assert.Equal(128, Cabac.MpsNext.Length);
+        Assert.Equal(128, Cabac.LpsNext.Length);
+    }
+
     [Fact]
     public void Decoder_ReproducesEncodedBins()
     {

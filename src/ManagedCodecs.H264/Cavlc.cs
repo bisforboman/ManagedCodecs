@@ -28,18 +28,15 @@ internal static class Cavlc
     /// <paramref name="block"/>[<paramref name="scan"/>[position]] for scan positions
     /// 0..maxNumCoeff-1; the caller clears the block first.
     /// </summary>
-    public static int ReadResidualBlock(BitReader r, int nC, int maxNumCoeff, Span<int> block, ReadOnlySpan<byte> scan)
-    {
-        // The reads on a cursor in locals (BitReader.Begin), the position written back once.
-        var bits = r.Begin();
-        int totalCoeff = ReadResidualBlock(ref bits, nC, maxNumCoeff, block, scan);
-        r.Commit(bits);
-        return totalCoeff;
-    }
-
+    /// <remarks>
+    /// The reads go through a cursor in this method's own locals (<see cref="BitReader.Begin"/>), whose bit cache the
+    /// JIT keeps in registers; passed by reference to a method of its own, the cursor stayed in memory, loaded and
+    /// stored at every read.
+    /// </remarks>
     [SkipLocalsInit]
-    private static int ReadResidualBlock(ref BitReader.Cursor r, int nC, int maxNumCoeff, Span<int> block, ReadOnlySpan<byte> scan)
+    public static int ReadResidualBlock(BitReader reader, int nC, int maxNumCoeff, Span<int> block, ReadOnlySpan<byte> scan)
     {
+        var r = reader.Begin();
         var coeffTokenTable = nC switch
         {
             ChromaDcNc => CoeffTokenChromaDc,
@@ -55,6 +52,7 @@ internal static class Cavlc
         int trailingOnes = token & 3;
         if (totalCoeff == 0)
         {
+            reader.Commit(r);
             return 0;
         }
 
@@ -150,6 +148,7 @@ internal static class Cavlc
             position -= run + 1;
         }
 
+        reader.Commit(r);
         return totalCoeff;
     }
 

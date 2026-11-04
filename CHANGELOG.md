@@ -32,6 +32,11 @@ demuxer, two properties), hence a minor version; code built against 0.7 keeps wo
 - Thumbnails: `VideoProbe` and `VideoThumbnail` on Matroska files, checked against ffprobe and FFmpeg's `-ss`: the
   duration is the Segment's, as FFmpeg's, from the earliest packet.
 
+### Fixed
+
+- Containers: an MP4 stream's `Duration` without an edit list is the shorter of the track's 'mdhd' duration and its
+  samples' summed durations, as FFmpeg's (it was the longer: an Android phone's video came out 55 ms too long; #317).
+
 ## 0.7.0 – 2026-11-01
 
 Thumbnails as JPEG: `Thumbnail.SaveJpeg` and `ToJpeg` write a baseline JPEG in managed code, beside the PNG. New public

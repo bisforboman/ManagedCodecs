@@ -75,6 +75,24 @@ About a minute for 150 frames of 720p. The AOT compiler inlines a little differe
 function differ; totals per stage do not depend on it. `--dump-instr=yes` with `objdump -d` of the binary classifies
 the executed instructions (vector, divisions, calls, branches).
 
+**A change's gain by AOT count can be larger than under the JIT**, which is what mcdec and most users run. Twice so
+far the count promised a gain the JIT build did not show: `StoreMotion`'s row stores (-0.7% of the AOT instructions,
+nothing by perf) and motion vector prediction in frames (-1.27%, about -0.1% by perf;
+docs/decisions/2026-11-04-h264-motion-prediction-frames.md). There the JIT's code for the changed functions was
+already leaner than the AOT compiler's (`MotionNeighbor` 2.45% of the JIT build's time, 4.8% of the AOT build's
+instructions). So count to find and to shape a change, but before keeping one that rests on a count, check it under
+the JIT. perf both builds on one stream, six runs each with the order alternating. For each run, divide the changed
+functions' samples (or the total) by those of functions the change does not touch (the motion compensation kernels,
+the deblocking filters), and compare the medians. That ratio resolves a point or two, which the wall clock here
+cannot. #312 passed it (1.9% of the frame by perf, 2.1% by count).
+
+What the count does see in both builds: a static array read from a hot method costs a class-initialization check and
+a load at every use, because mcdec compiles each method once, at its first call (tiered compilation off), often before
+the class's static constructor has run, and Native AOT checks the same way. Constant tables written as
+`static ReadOnlySpan<byte> X => [...]` don't pay it (#313, `MpsNext` and `LpsNext`: 2.8% of a CABAC frame by count, about
+1.7% by perf).
+`DOTNET_ReadyToRun=0 DOTNET_JitDisasm=<method>` shows the JIT's code, checks included.
+
 Not the JIT build: under valgrind (seen on runtime 10.0.13) the JIT's full-optimization compiles fail and fall back to
 MinOpts, where every span index is a call (the QMF FFT's profile, all MinOpts, was 7 times the native instruction
 count). Counts and shares taken that way (`valgrind --tool=callgrind --smc-check=all dotnet <mcdec.dll> ...`) are of

@@ -3,8 +3,9 @@ using ManagedCodecs.MonoGame;
 namespace ManagedCodecs.Tests.MonoGame;
 
 /// <summary>
-/// mcplay's RGBA conversion: the 8-bit path (tables, a pixel a word, two pixels a chroma sample) gives what the
-/// formula sample by sample gives, byte for byte, on random samples of every 8-bit layout, odd sizes included.
+/// mcplay's RGBA conversion: the 8-bit paths (tables, a pixel a word, two pixels a chroma sample; vectors for chroma at
+/// half the width) give what the formula sample by sample gives, byte for byte, on random samples of every 8-bit layout,
+/// odd sizes included, and a frame large enough to be shared out over threads.
 /// </summary>
 public class YuvToRgbaTests
 {
@@ -15,6 +16,7 @@ public class YuvToRgbaTests
         {
             data.Add(format, 64, 32);
             data.Add(format, 37, 19);
+            data.Add(format, 641, 479); // shared out over threads (above YuvToRgba.ParallelPixels), an odd width's tail
         }
 
         return data;

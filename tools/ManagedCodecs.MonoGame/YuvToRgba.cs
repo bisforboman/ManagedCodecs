@@ -1,4 +1,7 @@
 using System.Runtime.InteropServices;
+#if NET
+using System.Runtime.Intrinsics;
+#endif
 
 namespace ManagedCodecs.MonoGame;
 
@@ -88,24 +91,49 @@ internal sealed class YuvToRgba
         }
     }
 
-    /// <summary>Writes <paramref name="frame"/> into <paramref name="rgba"/>, width x height x 4 bytes.</summary>
-    public void Convert(VideoFrame frame, Span<byte> rgba)
+    /// <summary>Writes <paramref name="frame"/> into <paramref name="rgba"/>, width x height x 4 bytes, on this thread.</summary>
+    public void Convert(VideoFrame frame, Span<byte> rgba) => ConvertRows(frame, rgba, 0, frame.Height);
+
+    /// <summary>
+    /// Writes <paramref name="frame"/> into <paramref name="rgba"/>, width x height x 4 bytes: a frame of
+    /// <see cref="ParallelPixels"/> or more in bands of rows on the thread pool (each row is converted on its own, so
+    /// the result is the same), a smaller one on this thread.
+    /// </summary>
+    public void Convert(VideoFrame frame, byte[] rgba)
+    {
+        int height = frame.Height;
+        int bands = Math.Min(Environment.ProcessorCount, height / 16);
+        if (bands < 2 || (long)frame.Width * height < ParallelPixels)
+        {
+            ConvertRows(frame, rgba, 0, height);
+            return;
+        }
+
+        Parallel.For(0, bands, band => ConvertRows(frame, rgba, (int)((long)height * band / bands), (int)((long)height * (band + 1) / bands)));
+    }
+
+    /// <summary>The fewest pixels a frame has for <see cref="Convert(VideoFrame, byte[])"/> to share it out: about 512x512.</summary>
+    public const int ParallelPixels = 1 << 18;
+
+    /// <summary>
+    /// <see cref="Convert(VideoFrame, Span{byte})"/> by the formula, sample by sample at the samples' own depth: any
+    /// depth, and what the 8-bit paths must match byte for byte.
+    /// </summary>
+    public void ConvertReference(VideoFrame frame, Span<byte> rgba) => ReferenceRows(frame, rgba, 0, frame.Height);
+
+    private void ConvertRows(VideoFrame frame, Span<byte> rgba, int top, int bottom)
     {
         if (frame.Format.BytesPerSample() == 1 && BitConverter.IsLittleEndian)
         {
-            Convert8(frame, rgba);
+            Convert8(frame, rgba, top, bottom);
         }
         else
         {
-            ConvertReference(frame, rgba);
+            ReferenceRows(frame, rgba, top, bottom);
         }
     }
 
-    /// <summary>
-    /// <see cref="Convert"/> by the formula, sample by sample at the samples' own depth: any depth, and what the 8-bit
-    /// path must match byte for byte.
-    /// </summary>
-    public void ConvertReference(VideoFrame frame, Span<byte> rgba)
+    private void ReferenceRows(VideoFrame frame, Span<byte> rgba, int top, int bottom)
     {
         int width = frame.Width;
         int height = frame.Height;
@@ -122,7 +150,7 @@ internal sealed class YuvToRgba
         var (chromaWidth, chromaHeight) = gray ? (width, height) : format.PlaneSize(1, width, height);
         int xShift = Shift(width, chromaWidth);
         int yShift = Shift(height, chromaHeight);
-        for (int y = 0; y < height; y++)
+        for (int y = top; y < bottom; y++)
         {
             var luma = frame.GetRow(0, y);
             var cb = gray ? default : frame.GetRow(1, y >> yShift);
@@ -145,8 +173,9 @@ internal sealed class YuvToRgba
     }
 
     // 8-bit samples by the tables, each pixel written as one little-endian word (R, G, B, A in memory). With chroma at
-    // half the width (4:2:0, 4:2:2) a chroma sample's terms serve the two pixels it covers.
-    private void Convert8(VideoFrame frame, Span<byte> rgba)
+    // half the width (4:2:0, 4:2:2) a chroma sample's terms serve the two pixels it covers, and where vectors are
+    // accelerated, 32 pixels at a time by HalfWidthVectors, the tail by the tables.
+    private void Convert8(VideoFrame frame, Span<byte> rgba, int top, int bottom)
     {
         int width = frame.Width;
         int height = frame.Height;
@@ -157,7 +186,7 @@ internal sealed class YuvToRgba
         int yShift = Shift(height, chromaHeight);
         var words = MemoryMarshal.Cast<byte, uint>(rgba);
         int[] yt = _y8;
-        for (int y = 0; y < height; y++)
+        for (int y = top; y < bottom; y++)
         {
             var luma = frame.GetRow(0, y).Slice(0, width);
             var row = words.Slice(y * width, width);
@@ -178,7 +207,8 @@ internal sealed class YuvToRgba
                 int pairs = width >> 1;
                 cb = cb.Slice(0, (width + 1) >> 1);
                 cr = cr.Slice(0, cb.Length);
-                for (int i = 0; i < pairs; i++)
+                int done = HalfWidthVectors(luma, cb, cr, row, pairs);
+                for (int i = done; i < pairs; i++)
                 {
                     int u = cb[i];
                     int v = cr[i];
@@ -206,6 +236,80 @@ internal sealed class YuvToRgba
                 }
             }
         }
+    }
+
+    // The pixel pairs of a row with chroma at half the width, 16 pairs at a time by 128-bit vectors where they are
+    // accelerated: the tables' terms computed, not looked up, in the same 32-bit integers (the same products, shifts and
+    // rounding), so byte for byte the same. Returns how many pairs it did (0 without vectors); the tables do the rest.
+    private int HalfWidthVectors(ReadOnlySpan<byte> luma, ReadOnlySpan<byte> cb, ReadOnlySpan<byte> cr, Span<uint> row, int pairs)
+    {
+#if NET
+        if (!Vector128.IsHardwareAccelerated || pairs < 16)
+        {
+            return 0;
+        }
+
+        var yScale = Vector128.Create(_yScale);
+        var yBias = Vector128.Create((-_yOffset * _yScale) + (1 << 15));
+        var cScale = Vector128.Create(_cScale);
+        var crToR = Vector128.Create(_crToR);
+        var crToG = Vector128.Create(_crToG);
+        var cbToG = Vector128.Create(_cbToG);
+        var cbToB = Vector128.Create(_cbToB);
+        var half = Vector128.Create(128);
+        int i = 0;
+        for (; i + 16 <= pairs; i += 16)
+        {
+            var u = Vector128.Create(cb.Slice(i, 16));
+            var v = Vector128.Create(cr.Slice(i, 16));
+            var y0 = Vector128.Create(luma.Slice(2 * i, 16));
+            var y1 = Vector128.Create(luma.Slice((2 * i) + 16, 16));
+            var (uLow, uHigh) = Vector128.Widen(u);
+            var (vLow, vHigh) = Vector128.Widen(v);
+            var (y0Low, y0High) = Vector128.Widen(y0);
+            var (y1Low, y1High) = Vector128.Widen(y1);
+            var output = row.Slice(2 * i, 32);
+            Quarter(uLow, vLow, y0Low, y0High, output);
+            Quarter(uHigh, vHigh, y1Low, y1High, output.Slice(16));
+        }
+
+        return i;
+
+        // 8 chroma samples (as 16 bits) and the 16 luma samples they cover: 16 pixels.
+        void Quarter(Vector128<ushort> u8, Vector128<ushort> v8, Vector128<ushort> yLow, Vector128<ushort> yHigh, Span<uint> pixels)
+        {
+            var (uA, uB) = Vector128.Widen(u8);
+            var (vA, vB) = Vector128.Widen(v8);
+            var (yA, yB) = Vector128.Widen(yLow);
+            var (yC, yD) = Vector128.Widen(yHigh);
+            Four(uA.AsInt32(), vA.AsInt32(), yA.AsInt32(), yB.AsInt32(), pixels);
+            Four(uB.AsInt32(), vB.AsInt32(), yC.AsInt32(), yD.AsInt32(), pixels.Slice(8));
+        }
+
+        // 4 chroma samples and their 8 luma samples: each chroma term serves two neighbouring pixels.
+        void Four(Vector128<int> u4, Vector128<int> v4, Vector128<int> yFirst, Vector128<int> ySecond, Span<uint> pixels)
+        {
+            var c = Vector128.ShiftRightArithmetic((u4 - half) * cScale, 16);
+            var d = Vector128.ShiftRightArithmetic((v4 - half) * cScale, 16);
+            var r = d * crToR;
+            var g = (c * cbToG) + (d * crToG);
+            var b = c * cbToB;
+            Pixels((yFirst * yScale) + yBias, Vector128.Shuffle(r, Vector128.Create(0, 0, 1, 1)), Vector128.Shuffle(g, Vector128.Create(0, 0, 1, 1)), Vector128.Shuffle(b, Vector128.Create(0, 0, 1, 1))).CopyTo(pixels);
+            Pixels((ySecond * yScale) + yBias, Vector128.Shuffle(r, Vector128.Create(2, 2, 3, 3)), Vector128.Shuffle(g, Vector128.Create(2, 2, 3, 3)), Vector128.Shuffle(b, Vector128.Create(2, 2, 3, 3))).CopyTo(pixels.Slice(4));
+        }
+
+        static Vector128<uint> Pixels(Vector128<int> l, Vector128<int> r, Vector128<int> g, Vector128<int> b)
+        {
+            var low = Vector128<int>.Zero;
+            var high = Vector128.Create(255);
+            var red = Vector128.Clamp(Vector128.ShiftRightArithmetic(l + r, 16), low, high).AsUInt32();
+            var green = Vector128.Clamp(Vector128.ShiftRightArithmetic(l - g, 16), low, high).AsUInt32();
+            var blue = Vector128.Clamp(Vector128.ShiftRightArithmetic(l + b, 16), low, high).AsUInt32();
+            return red | (green << 8) | (blue << 16) | Vector128.Create(0xFF000000u);
+        }
+#else
+        return 0;
+#endif
     }
 
     // One pixel from luma's term and the chroma terms (green's subtracted), shifted down and clipped.

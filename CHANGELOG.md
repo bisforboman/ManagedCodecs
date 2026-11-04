@@ -15,8 +15,8 @@ run time.
 
 Matroska and WebM: `MatroskaDemuxer` reads them (and `Demuxer.Open` picks it), thumbnails take them, and
 `Packet.SkipEndSamples` carries an encoder's padding at a packet's end, which the AAC decoder drops; an MP4 stream's
-`Duration` without an edit list is now FFmpeg's. New public API (a
-demuxer, two properties), hence a minor version; code built against 0.7 keeps working.
+`Duration` without an edit list is now FFmpeg's. New public API (a demuxer, two properties), hence a minor version;
+code built against 0.7 keeps working.
 
 ### Added
 

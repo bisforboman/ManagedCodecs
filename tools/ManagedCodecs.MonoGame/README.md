@@ -25,8 +25,9 @@ player: no seeking, no pause, Escape quits.
   converted: PQ and HLG show dim and flat, as without tone mapping.
 - Shape: each frame is drawn at its `SampleAspectRatio` (anamorphic video wider than its samples), and turned by the
   stream's `Rotation` (phone video), counter-clockwise as FFmpeg's command line turns it.
-- A shader would convert faster than the CPU, but MonoGame's effect compiler (mgfxc) needs Wine on Linux, so it is
-  left for when the CPU conversion turns out to be the bottleneck.
+- A shader would convert faster than the CPU, but MonoGame's effect compiler (mgfxc) needs Wine on Linux: still so in
+  dotnet-mgfxc 3.8.6.1 (2026-11-04, error MGFXC0001 without it). With the conversion now about 2 ms a 1080p frame
+  (Measured, below), it is parked until MonoGame compiles shaders without Wine.
 
 CI builds it. It needs a window and OpenGL, so CI doesn't run it, but it runs headless under Xvfb with Mesa's software
 renderer (`Xvfb :99 &`, `DISPLAY=:99`, and `ALSOFT_DRIVERS=null` for audio with no device behind it).

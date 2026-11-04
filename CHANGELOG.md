@@ -11,10 +11,11 @@ share internals, so each depends on the others at exactly its own version (`[X]`
 then reports a mix of versions (NU1107, or NU1608 for a newer one referenced directly) rather than letting it fail at
 run time.
 
-## 0.8.0 – 2026-11-03
+## 0.8.0 – 2026-11-04
 
 Matroska and WebM: `MatroskaDemuxer` reads them (and `Demuxer.Open` picks it), thumbnails take them, and
-`Packet.SkipEndSamples` carries an encoder's padding at a packet's end, which the AAC decoder drops. New public API (a
+`Packet.SkipEndSamples` carries an encoder's padding at a packet's end, which the AAC decoder drops; an MP4 stream's
+`Duration` without an edit list is now FFmpeg's. New public API (a
 demuxer, two properties), hence a minor version; code built against 0.7 keeps working.
 
 ### Added

@@ -21,10 +21,6 @@ internal sealed class Cabac
     // Per context: pStateIdx in bits 0-5, valMPS in bit 6.
     private readonly byte[] _contexts = new byte[CabacTables.ContextCount];
 
-    // The context after an MPS and after an LPS, by context (transIdxMps, transIdxLps and the
-    // valMPS switch at state 0, 9.3.3.2.1.1).
-    private static readonly byte[] MpsNext = [.. Enumerable.Range(0, 128).Select(c => (byte)((c & 64) | CabacTables.TransIdxMps[c & 63]))];
-    private static readonly byte[] LpsNext = [.. Enumerable.Range(0, 128).Select(c => (byte)(((c & 63) == 0 ? (c & 64) ^ 64 : c & 64) | CabacTables.TransIdxLps[c & 63]))];
     private BitReader _reader = null!;
     private int _range;
 
@@ -66,7 +62,8 @@ internal sealed class Cabac
             throw new InvalidDataException("CABAC offset out of range.");
         }
 
-        Refill(ref _value, ref _bits);
+        _value = Refill(_value);
+        _bits += 32;
     }
 
     /// <summary>DecodeDecision (9.3.3.2.1) with context variable <paramref name="ctxIdx"/>.</summary>
@@ -170,7 +167,13 @@ internal sealed class Cabac
 
                 if (absMinus1 == 14)
                 {
-                    absMinus1 += ExpGolombBypass(range, ref value, ref bits);
+                    // Rare (levels above 14): through the fields, so that no method out of line takes the locals by
+                    // reference, which would keep them in memory throughout.
+                    _value = value;
+                    _bits = bits;
+                    absMinus1 += ExpGolombBypass(range);
+                    value = _value;
+                    bits = _bits;
                 }
 
                 greater1++;
@@ -209,7 +212,8 @@ internal sealed class Cabac
             _range <<= 1;
             if (--_bits < 0)
             {
-                Refill(ref _value, ref _bits);
+                _value = Refill(_value);
+                _bits += 32;
             }
         }
 
@@ -232,7 +236,7 @@ internal sealed class Cabac
         int bin = ctx >> 6;
         if (value < scaledRange)
         {
-            context = Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(MpsNext), ctx); // ctx < 128
+            context = Unsafe.Add(ref MemoryMarshal.GetReference(MpsNext), ctx); // ctx < 128
             if (range >= 256)
             {
                 return bin;
@@ -243,7 +247,7 @@ internal sealed class Cabac
             value -= scaledRange;
             range = lps;
             bin ^= 1;
-            context = Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(LpsNext), ctx);
+            context = Unsafe.Add(ref MemoryMarshal.GetReference(LpsNext), ctx);
         }
 
         int shift = BitOperations.LeadingZeroCount((uint)range) - 23;
@@ -251,7 +255,8 @@ internal sealed class Cabac
         bits -= shift;
         if (bits < 0)
         {
-            Refill(ref value, ref bits);
+            value = Refill(value);
+            bits += 32;
         }
 
         return bin;
@@ -263,7 +268,8 @@ internal sealed class Cabac
     {
         if (--bits < 0)
         {
-            Refill(ref value, ref bits);
+            value = Refill(value);
+            bits += 32;
         }
 
         ulong scaledRange = (ulong)range << bits;
@@ -277,8 +283,10 @@ internal sealed class Cabac
     }
 
     /// <summary>The k-th order Exp-Golomb suffix of a UEGk binarization (9.3.2.3), with k 0: all bypass bins.</summary>
-    private int ExpGolombBypass(int range, ref ulong value, ref int bits)
+    private int ExpGolombBypass(int range)
     {
+        ulong value = _value;
+        int bits = _bits;
         int k = 0;
         int result = 0;
         while (Bypass(range, ref value, ref bits) == 1)
@@ -296,17 +304,54 @@ internal sealed class Cabac
             result += Bypass(range, ref value, ref bits) << k;
         }
 
+        _value = value;
+        _bits = bits;
         return result;
     }
 
     /// <summary>
-    /// Takes 32 more bits into the read-ahead: at initialization, and whenever <paramref name="bits"/>
-    /// went negative because codIOffset needs bits the read-ahead did not hold yet.
+    /// <paramref name="value"/> with 32 more bits taken into the read-ahead (the caller adds 32 to its bit count): at
+    /// initialization, and whenever the count went negative because codIOffset needs bits the read-ahead did not hold
+    /// yet.
     /// </summary>
+    /// <remarks>
+    /// Out of line, and so taking and returning the value rather than references to the caller's locals: a reference
+    /// passed to a method that is not inlined keeps the local in memory, loaded and stored at every decision.
+    /// </remarks>
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private void Refill(ref ulong value, ref int bits)
-    {
-        value = (value << 32) | _reader.ReadBits(32);
-        bits += 32;
-    }
+    private ulong Refill(ulong value) => (value << 32) | _reader.ReadBits(32);
+
+    /// <summary>The context after an MPS, by context: transIdxMPS of its state (Table 9-45), valMPS kept (9.3.3.2.1.1).</summary>
+    /// <remarks>
+    /// Constant data, as <see cref="CabacTables.RangeTabLps"/> is, and not a static array built from the tables: a method
+    /// compiled before the class's static constructor ran (mcdec compiles each method once, at its first call) checks
+    /// that the constructor ran and loads the array at every use. The tests derive it from Table 9-45.
+    /// </remarks>
+    internal static ReadOnlySpan<byte> MpsNext =>
+    [
+        1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16,
+        17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32,
+        33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48,
+        49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 62, 63,
+        65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80,
+        81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96,
+        97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112,
+        113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 126, 127,
+    ];
+
+    /// <summary>
+    /// The context after an LPS, by context: transIdxLPS of its state (Table 9-45), valMPS switched at state 0
+    /// (9.3.3.2.1.1). Constant data, as <see cref="MpsNext"/>.
+    /// </summary>
+    internal static ReadOnlySpan<byte> LpsNext =>
+    [
+        64, 0, 1, 2, 2, 4, 4, 5, 6, 7, 8, 9, 9, 11, 11, 12,
+        13, 13, 15, 15, 16, 16, 18, 18, 19, 19, 21, 21, 22, 22, 23, 24,
+        24, 25, 26, 26, 27, 27, 28, 29, 29, 30, 30, 30, 31, 32, 32, 33,
+        33, 33, 34, 34, 35, 35, 35, 36, 36, 36, 37, 37, 37, 38, 38, 63,
+        0, 64, 65, 66, 66, 68, 68, 69, 70, 71, 72, 73, 73, 75, 75, 76,
+        77, 77, 79, 79, 80, 80, 82, 82, 83, 83, 85, 85, 86, 86, 87, 88,
+        88, 89, 90, 90, 91, 91, 92, 93, 93, 94, 94, 94, 95, 96, 96, 97,
+        97, 97, 98, 98, 99, 99, 99, 100, 100, 100, 101, 101, 101, 102, 102, 127,
+    ];
 }

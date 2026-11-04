@@ -1,5 +1,1 @@
 #nullable enable
-ManagedCodecs.Packet.SkipEndSamples.get -> int
-ManagedCodecs.Packet.SkipEndSamples.init -> void
-ManagedCodecs.PacketInfo.SkipEndSamples.get -> int
-ManagedCodecs.PacketInfo.SkipEndSamples.init -> void

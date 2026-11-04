@@ -137,6 +137,8 @@ ManagedCodecs.Packet.Pts.get -> long
 ManagedCodecs.Packet.Pts.init -> void
 ManagedCodecs.Packet.Sequence.get -> long
 ManagedCodecs.Packet.Sequence.init -> void
+ManagedCodecs.Packet.SkipEndSamples.get -> int
+ManagedCodecs.Packet.SkipEndSamples.init -> void
 ManagedCodecs.Packet.SkipSamples.get -> int
 ManagedCodecs.Packet.SkipSamples.init -> void
 ManagedCodecs.Packet.StreamIndex.get -> int
@@ -160,6 +162,8 @@ ManagedCodecs.PacketInfo.Sequence.get -> long
 ManagedCodecs.PacketInfo.Sequence.init -> void
 ManagedCodecs.PacketInfo.Size.get -> int
 ManagedCodecs.PacketInfo.Size.init -> void
+ManagedCodecs.PacketInfo.SkipEndSamples.get -> int
+ManagedCodecs.PacketInfo.SkipEndSamples.init -> void
 ManagedCodecs.PacketInfo.SkipSamples.get -> int
 ManagedCodecs.PacketInfo.SkipSamples.init -> void
 ManagedCodecs.PacketInfo.StreamIndex.get -> int

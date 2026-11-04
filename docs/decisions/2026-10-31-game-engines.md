@@ -65,3 +65,7 @@ The owner (2026-10-31), against the recommendation to keep it parked:
   `AudioStreamGenerator`, on mcplay's decoding and colour conversion, Godot 4.7 (.NET) on net10.0 with the packages as
   they are. CI builds it with the Godot .NET SDK from nuget.org (Godot's real C# API, no stubs); nobody has run it in
   Godot yet.
+- mcplay (the MonoGame sample) run under Xvfb with Mesa's software renderer (2026-11-04): Caminandes plays at its
+  24 fps, decoding 4.7 ms a frame and converting to RGBA 13.0 ms; a 37 Mbps 1080p30 clip keeps up too, 9.0 and
+  18.9 ms. The CPU conversion, not the decoder, is the larger cost (tools/ManagedCodecs.MonoGame/README.md). The run
+  found a crash without an audio device (OpenAL's NoAudioHardwareException), now caught: the video plays alone.

@@ -913,7 +913,8 @@ public sealed class Mp4Demuxer : IDemuxer
 
         /// <summary>
         /// The track's duration as FFmpeg gives its stream: the edits' summed length (leading empty edits left out:
-        /// they move the start), else 'mdhd''s or, where longer (fragmented files), the samples' summed durations.
+        /// they move the start), else the shorter of 'mdhd''s and the samples' summed durations (the longer in a
+        /// fragmented file).
         /// </summary>
         public long StreamDuration(uint movieTimescale, SampleTable samples)
         {
@@ -937,7 +938,13 @@ public sealed class Mp4Demuxer : IDemuxer
             }
 
             // A fragmented file's 'mdhd' counts only the samples in 'moov', if any; its fragments add the rest.
-            return Math.Max(MediaDuration, total);
+            if (_fragmentSamples.Count > 0)
+            {
+                return Math.Max(MediaDuration, total);
+            }
+
+            // Else the shorter of 'mdhd' and the samples (FFmpeg's stream duration), either where the other is 0.
+            return MediaDuration > 0 && total > 0 ? Math.Min(MediaDuration, total) : Math.Max(MediaDuration, total);
         }
 
         public SampleTable BuildSamples(uint movieTimescale)

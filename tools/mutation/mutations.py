@@ -269,6 +269,14 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.Containers/Mp4/Mp4Demuxer.cs",
          find="return Math.Max(MediaDuration, total);", replace="return MediaDuration;",
          tests="FullyQualifiedName~VideoProbeTests"),
+    # ... and without an edit list, the shorter of 'mdhd' and the samples (mp4-mdhd-duration: the video's 'mdhd', the
+    # audio's samples).
+    dict(file="src/ManagedCodecs.Containers/Mp4/Mp4Demuxer.cs",
+         find="? Math.Min(MediaDuration, total) :", replace="? MediaDuration :",
+         tests="FullyQualifiedName~VideoProbeTests"),
+    dict(file="src/ManagedCodecs.Containers/Mp4/Mp4Demuxer.cs",
+         find="? Math.Min(MediaDuration, total) :", replace="? total :",
+         tests="FullyQualifiedName~VideoProbeTests"),
     # ... and a Matroska file's is its Segment's Duration from the earliest packet, not each stream's start plus it.
     dict(file="src/ManagedCodecs.Thumbnails/VideoProbe.cs",
          find="bool segmentDuration = demuxer is MatroskaDemuxer;", replace="bool segmentDuration = false;",

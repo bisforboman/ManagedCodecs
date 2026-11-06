@@ -57,3 +57,9 @@ end_of_line = lf
 # init: using directives: 17 of 17 files sorted, 4 of 4 with System first
 dotnet_sort_system_directives_first = true
 # END stylebro-migrate
+
+# The tests' random inputs (CA5394, insecure randomness): seeded System.Random makes the random blocks, coefficients
+# and corrupted streams that compare each fast path with its reference repeatable; nothing secret is drawn. The
+# security analyzers are otherwise all errors (docs/decisions/2026-11-06-security-analyzers.md).
+[tests/**.cs]
+dotnet_diagnostic.CA5394.severity = none

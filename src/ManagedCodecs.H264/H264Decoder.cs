@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
 
 namespace ManagedCodecs.H264;
@@ -372,6 +373,7 @@ public sealed class H264Decoder : IVideoDecoder
     }
 
     /// <summary>Decodes the job's slices into its picture and deblocks it, then reports it done (or failed) to pictures that predict from it.</summary>
+    [SuppressMessage("Security", "CA5394:Do not use insecure randomness", Justification = "Only tests set RowDelay: a random sleep that varies frame threads' timing to find races. Nothing secret depends on it.")]
     private static void Run(PictureJob job)
     {
         var state = job.State;

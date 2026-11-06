@@ -908,6 +908,13 @@ relaxation, and dropping a last patch of fewer than 3 subbands (no sample's band
 checked to use what they are named for: filtering by the HF generator, cut gains, transient envelopes, sinusoids, and
 in the header sample smoothing, no interpolation and its limiter settings.
 
+Single precision, tried for speed and dropped (2026-11-06): the QMF banks' windowing (their sample history, windows
+and sums of products) in float, each sum widened to double as it is stored. Every comparison with FFmpeg still passed,
+the LFE's included; only `QmfTests`' bounds of 1e-6 against the banks' sums in double failed (3.5e-8 of a value of
+162). But under the JIT the windowing's share of `heaac-5.1.mp4` fell only from 11.8 to 11.2% (six alternating pairs),
+and the wall clock did not move: twice the lanes did not halve the work. The banks stay in double; the rest of a float
+port (the FFTs, the DCT-IVs, the rotations, about 900 lines laid out for two-lane vectors of doubles) was not tried.
+
 Downsampled SBR (the config gives SBR the core's own rate, 44.1 kHz in the sample's sync extension) runs as for twice
 that rate, its frequency tables too (the sample's band runs from QMF band 9 to 23 of the 88.2 kHz grid), and
 synthesizes only the lower 32 subbands, at the core's rate: 1024 samples a frame. The FDK encoder chooses it only for

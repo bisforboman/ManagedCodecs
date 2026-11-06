@@ -108,8 +108,9 @@ and code that reproduces FFmpeg's reading where it differs from the spec), and n
   every class sits at 2.2 to 2.8 times (CAVLC and CABAC, P and intra-only, High), so the gap is general rather than
   one class's (the CAVLC residual reader's compiled code is clean). MBAFF frames and field pictures find the pairs
   around a macroblock once (#177: 2.9% off `h264-mbaff-default.mp4`'s time, 4.0% off `jm-paff-b.mp4`'s), but each
-  neighbour lookup still runs Table 6-4's case analysis on (xN, yN) for itself, where progressive pictures read a
-  table made once a picture (docs/conformance.md, Performance notes; docs/decisions/2026-10-28-h264-neighbour-context.md).
+  neighbour lookup is still a call of its own (about 33 a macroblock); its case analysis on (xN, yN) is not the cost
+  (a table in its place counted no fewer instructions; docs/conformance.md, Performance notes;
+  docs/decisions/2026-10-28-h264-neighbour-context.md).
   With 4 threads a 720p P chain takes 0.52 of one thread's time over 50 frames and 0.41 over 250 (one IDR picture
   each, which decodes in 2.4 times a P picture's time with the P pictures trailing it: short GOPs gain less; medians
   of five interleaved runs), on 4 cores without SMT where four single-threaded decodes run side by side about 7%

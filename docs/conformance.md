@@ -691,7 +691,16 @@ What did move it (#177, 2026-10-28): splitting Table 6-4 into its two halves, fi
 case analysis on (xN, yN) per lookup (`AffNeighbor(in AffPairs, ...)`), the static lookup kept as the reference that
 `PairsFoundOnce_MatchTheLookup` compares it with: -5.4% of `h264-mbaff-default`'s instructions and -6.0% of
 `jm-paff-b`'s by callgrind, -2.9% and -4.0% of their time by perf
-(docs/decisions/2026-10-28-h264-neighbour-context.md). The per-lookup case analysis remains.
+(docs/decisions/2026-10-28-h264-neighbour-context.md). The per-lookup case analysis remains, but it is not the cost:
+tried and dropped (2026-11-06), B, C and D at row -1 resolved with the pairs (both block heights) and A's rows read
+from a table made with the decoder for each kind of pair (frame or field, top or bottom, left pair frame or field),
+checked against the case analysis at every location of `PairsFoundOnce_MatchTheLookup`'s random pictures. Callgrind
+(AOT, steady loops): with the table reads inside the lookup, +2.6% of `h264-mbaff-default`'s instructions; as a lean
+fast path with the fill and the case analysis out of line, 451.2 to 452.4 M a loop there and 80.94 to 80.79 M in
+`jm-paff-b`: no change. The out-of-line lookup costs about 100 instructions a call on main, half of them the call
+itself (prologue, the cache check, the 12-byte return); the table path still took about 64, and the fill (6 lookups a
+macroblock) ate the rest. What would move it is fewer calls (motion vector prediction's A, B, C and D in one, about 1.1
+million calls in three loops of `h264-mbaff-default`, 378,000 of them `MotionNeighbor`'s), not cheaper ones.
 
 A profile of a
 720p libx264 default stream (2026-10-22) is flat: CABAC residual decoding takes 14%, deblocking 21%

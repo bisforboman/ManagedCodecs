@@ -8,6 +8,20 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
+  <!-- No vulnerable package, direct or transitive, in anything the repository builds or ships (the owner's decision,
+       docs/decisions/2026-11-06-vulnerable-packages.md): restore audits every package of every project, the tools,
+       samples, tests and benchmarks too, against nuget.org's advisories, and an advisory of any severity fails the
+       build (NU1901 low to NU1904 critical), locally as in CI, pack and release. Fix one by moving the package (a
+       PackageVersion in Directory.Packages.props, with a comment naming the advisory), never by suppressing it.
+       NU1905 (the audit source can't be read) stays a warning. vulnerable-packages.yml checks main weekly, for
+       advisories published after a restore passed. -->
+  <PropertyGroup>
+    <NuGetAudit>true</NuGetAudit>
+    <NuGetAuditMode>all</NuGetAuditMode>
+    <NuGetAuditLevel>low</NuGetAuditLevel>
+    <WarningsAsErrors>$(WarningsAsErrors);NU1901;NU1902;NU1903;NU1904</WarningsAsErrors>
+  </PropertyGroup>
+
   <ItemGroup>
     <PackageReference Include="StyleBro.Analyzers" PrivateAssets="all" />
   </ItemGroup>

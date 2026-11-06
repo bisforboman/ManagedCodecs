@@ -1,0 +1,77 @@
+name: Vulnerable packages
+
+# Weekly, on main: every NuGet package with a known advisory, direct or transitive, in what the repository builds or
+# ships (the solution and the projects outside it: tools/vulnerable-packages.py). Every build already fails on one
+# (Directory.Build.props: NuGet audit, NU1901-NU1904 as errors), but only when it runs: this finds an advisory
+# published since main last built. One issue per streak: a comment on the open "Vulnerable NuGet packages" issue, or a
+# new one when none is open (closing it ends the streak); the job fails too. Not a required check
+# (docs/decisions/2026-11-06-vulnerable-packages.md). On pull requests that change this workflow or its script, a dry
+# run: it lists, and says what it would file.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '41 4 * * 2'
+  pull_request:
+    paths: ['.github/workflows/vulnerable-packages.yml', 'tools/vulnerable-packages.py']
+
+permissions:
+  contents: read
+  issues: write
+
+env:
+  DRY_RUN: ${{ github.event_name == 'pull_request' && '1' || '0' }}
+  GH_TOKEN: ${{ github.token }}
+  ISSUE_TITLE: Vulnerable NuGet packages
+
+jobs:
+  vulnerable:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
+        with:
+          dotnet-version: 10.0.x
+
+      # tools/ManagedCodecs.Wasm and the Blazor sample don't restore without it.
+      - name: Install the wasm-tools workload
+        run: dotnet workload install wasm-tools
+
+      - name: List vulnerable packages
+        shell: bash
+        run: |
+          set +e
+          tools/vulnerable-packages.py > report.md
+          status=$?
+          set -e
+          if [ "$status" = 0 ]; then
+            echo "No vulnerable package in what the repository builds or ships." | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if [ "$status" = 2 ]; then
+            echo "::error::A target could not be restored or listed (the log above says which): the listing is incomplete."
+          fi
+          [ -s report.md ] || exit 1
+          body=$(cat <<EOF
+          The weekly check found NuGet packages with known advisories in what the repository builds or ships ($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID). Every build of main fails on them now (NU1901-NU1904 are errors).
+
+          $(cat report.md)
+
+          - [ ] Move each package past its advisory: a \`PackageVersion\` in \`Directory.Packages.props\` (for a transitive one, a direct reference at the fixed version), with a comment naming the advisory. Never a suppression (docs/decisions/2026-11-06-vulnerable-packages.md).
+          - [ ] \`tools/vulnerable-packages.py\` lists nothing; close this issue once the fix has merged.
+          EOF
+          )
+          echo "$body" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$DRY_RUN" = 1 ]; then
+            echo "Would file or comment on \"$ISSUE_TITLE\":"; echo "$body"
+            exit 1
+          fi
+          open=$(gh issue list --state open --search "\"$ISSUE_TITLE\" in:title" --json number,title \
+            --jq "map(select(.title == \"$ISSUE_TITLE\")) | .[0].number // empty")
+          if [ -n "$open" ]; then
+            gh issue comment "$open" --body "$body"
+          else
+            gh issue create --title "$ISSUE_TITLE" --body "$body"
+          fi
+          exit 1

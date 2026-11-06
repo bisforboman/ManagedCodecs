@@ -42,6 +42,7 @@ in between. That comparison is not measured here.
 | `tools/ManagedCodecs.Unity.Sample` | A Unity `MonoBehaviour` that plays a video into a `Texture2D` and an `AudioClip` with the `ManagedCodecs.Unity` package (mcplay's decoding and colour conversion, linked); CI compiles it against stubs of UnityEngine, Unity has not run it |
 | `tools/make-samples.sh` | Generates the test samples and FFmpeg's references |
 | `tools/compare.sh` | Times mcdec and FFmpeg on the same file |
+| `tools/h264-stages.py` | Shares of H.264 decoding by stage, for mcdec and FFmpeg, from perf and callgrind profiles (docs/notes/h264-stages-2026-11.md) |
 | `tools/realworld.py` | Decodes real public films with mcdec and FFmpeg and compares them (nightly, `realworld.yml`) |
 | `tools/mutation/mutate.py` | Breaks each guard in `tools/mutation/mutations.py` and checks that a test fails (every pull request, `mutation.yml`) |
 | `tools/upstream-issue.sh` | Files `upstream.yml`'s weekly issues: a new StyleBro, or a new release of an encoder the committed samples come from |

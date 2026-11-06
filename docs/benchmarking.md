@@ -49,7 +49,8 @@ perf report --no-children --sort symbol
 Without `EnableWriteXorExecute=0` the JIT's code shows as bare addresses. A function's share falling between builds
 confirms a gain the wall clock can't separate from noise. With `-g` (frame pointers work for JIT code) and
 `DOTNET_ReadyToRun=0` (so CoreLib's helpers such as `SpanHelpers.Memmove` have names), samples can be assigned to a
-decoder's stages (docs/notes/h264-speed-gap-2026-10.md, Method).
+decoder's stages (docs/notes/h264-speed-gap-2026-10.md, Method); `tools/h264-stages.py` does that for mcdec and
+FFmpeg alike, by perf or by callgrind's counts (docs/notes/h264-stages-2026-11.md has the last results).
 
 `profile.yml` runs perf on the hosted x64 and ARM64 runners on one sample: the only profile of ARM64 code. On x64,
 `DOTNET_EnableAVX2=0` runs the 128-bit paths ARM64 takes.

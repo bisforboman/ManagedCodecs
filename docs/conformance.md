@@ -796,6 +796,15 @@ the 720p sample's steady frame on x64 and 0.8% on ARM64, the other samples withi
 per-change perf shares above, added up, promised about 4.5%. A share that falls in one function is not all saved
 time (part moves to the memory system or the next function), and a cloud VM's profile is not a runner's.
 
+Tried and dropped (2026-11-06): the ctxIdxInc and nC reads of a frame macroblock's left column and top row (CABAC's
+coded_block_flag, coded_block_pattern, mvd, ref_idx, mb_skip_flag and mb_type contexts; CAVLC's nC) took A and B
+from two addresses found once a macroblock, instead of the generic neighbour lookup and its slice check at every
+read. Debug asserts compared every read with the lookup on every sample. The parsing functions' perf share against
+the rest of the frame fell in all six alternating pairs on each 720p stream, but by about 0.7% of the frame on the
+libx264 default stream (CABAC) and 0.4% on `h264-bench-720p.mp4` (CAVLC): below the 1% bar set for motion vector
+prediction (docs/decisions/2026-11-04-h264-motion-prediction-frames.md). Inside the macroblock these reads were
+already direct, and at its edges the lookup is a table read and a compare: little is left to save.
+
 ## AAC
 
 AAC LC: channel configurations 1 to 7 and program config elements (1 to 8

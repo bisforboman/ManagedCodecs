@@ -22,6 +22,23 @@
     <WarningsAsErrors>$(WarningsAsErrors);NU1901;NU1902;NU1903;NU1904</WarningsAsErrors>
   </PropertyGroup>
 
+  <!-- The .NET SDK's security analyzers (category Security: CA2xxx, CA3xxx, CA5xxx) all run on every build of every
+       project, and each finding is an error there, not only where -warnaserror is on (the owner's decision,
+       docs/decisions/2026-11-06-security-analyzers.md). AnalysisModeSecurity=All makes the SDK add its global config
+       enabling every Security rule; the suffix, a private SDK property, picks that config's variant with each rule at
+       error (what CodeAnalysisTreatWarningsAsErrors would pick, but for Security only: that property would also make
+       the other categories' default rules errors). A category line in .editorconfig can't do it: the global config's
+       per-rule severities win over a category's. The SDK runs its analyzers on net5.0 and later only, with
+       AnalysisLevel set there: EnableNETAnalyzers and AnalysisLevelSecurity bring the Security rules (and only them)
+       to the netstandard2.1 Unity builds too. CheckSecurityAnalyzers (Directory.Build.targets) fails the build if a
+       project or an SDK stops honouring this. A false positive is suppressed where it is, with a justification. -->
+  <PropertyGroup>
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <AnalysisLevelSecurity>latest</AnalysisLevelSecurity>
+    <AnalysisModeSecurity>All</AnalysisModeSecurity>
+    <_GlobalAnalyzerConfigFileName_MicrosoftCodeAnalysisNetAnalyzersSecurity_WarnAsErrorSuffix>_warnaserror</_GlobalAnalyzerConfigFileName_MicrosoftCodeAnalysisNetAnalyzersSecurity_WarnAsErrorSuffix>
+  </PropertyGroup>
+
   <ItemGroup>
     <PackageReference Include="StyleBro.Analyzers" PrivateAssets="all" />
   </ItemGroup>

@@ -138,13 +138,22 @@ def label_resolver(debug_file):
     return resolve
 
 
+def method_name(symbol):
+    """
+    A JIT frame's `Namespace.Class::Method`, without its return type and parameters, which name other types (a method
+    returning `List<VideoFrame>` is not the output copy); other symbols as they are.
+    """
+    head = symbol.split("(", 1)[0]
+    return head.split()[-1] if head.strip() else symbol
+
+
 def classify(perf, data, rules, leaf_only, resolve):
     counts = collections.Counter()
     other = collections.Counter()
     for frames in read_samples(perf, data, leaf_only):
         stage = None
         for symbol, dso, _ in frames:
-            symbol = resolve(symbol)
+            symbol = method_name(resolve(symbol))
             for s, pattern in rules:
                 if pattern.search(symbol):
                     stage = s

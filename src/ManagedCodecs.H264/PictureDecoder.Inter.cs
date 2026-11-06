@@ -414,7 +414,7 @@ internal sealed partial class PictureDecoder<TPixel>
         // The 8x8 quadrants coded_block_pattern codes, and in each its 4x4 blocks with coefficients.
         for (int quadrants = cbpLuma & 15; quadrants != 0; quadrants &= quadrants - 1)
         {
-            int b8 = BitOperations.TrailingZeroCount(quadrants);
+            int b8 = BitOperations.TrailingZeroCount((uint)quadrants);
             for (int k = 0; k < 4; k++)
             {
                 int x = ((b8 & 1) * 2) + (k & 1);

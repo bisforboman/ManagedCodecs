@@ -811,6 +811,11 @@ the 8x8 quadrants coded_block_pattern marks, the lossless check and scaling tabl
 functions took 3.0 against 4.9% of `h264-bench-720p.mp4` and 2.0 against 2.9% of the 720p libx264 default stream (six
 alternating pairs each, lower in every one; their callers and the transform kernels up 0.1 to 0.2 points), and callgrind
 counted 2.1 and 1.3% fewer instructions a frame.
+Tried and dropped (2026-11-06): 4:2:0 chroma without AC coefficients (most chroma blocks) added its four DCs to the
+8x8 block at once, two rows a vector in 16-bit lanes, instead of four `AddDc` calls of four 32-bit row adds. A test
+against the scalar add passed and a broken kernel failed it. Callgrind counted 1.0% fewer instructions on
+`h264-bench-720p.mp4` and 0.3% on the CABAC stream, but under the JIT the chroma functions took only 0.3 and 0.1 points
+less of the frame (six alternating pairs each): not worth a kernel of its own.
 
 ## AAC
 

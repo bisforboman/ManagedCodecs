@@ -804,6 +804,13 @@ the rest of the frame fell in all six alternating pairs on each 720p stream, but
 libx264 default stream (CABAC) and 0.4% on `h264-bench-720p.mp4` (CAVLC): below the 1% bar set for motion vector
 prediction (docs/decisions/2026-11-04-h264-motion-prediction-frames.md). Inside the macroblock these reads were
 already direct, and at its edges the lookup is a table read and a compare: little is left to save.
+An inter macroblock whose coded_block_pattern codes nothing now adds no residual: before, it still found its target,
+ran the 16-block luma loop and worked out both chroma QPs and their scaling tables for nothing; a coded one visits only
+the 8x8 quadrants coded_block_pattern marks, the lossless check and scaling table taken once a macroblock
+(2026-11-06, the transform stage being furthest behind FFmpeg's time, docs/notes/h264-stages-2026-11.md). The changed
+functions took 3.0 against 4.9% of `h264-bench-720p.mp4` and 2.0 against 2.9% of the 720p libx264 default stream (six
+alternating pairs each, lower in every one; their callers and the transform kernels up 0.1 to 0.2 points), and callgrind
+counted 2.1 and 1.3% fewer instructions a frame.
 
 ## AAC
 

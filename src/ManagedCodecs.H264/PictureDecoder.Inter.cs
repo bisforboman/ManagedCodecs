@@ -366,16 +366,24 @@ internal sealed partial class PictureDecoder<TPixel>
 
         _qp[mbAddr] = slice.Qp;
 
-        var target = PictureTarget(mbAddr);
-        AddInterResidual(slice, mbAddr, target, cbpLuma, 0);
-        if (_chroma444)
+        // Nothing to add where coded_block_pattern codes nothing (the prediction is the macroblock's samples).
+        if (cbp == 0)
         {
-            AddInterResidual(slice, mbAddr, target, cbpLuma, 1);
-            AddInterResidual(slice, mbAddr, target, cbpLuma, 2);
             return;
         }
 
-        if (_monochrome)
+        var target = PictureTarget(mbAddr);
+        if (cbpLuma != 0)
+        {
+            AddInterResidual(slice, mbAddr, target, cbpLuma, 0);
+            if (_chroma444)
+            {
+                AddInterResidual(slice, mbAddr, target, cbpLuma, 1);
+                AddInterResidual(slice, mbAddr, target, cbpLuma, 2);
+            }
+        }
+
+        if (_chroma444 || _monochrome || cbpChroma == 0)
         {
             return;
         }
@@ -398,27 +406,36 @@ internal sealed partial class PictureDecoder<TPixel>
         }
 
         var (plane, origin, stride) = ComponentOf(target, component);
-        var counts = _totalCoeff[component];
+        var counts = _totalCoeff[component].AsSpan(mbAddr * 16, 16);
         var residual = _residuals[component];
-        for (int i = 0; i < 16; i++)
+        bool lossless = IsLossless(mbAddr);
+        var levelScale = slice.Scaling.LevelScale4x4(3 + component); // Inter Y, Cb or Cr
+
+        // The 8x8 quadrants coded_block_pattern codes, and in each its 4x4 blocks with coefficients.
+        for (int quadrants = cbpLuma & 15; quadrants != 0; quadrants &= quadrants - 1)
         {
-            int x = i & 3;
-            int y = i >> 2;
-            if ((cbpLuma & (1 << (((y >> 1) * 2) + (x >> 1)))) == 0 || counts[(mbAddr * 16) + i] == 0)
+            int b8 = BitOperations.TrailingZeroCount(quadrants);
+            for (int k = 0; k < 4; k++)
             {
-                continue;
-            }
+                int x = ((b8 & 1) * 2) + (k & 1);
+                int y = ((b8 >> 1) * 2) + (k >> 1);
+                int i = (y * 4) + x;
+                if (counts[i] == 0)
+                {
+                    continue;
+                }
 
-            var block = residual.Luma[i];
-            var dest = plane.AsSpan(origin + (y * 4 * stride) + (x * 4));
-            if (IsLossless(mbAddr))
-            {
-                Transform.AddBypass(block, 4, 4, BypassDpcm.None, dest, stride, _bitDepth);
-                continue;
-            }
+                var block = residual.Luma[i];
+                var dest = plane.AsSpan(origin + (y * 4 * stride) + (x * 4));
+                if (lossless)
+                {
+                    Transform.AddBypass(block, 4, 4, BypassDpcm.None, dest, stride, _bitDepth);
+                    continue;
+                }
 
-            Transform.Dequantize(block, qp, skipDc: false, slice.Scaling.LevelScale4x4(3 + component)); // Inter Y, Cb or Cr
-            Transform.InverseTransformAdd(block, dest, stride, _bitDepth);
+                Transform.Dequantize(block, qp, skipDc: false, levelScale);
+                Transform.InverseTransformAdd(block, dest, stride, _bitDepth);
+            }
         }
     }
 

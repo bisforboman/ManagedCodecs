@@ -11,6 +11,13 @@ share internals, so each depends on the others at exactly its own version (`[X]`
 then reports a mix of versions (NU1107, or NU1608 for a newer one referenced directly) rather than letting it fail at
 run time.
 
+## Unreleased
+
+### Changed
+
+- H.264: inter macroblocks without coded residual skip the residual add, and coded ones visit only their coded 8x8
+  blocks: about 2% off a CAVLC frame, 1% off a CABAC one.
+
 ## 0.8.0 – 2026-11-04
 
 Matroska and WebM: `MatroskaDemuxer` reads them (and `Demuxer.Open` picks it), thumbnails take them, and

@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Security.Cryptography;
 using ManagedCodecs.Aac;
 using ManagedCodecs.Containers;
@@ -12,6 +13,7 @@ namespace ManagedCodecs.Cli;
 /// hashes it), one a line in output order, and the audio's samples as interleaved 32-bit floats (as `-f f32le`), each
 /// packet's as the decoder gives them (edit lists applied: <see cref="Packet.SkipSamples"/>, <see cref="Packet.Discard"/>).
 /// </summary>
+[SuppressMessage("Security", "CA5351:Do Not Use Broken Cryptographic Algorithms", Justification = "MD5 as FFmpeg's framemd5 uses it, to compare frames with its references: a checksum, not security.")]
 public static class OutputDump
 {
     /// <summary>Writes <paramref name="prefix"/>.video.md5 and <paramref name="prefix"/>.audio.f32 for the streams there are decoders for.</summary>

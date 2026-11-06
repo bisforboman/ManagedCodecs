@@ -1,5 +1,6 @@
 // What mcdec itself uses of .NET's newer libraries and netstandard2.1 lacks (the decoders' own are in
 // src/ManagedCodecs.Unity/Polyfills.cs, linked in too).
+using System.Diagnostics.CodeAnalysis;
 using System.Security.Cryptography;
 
 namespace ManagedCodecs.Cli;
@@ -19,6 +20,7 @@ internal static class HarnessPolyfills
     }
 }
 
+[SuppressMessage("Security", "CA5351:Do Not Use Broken Cryptographic Algorithms", Justification = "MD5 as FFmpeg's framemd5 uses it (OutputDump, mcdec --hash), to compare frames: a checksum, not security.")]
 internal static class Md5Polyfill
 {
     extension(MD5)

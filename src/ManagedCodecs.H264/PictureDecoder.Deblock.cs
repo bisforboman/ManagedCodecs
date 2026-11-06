@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -62,6 +63,7 @@ internal sealed partial class PictureDecoder<TPixel>
     /// frame and field pairs meet. Macroblocks are still filtered in address order (8.7), so the result is the same as
     /// filtering the whole picture at the end.
     /// </summary>
+    [SuppressMessage("Security", "CA5394:Do not use insecure randomness", Justification = "Only tests set RowDelay: a random sleep that varies frame threads' timing to find races. Nothing secret depends on it.")]
     private void MacroblockDone(int mbAddr)
     {
         _lastDoneMb = mbAddr;

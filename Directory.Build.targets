@@ -8,4 +8,11 @@
       <_ProjectReferencesWithVersions Update="@(_ProjectReferencesWithVersions)" ProjectVersion="[%(_ProjectReferencesWithVersions.ProjectVersion)]" />
     </ItemGroup>
   </Target>
+
+  <!-- The security analyzers' global config must be the SDK's all-rules-at-error one (Directory.Build.props). After the
+       SDK's target that picks it, or after CoreCompile in a project where that target isn't imported (analyzers off). -->
+  <Target Name="CheckSecurityAnalyzers" AfterTargets="AddGlobalAnalyzerConfigForPackage_MicrosoftCodeAnalysisNetAnalyzersSecurity;CoreCompile">
+    <Error Condition="!$([System.String]::Copy('$(_GlobalAnalyzerConfigFile_MicrosoftCodeAnalysisNetAnalyzersSecurity)').EndsWith('_all_warnaserror.globalconfig')) or !Exists('$(_GlobalAnalyzerConfigFile_MicrosoftCodeAnalysisNetAnalyzersSecurity)')"
+           Text="The security analyzers aren't all errors: this SDK's global config is '$(_GlobalAnalyzerConfigFile_MicrosoftCodeAnalysisNetAnalyzersSecurity)'. See docs/decisions/2026-11-06-security-analyzers.md." />
+  </Target>
 </Project>

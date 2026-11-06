@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Security.Cryptography;
 
@@ -10,6 +11,7 @@ public sealed record FrameMd5Entry(int StreamIndex, long Dts, long Pts, long Dur
 /// Reads reference hashes produced by <c>ffmpeg -i input -f framemd5 out.framemd5</c> and hashes
 /// our own frames the same way, so decoder output can be checked to be bit-exact.
 /// </summary>
+[SuppressMessage("Security", "CA5351:Do Not Use Broken Cryptographic Algorithms", Justification = "MD5 as FFmpeg's framemd5 uses it, to compare frames with its references: a checksum, not security.")]
 public static class FrameMd5
 {
     public static List<FrameMd5Entry> Parse(IEnumerable<string> lines)

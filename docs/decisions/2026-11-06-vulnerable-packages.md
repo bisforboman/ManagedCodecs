@@ -2,17 +2,16 @@
 
 Decided by the owner, with the multiple-choice prompt; built in the same pull request.
 
-## Question
+## Questions
 
-How strictly should the repository keep NuGet packages with known advisories (direct or transitive) out of what it
-builds and ships, and how should an advisory published after a package was added be found?
+The owner was asked two questions with the multiple-choice prompt:
 
-## Choices
+1. "A vulnerable NuGet package (direct or transitive) should fail which builds?" Options: "Every build (Recommended)",
+   "CI and release only", "Release only". Answer: **Every build**.
+2. "Add the weekly check that opens an issue when main has a vulnerable package?" Options: "Yes, weekly issue
+   (Recommended)", "No". Answer: **Yes, weekly issue**.
 
-- When a build meets a vulnerable package: fail every build (local, CI, pack, release), fail only CI's builds (which
-  already build with `-warnaserror`, under NuGet's default audit settings), or only warn.
-- For advisories published later: a weekly check on main that files an issue, or rely on GitHub's Dependabot alerts
-  alone.
+A third question, on scanning the repository's own code, followed: 2026-11-06-security-analyzers.md.
 
 ## Answer
 

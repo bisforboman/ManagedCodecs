@@ -71,6 +71,9 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
   (`git config core.hooksPath .githooks` once per clone); by hand `dotnet tool run bro format ManagedCodecs.slnx`, CI
   with `--verify-no-changes`. The tool (.config/dotnet-tools.json) and the analyzers (Directory.Packages.props, where
   every package version is) move together, by hand while StyleBro is a prerelease; `upstream.yml` says when.
+  The SDK's security analyzers (category Security) run on every build of every project, as errors
+  (Directory.Build.props): fix a real finding, suppress a false positive where it is with a justification
+  (docs/decisions/2026-11-06-security-analyzers.md).
 - **Timing**: docs/benchmarking.md. Above all: time two builds interleaved, alternating which goes first (an A/A test
   with one always first once showed a 10% "regression"); a gain larger than the changed functions' share of the frame
   is noise, however consistent.

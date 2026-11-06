@@ -76,7 +76,10 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
   is noise, however consistent.
 - **Other workflows**: `realworld.yml` (nightly: real films and MJPEG against FFmpeg, `tools/realworld.py`),
   `benchmark.yml` (weekly), `compare.yml` and `profile.yml` (on demand), `upstream.yml` (weekly issues: a newer
-  StyleBro, a new release of an encoder behind the committed samples), `codeql.yml` (code scanning, not required).
+  StyleBro, a new release of an encoder behind the committed samples), `vulnerable-packages.yml` (weekly: NuGet
+  packages with advisories, direct or transitive, `tools/vulnerable-packages.py`; one issue per streak; every build
+  already fails on them, NU1901-NU1904 being errors: docs/decisions/2026-11-06-vulnerable-packages.md), `codeql.yml`
+  (code scanning, not required).
 
 ## Gotchas beside the code
 

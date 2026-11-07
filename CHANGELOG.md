@@ -19,6 +19,15 @@ run time.
   instructions in an 8-bit intra-only stream under Native AOT, about 1% of its time under the JIT. The output is
   unchanged.
 
+### Fixed
+
+- Playback: `MediaPlayer.TakeFrame` dropped about 1 frame in 5 when the game ticks at the video's own rate (24 fps
+  video at 24 Hz, 60 at 60 Hz): its clock, a sum of frame times, falls a rounding error short of some frames, which
+  were then shown a tick late and dropped. A frame is now due from half the interval before its time, so each call
+  shows the frame nearest the clock.
+- MonoGame: `VideoTexture` started the sound before the picture (about 280 ms with Big Buck Bunny), since the first
+  audio is decoded ahead of the first frame. The sound now starts with the first frame.
+
 ## 0.9.0 – 2026-11-07
 
 Playback for game engines: the new packages `ManagedCodecs.Playback` (`MediaPlayer`, also in ManagedCodecs.Unity) and

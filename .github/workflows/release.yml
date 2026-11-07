@@ -119,11 +119,16 @@ jobs:
           done
           ls artifacts
 
+      # The Godot addon as the Asset Library downloads it: addons/managedcodecs/ at the zip's root, its README's package
+      # reference pinned to this version (tools/ManagedCodecs.Godot/listing/README.md).
+      - name: Godot addon
+        run: tools/godot-addon.sh "$VERSION" artifacts
+
       # Signed provenance (built by this workflow from this commit): gh attestation verify <file> --repo bisforboman/ManagedCodecs
       - name: Attest the packages
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
-          subject-path: 'artifacts/*.nupkg, artifacts/*.snupkg'
+          subject-path: 'artifacts/*.nupkg, artifacts/*.snupkg, artifacts/*.zip'
 
       # Right before pushing: the temporary key is valid for an hour.
       - name: NuGet login
@@ -159,7 +164,7 @@ jobs:
           exit $failed
 
       # The tag on this commit (unless it was pushed by hand), the version's CHANGELOG section ("## X.Y.Z – date" up to
-      # the next "## ") as the notes, else GitHub's list of pull requests, and the packages.
+      # the next "## ") as the notes, else GitHub's list of pull requests, the packages and the Godot addon.
       - name: GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -167,4 +172,4 @@ jobs:
           awk -v v="## $VERSION " 'index($0, v) == 1 { on = 1; next } on && /^## / { exit } on' CHANGELOG.md > notes.md
           if [ -s notes.md ]; then notes=(--notes-file notes.md); else notes=(--generate-notes); fi
           prerelease=""; [[ "$VERSION" == *-* ]] && prerelease="--prerelease"
-          gh release create "v$VERSION" artifacts/*.nupkg --target "$GITHUB_SHA" --title "ManagedCodecs $VERSION" "${notes[@]}" $prerelease
+          gh release create "v$VERSION" artifacts/*.nupkg artifacts/*.zip --target "$GITHUB_SHA" --title "ManagedCodecs $VERSION" "${notes[@]}" $prerelease

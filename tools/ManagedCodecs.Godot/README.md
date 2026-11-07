@@ -11,26 +11,26 @@ tried with it yet. Please report back: [Testing it in Godot](#testing-it-in-godo
 ## Using it
 
 1. Godot 4.7, the .NET build, and the .NET 10 SDK (the project targets net10.0, as the packages do).
-2. Open this folder (`project.godot`) in the editor, or copy `ManagedCodecsVideo.cs` with mcplay's `MediaSource.cs` and
-   `YuvToRgba.cs` (`tools/ManagedCodecs.MonoGame`, which the project links) into a project of your own, which then
-   references the ManagedCodecs packages (`ManagedCodecs.H264`, `.Aac`, `.Mjpeg`, `.Containers`).
+2. Open this folder (`project.godot`) in the editor, or copy `ManagedCodecsVideo.cs` into a project of your own, which
+   then references the `ManagedCodecs.Playback` package.
 3. Copy a video in as `video.mp4` (ignored by git), or set the node's `File Path`, and run: `Main.tscn` is a
    `TextureRect` filling the window.
 
 ## What it does
 
 - `_Ready` reads the file through Godot's `FileAccess` (`res://` from the project folder in the editor, from the
-  `.pck` in an exported game) into a `MemoryStream`, which `Demuxer.Open` takes. The whole file is in memory: right for
+  `.pck` in an exported game) into a `MemoryStream`, which `MediaPlayer` takes. The whole file is in memory: right for
   cutscenes, not for films.
-- A thread of its own demuxes and decodes ahead (`MediaSource`, as mcplay: H.264 with frame threading, up to 4
-  threads) and converts each frame to RGBA on the CPU (`YuvToRgba`, by the frame's own matrix and range).
-- `_Process` shows the newest frame due by a clock started at the first frame (summing the frames' `delta`) and drops
-  late ones, through one `ImageTexture` (`Image.SetData` and `ImageTexture.Update` each frame), handing each frame's
-  pixels back to `MediaSource.Return`. Godot's images start at the top row, as the frames do. The rectangle keeps the
+- `ManagedCodecs.Playback`'s `MediaPlayer` demuxes and decodes ahead on a thread of its own (H.264 with frame threading,
+  up to 4 threads) and converts each frame to RGBA on the CPU, by the frame's own matrix and range.
+- `_Process` shows the newest frame due by a clock started at the first frame (summing the frames' `delta`;
+  `MediaPlayer.TakeFrame` drops late ones), through one `ImageTexture` (`Image.SetData` and `ImageTexture.Update` each
+  frame), handing each frame's pixels back to `MediaPlayer.Return`. Godot's images start at the top row, as the frames do. The rectangle keeps the
   aspect ratio as shown (the frame's width stretched by its sample aspect ratio).
 - Audio: an `AudioStreamPlayer` child with an `AudioStreamGenerator` at the decoded rate, made once the first audio
   comes, filled each frame with as many stereo frames as it takes (`PushBuffer`).
-- Rotation (a phone video's) isn't applied: turn the node by `MediaSource.VideoStream.Rotation` if you need it.
+- `Loop` (exported) plays the file again from its start, for a menu's backdrop.
+- Rotation (a phone video's) isn't applied: turn the node by `MediaPlayer.Video.Rotation` if you need it.
 - Web exports: Godot's C# can't export to the web yet.
 
 ## Testing it in Godot

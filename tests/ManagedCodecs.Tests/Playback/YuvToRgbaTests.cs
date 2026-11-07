@@ -1,6 +1,6 @@
-using ManagedCodecs.MonoGame;
+using ManagedCodecs.Playback;
 
-namespace ManagedCodecs.Tests.MonoGame;
+namespace ManagedCodecs.Tests.Playback;
 
 /// <summary>
 /// mcplay's RGBA conversion: the 8-bit paths (tables, a pixel a word, two pixels a chroma sample; vectors for chroma at

@@ -10,6 +10,9 @@ runtimes (Mono, IL2CPP). It is the same C# as the other packages, compiled into 
 - **Containers**: AVI, MP4 (fragmented too) and raw AAC (ADTS).
 - **Thumbnails**: `VideoProbe` (a video file's duration, size as shown, codecs, rotation) and `VideoThumbnail` (one
   frame as a small upright RGBA image, PNG or JPEG), as in the ManagedCodecs.Thumbnails package.
+- **Playback**: `MediaPlayer` decodes a video file on a thread of its own into RGBA frames for a `Texture2D`
+  (`RGBA32`) and float stereo for a streamed `AudioClip`, and gives `Update` the frame due by its clock, as in the
+  ManagedCodecs.Playback package. Not on WebGL, which has no threads.
 
 It is the scalar build. .NET Standard 2.1 has no `System.Runtime.Intrinsics`, so the SIMD paths are left out and their
 scalar references run instead. The output is the same to the bit: the whole test suite, conformance against FFmpeg

@@ -29,6 +29,8 @@
 
   <ItemGroup Condition="'$(UnityBuild)' == 'true'">
     <Compile Remove="**\VectorZipTests.cs" />
+    <!-- ManagedCodecs.MonoGame is net10.0 only, not part of the Unity build. -->
+    <Compile Remove="MonoGame\**" />
     <ProjectReference Include="..\..\src\ManagedCodecs.Unity\ManagedCodecs.Unity.csproj" />
   </ItemGroup>
 
@@ -40,6 +42,9 @@
     <ProjectReference Include="..\..\src\ManagedCodecs.Aac\ManagedCodecs.Aac.csproj" />
     <ProjectReference Include="..\..\src\ManagedCodecs.Thumbnails\ManagedCodecs.Thumbnails.csproj" />
     <ProjectReference Include="..\..\src\ManagedCodecs.Playback\ManagedCodecs.Playback.csproj" />
+    <ProjectReference Include="..\..\src\ManagedCodecs.MonoGame\ManagedCodecs.MonoGame.csproj" />
+    <!-- The package compiles against MonoGame without passing it on (a game brings its platform's); its tests need it. -->
+    <PackageReference Include="MonoGame.Framework.DesktopGL" />
   </ItemGroup>
 
 </Project>

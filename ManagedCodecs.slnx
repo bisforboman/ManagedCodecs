@@ -4,6 +4,7 @@
     <Project Path="src/ManagedCodecs.Containers/ManagedCodecs.Containers.csproj" />
     <Project Path="src/ManagedCodecs.Thumbnails/ManagedCodecs.Thumbnails.csproj" />
     <Project Path="src/ManagedCodecs.Playback/ManagedCodecs.Playback.csproj" />
+    <Project Path="src/ManagedCodecs.MonoGame/ManagedCodecs.MonoGame.csproj" />
     <Project Path="src/ManagedCodecs.Mjpeg/ManagedCodecs.Mjpeg.csproj" />
     <Project Path="src/ManagedCodecs.H264/ManagedCodecs.H264.csproj" />
     <Project Path="src/ManagedCodecs.Aac/ManagedCodecs.Aac.csproj" />
@@ -16,7 +17,7 @@
   <Folder Name="/tools/">
     <Project Path="tools/ManagedCodecs.Cli/ManagedCodecs.Cli.csproj" />
     <Project Path="tools/ManagedCodecs.Godot/ManagedCodecs.Godot.csproj" />
-    <Project Path="tools/ManagedCodecs.MonoGame/ManagedCodecs.MonoGame.csproj" />
+    <Project Path="tools/ManagedCodecs.MonoGame.Sample/ManagedCodecs.MonoGame.Sample.csproj" />
     <Project Path="tools/ManagedCodecs.Unity.Sample/ManagedCodecs.Unity.Sample.csproj" />
     <Project Path="tools/ManagedCodecs.Fuzz/ManagedCodecs.Fuzz.csproj" />
   </Folder>

@@ -68,6 +68,8 @@ run time.
 - HE-AAC: SBR's gains smoothed over time (a header with bs_smoothing_mode 0) and parametric stereo's mixing run in
   vectors, to the same bits: SBR's envelope adjuster takes about half its share of such a frame, about 8% of it, and
   the mixing about a fifth less of an HE-AAC v2 frame's 5 to 8%.
+- MJPEG: the bit reader's refill takes eight bytes inline, a call only at stuffing, markers and the data's end:
+  about 2 to 5% off a frame.
 
 ## 0.8.1 – 2026-11-07
 

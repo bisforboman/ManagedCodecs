@@ -68,3 +68,29 @@ runs of each build, the order alternating, on `testsrc-420.avi`: `PutDcOnly` and
 untouched `PutAvx2` and `DecodeBlock`, medians 0.21 before and 0.066 after (no run overlapping), about 7% of the
 profile. By wall clock (`tools/bench.py --base`, 15 interleaved runs, whole process): `testsrc-420.avi` 0.896,
 `testsrc-444.avi` 0.864 (its flat blocks about 11% of the profile before), `noise-q1.avi` 1.013 (few flat blocks).
+
+## Where the time goes after #357 and #369, and the refill's fast path inlined (2026-11-07)
+
+perf on main after #369 (`--loops 100`, the whole process, `-g` and `DOTNET_ReadyToRun=0`):
+
+| | `noise-q1.avi` | `testsrc-420.avi` |
+| --- | ---: | ---: |
+| `DecodeBlock` (the Huffman decoding inlined, the clear, dequantization) | 56.8% | 34.1% |
+| `JpegBitReader.Fill` | 9.0% | 5.9% |
+| `SimpleIdct.PutAvx2` | 9.7% | 12.9% |
+| `SimpleIdct.PutDcOnly` | – | 2.3% |
+| Building the Huffman tables | 0.3% | 1.0% |
+
+Against FFmpeg (`tools/bench.py`, 7 runs, this cloud VM's x64): mcdec's steady time is 0.57 of FFmpeg's on
+`testsrc-420.avi`, 0.63 on `testsrc-444.avi` and 0.66 on `noise-q1.avi` (whole process 0.69 to 0.76).
+
+The refill was a call every 56 bits or so. Its fast path (eight bytes without a 0xFF) is now inlined into the
+decoders (`JpegBitReader.Fill(ulong, int)`), the rest (stuffing, markers, the end of the data) a call as before
+(`FillSlow`). Bit-exact. perf, six runs of each build, the order alternating, `DecodeBlock`, `JpegBitReader` and
+`HuffmanTable` over `SimpleIdct`: medians 6.32 before and 6.01 after on `noise-q1.avi` (-4.9%, about 3.5% of the
+frame), 2.68 and 2.58 on `testsrc-420.avi` (-3.5%, about 1.6%), the runs overlapping a little. By wall clock
+(`tools/bench.py --base`, 15 interleaved runs): whole process 0.962, 0.961 and 0.952 of the base on `testsrc-420.avi`,
+`testsrc-444.avi` and `noise-q1.avi`, steady 0.944, 0.958 and 0.923.
+
+What is left is the decoding itself, a code and its magnitude bits at a time, and the transform; neither has a
+lever of the size of the three above in sight.

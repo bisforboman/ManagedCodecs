@@ -68,7 +68,17 @@ public class H264ConformanceTests
     public Task MatchesFfmpegAsynchronously(string sampleName) =>
         CompareWithFfmpeg(sampleName, borrowFrames: false, dispose: true, threads: 2, asynchronous: true);
 
-    private static async Task CompareWithFfmpeg(string sampleName, bool borrowFrames, bool dispose, int threads = 1, int rowDelay = 0, bool asynchronous = false)
+    /// <summary>
+    /// The same with <see cref="H264Decoder.CheckMotionNeighbors"/>: in MBAFF frames and field pictures, motion vector
+    /// prediction's neighbours found in one call (the pairs around the macroblock once) are compared with those found
+    /// one lookup each (Table 6-4's reference), for every partition of every sample.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(Samples))]
+    public Task MatchesFfmpegWithMotionNeighborsChecked(string sampleName) =>
+        CompareWithFfmpeg(sampleName, borrowFrames: false, dispose: true, checkMotionNeighbors: true);
+
+    private static async Task CompareWithFfmpeg(string sampleName, bool borrowFrames, bool dispose, int threads = 1, int rowDelay = 0, bool asynchronous = false, bool checkMotionNeighbors = false)
     {
         var lines = File.ReadAllLines(TestSamples.ReferenceOf(sampleName, ".framemd5"));
         var expected = FrameMd5.Parse(lines).Where(e => e.StreamIndex == 0).ToList(); // FFmpeg lists video first
@@ -82,7 +92,7 @@ public class H264ConformanceTests
 
         using var demuxer = Demuxer.Open(TestSamples.PathOf(sampleName));
         var video = demuxer.Video!;
-        var decoder = new H264Decoder(video) { BorrowFrames = borrowFrames, Threads = threads, RowDelay = rowDelay };
+        var decoder = new H264Decoder(video) { BorrowFrames = borrowFrames, Threads = threads, RowDelay = rowDelay, CheckMotionNeighbors = checkMotionNeighbors };
 
         int index = 0;
         long firstPts = 0;

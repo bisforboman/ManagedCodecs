@@ -701,6 +701,17 @@ fast path with the fill and the case analysis out of line, 451.2 to 452.4 M a lo
 itself (prologue, the cache check, the 12-byte return); the table path still took about 64, and the fill (6 lookups a
 macroblock) ate the rest. What would move it is fewer calls (motion vector prediction's A, B, C and D in one, about 1.1
 million calls in three loops of `h264-mbaff-default`, 378,000 of them `MotionNeighbor`'s), not cheaper ones.
+Fewer calls did (2026-11-07): in MBAFF frames and field pictures `PredictMv` finds A, B and C (D where C is missing)
+in one call, `AffMotionNeighbors`, with the pairs found once and Table 6-4's static case analysis for each location
+outside the macroblock; frames and the spatial direct mode keep `MotionNeighbor`, and both read motion through one
+`MotionAt`. `H264Decoder.CheckMotionNeighbors` (tests only) makes the one call compare its neighbours with the lookups
+one by one, on every sample (`MatchesFfmpegWithMotionNeighborsChecked`). Callgrind (AOT, steady loops): 449.5 to 441.4
+M instructions a loop of `h264-mbaff-default` (-1.8%), 80.52 to 79.24 M of `jm-paff-b` (-1.6%), and 2029.3 to 2007.1 M
+of `h264-bench-720p.mp4` (-1.1%: the shared `MotionAt` compiles leaner into frames' `MotionNeighbor` too). Under the
+JIT (perf, six runs each, the order alternating, normalized by the deblocking, motion compensation and CABAC residual
+functions): motion prediction and the functions it inlines into fell from 5.1 to 3.75 points of
+`h264-mbaff-default`'s frame and from 6.5 to 5.3 of `h264-bench-720p.mp4`'s; the whole frame by -0.3 and -0.7%,
+within that ratio's noise.
 
 A profile of a
 720p libx264 default stream (2026-10-22) is flat: CABAC residual decoding takes 14%, deblocking 21%

@@ -1,0 +1,61 @@
+name: A/B environment (experiment)
+
+# Temporary (#346): times mcdec with and without an environment variable, interleaved in one job, alternating
+# which goes first, on the hosted x64 and ARM64 runners. Not for main.
+on:
+  workflow_dispatch:
+    inputs:
+      variable:
+        description: The environment variable to set for B (NAME=VALUE)
+        default: DOTNET_ReadyToRun=0
+      pairs:
+        description: Interleaved pairs a sample
+        default: '8'
+
+permissions:
+  contents: read
+
+jobs:
+  ab:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
+        with:
+          dotnet-version: 10.0.x
+      - uses: ./.github/actions/samples
+      - name: Build
+        run: dotnet build tools/ManagedCodecs.Cli -c Release
+      - name: A/B
+        env:
+          VARIABLE: ${{ inputs.variable }}
+          PAIRS: ${{ inputs.pairs }}
+        run: |
+          mcdec=tools/ManagedCodecs.Cli/bin/Release/net10.0/mcdec.dll
+          one() { # $1 = a or b, $2 = sample, $3 = loops
+            if [ "$1" = b ]; then env "$VARIABLE" dotnet "$mcdec" "samples/$2" --loops "$3"; else dotnet "$mcdec" "samples/$2" --loops "$3"; fi \
+              | sed -nE 's/.* ([0-9.]+) us per frame/\1/p'
+          }
+          for s in h264-high-default.mp4:300 h264-bench-720p.mp4:40; do
+            n=${s%%:*}; l=${s##*:}
+            for i in $(seq 1 "$PAIRS"); do
+              if [ $((i % 2)) = 1 ]; then order="a b"; else order="b a"; fi
+              for x in $order; do echo "$n $x $i $(one "$x" "$n" "$l")"; done
+            done
+          done | tee ab.txt
+          python3 - <<'PY' | tee -a "$GITHUB_STEP_SUMMARY"
+          import collections, statistics as st
+          d = collections.defaultdict(dict)
+          for line in open("ab.txt"):
+              n, x, i, t = line.split()
+              d[n].setdefault(x, {})[i] = float(t)
+          for n, v in d.items():
+              r = [v["b"][i] / v["a"][i] for i in v["a"]]
+              print(f"{n}: A median {st.median(v['a'].values()):.1f} us, B median {st.median(v['b'].values()):.1f} us, "
+                    f"B/A median {st.median(r):.3f} (range {min(r):.3f} to {max(r):.3f}, B faster in {sum(x < 1 for x in r)}/{len(r)})")
+          PY

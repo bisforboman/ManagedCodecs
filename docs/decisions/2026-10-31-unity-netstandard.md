@@ -176,9 +176,11 @@ the H.264 rows on the runner of README's table, the MJPEG row on another):
 ci.yml's table of the Unity build on Mono against the net10.0 build, after this change (`tools/bench.py --runtime
 mono`, on a faster runner, an AMD EPYC 9V45, so not comparable with the table above by time): Mono takes 3.1 to 3.4
 times the net10.0 build's time on MJPEG, 3.1 to 8.7 on H.264 (720p 21.9 ms a frame), 4.7 to 4.8 on AAC and 7.2 to 9.1
-on HE-AAC. After all three pull requests (main's CI on the merge of the third, the same runner type): 3.2 to 3.9 on
-MJPEG, 2.6 to 9.1 on H.264 (720p 19.2 ms a frame), 5.3 to 5.6 on AAC and 6.8 to 8.3 on HE-AAC, the net10.0 build having
-got faster meanwhile too (its AAC IMDCT in single precision); src/ManagedCodecs.Unity/PACKAGE.md has that table.
+on HE-AAC. After all three pull requests, and after #386 put HE-AAC's QMF transforms in single precision
+in both builds (main's CI on its merge, on an EPYC 7763 runner): 4.1 to 4.3 on MJPEG, 3.2 to
+9.8 on H.264 (720p 38.7 ms a frame there; 19.2 on an EPYC 9V45 runner after #388), 6.7 to 6.8 on AAC and 6.2 to 7.8
+on HE-AAC, the net10.0 build having got faster meanwhile too (its IMDCT and QMF transforms in single precision);
+src/ManagedCodecs.Unity/PACKAGE.md has that table.
 
 The net10.0 build is unchanged where it runs: ManagedCodecs.H264.dll for net10.0 is the same file byte for byte
 (built without debug information, whose id hashes the sources), and the MJPEG change reaches CoreCLR only without

@@ -20,27 +20,27 @@ included, runs against this assembly, and every sample decodes the same on Mono.
 
 ## Speed
 
-On Mono 6.12 (mono-project.com's, one thread, GitHub's x64 runner, an AMD EPYC 9V45 that run), the time a frame,
+On Mono 6.12 (mono-project.com's, one thread, GitHub's x64 runner, an AMD EPYC 7763 that run), the time a frame,
 against the other packages on .NET 10 (medians of 3 interleaved runs, the last loop of each):
 
 | Sample | net10.0 (ms a frame) | Mono 6.12 (ms a frame) | Mono / net10.0 |
 | --- | ---: | ---: | ---: |
-| h264-bench-720p (1280x720, 1 I, 49 P) | 2.11 | 19.2 | 9.1 |
-| h264-p-refs (320x240, P frames, CAVLC) | 0.15 | 1.26 | 8.3 |
-| h264-b-pyramid (320x240, CABAC, B frames) | 0.41 | 2.06 | 5.1 |
-| h264-high-default (320x240, libx264's High defaults) | 0.33 | 1.96 | 6.0 |
-| h264-10bit-b (320x240, High 10) | 0.57 | 2.17 | 3.8 |
-| h264-mbaff-default (320x240, MBAFF) | 0.56 | 2.62 | 4.7 |
-| h264-high-motion (320x240, QP 22, fast motion) | 2.85 | 7.35 | 2.6 |
-| testsrc-420.avi (320x240 MJPEG) | 0.11 | 0.41 | 3.9 |
-| noise-q1.avi (MJPEG, highest quality) | 0.44 | 1.40 | 3.2 |
-| aac-stereo-48k (a frame: 1024 samples, 21 ms) | 0.007 | 0.039 | 5.3 |
-| aac-5.1 | 0.020 | 0.12 | 5.6 |
-| heaac-5.1 (a frame: 2048 samples, 43 ms) | 0.13 | 1.10 | 8.3 |
-| heaacv2-stereo | 0.054 | 0.37 | 6.8 |
+| h264-bench-720p (1280x720, 1 I, 49 P) | 3.96 | 38.7 | 9.8 |
+| h264-p-refs (320x240, P frames, CAVLC) | 0.29 | 2.56 | 8.9 |
+| h264-b-pyramid (320x240, CABAC, B frames) | 0.68 | 3.98 | 5.8 |
+| h264-high-default (320x240, libx264's High defaults) | 0.57 | 3.96 | 7.0 |
+| h264-10bit-b (320x240, High 10) | 0.92 | 4.37 | 4.7 |
+| h264-mbaff-default (320x240, MBAFF) | 0.95 | 5.21 | 5.5 |
+| h264-high-motion (320x240, QP 22, fast motion) | 4.07 | 13.4 | 3.3 |
+| testsrc-420.avi (320x240 MJPEG) | 0.18 | 0.77 | 4.3 |
+| noise-q1.avi (MJPEG, highest quality) | 0.72 | 2.97 | 4.1 |
+| aac-stereo-48k (a frame: 1024 samples, 21 ms) | 0.013 | 0.086 | 6.8 |
+| aac-5.1 | 0.039 | 0.26 | 6.7 |
+| heaac-5.1 (a frame: 2048 samples, 43 ms) | 0.23 | 1.77 | 7.8 |
+| heaacv2-stereo | 0.10 | 0.64 | 6.2 |
 
-So: audio (AAC 0.2 to 0.6% of a core in real time, HE-AAC 0.9 to 2.6%), MJPEG and small cutscenes play, and 720p H.264
-about 52 frames a second on one thread there (26 on the slower runner of earlier measurements, 38 ms a frame);
+So: audio (AAC 0.4 to 1.2% of a core in real time, HE-AAC 1.5 to 4%), MJPEG and small cutscenes play, and 720p H.264
+about 26 frames a second on one thread there (52 on the newer EPYC 9V45 runners, 19 ms a frame);
 `H264Decoder.Threads` decodes several pictures at once where threads exist. Unity's own Mono and IL2CPP are not
 measured. On .NET 10 itself this build takes 1 to 3.4 times the other packages' time: use them wherever .NET 10 runs.
 

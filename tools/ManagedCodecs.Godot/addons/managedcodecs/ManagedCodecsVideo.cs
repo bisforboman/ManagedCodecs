@@ -1,3 +1,10 @@
+// The usings and the nullable context are this file's own: a user's Godot project turns on neither implicit usings
+// nor nullable annotations, unlike this repository.
+#nullable enable
+
+using System;
+using System.Collections.Generic;
+using System.IO;
 using Godot;
 using ManagedCodecs.Playback;
 

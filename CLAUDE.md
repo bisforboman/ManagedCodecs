@@ -119,6 +119,9 @@ Read the CLAUDE.md beside the code you work on, also for a codec's samples or to
 - framemd5 lines can carry side data after the hash (`S=1, size, md5` on AAC's first packet): the hash is field 6.
 - A `stackalloc` span can't be captured by a local function or lambda, and a span variable declared without an
   initializer can't later hold stack memory: initialize it from the stack buffer.
+- `Unsafe.Add(ref x, n)` with a negative `n` crashed Mono 6.12 (SIGSEGV in the Unity build, CI's `unity` job, #400):
+  in code the Unity build compiles, take a ref to the first element needed (an array index) and add only non-negative
+  offsets.
 - Whole-vector loads read past the last needed byte: give buffers slack and check bounds against the furthest load (a
   chroma row read from x + 1 needs 17 bytes).
 - Generated samples differ between machines (libx264's `h264-mbaff-p-motion` on ARM64 and x64, `h264-main-slices`

@@ -409,10 +409,10 @@ and `VideoThumbnail`, and
 output is the same to the bit: CI runs the whole test suite against this assembly on CoreCLR, and decodes every sample
 on Mono 6.12 (`tools/unity-check.sh`), comparing the output, and each video file's probe and thumbnail, with the
 net10.0 build's. IL2CPP is not tested; it needs a
-Unity install. On Mono 6.12 (one thread, GitHub's x64 runner) it takes 4 to 19 times the net10.0 build's time:
-H.264 4 to 22 ms a 320x240 frame and 80 ms a 720p one (12.5 frames a second), MJPEG 1 to 3.4 ms a 320x240 frame,
-AAC 0.5 to 1.5% of a core in real time and HE-AAC 2 to 7%; so audio, MJPEG and small cutscenes, not HD H.264 on one
-thread. On CoreCLR the scalar build takes 1 to 3.4 times the other packages' time
+Unity install. On Mono 6.12 (one thread, GitHub's x64 runner) it takes 3 to 9 times the net10.0 build's time:
+H.264 1.4 to 10 ms a 320x240 frame and 22 to 38 ms a 720p one (26 to 45 frames a second, by the runner's CPU),
+MJPEG 0.4 to 1.7 ms a 320x240 frame, AAC 0.3 to 0.9% of a core in real time and HE-AAC 1.3 to 4%; so audio, MJPEG,
+cutscenes and 720p H.264 on a fast core, not 1080p on one thread. On CoreCLR the scalar build takes 1 to 3.4 times the other packages' time
 (docs/decisions/2026-10-31-unity-netstandard.md has both tables). WebGL builds have no threads,
 so `H264Decoder.Threads` stays at 1 there. The package holds the same types as the others, so a project references one
 or the other, never both. Its nuget.org page is `src/ManagedCodecs.Unity/PACKAGE.md`. A sample `MonoBehaviour` playing a video with it is in `tools/ManagedCodecs.Unity.Sample` (compiled in CI

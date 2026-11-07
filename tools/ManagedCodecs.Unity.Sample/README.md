@@ -30,8 +30,8 @@ build; whether Unity runs it as intended needs a Unity install, which nobody has
   as 16-bit stereo turned to floats, made once the first audio gives the rate.
 - Not for WebGL: it has no threads, and the decoder thread is the sample's design. On Android, StreamingAssets lie in
   the APK: read the file with `UnityWebRequest` into a `MemoryStream`, which `Demuxer.Open` takes.
-- Speed on Mono: the package's page has the table. Audio, MJPEG and small videos play; 720p H.264 decodes at about
-  12.5 frames a second on one thread.
+- Speed on Mono: the package's page has the table. Audio, MJPEG and small videos play; 720p H.264 decodes at 26 to
+  45 frames a second on one thread, by the CPU (Mono 6.12 on GitHub's runners).
 
 ## Testing it in Unity
 

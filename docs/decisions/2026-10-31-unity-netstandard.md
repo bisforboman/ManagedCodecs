@@ -173,6 +173,11 @@ the H.264 rows on the runner of README's table, the MJPEG row on another):
 | h264-10bit-b | 7.10 | 4.82 | 1.47 |
 | testsrc-420.avi (MJPEG) | 1.18 | 0.81 | 1.45 |
 
+ci.yml's table of the Unity build on Mono against the net10.0 build, after this change (`tools/bench.py --runtime
+mono`, on a faster runner, an AMD EPYC 9V45, so not comparable with the table above by time): Mono takes 3.1 to 3.4
+times the net10.0 build's time on MJPEG, 3.1 to 8.7 on H.264 (720p 21.9 ms a frame), 4.7 to 4.8 on AAC and 7.2 to 9.1
+on HE-AAC; src/ManagedCodecs.Unity/PACKAGE.md has it.
+
 The net10.0 build is unchanged where it runs: ManagedCodecs.H264.dll for net10.0 is the same file byte for byte
 (built without debug information, whose id hashes the sources), and the MJPEG change reaches CoreCLR only without
 SSSE3 or AVX2 (`PutScalar`), with `PutDcOnly`'s CoreCLR path as it was; `tools/bench.py --base` on the cloud VM (7

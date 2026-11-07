@@ -5,9 +5,10 @@ audio) in Godot 4's .NET build. Godot itself plays only Ogg Theora; this decodes
 [ManagedCodecs](https://github.com/bisforboman/ManagedCodecs) packages, so the same file plays on every desktop platform
 the .NET build exports to. Not for web exports: Godot's C# can't export to the web yet.
 
-**Run in Godot 4.7.2 on Linux** (in the editor's runner and an exported build, under Xvfb with software OpenGL and no
-sound card): every frame shown, the picture upright and its colours FFmpeg's, the sound in sync. Not yet on a desktop
-with a GPU and a sound card, nor on Windows or macOS: a report helps (repository README, "Testing it in Godot").
+**Run in Godot 4.7.2:** on Windows, 480p and 1080p H.264 (issue #402), and on Linux in the editor's runner and an
+exported build (under Xvfb with software OpenGL and no sound card): every frame shown, the picture upright and its
+colours FFmpeg's, the sound in sync. Sound on a desktop and macOS are not checked yet. A report helps (repository
+README, "Testing it in Godot").
 
 ## Installing
 
@@ -33,7 +34,11 @@ with a GPU and a sound card, nor on Windows or macOS: a report helps (repository
 
 The node reads the whole file into memory (right for cutscenes, not for films), keeps the picture's aspect ratio
 (`StretchMode` keep-aspect-centred), streams the sound through an `AudioStreamPlayer` child and prints a line every 5
-seconds: frames shown and dropped, and the decoding's and RGBA conversion's time a frame. A phone video's rotation is
+seconds: frames shown and dropped, the time the decoding thread waited for the decoder a frame (near zero while its
+threads keep ahead) and the RGBA conversion's time a frame. Built against the repository's sources instead of the
+package, reference them in Release (`SetConfiguration="Configuration=Release"`, as this repository's
+`ManagedCodecs.Godot.csproj` does): Godot's own configurations leave them unoptimised, several times slower, and the
+node warns. A phone video's rotation is
 not applied; turn the node.
 
 MIT licensed (LICENSE). H.264 is covered by patents in some countries (the Via LA AVC pool): whether a game that

@@ -4,7 +4,7 @@ For issue #254 (docs/decisions/2026-10-31-game-engines.md): an addon, `addons/ma
 `ManagedCodecsVideo` is a `TextureRect` node that plays a video (H.264 or MJPEG, AAC audio; MP4, Matroska or AVI) into
 an `ImageTexture` with the ManagedCodecs packages, on Godot 4.7's .NET build. Not a media player: no seeking, no pause.
 
-**Run in Godot 4.7.2 on Linux, exported too; not yet on a desktop with a GPU and sound card.** CI builds it with the Godot .NET SDK
+**Run in Godot 4.7.2 on Windows (issue #402) and Linux, exported too; sound not yet checked on a desktop.** CI builds it with the Godot .NET SDK
 (`Godot.NET.Sdk` and `GodotSharp` 4.7.2, from nuget.org). It has also run in Godot itself (2026-11-07), on a cloud VM
 under Xvfb with Mesa's software OpenGL and no sound card: [Testing it in Godot](#testing-it-in-godot) has the results
 and what is left to try. Please report back from a desktop.
@@ -54,7 +54,10 @@ the history and the MonoGame measurements).
 3. **Runs.** Each in the editor (F5), then in an exported desktop build (the export templates for .NET).
 4. **Record**, for each run: the Godot version, the OS and CPU, and the last line the sample prints (every 5 seconds and
    on quitting): `ManagedCodecsVideo: 1280x720, 1500 frames shown, 3 dropped, ms a frame: decode 9.1, RGBA conversion
-   2.0`. A steadily growing dropped count means playback doesn't keep up; the two times say which part is short.
+   2.0`. A steadily growing dropped count means playback doesn't keep up. The decode time is the decoding thread's wait
+   for the decoder's threads, near zero while they keep ahead, so it can't be compared across resolutions; the RGBA
+   conversion's is its cost a frame. The csproj builds the decoders in Release whatever Godot's configuration (issue
+   #402: Debug ones were about 4 times slower at 1080p).
    Also whether the picture is upright and its colours right (compare with VLC), whether the sound plays without gaps
    and in sync, and the first error in the output panel, if any.
 
@@ -80,4 +83,5 @@ for the first frame), opening the folder in the editor wrote `net8.0` into the `
 `net10.0` itself), and an export left out the C# (no solution file) and the video (not a resource); the folder now has
 both a solution and an export preset.
 
-Still to try: a desktop with a GPU and a sound card (does the sound play live without gaps), and Windows and macOS.
+Windows: issue #402 (480p and 1080p H.264, the picture; the decoders built in Release since). Still to try: a desktop
+with a sound card (does the sound play live without gaps), and macOS.

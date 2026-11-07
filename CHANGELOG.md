@@ -26,9 +26,13 @@ run time.
 
 ### Changed
 
+- HE-AAC decodes faster: the QMF banks' transforms (their FFTs, DCT-IVs and rotations, between windows still in double)
+  run in single precision, four values a vector: 7 to 10% off a 5.1 HE-AAC frame and 4 to 7% off HE-AAC v2, on ARM64
+  and x64. The output moves against FFmpeg's (single precision too) in the third or fourth digit of its differences.
 - H.264: about 24 small functions on the hot paths are inlined, as the runtime's dynamic PGO does (#346): 1.5 to 3.8%
   less time a frame in the steady state on ARM64 and 0.4 to 2.6% on x64 with tiering off (as mcdec runs) or
-  `TieredPGO=false`, and up to 5% more JIT time at startup for short files. Native AOT builds are not timed yet.
+  `TieredPGO=false`, and up to 5% more JIT time at startup for short files. Native AOT builds (no JIT at startup)
+  execute 3.1 to 5.6% fewer instructions a frame.
 - H.264: the direct motion compensation path for frame macroblocks also takes samples above 8 bits and 4:2:2: about 2%
   fewer instructions in 10-bit and 4:2:2 streams.
 - H.264: MBAFF frames and field pictures take the direct motion compensation path too: about 2.2% fewer instructions
@@ -41,6 +45,8 @@ run time.
   4.8e-7 (the bound is 2^-17, 7.6e-6).
 - H.264: above 8 bits, the bi-predicted average, weighted prediction and the inverse transform adds run in vectors
   instead of a loop per sample: about 9 to 13% fewer instructions in 10-bit streams (3% of the frame under the JIT).
+- HE-AAC v2: parametric stereo's hybrid filters, its transient detector's smoothing and the hybrid sub-subbands'
+  all-pass filter run in vectors: about 6% off a 20-band frame and 11% off a 34-band one on x64. The output is unchanged.
 - H.264: in MBAFF frames and field pictures, motion vector prediction finds its neighbours A, B and C in one call:
   about 1.8% fewer instructions in MBAFF frames, 1.6% in field pictures and 1.1% in progressive CAVLC frames.
 - H.264: in MBAFF frames and field pictures, CABAC's context selection reads a macroblock's left and above neighbours

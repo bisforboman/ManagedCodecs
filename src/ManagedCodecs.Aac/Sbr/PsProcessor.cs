@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 #if NET
+using System.Numerics;
 using System.Runtime.Intrinsics;
 #endif
 
@@ -102,6 +103,12 @@ internal sealed class PsProcessor
     private static readonly double[] ModulationCos = [.. Enumerable.Range(0, 8 * 13).Select(i => QmfTrig.CosPi256(-32 * ((2 * (i / 13)) + 1) * ((i % 13) - 6)))];
     private static readonly double[] ModulationSin = [.. Enumerable.Range(0, 8 * 13).Select(i => QmfTrig.SinPi256(-32 * ((2 * (i / 13)) + 1) * ((i % 13) - 6)))];
 
+    // The same filters tap by tap (13 rows of N sub-subbands), the layout HybridFilter reads.
+    private static readonly (double[] Re, double[] Im) Filter12ByTap = (ByTap(Filter12.Re, 12), ByTap(Filter12.Im, 12));
+    private static readonly (double[] Re, double[] Im) Filter8ByTap = (ByTap(Filter8.Re, 8), ByTap(Filter8.Im, 8));
+    private static readonly (double[] Re, double[] Im) Filter4ByTap = (ByTap(Filter4.Re, 4), ByTap(Filter4.Im, 4));
+    private static readonly (double[] Re, double[] Im) ModulationByTap = (ByTap(ModulationCos, 8), ByTap(ModulationSin, 8));
+
     // The decorrelator's all-pass links (8.6.4.5): their delays in slots, decay factors and fractional delays.
     private static readonly int[] LinkDelays = [3, 4, 5];
     private static readonly double[] LinkDecays = [0.65143905753106, 0.56471812200776, 0.48954165955695];
@@ -113,6 +120,9 @@ internal sealed class PsProcessor
     // either layout).
     internal static readonly (double[] Re, double[] Im) QmfPhase = Phases(QmfCentres(), Fraction);
     internal static readonly (double[] Re, double[] Im)[] QmfLinkPhase = [.. LinkFractions.Select(q => Phases(QmfCentres(), q))];
+
+    // The hybrid sub-subbands' all-pass decay: 1 throughout (8.6.4.5.2 fades only QMF bands).
+    private static readonly double[] HybridDecay = [.. Enumerable.Repeat(1.0, MaxHybridBands)];
 
     /// <summary>
     /// The 20-band layout (8.6.4.6): the first 10 groups single hybrid sub-subbands (12 of them: band 0's 0 to 7 with 4
@@ -425,45 +435,22 @@ internal sealed class PsProcessor
         {
             for (int i = 0; i < Slots; i++)
             {
-                Filter(_bandRe[0], _bandIm[0], i, Filter12, 12, _leftRe[i], _leftIm[i], 0);
-                Filter(_bandRe[1], _bandIm[1], i, Filter8, 8, _leftRe[i], _leftIm[i], 12);
+                HybridFilter(_bandRe[0].AsSpan(i, 13), _bandIm[0].AsSpan(i, 13), Filter12ByTap, [], _leftRe[i].AsSpan(0, 12), _leftIm[i].AsSpan(0, 12));
+                HybridFilter(_bandRe[1].AsSpan(i, 13), _bandIm[1].AsSpan(i, 13), Filter8ByTap, [], _leftRe[i].AsSpan(12, 8), _leftIm[i].AsSpan(12, 8));
                 for (int band = 2; band < HybridQmfBands; band++)
                 {
-                    Filter(_bandRe[band], _bandIm[band], i, Filter4, 4, _leftRe[i], _leftIm[i], 20 + (4 * (band - 2)));
+                    HybridFilter(_bandRe[band].AsSpan(i, 13), _bandIm[band].AsSpan(i, 13), Filter4ByTap, [], _leftRe[i].AsSpan(20 + (4 * (band - 2)), 4), _leftIm[i].AsSpan(20 + (4 * (band - 2)), 4));
                 }
             }
 
             return;
         }
 
-        Span<double> out8Re = stackalloc double[8];
-        Span<double> out8Im = stackalloc double[8];
         for (int i = 0; i < Slots; i++)
         {
-            var bandRe = _bandRe[0];
-            var bandIm = _bandIm[0];
-            for (int q = 0; q < 8; q++)
-            {
-                double sumRe = 0;
-                double sumIm = 0;
-                for (int n = 0; n < 13; n++)
-                {
-                    double xr = bandRe[i + n];
-                    double xi = bandIm[i + n];
-                    double c = ModulationCos[(13 * q) + n];
-                    double s = ModulationSin[(13 * q) + n];
-                    sumRe += Prototype8[n] * ((xr * c) - (xi * s));
-                    sumIm += Prototype8[n] * ((xi * c) + (xr * s));
-                }
-
-                out8Re[q] = sumRe;
-                out8Im[q] = sumIm;
-            }
-
             var leftRe = _leftRe[i];
             var leftIm = _leftIm[i];
-            out8Re.CopyTo(leftRe);
-            out8Im.CopyTo(leftIm);
+            HybridFilter(_bandRe[0].AsSpan(i, 13), _bandIm[0].AsSpan(i, 13), ModulationByTap, Prototype8, leftRe.AsSpan(0, 8), leftIm.AsSpan(0, 8));
             leftRe[3] += leftRe[4];
             leftIm[3] += leftIm[4];
             leftRe[2] += leftRe[5];
@@ -498,7 +485,65 @@ internal sealed class PsProcessor
     {
         var layout = _layout;
 
-        // The transient detector: each parameter band's power by slot, against its smoothed peak.
+        var ratio = _ratio;
+        statistics.PsDuckedSlots += DetectTransients(re, im);
+
+        // Slot by slot: the all-pass delay's position and each link's are the same for every subband (each starts from
+        // the stored ones and moves one a slot), so a slot's subbands go through in order along contiguous rows. Every
+        // (slot, subband) is computed as it would be subband by subband, so the output is the same to the bit.
+        Span<int> linkIndex = stackalloc int[3];
+        _linkIndex.CopyTo(linkIndex);
+        Span<double> delayedRe = stackalloc double[64];
+        Span<double> delayedIm = stackalloc double[64];
+        int d = _delayIndex;
+        for (int i = 0; i < Slots; i++)
+        {
+            // Every sub-subband the layout has, those no group takes too (20 bands' 4 and 5, which stay zero, as does
+            // their state), so the row runs contiguous.
+            AllPassRow(_leftRe[i], _leftIm[i], 0, layout.HybridBands, HybridDecay, _hybridDelayRe[d], _hybridDelayIm[d], layout.HybridPhase, _hybridLinkRe, _hybridLinkIm, layout.HybridLinkPhase, linkIndex, delayedRe, delayedIm);
+            for (int gr = 0; gr < layout.SubQmfGroups; gr++)
+            {
+                int sb = layout.GroupBorders[gr];
+                double duck = ratio[i][layout.GroupBins[gr]];
+                _rightRe[i][sb] = duck * delayedRe[sb];
+                _rightIm[i][sb] = duck * delayedIm[sb];
+            }
+
+            var inRe = re[i];
+            var inIm = im[i];
+            var outRow = rightRe[i];
+            var outRowIm = rightIm[i];
+            AllPassRow(inRe, inIm, layout.GroupBorders[layout.SubQmfGroups], AllPassBands, layout.QmfDecay, _qmfDelayRe[d], _qmfDelayIm[d], QmfPhase, _qmfLinkRe, _qmfLinkIm, QmfLinkPhase, linkIndex, delayedRe, delayedIm);
+
+            // The plain delays: what went in 14 slots ago below band 35, one slot ago from it up.
+            Delay(inRe, inIm, AllPassBands, ShortDelayBands, _qmfDelayRe[_qmfDelayIndex], _qmfDelayIm[_qmfDelayIndex], delayedRe, delayedIm);
+            Delay(inRe, inIm, ShortDelayBands, 64, _qmfDelayRe[0], _qmfDelayIm[0], delayedRe, delayedIm);
+            _qmfDelayIndex = _qmfDelayIndex + 1 >= LongDelay ? 0 : _qmfDelayIndex + 1;
+            for (int gr = layout.SubQmfGroups; gr < layout.Groups; gr++)
+            {
+                double duck = ratio[i][layout.GroupBins[gr]];
+                for (int sb = layout.GroupBorders[gr]; sb < layout.GroupBorders[gr + 1]; sb++)
+                {
+                    outRow[sb] = duck * delayedRe[sb];
+                    outRowIm[sb] = duck * delayedIm[sb];
+                }
+            }
+
+            d = d + 1 >= AllPassDelay ? 0 : d + 1;
+            for (int link = 0; link < 3; link++)
+            {
+                linkIndex[link] = linkIndex[link] + 1 >= LinkDelays[link] ? 0 : linkIndex[link] + 1;
+            }
+        }
+
+        _delayIndex = d;
+        linkIndex.CopyTo(_linkIndex);
+    }
+
+    // The transient detector: each parameter band's power by slot, against its smoothed peak; the slots ducked.
+    private int DetectTransients(double[][] re, double[][] im)
+    {
+        var layout = _layout;
         var ratio = _ratio;
         Span<double> power = stackalloc double[MaxBins];
         int ducked = 0;
@@ -530,72 +575,84 @@ internal sealed class PsProcessor
                 power[bin] = sum;
             }
 
-            var slotRatio = ratio[i];
-            for (int bin = 0; bin < layout.Bins; bin++)
-            {
-                double p = power[bin];
-                double peak = Math.Max(_peakDecay[bin] * PeakDecay, p);
-                double difference = _peakDifference[bin] + (EnergySmoothing * (peak - p - _peakDifference[bin]));
-                double energy = _energy[bin] + (EnergySmoothing * (p - _energy[bin]));
-                (_peakDecay[bin], _peakDifference[bin], _energy[bin]) = (peak, difference, energy);
-                bool transient = TransientImpact * difference > energy;
-                slotRatio[bin] = transient ? energy / (TransientImpact * difference) : 1;
-                ducked += transient ? 1 : 0;
-            }
+            ducked += SmoothPeaks(power[..layout.Bins], _peakDecay, _peakDifference, _energy, ratio[i]);
         }
 
-        statistics.PsDuckedSlots += ducked;
+        return ducked;
+    }
 
-        // Slot by slot: the all-pass delay's position and each link's are the same for every subband (each starts from
-        // the stored ones and moves one a slot), so a slot's subbands go through in order along contiguous rows. Every
-        // (slot, subband) is computed as it would be subband by subband, so the output is the same to the bit.
-        Span<int> linkIndex = stackalloc int[3];
-        _linkIndex.CopyTo(linkIndex);
-        Span<double> delayedRe = stackalloc double[64];
-        Span<double> delayedIm = stackalloc double[64];
-        int d = _delayIndex;
-        for (int i = 0; i < Slots; i++)
+    /// <summary>
+    /// One slot of the transient detector's smoothing, bin by bin: the peak's decay, the peak excess and the energy are
+    /// updated from <paramref name="power"/>, and <paramref name="ratio"/> takes each bin's ducking (1 without a
+    /// transient). Four bins at a time where Vector256 is accelerated (two with Vector128 alone), each lane with the
+    /// scalar operations in their order, so the values are the same to the bit (<c>PsSmoothPeaks_MatchesScalar</c>).
+    /// </summary>
+    /// <returns>The bins found transient.</returns>
+    internal static int SmoothPeaks(ReadOnlySpan<double> power, Span<double> peakDecay, Span<double> peakDifference, Span<double> energy, Span<double> ratio, bool scalar = false)
+    {
+        int bins = power.Length;
+        if (peakDecay.Length < bins || peakDifference.Length < bins || energy.Length < bins || ratio.Length < bins)
         {
-            var hybridDelayRe = _hybridDelayRe[d];
-            var hybridDelayIm = _hybridDelayIm[d];
-            for (int gr = 0; gr < layout.SubQmfGroups; gr++)
-            {
-                int sb = layout.GroupBorders[gr];
-                var (outRe, outIm) = AllPass(_leftRe[i][sb], _leftIm[i][sb], sb, 1, hybridDelayRe, hybridDelayIm, layout.HybridPhase, _hybridLinkRe, _hybridLinkIm, layout.HybridLinkPhase, linkIndex);
-                double duck = ratio[i][layout.GroupBins[gr]];
-                _rightRe[i][sb] = duck * outRe;
-                _rightIm[i][sb] = duck * outIm;
-            }
+            throw new ArgumentException("Every bin takes a peak, an excess, an energy and a ratio.");
+        }
 
-            var inRe = re[i];
-            var inIm = im[i];
-            var outRow = rightRe[i];
-            var outRowIm = rightIm[i];
-            AllPassRow(inRe, inIm, layout.GroupBorders[layout.SubQmfGroups], AllPassBands, layout.QmfDecay, _qmfDelayRe[d], _qmfDelayIm[d], _qmfLinkRe, _qmfLinkIm, linkIndex, delayedRe, delayedIm);
-
-            // The plain delays: what went in 14 slots ago below band 35, one slot ago from it up.
-            Delay(inRe, inIm, AllPassBands, ShortDelayBands, _qmfDelayRe[_qmfDelayIndex], _qmfDelayIm[_qmfDelayIndex], delayedRe, delayedIm);
-            Delay(inRe, inIm, ShortDelayBands, 64, _qmfDelayRe[0], _qmfDelayIm[0], delayedRe, delayedIm);
-            _qmfDelayIndex = _qmfDelayIndex + 1 >= LongDelay ? 0 : _qmfDelayIndex + 1;
-            for (int gr = layout.SubQmfGroups; gr < layout.Groups; gr++)
+        int bin = 0;
+        int ducked = 0;
+#if NET
+        if (!scalar && Vector256.IsHardwareAccelerated)
+        {
+            for (; bin <= bins - Vector256<double>.Count; bin += Vector256<double>.Count)
             {
-                double duck = ratio[i][layout.GroupBins[gr]];
-                for (int sb = layout.GroupBorders[gr]; sb < layout.GroupBorders[gr + 1]; sb++)
-                {
-                    outRow[sb] = duck * delayedRe[sb];
-                    outRowIm[sb] = duck * delayedIm[sb];
-                }
-            }
-
-            d = d + 1 >= AllPassDelay ? 0 : d + 1;
-            for (int link = 0; link < 3; link++)
-            {
-                linkIndex[link] = linkIndex[link] + 1 >= LinkDelays[link] ? 0 : linkIndex[link] + 1;
+                var p = Vector256.Create(power[bin..]);
+                var peak = Vector256.Max(Vector256.Create(peakDecay[bin..]) * PeakDecay, p);
+                var excess = Vector256.Create(peakDifference[bin..]);
+                var difference = excess + (EnergySmoothing * (peak - p - excess));
+                var smoothed = Vector256.Create(energy[bin..]);
+                smoothed += EnergySmoothing * (p - smoothed);
+                peak.CopyTo(peakDecay[bin..]);
+                difference.CopyTo(peakDifference[bin..]);
+                smoothed.CopyTo(energy[bin..]);
+                var impact = TransientImpact * difference;
+                var transient = Vector256.GreaterThan(impact, smoothed);
+                Vector256.ConditionalSelect(transient, smoothed / impact, Vector256<double>.One).CopyTo(ratio[bin..]);
+                ducked += BitOperations.PopCount(transient.ExtractMostSignificantBits());
             }
         }
 
-        _delayIndex = d;
-        linkIndex.CopyTo(_linkIndex);
+        if (!scalar && Vector128.IsHardwareAccelerated)
+        {
+            for (; bin <= bins - Vector128<double>.Count; bin += Vector128<double>.Count)
+            {
+                var p = Vector128.Create(power[bin..]);
+                var peak = Vector128.Max(Vector128.Create(peakDecay[bin..]) * PeakDecay, p);
+                var excess = Vector128.Create(peakDifference[bin..]);
+                var difference = excess + (EnergySmoothing * (peak - p - excess));
+                var smoothed = Vector128.Create(energy[bin..]);
+                smoothed += EnergySmoothing * (p - smoothed);
+                peak.CopyTo(peakDecay[bin..]);
+                difference.CopyTo(peakDifference[bin..]);
+                smoothed.CopyTo(energy[bin..]);
+                var impact = TransientImpact * difference;
+                var transient = Vector128.GreaterThan(impact, smoothed);
+                Vector128.ConditionalSelect(transient, smoothed / impact, Vector128<double>.One).CopyTo(ratio[bin..]);
+                ducked += BitOperations.PopCount(transient.ExtractMostSignificantBits());
+            }
+        }
+#endif
+
+        for (; bin < bins; bin++)
+        {
+            double p = power[bin];
+            double peak = Math.Max(peakDecay[bin] * PeakDecay, p);
+            double difference = peakDifference[bin] + (EnergySmoothing * (peak - p - peakDifference[bin]));
+            double smoothed = energy[bin] + (EnergySmoothing * (p - energy[bin]));
+            (peakDecay[bin], peakDifference[bin], energy[bin]) = (peak, difference, smoothed);
+            bool transient = TransientImpact * difference > smoothed;
+            ratio[bin] = transient ? smoothed / (TransientImpact * difference) : 1;
+            ducked += transient ? 1 : 0;
+        }
+
+        return ducked;
     }
 
     // Subbands first .. end - 1 of a plain delay line's row: out what it held, in what comes now.
@@ -611,12 +668,12 @@ internal sealed class PsProcessor
     internal static double[] QmfDecays(int cutoff) => [.. Enumerable.Range(0, 64).Select(sb => sb <= cutoff ? 1 : Math.Max(0, 1 + (cutoff * DecaySlope) - (DecaySlope * sb)))];
 
     /// <summary>
-    /// The QMF subbands <paramref name="first"/> .. <paramref name="end"/> - 1 of one slot through the all-pass filter
-    /// (<see cref="AllPass"/>), into <paramref name="outRe"/> and <paramref name="outIm"/> at the same indices: four
+    /// The (sub-)subbands <paramref name="first"/> .. <paramref name="end"/> - 1 of one slot through the all-pass filter
+    /// (<see cref="AllPass"/>, with the QMF bands' phases or a layout's hybrid ones), into <paramref name="outRe"/> and <paramref name="outIm"/> at the same indices: four
     /// subbands at a time where Vector256 is accelerated (two with Vector128 alone), each lane with AllPass's operations in its order (no fused
     /// multiply-adds), so the output is the same to the bit (<c>PsAllPassRow_MatchesScalar</c>); the rest one by one.
     /// </summary>
-    internal static void AllPassRow(ReadOnlySpan<double> inRe, ReadOnlySpan<double> inIm, int first, int end, double[] decay, double[] delayRe, double[] delayIm, double[][][] linkRe, double[][][] linkIm, ReadOnlySpan<int> linkIndex, Span<double> outRe, Span<double> outIm)
+    internal static void AllPassRow(ReadOnlySpan<double> inRe, ReadOnlySpan<double> inIm, int first, int end, double[] decay, double[] delayRe, double[] delayIm, (double[] Re, double[] Im) phase, double[][][] linkRe, double[][][] linkIm, (double[] Re, double[] Im)[] linkPhase, ReadOnlySpan<int> linkIndex, Span<double> outRe, Span<double> outIm)
     {
         int sb = first;
 #if NET
@@ -628,8 +685,8 @@ internal sealed class PsProcessor
                 var delayedIm = Vector256.Create<double>(delayIm.AsSpan(sb));
                 Vector256.Create<double>(inRe[sb..]).CopyTo(delayRe.AsSpan(sb));
                 Vector256.Create<double>(inIm[sb..]).CopyTo(delayIm.AsSpan(sb));
-                var phaseRe = Vector256.Create<double>(QmfPhase.Re.AsSpan(sb));
-                var phaseIm = Vector256.Create<double>(QmfPhase.Im.AsSpan(sb));
+                var phaseRe = Vector256.Create<double>(phase.Re.AsSpan(sb));
+                var phaseIm = Vector256.Create<double>(phase.Im.AsSpan(sb));
                 var r = (delayedRe * phaseRe) - (delayedIm * phaseIm);
                 var m = (delayedRe * phaseIm) + (delayedIm * phaseRe);
                 var decays = Vector256.Create<double>(decay.AsSpan(sb));
@@ -637,7 +694,7 @@ internal sealed class PsProcessor
                 {
                     var bufRe = linkRe[link][linkIndex[link]].AsSpan(sb);
                     var bufIm = linkIm[link][linkIndex[link]].AsSpan(sb);
-                    var lp = QmfLinkPhase[link];
+                    var lp = linkPhase[link];
                     var lpRe = Vector256.Create<double>(lp.Re.AsSpan(sb));
                     var lpIm = Vector256.Create<double>(lp.Im.AsSpan(sb));
                     var a = decays * Vector256.Create(LinkDecays[link]);
@@ -663,8 +720,8 @@ internal sealed class PsProcessor
                 var delayedIm = Vector128.Create<double>(delayIm.AsSpan(sb));
                 Vector128.Create<double>(inRe[sb..]).CopyTo(delayRe.AsSpan(sb));
                 Vector128.Create<double>(inIm[sb..]).CopyTo(delayIm.AsSpan(sb));
-                var phaseRe = Vector128.Create<double>(QmfPhase.Re.AsSpan(sb));
-                var phaseIm = Vector128.Create<double>(QmfPhase.Im.AsSpan(sb));
+                var phaseRe = Vector128.Create<double>(phase.Re.AsSpan(sb));
+                var phaseIm = Vector128.Create<double>(phase.Im.AsSpan(sb));
                 var r = (delayedRe * phaseRe) - (delayedIm * phaseIm);
                 var m = (delayedRe * phaseIm) + (delayedIm * phaseRe);
                 var decays = Vector128.Create<double>(decay.AsSpan(sb));
@@ -672,7 +729,7 @@ internal sealed class PsProcessor
                 {
                     var bufRe = linkRe[link][linkIndex[link]].AsSpan(sb);
                     var bufIm = linkIm[link][linkIndex[link]].AsSpan(sb);
-                    var lp = QmfLinkPhase[link];
+                    var lp = linkPhase[link];
                     var lpRe = Vector128.Create<double>(lp.Re.AsSpan(sb));
                     var lpIm = Vector128.Create<double>(lp.Im.AsSpan(sb));
                     var a = decays * Vector128.Create(LinkDecays[link]);
@@ -694,7 +751,7 @@ internal sealed class PsProcessor
 
         for (; sb < end; sb++)
         {
-            (outRe[sb], outIm[sb]) = AllPass(inRe[sb], inIm[sb], sb, decay[sb], delayRe, delayIm, QmfPhase, linkRe, linkIm, QmfLinkPhase, linkIndex);
+            (outRe[sb], outIm[sb]) = AllPass(inRe[sb], inIm[sb], sb, decay[sb], delayRe, delayIm, phase, linkRe, linkIm, linkPhase, linkIndex);
         }
     }
 
@@ -1133,28 +1190,114 @@ internal sealed class PsProcessor
         h22 = Math.Sqrt(2) * cosAlpha * sinGamma;
     }
 
-    // One slot of a 34-band hybrid filter: the band's slots i to i + 12 through each of its N complex filters, into
-    // sub-subbands offset to offset + N - 1.
-    private static void Filter(double[] bandRe, double[] bandIm, int i, (double[] Re, double[] Im) filter, int count, double[] outRe, double[] outIm, int offset)
+    /// <summary>
+    /// One slot of a hybrid filter: the band's 13 slots <paramref name="xRe"/>, <paramref name="xIm"/> through each of
+    /// its N complex filters (<paramref name="filter"/> tap by tap, 13 rows of N), into the N sub-subbands of
+    /// <paramref name="outRe"/>, <paramref name="outIm"/>; each tap's product times <paramref name="prototype"/>'s at
+    /// that tap where it is given (the 20-band filter, whose table holds the modulation alone). Four sub-subbands at a
+    /// time where Vector256 is accelerated (two with Vector128 alone), each lane with <see cref="HybridFilterScalar"/>'s
+    /// operations in its order, so the output is the same to the bit (<c>PsHybridFilter_MatchesScalar</c>).
+    /// </summary>
+    internal static void HybridFilter(ReadOnlySpan<double> xRe, ReadOnlySpan<double> xIm, (double[] Re, double[] Im) filter, ReadOnlySpan<double> prototype, Span<double> outRe, Span<double> outIm)
     {
-        for (int q = 0; q < count; q++)
+        int count = outRe.Length;
+        if (xRe.Length < 13 || xIm.Length < 13 || outIm.Length < count || filter.Re.Length < 13 * count || filter.Im.Length < 13 * count || (prototype.Length != 0 && prototype.Length < 13))
+        {
+            throw new ArgumentException("A hybrid filter takes 13 taps of each sub-subband.");
+        }
+
+        int q = 0;
+#if NET
+        bool scaled = prototype.Length != 0;
+        if (Vector256.IsHardwareAccelerated)
+        {
+            for (; q <= count - Vector256<double>.Count; q += Vector256<double>.Count)
+            {
+                var sumRe = Vector256<double>.Zero;
+                var sumIm = Vector256<double>.Zero;
+                for (int n = 0; n < 13; n++)
+                {
+                    var xr = Vector256.Create(xRe[n]);
+                    var xi = Vector256.Create(xIm[n]);
+                    var c = Vector256.Create(filter.Re.AsSpan((count * n) + q));
+                    var s = Vector256.Create(filter.Im.AsSpan((count * n) + q));
+                    var re = (xr * c) - (xi * s);
+                    var im = (xi * c) + (xr * s);
+                    if (scaled)
+                    {
+                        re = prototype[n] * re;
+                        im = prototype[n] * im;
+                    }
+
+                    sumRe += re;
+                    sumIm += im;
+                }
+
+                sumRe.CopyTo(outRe[q..]);
+                sumIm.CopyTo(outIm[q..]);
+            }
+        }
+
+        if (Vector128.IsHardwareAccelerated)
+        {
+            for (; q <= count - Vector128<double>.Count; q += Vector128<double>.Count)
+            {
+                var sumRe = Vector128<double>.Zero;
+                var sumIm = Vector128<double>.Zero;
+                for (int n = 0; n < 13; n++)
+                {
+                    var xr = Vector128.Create(xRe[n]);
+                    var xi = Vector128.Create(xIm[n]);
+                    var c = Vector128.Create(filter.Re.AsSpan((count * n) + q));
+                    var s = Vector128.Create(filter.Im.AsSpan((count * n) + q));
+                    var re = (xr * c) - (xi * s);
+                    var im = (xi * c) + (xr * s);
+                    if (scaled)
+                    {
+                        re = prototype[n] * re;
+                        im = prototype[n] * im;
+                    }
+
+                    sumRe += re;
+                    sumIm += im;
+                }
+
+                sumRe.CopyTo(outRe[q..]);
+                sumIm.CopyTo(outIm[q..]);
+            }
+        }
+#endif
+
+        HybridFilterScalar(xRe, xIm, filter, prototype, outRe, outIm, q);
+    }
+
+    /// <summary>As <see cref="HybridFilter"/>, one sub-subband at a time from <paramref name="first"/>: the reference.</summary>
+    internal static void HybridFilterScalar(ReadOnlySpan<double> xRe, ReadOnlySpan<double> xIm, (double[] Re, double[] Im) filter, ReadOnlySpan<double> prototype, Span<double> outRe, Span<double> outIm, int first = 0)
+    {
+        int count = outRe.Length;
+        for (int q = first; q < count; q++)
         {
             double sumRe = 0;
             double sumIm = 0;
             for (int n = 0; n < 13; n++)
             {
-                double xr = bandRe[i + n];
-                double xi = bandIm[i + n];
-                double c = filter.Re[(13 * q) + n];
-                double s = filter.Im[(13 * q) + n];
-                sumRe += (xr * c) - (xi * s);
-                sumIm += (xi * c) + (xr * s);
+                double xr = xRe[n];
+                double xi = xIm[n];
+                double c = filter.Re[(count * n) + q];
+                double s = filter.Im[(count * n) + q];
+                double re = (xr * c) - (xi * s);
+                double im = (xi * c) + (xr * s);
+                sumRe += prototype.Length != 0 ? prototype[n] * re : re;
+                sumIm += prototype.Length != 0 ? prototype[n] * im : im;
             }
 
-            outRe[offset + q] = sumRe;
-            outIm[offset + q] = sumIm;
+            outRe[q] = sumRe;
+            outIm[q] = sumIm;
         }
     }
+
+    // A table by sub-subband (N rows of 13 taps) laid out by tap (13 rows of N).
+    private static double[] ByTap(double[] bySubband, int bands) => [.. Enumerable.Range(0, 13 * bands).Select(i => bySubband[(13 * (i % bands)) + (i / bands)])];
 
     // A prototype times exp(-i 2 pi / bands (q + 0.5)(n - 6)), by sub-subband q and tap n.
     private static (double[] Re, double[] Im) Filters(double[] prototype, int bands)

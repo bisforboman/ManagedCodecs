@@ -20,4 +20,10 @@
     <ProjectReference Include="..\..\src\ManagedCodecs.Thumbnails\ManagedCodecs.Thumbnails.csproj" />
   </ItemGroup>
 
+  <!-- A static PGO profile for a Native AOT publish (-p:McdecMibc=<file>.mibc, made with dotnet-pgo from a trace): ILC's
+       MibcFile item (#346). -->
+  <ItemGroup Condition="'$(McdecMibc)' != ''">
+    <MibcFile Include="$(McdecMibc)" />
+  </ItemGroup>
+
 </Project>

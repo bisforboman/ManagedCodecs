@@ -905,6 +905,10 @@ H.264 samples, medians of 7 interleaved runs, every one of the ten lower. Agains
 compiles the larger methods at startup. The ARM64 runner's instruction samples (`profile.yml`, `event: instructions`) put it at
 -2.5% of `h264-high-default.mp4`'s frame against PGO's -12.6%. So inlining is about a fifth of PGO's gain, and the
 rest is how PGO compiles the large methods (#346).
+PGO's warm-up, as against its steady gain (2026-11-07, #347): each hot method is compiled three times, and the tier-1
+compiles queue on one background thread, busy until about frame 1,000; the per-picture methods wait late in that
+queue. `AggressiveOptimization` on the slice and picture drivers was tried and dropped (4 to 6% faster on one
+stream, 4% slower on two). The measurements, here and on GitHub's runners, are in docs/notes/jit-warmup-2026-11.md.
 
 Deeper samples' kernels next (#337, 2026-11-07). Above 8 bits the bi-predicted average, the explicit and implicit
 weights and the 4x4, 8x8 and DC-only inverse transform adds were the by-the-definition loops over spans. They now run

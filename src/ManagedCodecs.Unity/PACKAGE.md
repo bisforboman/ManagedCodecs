@@ -25,22 +25,22 @@ against the other packages on .NET 10 (medians of 3 interleaved runs, the last l
 
 | Sample | net10.0 (ms a frame) | Mono 6.12 (ms a frame) | Mono / net10.0 |
 | --- | ---: | ---: | ---: |
-| h264-bench-720p (1280x720, 1 I, 49 P) | 2.53 | 21.9 | 8.7 |
-| h264-p-refs (320x240, P frames, CAVLC) | 0.18 | 1.41 | 8.1 |
-| h264-b-pyramid (320x240, CABAC, B frames) | 0.46 | 2.48 | 5.4 |
-| h264-high-default (320x240, libx264's High defaults) | 0.37 | 2.36 | 6.4 |
-| h264-10bit-b (320x240, High 10) | 0.66 | 2.75 | 4.1 |
-| h264-mbaff-default (320x240, MBAFF) | 0.67 | 3.26 | 4.8 |
-| h264-high-motion (320x240, QP 22, fast motion) | 3.18 | 10.1 | 3.2 |
-| testsrc-420.avi (320x240 MJPEG) | 0.14 | 0.42 | 3.1 |
-| noise-q1.avi (MJPEG, highest quality) | 0.50 | 1.68 | 3.4 |
-| aac-stereo-48k (a frame: 1024 samples, 21 ms) | 0.012 | 0.054 | 4.7 |
-| aac-5.1 | 0.039 | 0.19 | 4.8 |
-| heaac-5.1 (a frame: 2048 samples, 43 ms) | 0.19 | 1.69 | 9.1 |
-| heaacv2-stereo | 0.075 | 0.54 | 7.2 |
+| h264-bench-720p (1280x720, 1 I, 49 P) | 2.11 | 19.2 | 9.1 |
+| h264-p-refs (320x240, P frames, CAVLC) | 0.15 | 1.26 | 8.3 |
+| h264-b-pyramid (320x240, CABAC, B frames) | 0.41 | 2.06 | 5.1 |
+| h264-high-default (320x240, libx264's High defaults) | 0.33 | 1.96 | 6.0 |
+| h264-10bit-b (320x240, High 10) | 0.57 | 2.17 | 3.8 |
+| h264-mbaff-default (320x240, MBAFF) | 0.56 | 2.62 | 4.7 |
+| h264-high-motion (320x240, QP 22, fast motion) | 2.85 | 7.35 | 2.6 |
+| testsrc-420.avi (320x240 MJPEG) | 0.11 | 0.41 | 3.9 |
+| noise-q1.avi (MJPEG, highest quality) | 0.44 | 1.40 | 3.2 |
+| aac-stereo-48k (a frame: 1024 samples, 21 ms) | 0.007 | 0.039 | 5.3 |
+| aac-5.1 | 0.020 | 0.12 | 5.6 |
+| heaac-5.1 (a frame: 2048 samples, 43 ms) | 0.13 | 1.10 | 8.3 |
+| heaacv2-stereo | 0.054 | 0.37 | 6.8 |
 
-So: audio (AAC 0.3 to 0.9% of a core in real time, HE-AAC 1.3 to 4%), MJPEG and small cutscenes play, and 720p H.264
-about 45 frames a second on one thread there (26 on the slower runner of earlier measurements, 38 ms a frame);
+So: audio (AAC 0.2 to 0.6% of a core in real time, HE-AAC 0.9 to 2.6%), MJPEG and small cutscenes play, and 720p H.264
+about 52 frames a second on one thread there (26 on the slower runner of earlier measurements, 38 ms a frame);
 `H264Decoder.Threads` decodes several pictures at once where threads exist. Unity's own Mono and IL2CPP are not
 measured. On .NET 10 itself this build takes 1 to 3.4 times the other packages' time: use them wherever .NET 10 runs.
 

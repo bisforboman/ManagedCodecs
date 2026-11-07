@@ -173,6 +173,48 @@ public class QmfTests
     }
 
     /// <summary>
+    /// SBR's banks with its 2^15 folded into their windows (the analysis bank's input times 32768, from single
+    /// precision; the synthesis banks' output over 32768) give exactly the unscaled banks' values on the scaled samples,
+    /// slot after slot.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ScaledBanks_AreExact(bool downsampled)
+    {
+        var random = new Random(downsampled ? 13 : 12);
+        var (analysis, scaledAnalysis) = (new QmfAnalysis(), new QmfAnalysis(32768));
+        var (synthesis, scaledSynthesis) = (new QmfSynthesis(downsampled), new QmfSynthesis(downsampled, 1.0 / 32768));
+        int bands = synthesis.Bands;
+        var (input, singles) = (new double[32], new float[32]);
+        var (real, imaginary, scaledReal, scaledImaginary) = (new double[64], new double[64], new double[64], new double[64]);
+        var (output, scaledOutput) = (new double[64], new double[64]);
+        for (int slot = 0; slot < 50; slot++)
+        {
+            for (int n = 0; n < 32; n++)
+            {
+                singles[n] = (float)(random.NextDouble() - 0.5);
+                input[n] = singles[n] * 32768.0;
+            }
+
+            analysis.Process(input, real, imaginary);
+            scaledAnalysis.Process(singles, scaledReal, scaledImaginary);
+            Assert.Equal(real[..32], scaledReal[..32]);
+            Assert.Equal(imaginary[..32], scaledImaginary[..32]);
+
+            for (int k = 0; k < bands; k++)
+            {
+                real[k] = (random.NextDouble() - 0.5) * 65536;
+                imaginary[k] = (random.NextDouble() - 0.5) * 65536;
+            }
+
+            synthesis.Process(real, imaginary, output);
+            scaledSynthesis.Process(real, imaginary, scaledOutput);
+            Assert.Equal(output[..bands].Select(x => x / 32768), scaledOutput[..bands]);
+        }
+    }
+
+    /// <summary>
     /// The FFT-based banks give the spec's sums (<see cref="QmfAnalysisReference"/>, <see cref="QmfSynthesisReference"/>)
     /// on random input, slot after slot: past the point where their history buffers wrap around (after 15 slots of the
     /// analysis bank, 9 of the synthesis bank).

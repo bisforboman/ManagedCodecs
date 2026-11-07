@@ -53,7 +53,11 @@ decoder's stages (docs/notes/h264-speed-gap-2026-10.md, Method); `tools/h264-sta
 FFmpeg alike, by perf or by callgrind's counts (docs/notes/h264-stages-2026-11.md has the last results).
 
 `profile.yml` runs perf on the hosted x64 and ARM64 runners on one sample: the only profile of ARM64 code. On x64,
-`DOTNET_EnableAVX2=0` runs the 128-bit paths ARM64 takes.
+`DOTNET_EnableAVX2=0` runs the 128-bit paths ARM64 takes. Its `tiering: pgo` profiles the runtime's defaults (tiered
+compilation, dynamic PGO) instead of mcdec's tiering off, with `delay` (ms) leaving the warm-up out. Its `event:
+instructions` samples by retired instructions on the ARM64 runner, which has hardware counters. Every run reports
+`perf stat`'s instruction and cycle totals there. That compares the two settings function by function without a
+cloud VM's noise (#346).
 
 Hardware counters (`perf stat -e cycles,instructions`): GitHub's ARM64 runner has them, the x64 runner and the cloud VM
 do not (`<not supported>`), and the x64 runner's 4 vCPUs are 2 cores with SMT. `perf record -e context-switches -g`

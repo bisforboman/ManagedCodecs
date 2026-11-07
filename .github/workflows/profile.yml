@@ -7,7 +7,8 @@ name: Profile
 # --ref <branch> -f sample=<name>`). `tiering: pgo` profiles the runtime's defaults instead (tiered compilation and
 # dynamic PGO), from `delay` ms on so that the warm-up is left out; `event: instructions` samples by retired
 # instructions where the runner has hardware counters (the ARM64 one; the x64 one falls back to the clock). Both
-# report `perf stat`'s instruction and cycle totals where counters exist (issue #346).
+# report `perf stat`'s instruction and cycle totals where counters exist (issue #346). `stages` adds H.264's shares by
+# stage (tools/h264-stages.py).
 on:
   workflow_dispatch:
     inputs:
@@ -33,6 +34,10 @@ on:
         type: choice
         options: [cpu-clock, instructions]
         default: cpu-clock
+      stages:
+        description: Also H.264's shares by stage (tools/h264-stages.py; records call chains, ReadyToRun off)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -73,6 +78,7 @@ jobs:
           TIERING: ${{ inputs.tiering }}
           DELAY: ${{ inputs.delay }}
           EVENT: ${{ inputs.event }}
+          STAGES: ${{ inputs.stages }}
           # The JIT's code by name (a perf map), without double mapping (else it shows as bare addresses).
           DOTNET_PerfMapEnabled: '1'
           DOTNET_EnableWriteXorExecute: '0'
@@ -90,7 +96,10 @@ jobs:
           # -D only for a real delay: the runner's perf (Ubuntu's generic 6.8) rejects -D 0, which is the default.
           delay=()
           if [ "$DELAY" -gt 0 ] 2>/dev/null; then delay=(-D "$DELAY"); fi
-          "$PERF" record -q "${sampling[@]}" "${delay[@]}" -o perf.data dotnet "$mcdec" "samples/$SAMPLE" --loops "$LOOPS" | tee mcdec.txt
+          # By stage: call chains, and CoreLib jitted so that its helpers (Memmove) have names (tools/h264-stages.py).
+          chains=()
+          if [ "$STAGES" = true ]; then chains=(-g); export DOTNET_ReadyToRun=0; fi
+          "$PERF" record -q "${sampling[@]}" "${delay[@]}" "${chains[@]}" -o perf.data dotnet "$mcdec" "samples/$SAMPLE" --loops "$LOOPS" | tee mcdec.txt
           if ! "$PERF" report -i perf.data --stdio 2>/dev/null | grep -q '%'; then
             echo "::error::perf recorded no samples: the delay ($DELAY ms) outlasted the decode; raise loops or lower the delay."
             exit 1
@@ -124,6 +133,14 @@ jobs:
             "$PERF" report -i perf.data --no-children --sort symbol --percent-limit "$THRESHOLD" --stdio 2>/dev/null \
               | grep -v '^#' | grep -v '^$' | sed -E 's/\(.*\)\[[A-Za-z0-9]+\]//; s/\[\.\] //' | cut -c1-160
             echo '```'
+            if [ "$STAGES" = true ]; then
+              echo
+              # Code inlined into a caller counts as the caller's stage (perf sees no inlined frames), so compare
+              # tiering off and pgo on groups of stages as well as on single ones.
+              echo "By stage (tools/h264-stages.py, $EVENT samples):"
+              echo
+              tools/h264-stages.py --perf "$PERF" --ours perf.data
+            fi
           } > report.md
           # In the log too, where the API reads it (a run summary has no API).
           cat report.md

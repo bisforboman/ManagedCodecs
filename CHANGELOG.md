@@ -20,6 +20,11 @@ run time.
 - H.264: in MBAFF frames and field pictures, CABAC's context selection reads a macroblock's left and above neighbours
   from a table found once a macroblock instead of a call each: about 1.6% fewer instructions in CABAC MBAFF frames
   and 1.7% in field pictures.
+- ManagedCodecs.Unity on Mono: motion compensation filters whole rows of a block instead of every sample by the
+  definition, MJPEG's IDCT indexes rather than slicing, and the bit-count polyfills search rather than loop: on Mono
+  6.12, 720p H.264 about twice as fast (79 to 38 ms a frame), 320x240 H.264 1.3 to 1.5 times, MJPEG 1.45 times.
+  The other packages' code is unchanged where it runs (docs/decisions/2026-10-31-unity-netstandard.md, Mono's
+  profile).
 
 ## 0.8.1 – 2026-11-07
 

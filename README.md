@@ -573,7 +573,10 @@ defaults, tiered compilation and dynamic PGO, which start faster but cost a shor
 
 Dynamic PGO runs instrumented code first and pays that back only on long files (about 9% less a frame once it is done,
 but still behind after 5,000 frames here; about 14% less on a 720p CABAC stream and 18% on this one in a later
-measurement, docs/conformance.md, H.264, Performance notes, and #346). For short files, turn it off in the app's project:
+measurement, docs/conformance.md, H.264, Performance notes, and #346). The warm-up is long because each hot method
+is compiled three times and the tier-1 compiles queue on one background thread, busy to about frame 1,000; where PGO
+pays back depends on picture size (about 1,000 frames at 720p, more than 5,000 at 320x240;
+docs/notes/jit-warmup-2026-11.md). For short files, turn it off in the app's project:
 
 ```xml
 <TieredPGO>false</TieredPGO>

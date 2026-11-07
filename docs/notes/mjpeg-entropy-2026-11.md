@@ -59,3 +59,12 @@ samples (`DecodeBlock`, `JpegBitReader`, `HuffmanTable`) over the untouched `Sim
 The six runs of each build don't overlap on either sample. By wall clock (`tools/bench.py --base`, 15 interleaved
 runs, whole process): `testsrc-420.avi` 0.915, `testsrc-444.avi` 0.929, `noise-q1.avi` 0.920 of the base; steady 0.927,
 1.045 and 0.924, the steady column being the noisier on short clips (docs/benchmarking.md).
+
+## A flat block's rows as 8-byte stores (2026-11-07)
+
+`SimpleIdct.PutDcOnly` wrote a flat block's eight rows with eight `Span.Fill` calls (the 5.6% above); each row is now
+one unaligned 8-byte store, in both builds (#361 had made it so in the Unity build, for Mono). Bit-exact. perf, six
+runs of each build, the order alternating, on `testsrc-420.avi`: `PutDcOnly` and `SpanHelpers.Fill` over the
+untouched `PutAvx2` and `DecodeBlock`, medians 0.21 before and 0.066 after (no run overlapping), about 7% of the
+profile. By wall clock (`tools/bench.py --base`, 15 interleaved runs, whole process): `testsrc-420.avi` 0.896,
+`testsrc-444.avi` 0.864 (its flat blocks about 11% of the profile before), `noise-q1.avi` 1.013 (few flat blocks).

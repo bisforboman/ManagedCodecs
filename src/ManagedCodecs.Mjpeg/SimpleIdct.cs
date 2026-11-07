@@ -86,21 +86,16 @@ internal static class SimpleIdct
         // into zeros; each column then only has its first term.
         int row = (short)(dc << DcShift);
         byte value = Clamp((W4 * (row + ColumnRounding)) >> ColShift);
-#if NET
-        for (int y = 0; y < 8; y++)
-        {
-            dest.Slice(y * stride, 8).Fill(value);
-        }
-#else
-        // Each row as one 8-byte store (CheckDestination checked the bounds): Mono calls Slice and Fill rather than
-        // inlining them.
+
+        // Each row as one 8-byte store (CheckDestination checked the bounds), not a Span.Fill call each: on CoreCLR those
+        // calls were about 5% of a small frame of flat blocks (docs/notes/mjpeg-entropy-2026-11.md), and Mono calls
+        // Slice and Fill too rather than inlining them.
         ulong eight = value * 0x0101010101010101UL;
         ref byte first = ref MemoryMarshal.GetReference(dest);
         for (int y = 0; y < 8; y++)
         {
             Unsafe.WriteUnaligned(ref Unsafe.Add(ref first, y * stride), eight);
         }
-#endif
     }
 
     public static void PutScalar(Span<short> block, Span<byte> dest, int stride)

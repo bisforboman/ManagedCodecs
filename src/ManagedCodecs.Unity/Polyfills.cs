@@ -49,6 +49,8 @@ namespace System.Numerics
     /// <summary>The bit operations the sources use, in plain arithmetic (.NET's are intrinsics).</summary>
     internal static class BitOperations
     {
+        // A binary search, five steps: CABAC's renormalization calls it at every decision, and a loop a bit took most of
+        // a CABAC slice's time on Mono (docs/decisions/2026-10-31-unity-netstandard.md, Mono's profile).
         public static int LeadingZeroCount(uint value)
         {
             if (value == 0)
@@ -57,9 +59,32 @@ namespace System.Numerics
             }
 
             int count = 0;
-            while ((value & 0x80000000u) == 0)
+            if (value <= 0x0000FFFFu)
             {
-                value <<= 1;
+                count += 16;
+                value <<= 16;
+            }
+
+            if (value <= 0x00FFFFFFu)
+            {
+                count += 8;
+                value <<= 8;
+            }
+
+            if (value <= 0x0FFFFFFFu)
+            {
+                count += 4;
+                value <<= 4;
+            }
+
+            if (value <= 0x3FFFFFFFu)
+            {
+                count += 2;
+                value <<= 2;
+            }
+
+            if (value <= 0x7FFFFFFFu)
+            {
                 count++;
             }
 
@@ -81,9 +106,32 @@ namespace System.Numerics
             }
 
             int count = 0;
-            while ((value & 1) == 0)
+            if ((value & 0xFFFFu) == 0)
             {
-                value >>= 1;
+                count += 16;
+                value >>= 16;
+            }
+
+            if ((value & 0xFFu) == 0)
+            {
+                count += 8;
+                value >>= 8;
+            }
+
+            if ((value & 0xFu) == 0)
+            {
+                count += 4;
+                value >>= 4;
+            }
+
+            if ((value & 3u) == 0)
+            {
+                count += 2;
+                value >>= 2;
+            }
+
+            if ((value & 1u) == 0)
+            {
                 count++;
             }
 
@@ -309,7 +357,19 @@ namespace ManagedCodecs
         extension<T>(Span<T> span)
             where T : IEquatable<T>
         {
-            public int IndexOfAnyExcept(T value) => ((ReadOnlySpan<T>)span).IndexOfAnyExcept(value);
+            // A loop of its own, not through ReadOnlySpan's: Mono calls the conversion rather than inlining it.
+            public int IndexOfAnyExcept(T value)
+            {
+                for (int i = 0; i < span.Length; i++)
+                {
+                    if (!span[i].Equals(value))
+                    {
+                        return i;
+                    }
+                }
+
+                return -1;
+            }
         }
 
         extension<T>(ReadOnlySpan<T> span)

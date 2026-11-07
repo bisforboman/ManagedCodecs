@@ -27,15 +27,17 @@ internal sealed partial class PictureDecoder<TPixel>
         6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13, 14, 14, 15, 15, 16, 16, 17, 17, 18, 18,
     ];
 
-    // Table 8-17: tC0 by indexA, for bS = 1, 2, 3.
+    // Table 8-17: tC0 by indexA, for bS = 1, 2, 3, after a 0 for bS 0: four bytes a row, so that a row loads as one
+    // vector's first lanes (EdgeParameters.Tc0Row).
     private static ReadOnlySpan<byte> Tc0 =>
     [
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 1, 1, 1, 1,
-        1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 1, 1, 2, 1, 1, 2, 1, 1, 2, 1, 2, 3,
-        1, 2, 3, 2, 2, 3, 2, 2, 4, 2, 3, 4, 2, 3, 4, 3, 3, 5, 3, 4, 6, 3, 4, 6,
-        4, 5, 7, 4, 5, 8, 4, 6, 9, 5, 7, 10, 6, 8, 11, 6, 8, 13, 7, 10, 14, 8, 11, 16,
-        9, 12, 18, 10, 13, 20, 11, 15, 23, 13, 17, 25,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 1, 1, 1,
+        0, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 2, 0, 1, 1, 2, 0, 1, 1, 2, 0, 1, 1, 2, 0, 1, 2, 3,
+        0, 1, 2, 3, 0, 2, 2, 3, 0, 2, 2, 4, 0, 2, 3, 4, 0, 2, 3, 4, 0, 3, 3, 5, 0, 3, 4, 6, 0, 3, 4, 6,
+        0, 4, 5, 7, 0, 4, 5, 8, 0, 4, 6, 9, 0, 5, 7, 10, 0, 6, 8, 11, 0, 6, 8, 13, 0, 7, 10, 14, 0, 8, 11, 16,
+        0, 9, 12, 18, 0, 10, 13, 20, 0, 11, 15, 23, 0, 13, 17, 25,
     ];
 
     // The picture's macroblocks decoded in address order from its first (every one of its slots before this address),
@@ -999,7 +1001,7 @@ internal sealed partial class PictureDecoder<TPixel>
         {
             if (bS < 4)
             {
-                int tc = (Tc0[(indexA * 3) + bS - 1] << (bitDepth - 8)) + 1;
+                int tc = (Tc0[(indexA * 4) + bS] << (bitDepth - 8)) + 1;
                 int delta = Math.Clamp((((q0v - p0v) << 2) + (p1 - q1) + 4) >> 3, -tc, tc);
                 plane[p0] = Samples.From<TPixel>(Math.Clamp(p0v + delta, 0, max));
                 plane[q0] = Samples.From<TPixel>(Math.Clamp(q0v - delta, 0, max));
@@ -1020,7 +1022,7 @@ internal sealed partial class PictureDecoder<TPixel>
 
         if (bS < 4)
         {
-            int tc0 = Tc0[(indexA * 3) + bS - 1] << (bitDepth - 8);
+            int tc0 = Tc0[(indexA * 4) + bS] << (bitDepth - 8);
             int tc = tc0 + (ap ? 1 : 0) + (aq ? 1 : 0);
             int delta = Math.Clamp((((q0v - p0v) << 2) + (p1 - q1) + 4) >> 3, -tc, tc);
             plane[p0] = Samples.From<TPixel>(Math.Clamp(p0v + delta, 0, max));
@@ -1408,7 +1410,7 @@ internal sealed partial class PictureDecoder<TPixel>
 #endif
 
     /// <summary>tC0 (Table 8-17) for bS 1 to 3; 0 for the other strengths, which do not use it.</summary>
-    private static short Tc0Of(int bS, int indexA) => bS is > 0 and < 4 ? Tc0[(indexA * 3) + bS - 1] : (short)0;
+    private static short Tc0Of(int bS, int indexA) => bS is > 0 and < 4 ? Tc0[(indexA * 4) + bS] : (short)0;
 
 #if NET
     /// <summary>
@@ -1717,19 +1719,15 @@ internal sealed partial class PictureDecoder<TPixel>
     }
 #endif
 
-    // <summary>bS, tC0, alpha and beta for eight lanes, from one indexA's row of the tables.</summary>
-    // EdgeParameters.Tc0Row by indexA, made once: building the vector lane by lane for every edge cost about 1% of
-    // decoding.
-#if NET
-    private static readonly Vector128<byte>[] Tc0Rows =
-        [.. Enumerable.Range(0, 52).Select(i => Vector128.Create(0, Tc0[i * 3], Tc0[(i * 3) + 1], Tc0[(i * 3) + 2], 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))];
-#endif
-
+    // bS, tC0, alpha and beta for eight lanes, from one indexA's row of the tables. tC0's row is one load from the
+    // constant Tc0 (indexA is 0 .. 51): building the vector lane by lane for every edge cost about 1% of decoding, and an
+    // array of the rows made once checked the struct's class initialization at every edge in the code compiled before it
+    // ran (mcdec compiles each method at its first call; Native AOT checks the same way).
 #if NET
     private readonly struct EdgeParameters(int indexA, int alpha, int beta)
     {
         /// <summary>tC0 by bS (0 for bS 0 and 4), lanes 0 .. 4.</summary>
-        public readonly Vector128<byte> Tc0Row = Tc0Rows[indexA];
+        public readonly Vector128<byte> Tc0Row = Vector128.CreateScalar(Unsafe.ReadUnaligned<uint>(ref Unsafe.Add(ref MemoryMarshal.GetReference(Tc0), indexA * 4))).AsByte();
         public readonly Vector128<short> Alpha = Vector128.Create((short)alpha);
         public readonly Vector128<short> Beta = Vector128.Create((short)beta);
     }

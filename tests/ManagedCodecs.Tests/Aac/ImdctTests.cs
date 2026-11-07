@@ -2,15 +2,19 @@ using ManagedCodecs.Aac;
 
 namespace ManagedCodecs.Tests.Aac;
 
-/// <summary>The FFT-based IMDCT must match the definition evaluated term by term, and its vector FFT the scalar one.</summary>
+/// <summary>The FFT-based IMDCT (in float) must match the definition evaluated term by term in double, and its vector paths the scalar ones.</summary>
 public class ImdctTests
 {
+    /// <summary>
+    /// The IMDCT, in single precision, is within float rounding of the definition in double: 2e-6 of the block's peak
+    /// (in double it was within 1e-12; the decoders' outputs against FFmpeg's are in docs/conformance.md).
+    /// </summary>
     [Theory]
     [InlineData(1024)]
     [InlineData(128)]
     public void FastImdct_MatchesDefinition(int coefficients)
     {
-        var random = new Random(coefficients);
+        var random = new Random(coefficients + 2);
         var spec = new double[coefficients];
         var expected = new double[2 * coefficients];
         var actual = new double[2 * coefficients];
@@ -18,7 +22,6 @@ public class ImdctTests
         {
             for (int k = 0; k < coefficients; k++)
             {
-                // Spectral values span the range real streams produce (up to 8191^(4/3) * gain).
                 spec[k] = (random.NextDouble() - 0.5) * Math.Pow(10, random.Next(0, 6));
             }
 
@@ -27,21 +30,26 @@ public class ImdctTests
             double peak = expected.Max(Math.Abs);
             for (int n = 0; n < expected.Length; n++)
             {
-                Assert.True(Math.Abs(expected[n] - actual[n]) <= peak * 1e-12, $"Sample {n}: {expected[n]} vs {actual[n]}");
+                Assert.True(Math.Abs(expected[n] - actual[n]) <= peak * 2e-6, $"Sample {n}: {expected[n]} vs {actual[n]}");
             }
         }
     }
 
-    /// <summary>The vector pre-twiddle and fold do the scalar arithmetic in its order: the same doubles, to the bit.</summary>
+    /// <summary>
+    /// The vector IMDCT and FFT do the scalar arithmetic in its order, without fused multiply-adds: the same floats, to the
+    /// bit. The FFT (its bit reversal fused with the first stage) gives the book's FFT's floats too, but for a zero's sign.
+    /// </summary>
     [Theory]
     [InlineData(1024)]
     [InlineData(128)]
     public void VectorImdct_MatchesScalarExactly(int coefficients)
     {
-        var random = new Random(coefficients + 1);
+        var random = new Random(coefficients + 3);
         var spec = new double[coefficients];
         var expected = new double[2 * coefficients];
         var actual = new double[2 * coefficients];
+        var re = new float[coefficients / 2];
+        var im = new float[coefficients / 2];
         for (int trial = 0; trial < 50; trial++)
         {
             for (int k = 0; k < coefficients; k++)
@@ -52,39 +60,35 @@ public class ImdctTests
             Imdct.InverseScalar(spec, expected);
             Imdct.Inverse(spec, actual);
             Assert.Equal(expected.Select(BitConverter.DoubleToInt64Bits), actual.Select(BitConverter.DoubleToInt64Bits));
-        }
-    }
 
-    /// <summary>
-    /// The FFT (its bit reversal fused with the first stage, the later stages in vectors) does each butterfly's arithmetic
-    /// in the reference's order: the same doubles, to the bit apart from the sign of a zero (the reference multiplies
-    /// by the first stage's twiddle, 1 - 0i). Every other trial has zeros, as silent bands give.
-    /// </summary>
-    [Theory]
-    [InlineData(512)]
-    [InlineData(64)]
-    public void VectorFft_MatchesScalarExactly(int length)
-    {
-        var random = new Random(length);
-        var re = new double[length];
-        var im = new double[length];
-        for (int trial = 0; trial < 40; trial++)
-        {
-            for (int k = 0; k < length; k++)
+            for (int k = 0; k < re.Length; k++)
             {
-                bool zero = trial % 2 == 1 && random.Next(3) == 0;
-                re[k] = zero ? 0 : (random.NextDouble() - 0.5) * Math.Pow(10, random.Next(0, 6));
-                im[k] = zero ? 0 : (random.NextDouble() - 0.5) * Math.Pow(10, random.Next(0, 6));
+                re[k] = (float)spec[k];
+                im[k] = (float)spec[coefficients - 1 - k];
             }
 
-            var expectedRe = (double[])re.Clone();
-            var expectedIm = (double[])im.Clone();
-            Imdct.Fft(expectedRe, expectedIm, scalar: true);
-            Imdct.Fft(re, im, scalar: false);
+            // Every other trial with zeros, as silent bands give: the reference multiplies the first stage by 1 - 0i, so
+            // against it only a zero's sign may differ (equal floats, but for 0 and -0).
+            if (trial % 2 == 1)
+            {
+                for (int k = 0; k < re.Length; k += 3)
+                {
+                    re[k] = 0;
+                    im[(k + 1) % im.Length] = 0;
+                }
+            }
 
-            // Equal doubles have equal bits, but for 0 and -0.
-            Assert.Equal(expectedRe, re);
-            Assert.Equal(expectedIm, im);
+            var scalarRe = (float[])re.Clone();
+            var scalarIm = (float[])im.Clone();
+            var referenceRe = (float[])re.Clone();
+            var referenceIm = (float[])im.Clone();
+            Imdct.Fft(scalarRe, scalarIm, vector: false);
+            Imdct.Fft(referenceRe, referenceIm, vector: false, reference: true);
+            Imdct.Fft(re, im, vector: true);
+            Assert.Equal(scalarRe.Select(BitConverter.SingleToInt32Bits), re.Select(BitConverter.SingleToInt32Bits));
+            Assert.Equal(scalarIm.Select(BitConverter.SingleToInt32Bits), im.Select(BitConverter.SingleToInt32Bits));
+            Assert.Equal(referenceRe, re);
+            Assert.Equal(referenceIm, im);
         }
     }
 

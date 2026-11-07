@@ -1,0 +1,62 @@
+#nullable enable
+ManagedCodecs.Playback.AudioChunk
+ManagedCodecs.Playback.AudioChunk.SampleRate.get -> int
+ManagedCodecs.Playback.AudioChunk.Samples.get -> float[]!
+ManagedCodecs.Playback.MediaPlayer
+ManagedCodecs.Playback.MediaPlayer.Audio.get -> ManagedCodecs.AudioStreamInfo?
+ManagedCodecs.Playback.MediaPlayer.Dispose() -> void
+ManagedCodecs.Playback.MediaPlayer.Error.get -> System.Exception?
+ManagedCodecs.Playback.MediaPlayer.IsFinished.get -> bool
+ManagedCodecs.Playback.MediaPlayer.MediaPlayer(string! path) -> void
+ManagedCodecs.Playback.MediaPlayer.MediaPlayer(string! path, ManagedCodecs.Playback.PlaybackOptions? options) -> void
+ManagedCodecs.Playback.MediaPlayer.MediaPlayer(System.IO.Stream! stream) -> void
+ManagedCodecs.Playback.MediaPlayer.MediaPlayer(System.IO.Stream! stream, ManagedCodecs.Playback.PlaybackOptions? options) -> void
+ManagedCodecs.Playback.MediaPlayer.Return(ManagedCodecs.Playback.RgbaFrame! frame) -> void
+ManagedCodecs.Playback.MediaPlayer.Start() -> void
+ManagedCodecs.Playback.MediaPlayer.Statistics.get -> ManagedCodecs.Playback.PlaybackStatistics
+ManagedCodecs.Playback.MediaPlayer.TakeAudio() -> ManagedCodecs.Playback.AudioChunk?
+ManagedCodecs.Playback.MediaPlayer.TakeFrame(System.TimeSpan position) -> ManagedCodecs.Playback.RgbaFrame?
+ManagedCodecs.Playback.MediaPlayer.Video.get -> ManagedCodecs.VideoStreamInfo!
+ManagedCodecs.Playback.PlaybackOptions
+ManagedCodecs.Playback.PlaybackOptions.<Clone>$() -> ManagedCodecs.Playback.PlaybackOptions!
+ManagedCodecs.Playback.PlaybackOptions.DecoderThreads.get -> int
+ManagedCodecs.Playback.PlaybackOptions.DecoderThreads.init -> void
+ManagedCodecs.Playback.PlaybackOptions.Equals(ManagedCodecs.Playback.PlaybackOptions? other) -> bool
+ManagedCodecs.Playback.PlaybackOptions.Loop.get -> bool
+ManagedCodecs.Playback.PlaybackOptions.Loop.init -> void
+ManagedCodecs.Playback.PlaybackOptions.Matrix.get -> ManagedCodecs.ColorMatrix?
+ManagedCodecs.Playback.PlaybackOptions.Matrix.init -> void
+ManagedCodecs.Playback.PlaybackOptions.PlaybackOptions() -> void
+ManagedCodecs.Playback.PlaybackOptions.Range.get -> ManagedCodecs.ColorRange?
+ManagedCodecs.Playback.PlaybackOptions.Range.init -> void
+ManagedCodecs.Playback.PlaybackStatistics
+ManagedCodecs.Playback.PlaybackStatistics.ConvertedFrames.get -> long
+ManagedCodecs.Playback.PlaybackStatistics.ConvertedFrames.init -> void
+ManagedCodecs.Playback.PlaybackStatistics.ConvertMilliseconds.get -> double
+ManagedCodecs.Playback.PlaybackStatistics.ConvertMilliseconds.init -> void
+ManagedCodecs.Playback.PlaybackStatistics.DecodedFrames.get -> long
+ManagedCodecs.Playback.PlaybackStatistics.DecodedFrames.init -> void
+ManagedCodecs.Playback.PlaybackStatistics.DecodeMilliseconds.get -> double
+ManagedCodecs.Playback.PlaybackStatistics.DecodeMilliseconds.init -> void
+ManagedCodecs.Playback.PlaybackStatistics.Deconstruct(out long DecodedFrames, out double DecodeMilliseconds, out long ConvertedFrames, out double ConvertMilliseconds, out long DroppedFrames) -> void
+ManagedCodecs.Playback.PlaybackStatistics.DroppedFrames.get -> long
+ManagedCodecs.Playback.PlaybackStatistics.DroppedFrames.init -> void
+ManagedCodecs.Playback.PlaybackStatistics.Equals(ManagedCodecs.Playback.PlaybackStatistics other) -> bool
+ManagedCodecs.Playback.PlaybackStatistics.PlaybackStatistics() -> void
+ManagedCodecs.Playback.PlaybackStatistics.PlaybackStatistics(long DecodedFrames, double DecodeMilliseconds, long ConvertedFrames, double ConvertMilliseconds, long DroppedFrames) -> void
+ManagedCodecs.Playback.RgbaFrame
+ManagedCodecs.Playback.RgbaFrame.Height.get -> int
+ManagedCodecs.Playback.RgbaFrame.Pixels.get -> byte[]!
+ManagedCodecs.Playback.RgbaFrame.SampleAspectRatio.get -> ManagedCodecs.Rational
+ManagedCodecs.Playback.RgbaFrame.Time.get -> System.TimeSpan
+ManagedCodecs.Playback.RgbaFrame.Width.get -> int
+override ManagedCodecs.Playback.PlaybackOptions.Equals(object? obj) -> bool
+override ManagedCodecs.Playback.PlaybackOptions.GetHashCode() -> int
+override ManagedCodecs.Playback.PlaybackOptions.ToString() -> string!
+override ManagedCodecs.Playback.PlaybackStatistics.GetHashCode() -> int
+static ManagedCodecs.Playback.PlaybackOptions.operator !=(ManagedCodecs.Playback.PlaybackOptions? left, ManagedCodecs.Playback.PlaybackOptions? right) -> bool
+static ManagedCodecs.Playback.PlaybackOptions.operator ==(ManagedCodecs.Playback.PlaybackOptions? left, ManagedCodecs.Playback.PlaybackOptions? right) -> bool
+static ManagedCodecs.Playback.PlaybackStatistics.operator !=(ManagedCodecs.Playback.PlaybackStatistics left, ManagedCodecs.Playback.PlaybackStatistics right) -> bool
+static ManagedCodecs.Playback.PlaybackStatistics.operator ==(ManagedCodecs.Playback.PlaybackStatistics left, ManagedCodecs.Playback.PlaybackStatistics right) -> bool
+~override ManagedCodecs.Playback.PlaybackStatistics.Equals(object obj) -> bool
+~override ManagedCodecs.Playback.PlaybackStatistics.ToString() -> string

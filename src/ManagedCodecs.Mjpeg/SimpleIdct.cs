@@ -86,9 +86,15 @@ internal static class SimpleIdct
         // into zeros; each column then only has its first term.
         int row = (short)(dc << DcShift);
         byte value = Clamp((W4 * (row + ColumnRounding)) >> ColShift);
+
+        // Each row as one 8-byte store (CheckDestination checked the bounds), not a Span.Fill call each: on CoreCLR those
+        // calls were about 5% of a small frame of flat blocks (docs/notes/mjpeg-entropy-2026-11.md), and Mono calls
+        // Slice and Fill too rather than inlining them.
+        ulong eight = value * 0x0101010101010101UL;
+        ref byte first = ref MemoryMarshal.GetReference(dest);
         for (int y = 0; y < 8; y++)
         {
-            dest.Slice(y * stride, 8).Fill(value);
+            Unsafe.WriteUnaligned(ref Unsafe.Add(ref first, y * stride), eight);
         }
     }
 
@@ -101,66 +107,70 @@ internal static class SimpleIdct
 
         CheckDestination(dest, stride);
 
+        // Rows and columns by offset, not slices: the Unity build runs this on Mono, which calls a slice and a
+        // Span-to-ReadOnlySpan conversion rather than inlining them (docs/decisions/2026-10-31-unity-netstandard.md).
         for (int i = 0; i < 8; i++)
         {
-            Row(block.Slice(i * 8, 8));
+            Row(block, i * 8);
         }
 
         for (int i = 0; i < 8; i++)
         {
-            Column(block, i, dest[i..], stride);
+            Column(block, i, dest, stride);
         }
     }
 
-    private static void Row(Span<short> row)
+    /// <summary>The row of <paramref name="block"/> from <paramref name="at"/>, in place.</summary>
+    private static void Row(Span<short> block, int at)
     {
-        if (row[1..].IndexOfAnyExcept((short)0) < 0)
+        if (((ushort)block[at + 1] | (ushort)block[at + 2] | (ushort)block[at + 3] | (ushort)block[at + 4] | (ushort)block[at + 5] | (ushort)block[at + 6] | (ushort)block[at + 7]) == 0)
         {
             // DC only: a plain shift, which can differ from the full path by one in rare cases.
-            short dc = (short)(row[0] << DcShift);
-            row.Fill(dc);
+            short dc = (short)(block[at] << DcShift);
+            block.Slice(at, 8).Fill(dc);
             return;
         }
 
-        int a0 = (W4 * row[0]) + (1 << (RowShift - 1));
+        int a0 = (W4 * block[at]) + (1 << (RowShift - 1));
         int a1 = a0;
         int a2 = a0;
         int a3 = a0;
 
-        a0 += W2 * row[2];
-        a1 += W6 * row[2];
-        a2 -= W6 * row[2];
-        a3 -= W2 * row[2];
+        a0 += W2 * block[at + 2];
+        a1 += W6 * block[at + 2];
+        a2 -= W6 * block[at + 2];
+        a3 -= W2 * block[at + 2];
 
-        int b0 = (W1 * row[1]) + (W3 * row[3]);
-        int b1 = (W3 * row[1]) - (W7 * row[3]);
-        int b2 = (W5 * row[1]) - (W1 * row[3]);
-        int b3 = (W7 * row[1]) - (W5 * row[3]);
+        int b0 = (W1 * block[at + 1]) + (W3 * block[at + 3]);
+        int b1 = (W3 * block[at + 1]) - (W7 * block[at + 3]);
+        int b2 = (W5 * block[at + 1]) - (W1 * block[at + 3]);
+        int b3 = (W7 * block[at + 1]) - (W5 * block[at + 3]);
 
-        if (row[4..].IndexOfAnyExcept((short)0) >= 0)
+        if (((ushort)block[at + 4] | (ushort)block[at + 5] | (ushort)block[at + 6] | (ushort)block[at + 7]) != 0)
         {
-            a0 += (W4 * row[4]) + (W6 * row[6]);
-            a1 += (-W4 * row[4]) - (W2 * row[6]);
-            a2 += (-W4 * row[4]) + (W2 * row[6]);
-            a3 += (W4 * row[4]) - (W6 * row[6]);
+            a0 += (W4 * block[at + 4]) + (W6 * block[at + 6]);
+            a1 += (-W4 * block[at + 4]) - (W2 * block[at + 6]);
+            a2 += (-W4 * block[at + 4]) + (W2 * block[at + 6]);
+            a3 += (W4 * block[at + 4]) - (W6 * block[at + 6]);
 
-            b0 += (W5 * row[5]) + (W7 * row[7]);
-            b1 += (-W1 * row[5]) - (W5 * row[7]);
-            b2 += (W7 * row[5]) + (W3 * row[7]);
-            b3 += (W3 * row[5]) - (W1 * row[7]);
+            b0 += (W5 * block[at + 5]) + (W7 * block[at + 7]);
+            b1 += (-W1 * block[at + 5]) - (W5 * block[at + 7]);
+            b2 += (W7 * block[at + 5]) + (W3 * block[at + 7]);
+            b3 += (W3 * block[at + 5]) - (W1 * block[at + 7]);
         }
 
-        row[0] = (short)((a0 + b0) >> RowShift);
-        row[7] = (short)((a0 - b0) >> RowShift);
-        row[1] = (short)((a1 + b1) >> RowShift);
-        row[6] = (short)((a1 - b1) >> RowShift);
-        row[2] = (short)((a2 + b2) >> RowShift);
-        row[5] = (short)((a2 - b2) >> RowShift);
-        row[3] = (short)((a3 + b3) >> RowShift);
-        row[4] = (short)((a3 - b3) >> RowShift);
+        block[at] = (short)((a0 + b0) >> RowShift);
+        block[at + 7] = (short)((a0 - b0) >> RowShift);
+        block[at + 1] = (short)((a1 + b1) >> RowShift);
+        block[at + 6] = (short)((a1 - b1) >> RowShift);
+        block[at + 2] = (short)((a2 + b2) >> RowShift);
+        block[at + 5] = (short)((a2 - b2) >> RowShift);
+        block[at + 3] = (short)((a3 + b3) >> RowShift);
+        block[at + 4] = (short)((a3 - b3) >> RowShift);
     }
 
-    private static void Column(ReadOnlySpan<short> block, int x, Span<byte> dest, int stride)
+    /// <summary>Column <paramref name="x"/> of <paramref name="block"/>, clamped into column <paramref name="x"/> of <paramref name="dest"/>.</summary>
+    private static void Column(Span<short> block, int x, Span<byte> dest, int stride)
     {
         int c0 = block[x];
         int c1 = block[8 + x];
@@ -186,14 +196,14 @@ internal static class SimpleIdct
         int b2 = (W5 * c1) - (W1 * c3) + (W7 * c5) + (W3 * c7);
         int b3 = (W7 * c1) - (W5 * c3) + (W3 * c5) - (W1 * c7);
 
-        dest[0] = Clamp((a0 + b0) >> ColShift);
-        dest[stride] = Clamp((a1 + b1) >> ColShift);
-        dest[2 * stride] = Clamp((a2 + b2) >> ColShift);
-        dest[3 * stride] = Clamp((a3 + b3) >> ColShift);
-        dest[4 * stride] = Clamp((a3 - b3) >> ColShift);
-        dest[5 * stride] = Clamp((a2 - b2) >> ColShift);
-        dest[6 * stride] = Clamp((a1 - b1) >> ColShift);
-        dest[7 * stride] = Clamp((a0 - b0) >> ColShift);
+        dest[x] = Clamp((a0 + b0) >> ColShift);
+        dest[x + stride] = Clamp((a1 + b1) >> ColShift);
+        dest[x + (2 * stride)] = Clamp((a2 + b2) >> ColShift);
+        dest[x + (3 * stride)] = Clamp((a3 + b3) >> ColShift);
+        dest[x + (4 * stride)] = Clamp((a3 - b3) >> ColShift);
+        dest[x + (5 * stride)] = Clamp((a2 - b2) >> ColShift);
+        dest[x + (6 * stride)] = Clamp((a1 - b1) >> ColShift);
+        dest[x + (7 * stride)] = Clamp((a0 - b0) >> ColShift);
     }
 
 #if NET

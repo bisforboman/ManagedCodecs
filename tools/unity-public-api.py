@@ -10,7 +10,7 @@ each *REMOVED* line taking its member out.
 import sys
 from pathlib import Path
 
-PACKAGES = ["ManagedCodecs.Core", "ManagedCodecs.Containers", "ManagedCodecs.Mjpeg", "ManagedCodecs.H264", "ManagedCodecs.Aac", "ManagedCodecs.Thumbnails"]
+PACKAGES = ["ManagedCodecs.Core", "ManagedCodecs.Containers", "ManagedCodecs.Mjpeg", "ManagedCodecs.H264", "ManagedCodecs.Aac", "ManagedCodecs.Thumbnails", "ManagedCodecs.Playback"]
 
 
 def api(project):

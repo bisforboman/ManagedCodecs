@@ -33,13 +33,14 @@ in between. That comparison is not measured here.
 | `src/ManagedCodecs.Mjpeg` | `MjpegDecoder`: baseline/extended Huffman JPEG, interlaced AVI1, bit-exact with FFmpeg |
 | `src/ManagedCodecs.H264` | `H264Decoder`: Constrained Baseline, Main, High, High 10, High 4:2:2 and High 4:4:4 Predictive profile H.264 (CAVLC, CABAC, I/P/B, weighted prediction, 8x8 transform, scaling matrices, deblocking, monochrome, 4:2:0, 4:2:2 and 4:4:4, also as separate colour planes, 8 to 14 bits, lossless, progressive and interlaced), bit-exact |
 | `src/ManagedCodecs.Thumbnails` | `VideoProbe`: a video file's duration, displayed size, codecs and rotation as ffprobe reports them, without decoding; `VideoThumbnail`: a frame as a small upright RGBA image, PNG or JPEG; the `ManagedCodecs.Thumbnails` package (see Probing a video, Thumbnails; docs/decisions/2026-10-31-thumbnails.md) |
-| `src/ManagedCodecs.Unity` | The netstandard2.1 build for Unity (Mono, IL2CPP): every decoder's sources (and Thumbnails') in one assembly, without the vector paths, 1 to 3.4 times slower on CoreCLR; the `ManagedCodecs.Unity` package (see Unity) |
-| `src/ManagedCodecs.Aac` | `AacDecoder`: AAC LC (mono to 7.1, M/S, intensity, PNS, TNS), within 3e-7 of FFmpeg's float output; HE-AAC (spectral band replication) |
+| `src/ManagedCodecs.Playback` | `MediaPlayer`: plays a video file for a game engine, decoding on a thread of its own into RGBA frames and float stereo, and handing the game loop the frame due by its clock; the `ManagedCodecs.Playback` package (see In-game video) |
+| `src/ManagedCodecs.Unity` | The netstandard2.1 build for Unity (Mono, IL2CPP): every decoder's sources (and Thumbnails' and Playback's) in one assembly, without the vector paths, 1 to 3.4 times slower on CoreCLR; the `ManagedCodecs.Unity` package (see Unity) |
+| `src/ManagedCodecs.Aac` | `AacDecoder`: AAC LC (mono to 7.1, M/S, intensity, PNS, TNS), within 5e-7 of FFmpeg's float output; HE-AAC (spectral band replication) |
 | `src/Shared` | Source files linked into several codec projects (the VLC decoder) |
 | `tools/ManagedCodecs.Cli` | `mcdec`: decodes a file and times it, to compare with `ffmpeg -benchmark` (`--threads N` for H.264 frame threading and HE-AAC's channels) |
-| `tools/ManagedCodecs.Godot` | A Godot 4 (.NET) node that plays a video into an `ImageTexture` and an `AudioStreamGenerator` (mcplay's decoding and colour conversion, linked); CI builds it with the Godot .NET SDK, Godot has not run it |
-| `tools/ManagedCodecs.MonoGame` | `mcplay`: a MonoGame sample that plays a file into a texture, for in-game video (its README; issue #254) |
-| `tools/ManagedCodecs.Unity.Sample` | A Unity `MonoBehaviour` that plays a video into a `Texture2D` and an `AudioClip` with the `ManagedCodecs.Unity` package (mcplay's decoding and colour conversion, linked); CI compiles it against stubs of UnityEngine, Unity has not run it |
+| `tools/ManagedCodecs.Godot` | A Godot 4 (.NET) node that plays a video into an `ImageTexture` and an `AudioStreamGenerator` with `ManagedCodecs.Playback`; CI builds it with the Godot .NET SDK, Godot has not run it |
+| `tools/ManagedCodecs.MonoGame` | `mcplay`: a MonoGame sample that plays a file into a texture with `ManagedCodecs.Playback` (its README has the 1080p measurements; issue #254) |
+| `tools/ManagedCodecs.Unity.Sample` | A Unity `MonoBehaviour` that plays a video into a `Texture2D` and an `AudioClip` with the `ManagedCodecs.Unity` package (its `MediaPlayer`); CI compiles it against stubs of UnityEngine, Unity has not run it |
 | `tools/make-samples.sh` | Generates the test samples and FFmpeg's references |
 | `tools/compare.sh` | Times mcdec and FFmpeg on the same file |
 | `tools/h264-stages.py` | Shares of H.264 decoding by stage, for mcdec and FFmpeg, from perf and callgrind profiles (docs/notes/h264-stages-2026-11.md) |
@@ -76,7 +77,7 @@ and code that reproduces FFmpeg's reading where it differs from the spec), and n
   (`Threads`), and concealment of damaged slices (`ConcealErrors`, Malformed input).
 - **AAC LC**: mono to 7.1 and program config elements (in MP4 and ADTS, in FFmpeg's channel order), every window
   sequence and shape, M/S and intensity stereo,
-  PNS, TNS; within 2^-17 of FFmpeg's float output (measured: 3e-7). Encoder priming is trimmed by the MP4 edit list,
+  PNS, TNS; within 2^-17 of FFmpeg's float output (measured: 4e-7 on the samples, 4.8e-7 on real films). Encoder priming is trimmed by the MP4 edit list,
   or by an iTunSMPB tag without one.
 - **HE-AAC** (spectral band replication, at twice the core's rate, or downsampled at the core's own): signalled in the
   config or only by its data, mono to 5.1, coupled pairs; within 1e-6 of FFmpeg's float output where its single precision is not the limit (see
@@ -109,8 +110,9 @@ and code that reproduces FFmpeg's reading where it differs from the spec), and n
   one class's (the CAVLC residual reader's compiled code is clean). MBAFF frames and field pictures find the pairs
   around a macroblock once (#177: 2.9% off `h264-mbaff-default.mp4`'s time, 4.0% off `jm-paff-b.mp4`'s), and motion
   vector prediction finds its three neighbours in one call (1.8% off `h264-mbaff-default.mp4`'s instructions) and
-  CABAC's context selection reads its left and above neighbours from a table found once a macroblock (1.6% more), but
-  the other neighbour lookups (intra prediction, spatial direct, the deblocking filter's) are still a call each; their
+  CABAC's context selection reads its left and above neighbours from a table found once a macroblock (1.6% more), as
+  does spatial direct prediction its three, once for both its uses (2.2% more), but the other neighbour lookups
+  (intra prediction, the deblocking filter's) are still a call each; their
   case analysis on (xN, yN) is not the cost (a table in its place counted no fewer instructions; docs/conformance.md, Performance notes;
   docs/decisions/2026-10-28-h264-neighbour-context.md).
   With 4 threads a 720p P chain takes 0.52 of one thread's time over 50 frames and 0.41 over 250 (one IDR picture
@@ -139,7 +141,8 @@ dotnet add package ManagedCodecs
 
 For Unity (Mono, IL2CPP), `ManagedCodecs.Unity` instead (see Unity, below).
 For a video's facts and thumbnail in a web back end or a browser, `ManagedCodecs.Thumbnails` (see Probing a video and
-Thumbnails, below).
+Thumbnails, below). For video in a game (MonoGame, FNA, Godot .NET, Stride), `ManagedCodecs.Playback` (see In-game
+video, below).
 
 Building from source requires the .NET 10 SDK. The tests also need samples made with FFmpeg (with libx264) and ImageMagick:
 
@@ -399,20 +402,56 @@ var thumbnail = await VideoThumbnail.CreateAsync(buffer, new ThumbnailOptions { 
 thumbnail.SavePng(response.Body); // or thumbnail.SaveJpeg(response.Body, quality: 85)
 ```
 
+### In-game video
+
+`ManagedCodecs.Playback`'s `MediaPlayer` plays an MP4, Matroska, WebM or AVI file (H.264 or MJPEG, AAC audio) for a
+game engine, with no engine's API in it: after `Start()`, a thread of its own demuxes and decodes ahead (H.264 with
+frame threading, by default one thread fewer than the processors, up to 4), converts each frame to RGBA and the audio
+to interleaved float stereo, into bounded queues. Each frame of the game, `TakeFrame(clock)` gives the newest frame due
+by the game's own clock (from the first frame, due at zero; frames already late are dropped and counted), to copy into
+a texture, and `TakeAudio()` the next decoded audio for the engine's streaming sound. `Return(frame)` hands its pixels
+back for a later frame (a 1080p frame is 8 MB). A damaged file plays up to the damage and then ends, with the
+exception in `Error`, rather than throwing at the game loop.
+
+```csharp
+using var player = new MediaPlayer("intro.mp4", new PlaybackOptions { Loop = false });
+player.Start();
+
+// Each frame of the game:
+if (player.TakeFrame(clock.Elapsed) is { } frame)
+{
+    texture.SetData(frame.Pixels); // R, G, B, A from the top row: MonoGame's SurfaceFormat.Color
+    player.Return(frame);
+}
+
+while (player.TakeAudio() is { } audio) { /* audio.Samples at audio.SampleRate to the engine's streaming sound */ }
+```
+
+- **Colours:** each frame by its own matrix and range, and where the stream says nothing as players assume (BT.709 from
+  720 lines, BT.601 below, limited range); `PlaybackOptions.Matrix` and `Range` override them. Within 2 levels of
+  FFmpeg's scaler (tools/ManagedCodecs.MonoGame/README.md); the fast path is checked against the formula on random
+  samples of every 8-bit layout.
+- **Speed:** on 4 vCPUs at 2.1 GHz, 1080p24 and 1080p30 keep up, decoding and conversion included (mcplay's README).
+- **Not a media player:** no seeking and no clock of its own (pause by stopping the clock you pass); `Loop` plays the
+  file again from its start, its frames' times running on.
+- **Samples:** `tools/ManagedCodecs.MonoGame` (MonoGame), `tools/ManagedCodecs.Godot` (a Godot 4 .NET node) and
+  `tools/ManagedCodecs.Unity.Sample` (a `MonoBehaviour`; `ManagedCodecs.Unity` holds `MediaPlayer` too). Only mcplay
+  has been run; CI builds the others.
+
 ### Unity
 
 `ManagedCodecs.Unity` is the same sources built for .NET Standard 2.1, which Unity's runtimes (Mono and IL2CPP, Unity
-2021.2 or later) load: one assembly, `ManagedCodecs.Unity.dll`, with every decoder and demuxer and the Thumbnails package's `VideoProbe`
-and `VideoThumbnail`, and
+2021.2 or later) load: one assembly, `ManagedCodecs.Unity.dll`, with every decoder and demuxer, the Thumbnails package's `VideoProbe`
+and `VideoThumbnail`, Playback's `MediaPlayer`, and
 `System.Runtime.CompilerServices.Unsafe` as its one dependency. .NET Standard 2.1 has no
 `System.Runtime.Intrinsics`, so the vector paths are left out (`#if NET`) and their scalar references run. The
 output is the same to the bit: CI runs the whole test suite against this assembly on CoreCLR, and decodes every sample
 on Mono 6.12 (`tools/unity-check.sh`), comparing the output, and each video file's probe and thumbnail, with the
 net10.0 build's. IL2CPP is not tested; it needs a
-Unity install. On Mono 6.12 (one thread, GitHub's x64 runner) it takes 4 to 19 times the net10.0 build's time:
-H.264 4 to 22 ms a 320x240 frame and 80 ms a 720p one (12.5 frames a second), MJPEG 1 to 3.4 ms a 320x240 frame,
-AAC 0.5 to 1.5% of a core in real time and HE-AAC 2 to 7%; so audio, MJPEG and small cutscenes, not HD H.264 on one
-thread. On CoreCLR the scalar build takes 1 to 3.4 times the other packages' time
+Unity install. On Mono 6.12 (one thread, GitHub's x64 runner) it takes 3 to 9 times the net10.0 build's time:
+H.264 1.4 to 10 ms a 320x240 frame and 22 to 38 ms a 720p one (26 to 45 frames a second, by the runner's CPU),
+MJPEG 0.4 to 1.7 ms a 320x240 frame, AAC 0.3 to 0.9% of a core in real time and HE-AAC 1.3 to 4%; so audio, MJPEG,
+cutscenes and 720p H.264 on a fast core, not 1080p on one thread. On CoreCLR the scalar build takes 1 to 3.4 times the other packages' time
 (docs/decisions/2026-10-31-unity-netstandard.md has both tables). WebGL builds have no threads,
 so `H264Decoder.Threads` stays at 1 there. The package holds the same types as the others, so a project references one
 or the other, never both. Its nuget.org page is `src/ManagedCodecs.Unity/PACKAGE.md`. A sample `MonoBehaviour` playing a video with it is in `tools/ManagedCodecs.Unity.Sample` (compiled in CI
@@ -504,9 +543,12 @@ inlined (#200, about 3%), and SBR's and parametric stereo's last 256-bit-only lo
 NEON assembly (about 16% faster than its C one on the same runner), and AAC's FFT is about 20% of an ARM64 frame
 against 11% on x64, likely because ours works on 2 doubles a vector where FFmpeg's works on 4 floats (not
 confirmed; fusing two FFT stages a pass gained only 1 to 2% and was dropped). Fusing the bit reversal with the
-first stage and vectorizing the post-twiddle (#339) later took 12 to 15% off AAC LC on a cloud VM: the twiddles had
+first stage and vectorizing the post-twiddle (#339) later took 19 to 23% off AAC LC on x64 and 15 to 17% on ARM64 (hosted runners): the twiddles had
 cost as much as the FFT itself (docs/notes/aac-stages-2026-11.md, which also finds that 5.1's ratio being above stereo's
-comes from FFmpeg's cost per frame, not from our FFT). H.264's ARM64 profile is as flat as
+comes from FFmpeg's cost per frame, not from our FFT). The IMDCT in single precision, four floats a vector (#343),
+then took 13 to 15% off AAC LC's steady frame on ARM64 and 5 to 10% on x64 (`compare.yml` against #339's double
+version; a first float version, without #339's fusion, against the code before #339: 17 to 19% and 11 to 13%): the 2 doubles a vector were part of ARM64's gap.
+H.264's ARM64 profile is as flat as
 x64's. The QMF banks' real-input transforms (2026-10-28) took 14 to 16% off 5.1 HE-AAC and 8 to 10% off
 HE-AAC v2 on both runners (`compare.yml` against the code before them). The runners' CPUs differ from run to run (an
 EPYC 7763 on 2026-10-25 and in the first run of 2026-10-29, a 9V74 on 2026-10-28, a 9V45 in the second run of

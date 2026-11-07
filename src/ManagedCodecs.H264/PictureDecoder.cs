@@ -119,6 +119,12 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
 
     public PictureDecoder(SequenceParameterSet sps, int plane = 0)
     {
+        // The static constructors of this class (its partition and scan tables) and of Cavlc (its code tables), run
+        // before any slice: the JIT then compiles the methods that read them (each at its first call, with tiering off
+        // as in mcdec) without a check of the class's initialization at each read. Cavlc.ReadResidualBlock took about 3%
+        // less time.
+        RuntimeHelpers.RunClassConstructor(typeof(PictureDecoder<TPixel>).TypeHandle);
+        RuntimeHelpers.RunClassConstructor(typeof(Cavlc).TypeHandle);
         Sps = sps;
         _plane = plane;
         _widthInMbs = sps.WidthInMbs;

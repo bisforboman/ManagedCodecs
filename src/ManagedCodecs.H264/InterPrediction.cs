@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
 namespace ManagedCodecs.H264;
@@ -121,6 +122,7 @@ internal static partial class InterPrediction
     /// A luma block of any sample type: through the row-based <see cref="PredictLuma(Picture, int, int, int, int, int, int, Span{byte}, int, int)"/>
     /// for 8-bit samples, <see cref="PredictLuma16"/> for deeper ones.
     /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static void PredictLumaBlock<TPixel>(Picture reference, int x, int y, int width, int height, int mvX, int mvY, Span<TPixel> output, int outputStride, int component = 0)
         where TPixel : unmanaged
     {
@@ -134,6 +136,7 @@ internal static partial class InterPrediction
     }
 
     /// <summary>A chroma block of any sample type, as <see cref="PredictLumaBlock"/>.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static void PredictChromaBlock<TPixel>(Picture reference, int component, int x, int y, int width, int height, int mvX, int mvY, Span<TPixel> output, int outputStride)
         where TPixel : unmanaged
     {
@@ -147,6 +150,7 @@ internal static partial class InterPrediction
     }
 
     /// <summary>The rounded average of two predictions (8.4.2.3.1), of any sample type, as <see cref="Average(ReadOnlySpan{byte}, ReadOnlySpan{byte}, int, int, int, Span{byte}, int)"/>.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static void AverageBlock<TPixel>(ReadOnlySpan<TPixel> a, ReadOnlySpan<TPixel> b, int stride, int width, int height, Span<TPixel> output, int outputStride)
         where TPixel : unmanaged
     {
@@ -156,6 +160,13 @@ internal static partial class InterPrediction
             return;
         }
 
+        AverageBlock16(MemoryMarshal.Cast<TPixel, ushort>(a), MemoryMarshal.Cast<TPixel, ushort>(b), stride, width, height, MemoryMarshal.Cast<TPixel, ushort>(output), outputStride);
+    }
+
+    /// <summary><see cref="AverageBlock{TPixel}"/> by the definition (8-448), which the vector versions are tested against.</summary>
+    public static void AverageBlockReference<TPixel>(ReadOnlySpan<TPixel> a, ReadOnlySpan<TPixel> b, int stride, int width, int height, Span<TPixel> output, int outputStride)
+        where TPixel : unmanaged
+    {
         for (int j = 0; j < height; j++)
         {
             for (int i = 0; i < width; i++)

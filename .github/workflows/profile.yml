@@ -34,9 +34,13 @@ on:
         options: [cpu-clock, instructions]
         default: cpu-clock
       stages:
-        description: Also record call graphs and report H.264 shares by stage (tools/h264-stages.py)
+        description: Also record call graphs and report H.264 shares by stage (tools/h264-stages.py; implies no ReadyToRun)
         type: boolean
         default: false
+      readytorun:
+        description: Use the framework's ReadyToRun code (off is DOTNET_ReadyToRun=0, everything jitted)
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -78,6 +82,7 @@ jobs:
           DELAY: ${{ inputs.delay }}
           EVENT: ${{ inputs.event }}
           STAGES: ${{ inputs.stages }}
+          READYTORUN: ${{ inputs.readytorun }}
           # The JIT's code by name (a perf map), without double mapping (else it shows as bare addresses).
           DOTNET_PerfMapEnabled: '1'
           DOTNET_EnableWriteXorExecute: '0'
@@ -98,6 +103,7 @@ jobs:
           # Stages need call chains, and CoreLib's helpers by name (no ReadyToRun code), as tools/h264-stages.py says.
           graph=()
           if [ "$STAGES" = true ]; then graph=(-g); export DOTNET_ReadyToRun=0; fi
+          if [ "$READYTORUN" = false ]; then export DOTNET_ReadyToRun=0; fi
           "$PERF" record -q "${sampling[@]}" "${delay[@]}" "${graph[@]}" -o perf.data dotnet "$mcdec" "samples/$SAMPLE" --loops "$LOOPS" | tee mcdec.txt
           if ! "$PERF" report -i perf.data --stdio 2>/dev/null | grep -q '%'; then
             echo "::error::perf recorded no samples: the delay ($DELAY ms) outlasted the decode; raise loops or lower the delay."
@@ -107,7 +113,7 @@ jobs:
           "$PERF" stat -e instructions,cycles -x, -o stat.txt dotnet "$mcdec" "samples/$SAMPLE" --loops "$LOOPS" > /dev/null || true
           cpu="$(grep -m1 -E '^(model name|Model)' /proc/cpuinfo | cut -d: -f2 | xargs || uname -m)"
           {
-            echo "### $(uname -m) ($cpu): \`$SAMPLE\`, $LOOPS loops, tiering $TIERING, $EVENT from $DELAY ms, $(git rev-parse --short HEAD)"
+            echo "### $(uname -m) ($cpu): \`$SAMPLE\`, $LOOPS loops, tiering $TIERING, ReadyToRun ${DOTNET_ReadyToRun:-1}, $EVENT from $DELAY ms, $(git rev-parse --short HEAD)"
             echo
             echo '```'
             grep -E '^(decoded|bench|last loop)' mcdec.txt

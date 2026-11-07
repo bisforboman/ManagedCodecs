@@ -336,4 +336,39 @@ public class PsTests
             }
         }
     }
+
+    /// <summary>
+    /// The hybrid filters' vector path does each sub-subband's sum over the 13 taps in the scalar order, with and
+    /// without a prototype apart from the taps: the same output to the bit for 12, 8 and 4 sub-subbands (34 bands) and 8
+    /// (20 bands), and widths no vector path takes.
+    /// </summary>
+    [Theory]
+    [InlineData(4, false)]
+    [InlineData(8, false)]
+    [InlineData(12, false)]
+    [InlineData(8, true)]
+    [InlineData(2, true)]
+    [InlineData(6, false)]
+    public void PsHybridFilter_MatchesScalar(int count, bool prototype)
+    {
+        var random = new Random((count * 2) + (prototype ? 1 : 0));
+        double Next() => (random.NextDouble() - 0.5) * Math.Pow(10, random.Next(-3, 4));
+        double[] Values(int n) => [.. Enumerable.Range(0, n).Select(_ => Next())];
+        for (int trial = 0; trial < 20; trial++)
+        {
+            double[] xRe = Values(13);
+            double[] xIm = Values(13);
+            double[] cos = Values(13 * count);
+            double[] sin = Values(13 * count);
+            double[] taps = prototype ? Values(13) : [];
+            var expectedRe = new double[count];
+            var expectedIm = new double[count];
+            var actualRe = new double[count];
+            var actualIm = new double[count];
+            PsProcessor.HybridFilterScalar(xRe, xIm, cos, sin, taps, expectedRe, expectedIm);
+            PsProcessor.HybridFilter(xRe, xIm, cos, sin, taps, actualRe, actualIm);
+            Assert.Equal(expectedRe.Select(BitConverter.DoubleToInt64Bits), actualRe.Select(BitConverter.DoubleToInt64Bits));
+            Assert.Equal(expectedIm.Select(BitConverter.DoubleToInt64Bits), actualIm.Select(BitConverter.DoubleToInt64Bits));
+        }
+    }
 }

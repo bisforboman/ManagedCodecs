@@ -102,6 +102,12 @@ internal sealed class PsProcessor
     private static readonly double[] ModulationCos = [.. Enumerable.Range(0, 8 * 13).Select(i => QmfTrig.CosPi256(-32 * ((2 * (i / 13)) + 1) * ((i % 13) - 6)))];
     private static readonly double[] ModulationSin = [.. Enumerable.Range(0, 8 * 13).Select(i => QmfTrig.SinPi256(-32 * ((2 * (i / 13)) + 1) * ((i % 13) - 6)))];
 
+    // The same filters with the taps outermost, n * N + q: what HybridFilter reads N sub-subbands at a time.
+    private static readonly (double[] Cos, double[] Sin) Taps12 = Transpose(Filter12.Re, Filter12.Im, 12);
+    private static readonly (double[] Cos, double[] Sin) Taps8 = Transpose(Filter8.Re, Filter8.Im, 8);
+    private static readonly (double[] Cos, double[] Sin) Taps4 = Transpose(Filter4.Re, Filter4.Im, 4);
+    private static readonly (double[] Cos, double[] Sin) Modulation8 = Transpose(ModulationCos, ModulationSin, 8);
+
     // The decorrelator's all-pass links (8.6.4.5): their delays in slots, decay factors and fractional delays.
     private static readonly int[] LinkDelays = [3, 4, 5];
     private static readonly double[] LinkDecays = [0.65143905753106, 0.56471812200776, 0.48954165955695];
@@ -425,45 +431,25 @@ internal sealed class PsProcessor
         {
             for (int i = 0; i < Slots; i++)
             {
-                Filter(_bandRe[0], _bandIm[0], i, Filter12, 12, _leftRe[i], _leftIm[i], 0);
-                Filter(_bandRe[1], _bandIm[1], i, Filter8, 8, _leftRe[i], _leftIm[i], 12);
+                var leftRe34 = _leftRe[i];
+                var leftIm34 = _leftIm[i];
+                HybridFilter(_bandRe[0].AsSpan(i, 13), _bandIm[0].AsSpan(i, 13), Taps12.Cos, Taps12.Sin, default, leftRe34.AsSpan(0, 12), leftIm34.AsSpan(0, 12));
+                HybridFilter(_bandRe[1].AsSpan(i, 13), _bandIm[1].AsSpan(i, 13), Taps8.Cos, Taps8.Sin, default, leftRe34.AsSpan(12, 8), leftIm34.AsSpan(12, 8));
                 for (int band = 2; band < HybridQmfBands; band++)
                 {
-                    Filter(_bandRe[band], _bandIm[band], i, Filter4, 4, _leftRe[i], _leftIm[i], 20 + (4 * (band - 2)));
+                    int offset = 20 + (4 * (band - 2));
+                    HybridFilter(_bandRe[band].AsSpan(i, 13), _bandIm[band].AsSpan(i, 13), Taps4.Cos, Taps4.Sin, default, leftRe34.AsSpan(offset, 4), leftIm34.AsSpan(offset, 4));
                 }
             }
 
             return;
         }
 
-        Span<double> out8Re = stackalloc double[8];
-        Span<double> out8Im = stackalloc double[8];
         for (int i = 0; i < Slots; i++)
         {
-            var bandRe = _bandRe[0];
-            var bandIm = _bandIm[0];
-            for (int q = 0; q < 8; q++)
-            {
-                double sumRe = 0;
-                double sumIm = 0;
-                for (int n = 0; n < 13; n++)
-                {
-                    double xr = bandRe[i + n];
-                    double xi = bandIm[i + n];
-                    double c = ModulationCos[(13 * q) + n];
-                    double s = ModulationSin[(13 * q) + n];
-                    sumRe += Prototype8[n] * ((xr * c) - (xi * s));
-                    sumIm += Prototype8[n] * ((xi * c) + (xr * s));
-                }
-
-                out8Re[q] = sumRe;
-                out8Im[q] = sumIm;
-            }
-
             var leftRe = _leftRe[i];
             var leftIm = _leftIm[i];
-            out8Re.CopyTo(leftRe);
-            out8Im.CopyTo(leftIm);
+            HybridFilter(_bandRe[0].AsSpan(i, 13), _bandIm[0].AsSpan(i, 13), Modulation8.Cos, Modulation8.Sin, Prototype8, leftRe.AsSpan(0, 8), leftIm.AsSpan(0, 8));
             leftRe[3] += leftRe[4];
             leftIm[3] += leftIm[4];
             leftRe[2] += leftRe[5];
@@ -1133,27 +1119,138 @@ internal sealed class PsProcessor
         h22 = Math.Sqrt(2) * cosAlpha * sinGamma;
     }
 
-    // One slot of a 34-band hybrid filter: the band's slots i to i + 12 through each of its N complex filters, into
-    // sub-subbands offset to offset + N - 1.
-    private static void Filter(double[] bandRe, double[] bandIm, int i, (double[] Re, double[] Im) filter, int count, double[] outRe, double[] outIm, int offset)
+    /// <summary>
+    /// One slot of a hybrid filter (8.6.4.3): a band's 13 samples <paramref name="xRe"/>, <paramref name="xIm"/> (its
+    /// slots i to i + 12) through each of its N complex filters, N the length of <paramref name="outRe"/>, the taps in
+    /// <paramref name="cos"/> and <paramref name="sin"/> at n * N + q: the sum over n of (x(n) times the tap) for
+    /// sub-subband q, each term times <paramref name="prototype"/>[n] when one is given (20 bands' 8-band filter, whose
+    /// modulation is kept apart from its prototype). Four (two with Vector128 alone) sub-subbands at a time, each lane
+    /// with <see cref="HybridFilterScalar"/>'s operations in its order, so the output is the same to the bit
+    /// (<c>PsHybridFilter_MatchesScalar</c>).
+    /// </summary>
+    internal static void HybridFilter(ReadOnlySpan<double> xRe, ReadOnlySpan<double> xIm, ReadOnlySpan<double> cos, ReadOnlySpan<double> sin, ReadOnlySpan<double> prototype, Span<double> outRe, Span<double> outIm)
     {
+        int count = outRe.Length;
+        if (xRe.Length < 13 || xIm.Length < 13 || cos.Length < 13 * count || sin.Length < 13 * count || outIm.Length < count || (!prototype.IsEmpty && prototype.Length < 13))
+        {
+            throw new ArgumentException("A hybrid filter takes 13 samples and 13 taps of each sub-subband.");
+        }
+
+#if NET
+        if (Vector256.IsHardwareAccelerated && count % 4 == 0)
+        {
+            for (int q = 0; q < count; q += 4)
+            {
+                var sumRe = Vector256<double>.Zero;
+                var sumIm = Vector256<double>.Zero;
+                for (int n = 0; n < 13; n++)
+                {
+                    var xr = Vector256.Create(xRe[n]);
+                    var xi = Vector256.Create(xIm[n]);
+                    var c = Vector256.Create(cos.Slice((n * count) + q, 4));
+                    var s = Vector256.Create(sin.Slice((n * count) + q, 4));
+                    var termRe = (xr * c) - (xi * s);
+                    var termIm = (xi * c) + (xr * s);
+                    if (!prototype.IsEmpty)
+                    {
+                        var p = Vector256.Create(prototype[n]);
+                        termRe = p * termRe;
+                        termIm = p * termIm;
+                    }
+
+                    sumRe += termRe;
+                    sumIm += termIm;
+                }
+
+                sumRe.CopyTo(outRe[q..]);
+                sumIm.CopyTo(outIm[q..]);
+            }
+
+            return;
+        }
+
+        if (!Vector256.IsHardwareAccelerated && Vector128.IsHardwareAccelerated && count % 2 == 0)
+        {
+            for (int q = 0; q < count; q += 2)
+            {
+                var sumRe = Vector128<double>.Zero;
+                var sumIm = Vector128<double>.Zero;
+                for (int n = 0; n < 13; n++)
+                {
+                    var xr = Vector128.Create(xRe[n]);
+                    var xi = Vector128.Create(xIm[n]);
+                    var c = Vector128.Create(cos.Slice((n * count) + q, 2));
+                    var s = Vector128.Create(sin.Slice((n * count) + q, 2));
+                    var termRe = (xr * c) - (xi * s);
+                    var termIm = (xi * c) + (xr * s);
+                    if (!prototype.IsEmpty)
+                    {
+                        var p = Vector128.Create(prototype[n]);
+                        termRe = p * termRe;
+                        termIm = p * termIm;
+                    }
+
+                    sumRe += termRe;
+                    sumIm += termIm;
+                }
+
+                sumRe.CopyTo(outRe[q..]);
+                sumIm.CopyTo(outIm[q..]);
+            }
+
+            return;
+        }
+#endif
+
+        HybridFilterScalar(xRe, xIm, cos, sin, prototype, outRe, outIm);
+    }
+
+    /// <summary><see cref="HybridFilter"/> one sub-subband and one tap at a time: the reference for it.</summary>
+    internal static void HybridFilterScalar(ReadOnlySpan<double> xRe, ReadOnlySpan<double> xIm, ReadOnlySpan<double> cos, ReadOnlySpan<double> sin, ReadOnlySpan<double> prototype, Span<double> outRe, Span<double> outIm)
+    {
+        int count = outRe.Length;
         for (int q = 0; q < count; q++)
         {
             double sumRe = 0;
             double sumIm = 0;
             for (int n = 0; n < 13; n++)
             {
-                double xr = bandRe[i + n];
-                double xi = bandIm[i + n];
-                double c = filter.Re[(13 * q) + n];
-                double s = filter.Im[(13 * q) + n];
-                sumRe += (xr * c) - (xi * s);
-                sumIm += (xi * c) + (xr * s);
+                double xr = xRe[n];
+                double xi = xIm[n];
+                double c = cos[(n * count) + q];
+                double s = sin[(n * count) + q];
+                double termRe = (xr * c) - (xi * s);
+                double termIm = (xi * c) + (xr * s);
+                if (!prototype.IsEmpty)
+                {
+                    termRe = prototype[n] * termRe;
+                    termIm = prototype[n] * termIm;
+                }
+
+                sumRe += termRe;
+                sumIm += termIm;
             }
 
-            outRe[offset + q] = sumRe;
-            outIm[offset + q] = sumIm;
+            outRe[q] = sumRe;
+            outIm[q] = sumIm;
         }
+    }
+
+    // Taps by sub-subband q and tap n at 13 q + n, as n * bands + q.
+    private static (double[] Cos, double[] Sin) Transpose(double[] re, double[] im, int bands)
+    {
+        var cos = new double[13 * bands];
+        var sin = new double[13 * bands];
+        for (int q = 0; q < bands; q++)
+        {
+            for (int n = 0; n < 13; n++)
+            {
+                cos[(n * bands) + q] = re[(13 * q) + n];
+                sin[(n * bands) + q] = im[(13 * q) + n];
+            }
+        }
+
+        return (cos, sin);
     }
 
     // A prototype times exp(-i 2 pi / bands (q + 0.5)(n - 6)), by sub-subband q and tap n.

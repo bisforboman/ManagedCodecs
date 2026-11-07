@@ -87,3 +87,80 @@ On the hosted runners (`compare.yml` run 42374598337, medians of 7 interleaved r
 | ARM64 | 0.831 | 0.846 | 0.970 | 0.990 |
 
 The runners gain more than the cloud VM: 19 to 23% off AAC LC on x64 and 15 to 17% on ARM64.
+
+## Again on main after #343 and #355
+
+Main is now at c954bff: the IMDCT is in single precision (#343) and spectral decoding uses packed tables (#355). Same
+VM and method, two perf runs each.
+
+| Stage, share of decoder code | `aac-5.1.mp4` | `aac-stereo-48k.mp4` |
+| --- | ---: | ---: |
+| Spectral decoding | 42.3% | 28.6% |
+| of which `Dequantize` and `InverseQuantize` | 21% | 11% |
+| IMDCT FFT (`Imdct+Plan::*`) | 22.5% | 24.8% |
+| IMDCT twiddles and fold (`InverseVector`) | 19.5% | 23.3% |
+| Window, overlap, output | 12.2% | 16.0% |
+| Stereo, TNS, other | 2.5% | 3.5% |
+
+The steady frame is now 39 to 44 µs for 5.1 and 12.6 for stereo, against 60 and 17 after #354. Outside the decoder's
+code (26 to 38% of the samples), the time is mostly startup: coreclr and the JIT take 11.6%, and 1000 loops take only
+7% longer than their steady time alone would. The rest is `memset` (2.2 to 2.4%, mostly `Array.Clear` of each
+channel's 1024 doubles) and page faults.
+
+The largest single stage with no issue yet was inverse quantization. It is one table lookup and one multiply a
+coefficient, but its call and two data-dependent branches cost 16% of all of 5.1's samples: #373. After it, the
+IMDCT's two halves and the window remain, each already worked on.
+
+## Tried and dropped: the post-twiddle and the fold in one pass
+
+After #343, `Imdct.InverseVector` writes the post-twiddle's two halves to buffers (`re` in place and `q`), interleaves
+them into the DCT-IV's `u`, then reads `u` back for the three loops of the fold. I tried computing each block of eight of
+u's values in registers instead: four l's real parts and their mirror's negated imaginary parts, zipped. Each block
+was scaled once and stored straight to its two places in the output, one of them reversed, with no `u` or `q`. The
+output was the same to the bit (`VectorImdct_MatchesScalarExactly`, and the hashes of all 54 AAC and HE-AAC samples).
+
+The wall clock could not see it. Over 15 interleaved runs, steady time branch / main was 1.020 for `aac-stereo-48k`,
+0.992 for `aac-5.1` and 0.984 for `heaac/heaac-5.1`. By perf (three runs of each build, alternating), `InverseVector`'s
+samples over those of functions it does not touch fell by 4% in 5.1 (medians 0.277 and 0.265) and by about 7% in
+stereo, where the runs overlap. That is about 0.6% of a frame, below what this method resolves. Likely because the
+buffers it removed (5 KB of a long block) stay in the L1 cache, where a store and a reload cost little (not measured).
+
+## Spectral reading after #355 and #376: where its time goes
+
+On Elephants Dream's AAC (192 kbit/s stereo, `tools/realworld.py`'s film, the audio remuxed alone), with #376's
+dequantization, `ReadSpectralData` (with `Huffman.ReadSpectrum` inlined) is 23% of all samples. That is 30% of the
+decoder's code, ahead of `Imdct.InverseVector` (13%) and `Dequantize` (9%).
+
+Callgrind with `--branch-sim=yes` on a Native AOT build (60 s of the film) puts it at:
+- 22% of the decode's instructions;
+- 41% of its mispredicted conditional branches, about 0.3 a codeword.
+
+Mapping the addresses with `--dump-instr=yes` and `objdump` (`nm mcdec.dbg` gives the function's offset) shows:
+- **The cursor's refill check** (`_used > 25`) is the most mispredicted branch, wrong 27% of the time.
+- **Each band's loop exit** comes second.
+- **The cursor's fields** stay on the stack rather than in registers. `Cursor.Position` in the cold error paths and
+  `Commit(in Cursor)` take its address, and the one large method that inlines all four loops runs out of registers.
+
+There are about 270 codewords a channel-frame, at about 80 instructions each, so instructions, not mispredicts, are
+most of the cost. Refill mispredicts can account for at most about 2 cycles of the roughly 40 a codeword takes.
+
+**Tried and dropped: each band's loop as its own method, its cursor a local copy.**
+- The cold paths took the cursor by value.
+- The JIT then kept `_start` and `_used` in registers.
+- The film's steady time over 8 interleaved runs was 17.9 µs a frame against 18.1, which is noise.
+- By perf (three runs each, alternating), spectral reading's samples over those of the stages it does not touch moved
+  from 0.564 to 0.548 (medians), 3% of the stage. That is well under a point of the frame.
+- Store forwarding makes the cursor's memory round trips cheap; they were not the cost.
+
+Taking the cursor's address out of the cold paths alone was slower: 20.0 µs against 18.2. Passing the 24-byte struct
+by value goes through a stack copy, and it did not free registers in the large method.
+
+What is left is the work per codeword, about 80 instructions:
+- the second-level test;
+- two bounds-checked table and array accesses;
+- each value's sign extracted with shifts and masks;
+- the refill.
+
+A gain there needs a leaner entry layout. For example, entries could carry each value's sign-bit position, and two
+codewords could be read per refill (57 bits cover two of any book's, escapes aside). By the counts that is perhaps a
+quarter of the stage, about 5 to 7% of a film's AAC frame. That is not tried here.

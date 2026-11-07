@@ -542,6 +542,7 @@ internal sealed partial class PictureDecoder<TPixel>
     /// motion; the blocks are picture-wide 4x4 block indices (macroblock * 16 + raster index). The
     /// reference pictures are compared as pictures, whichever list they came from.
     /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private int MotionStrength(int p, int q, int limitY = 4)
     {
         int partP = ((p >> 4) * 4) + ((p & 15) >> 3 << 1) + ((p & 3) >> 1);

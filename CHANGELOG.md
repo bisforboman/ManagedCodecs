@@ -26,6 +26,9 @@ run time.
 
 ### Changed
 
+- H.264: about 24 small functions on the hot paths are inlined, as the runtime's dynamic PGO does (#346): 1.5 to 3.8%
+  less time a frame in the steady state on ARM64 and 0.4 to 2.6% on x64 with tiering off (as mcdec runs) or
+  `TieredPGO=false`, and up to 5% more JIT time at startup for short files. Native AOT builds are not timed yet.
 - H.264: the direct motion compensation path for frame macroblocks also takes samples above 8 bits and 4:2:2: about 2%
   fewer instructions in 10-bit and 4:2:2 streams.
 - AAC: the IMDCT's FFT does its bit reversal and first stage in one vector pass, and its post-twiddle runs in
@@ -65,6 +68,8 @@ run time.
 - HE-AAC: SBR's gains smoothed over time (a header with bs_smoothing_mode 0) and parametric stereo's mixing run in
   vectors, to the same bits: SBR's envelope adjuster takes about half its share of such a frame, about 8% of it, and
   the mixing about a fifth less of an HE-AAC v2 frame's 5 to 8%.
+- MJPEG: the bit reader's refill takes eight bytes inline, a call only at stuffing, markers and the data's end:
+  about 2 to 5% off a frame.
 
 ## 0.8.1 – 2026-11-07
 

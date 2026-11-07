@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
 
 namespace ManagedCodecs.Mjpeg;
 
@@ -98,7 +99,30 @@ internal ref struct JpegBitReader
     /// Returns the new buffer; its count is <see cref="FilledCount"/> of <paramref name="count"/>. Taking and returning
     /// values (not references) keeps the caller's locals in registers.
     /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public ulong Fill(ulong buffer, int count)
+    {
+        // Fill()'s fast path, inlined into the decoders (a call every 56 bits or so cost 2 to 5% of a frame): eight
+        // bytes with no 0xFF among them. _buffer and _count stay as they were: the caller holds them until Restore.
+        if (!_atMarker && _pos + 8 <= _data.Length)
+        {
+            ulong next = BinaryPrimitives.ReadUInt64BigEndian(_data.Slice(_pos, 8));
+            ulong inverted = ~next;
+            if (((inverted - 0x0101010101010101UL) & ~inverted & 0x8080808080808080UL) == 0)
+            {
+                int bits = (64 - count) & ~7;
+                _pos += bits >> 3;
+                _dataBits += bits;
+                _fedBits += bits;
+                return buffer | (next >> count);
+            }
+        }
+
+        return FillSlow(buffer, count);
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private ulong FillSlow(ulong buffer, int count)
     {
         _buffer = buffer;
         _count = count;

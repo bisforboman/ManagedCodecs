@@ -557,8 +557,8 @@ then took 13 to 15% off AAC LC's steady frame on ARM64 and 5 to 10% on x64 (`com
 version; a first float version, without #339's fusion, against the code before #339: 17 to 19% and 11 to 13%): the 2 doubles a vector were part of ARM64's gap.
 H.264's ARM64 profile is as flat as
 x64's. The QMF banks' real-input transforms (2026-10-28) took 14 to 16% off 5.1 HE-AAC and 8 to 10% off
-HE-AAC v2 on both runners (`compare.yml` against the code before them). The same transforms in single precision (2026-11-07) took 8 to
-10% more off 5.1 HE-AAC and 5 to 7% off HE-AAC v2, again on both. The runners' CPUs differ from run to run (an
+HE-AAC v2 on both runners (`compare.yml` against the code before them). The same transforms in single precision (2026-11-07) took 7 to
+10% more off 5.1 HE-AAC and 4 to 7% off HE-AAC v2, again on both. The runners' CPUs differ from run to run (an
 EPYC 7763 on 2026-10-25 and in the first run of 2026-10-29, a 9V74 on 2026-10-28, a 9V45 in the second run of
 2026-10-29 and in the first run of 2026-10-30, a Xeon 6973P-C in the third run of 2026-10-29, a Xeon Platinum 8370C in the second run of 2026-10-30, which moved the x64 ratios by up to a third with the code unchanged): a ratio is a snapshot, and only builds timed against each other in one run
 (`compare.yml`) show a change. A VM's speed

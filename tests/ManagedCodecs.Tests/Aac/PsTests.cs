@@ -279,7 +279,7 @@ public class PsTests
 
             var outRe = new double[64];
             var outIm = new double[64];
-            PsProcessor.AllPassRow(inRe, inIm, first, end, decays, delayRe, delayIm, linkRe, linkIm, linkIndex, outRe, outIm);
+            PsProcessor.AllPassRow(inRe, inIm, first, end, decays, delayRe, delayIm, PsProcessor.QmfPhase, linkRe, linkIm, PsProcessor.QmfLinkPhase, linkIndex, outRe, outIm);
             Assert.Equal(expectedRe, outRe);
             Assert.Equal(expectedIm, outIm);
             Assert.Equal(expectedDelayRe, delayRe);
@@ -333,6 +333,125 @@ public class PsTests
             for (int r = 0; r < 4; r++)
             {
                 Assert.Equal(Bits(expected[r]), Bits(actual[r]));
+            }
+        }
+    }
+
+    /// <summary>
+    /// The hybrid filter's vector path, with a prototype (20 bands) and without (34 bands), takes each sub-subband's
+    /// sum in the scalar order: the same outputs to the bit, for every width the layouts use and a few others.
+    /// </summary>
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(4)]
+    [InlineData(8)]
+    [InlineData(12)]
+    public void PsHybridFilter_MatchesScalar(int count)
+    {
+        var random = new Random(count);
+        double Next() => (random.NextDouble() - 0.5) * Math.Pow(10, random.Next(-3, 4));
+        double[] Values(int length) => [.. Enumerable.Range(0, length).Select(_ => Next())];
+        for (int trial = 0; trial < 10; trial++)
+        {
+            var xRe = Values(13);
+            var xIm = Values(13);
+            (double[] Re, double[] Im) filter = (Values(13 * count), Values(13 * count));
+            double[] prototype = trial % 2 == 0 ? [] : Values(13);
+            var expectedRe = new double[count];
+            var expectedIm = new double[count];
+            var actualRe = new double[count];
+            var actualIm = new double[count];
+            PsProcessor.HybridFilterScalar(xRe, xIm, filter, prototype, expectedRe, expectedIm);
+            PsProcessor.HybridFilter(xRe, xIm, filter, prototype, actualRe, actualIm);
+            Assert.Equal(expectedRe.Select(BitConverter.DoubleToInt64Bits), actualRe.Select(BitConverter.DoubleToInt64Bits));
+            Assert.Equal(expectedIm.Select(BitConverter.DoubleToInt64Bits), actualIm.Select(BitConverter.DoubleToInt64Bits));
+        }
+    }
+
+    /// <summary>
+    /// The transient detector's vector smoothing updates each bin's peak, excess and energy and finds its ratio and
+    /// whether it is transient as the scalar loop does: the same state, ratios and count to the bit, over a run of slots
+    /// with transients and without, for 10, 20 and 34 bins and widths between.
+    /// </summary>
+    [Theory]
+    [InlineData(1)]
+    [InlineData(3)]
+    [InlineData(10)]
+    [InlineData(20)]
+    [InlineData(34)]
+    public void PsSmoothPeaks_MatchesScalar(int bins)
+    {
+        var random = new Random(bins);
+        static IEnumerable<long> Bits(double[] values) => values.Select(BitConverter.DoubleToInt64Bits);
+        double[][] expected = [new double[bins], new double[bins], new double[bins], new double[bins]];
+        double[][] actual = [new double[bins], new double[bins], new double[bins], new double[bins]];
+        int transients = 0;
+        for (int slot = 0; slot < 64; slot++)
+        {
+            // Mostly steady power with bursts, so both branches are taken.
+            var power = Enumerable.Range(0, bins).Select(_ => random.NextDouble() * (random.Next(8) == 0 ? 1000 : 1)).ToArray();
+            int expectedCount = PsProcessor.SmoothPeaks(power, expected[0], expected[1], expected[2], expected[3], scalar: true);
+            int actualCount = PsProcessor.SmoothPeaks(power, actual[0], actual[1], actual[2], actual[3]);
+            Assert.Equal(expectedCount, actualCount);
+            transients += expectedCount;
+            for (int r = 0; r < 4; r++)
+            {
+                Assert.Equal(Bits(expected[r]), Bits(actual[r]));
+            }
+        }
+
+        Assert.InRange(transients, 1, (64 * bins) - 1);
+    }
+
+    /// <summary>
+    /// The all-pass row with a layout's hybrid phases and a decay of 1 (the hybrid sub-subbands, 12 in 20 bands and 32 in
+    /// 34) gives each sub-subband's output and state as <see cref="PsProcessor.AllPass"/> one by one: the same to the bit.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void PsAllPassRow_Hybrid_MatchesScalar(bool bands34)
+    {
+        var layout = bands34 ? PsProcessor.Layout34 : PsProcessor.Layout20;
+        int bands = layout.HybridBands;
+        var ones = Enumerable.Repeat(1.0, bands).ToArray();
+        var random = new Random(bands);
+        double Next() => (random.NextDouble() - 0.5) * Math.Pow(10, random.Next(-3, 4));
+        double[] Row() => [.. Enumerable.Range(0, bands).Select(_ => Next())];
+        static double[][][] Copy(double[][][] links) => [.. links.Select(l => l.Select(r => (double[])r.Clone()).ToArray())];
+        for (int trial = 0; trial < 10; trial++)
+        {
+            var inRe = Row();
+            var inIm = Row();
+            var delayRe = Row();
+            var delayIm = Row();
+            double[][][] linkRe = [.. new[] { 3, 4, 5 }.Select(n => Enumerable.Range(0, n).Select(_ => Row()).ToArray())];
+            double[][][] linkIm = [.. new[] { 3, 4, 5 }.Select(n => Enumerable.Range(0, n).Select(_ => Row()).ToArray())];
+            int[] linkIndex = [random.Next(3), random.Next(4), random.Next(5)];
+            var expectedDelayRe = (double[])delayRe.Clone();
+            var expectedDelayIm = (double[])delayIm.Clone();
+            var expectedLinkRe = Copy(linkRe);
+            var expectedLinkIm = Copy(linkIm);
+            var expectedRe = new double[bands];
+            var expectedIm = new double[bands];
+            for (int sb = 0; sb < bands; sb++)
+            {
+                (expectedRe[sb], expectedIm[sb]) = PsProcessor.AllPass(inRe[sb], inIm[sb], sb, 1, expectedDelayRe, expectedDelayIm, layout.HybridPhase, expectedLinkRe, expectedLinkIm, layout.HybridLinkPhase, linkIndex);
+            }
+
+            var outRe = new double[bands];
+            var outIm = new double[bands];
+            PsProcessor.AllPassRow(inRe, inIm, 0, bands, ones, delayRe, delayIm, layout.HybridPhase, linkRe, linkIm, layout.HybridLinkPhase, linkIndex, outRe, outIm);
+            Assert.Equal(expectedRe.Select(BitConverter.DoubleToInt64Bits), outRe.Select(BitConverter.DoubleToInt64Bits));
+            Assert.Equal(expectedIm.Select(BitConverter.DoubleToInt64Bits), outIm.Select(BitConverter.DoubleToInt64Bits));
+            Assert.Equal(expectedDelayRe, delayRe);
+            Assert.Equal(expectedDelayIm, delayIm);
+            for (int link = 0; link < 3; link++)
+            {
+                Assert.Equal(expectedLinkRe[link], linkRe[link]);
+                Assert.Equal(expectedLinkIm[link], linkIm[link]);
             }
         }
     }

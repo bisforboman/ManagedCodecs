@@ -1028,11 +1028,11 @@ of 578 output samples, and no fractional delay (unit tests; reading samples in t
 or a kernel offset by one breaks them). The kernels' cos and sin are computed without Math.Cos and Math.Sin, whose
 last bits differ between .NET and WebAssembly's runtime, which the HF generator's prediction can magnify.
 The vector paths (the QMF FFTs and rotations, the HF generator's covariances and patch filter, the gains, noise and
-sinusoids added to the high band and their smoothing over time, the parametric stereo all-pass links and mixing) do each lane's arithmetic in the scalar loop's
+sinusoids added to the high band and their smoothing over time, the parametric stereo hybrid filters, transient detector, all-pass links and mixing) do each lane's arithmetic in the scalar loop's
 order, without fused multiply-adds, and add noise under a mask rather than as zero, so a negative zero stays: each is
 compared bit for bit with its scalar loop on random input (`VectorFft_MatchesScalarExactly`,
 `VectorRotations_MatchScalarExactly`, `SbrCovariances_MatchScalar`, `SbrFilterPatch_MatchesFormula`,
-`SbrApplyGains_MatchesScalar`, `SbrSmoothGains_MatchesScalar`, `PsAllPassRow_MatchesScalar`, `PsMixGroup_MatchesScalar`), and each speed change left every sample's output the same
+`SbrApplyGains_MatchesScalar`, `SbrSmoothGains_MatchesScalar`, `PsHybridFilter_MatchesScalar`, `PsDetector_MatchesScalar`, `PsAllPassRow_MatchesScalar`, `PsMixGroup_MatchesScalar`), and each speed change left every sample's output the same
 to the bit.
 
 Decoded output (`SbrConformanceTests`) against FFmpeg's (name.sbr.f32: at the SBR rate; MP4 without the 2048 samples of

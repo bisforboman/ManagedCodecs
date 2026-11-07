@@ -911,6 +911,15 @@ writes with `-aac_pce 1` (up to 16 channels) and on the FDK encoder's PCEs for 1
 its tree; the 7.1 rear-surround and front-centre modes write one anyway); `ProgramConfigTests` holds the shapes,
 and the ones no encoder at hand writes, which keep the listed order.
 
+Spectral data is read through packed tables (#341): one lookup a codeword gives its length, its values and how many
+sign bits follow, one read takes all the signs, the values go straight into the quantized spectrum, and the reads go
+through a 64-bit cache (`AacBitReader.Cursor`, as H.264's CAVLC one) that reads past the end as zeros, the unit's end
+checked when it is committed. `SpectrumHuffmanTests` compares it with the reader by the definition (kept as
+`Huffman.ReadSpectrumByDefinition`) on random bits for every codebook, truncated units and long escapes among them.
+The benchmark samples (low-bitrate tones) barely reach this code; on real films' AAC it was the largest stage:
+Elephants Dream's 192 kbit/s stereo spent 31% of its decode there by perf, 16% after, and decodes 21% faster (median
+of 10 interleaved runs each, 1177 to 925 ms for its 11 minutes once warm; Sintel's trailer, 127 kbit/s, 14% faster).
+
 ## HE-AAC (spectral band replication)
 
 Samples from the Fraunhofer FDK encoder, committed in `samples/heaac/` (`tools/make-heaac-samples.sh`): stereo at

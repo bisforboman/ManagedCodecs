@@ -41,6 +41,12 @@ on:
         description: Use the framework's ReadyToRun code (off is DOTNET_ReadyToRun=0, everything jitted)
         type: boolean
         default: true
+      ab_env:
+        description: Instead of profiling, time mcdec with and without this variable (NAME=VALUE), interleaved
+        default: ''
+      ab_pairs:
+        description: Interleaved pairs a sample, for ab_env
+        default: '8'
 
 permissions:
   contents: read
@@ -63,6 +69,7 @@ jobs:
       - uses: ./.github/actions/samples
 
       - name: Install perf
+        if: inputs.ab_env == ''
         run: |
           sudo apt-get install -y -q linux-tools-generic > /dev/null
           # The runner's kernel has no matching linux-tools package; the generic one's perf works with it.
@@ -74,6 +81,7 @@ jobs:
         run: dotnet build tools/ManagedCodecs.Cli -c Release
 
       - name: Profile
+        if: inputs.ab_env == ''
         env:
           SAMPLE: ${{ inputs.sample }}
           LOOPS: ${{ inputs.loops }}
@@ -148,3 +156,33 @@ jobs:
           # In the log too, where the API reads it (a run summary has no API).
           cat report.md
           cat report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: A/B
+        if: inputs.ab_env != ''
+        env:
+          VARIABLE: ${{ inputs.ab_env }}
+          PAIRS: ${{ inputs.ab_pairs }}
+        run: |
+          mcdec=tools/ManagedCodecs.Cli/bin/Release/net10.0/mcdec.dll
+          one() { # $1 = a or b, $2 = sample, $3 = loops
+            if [ "$1" = b ]; then env "$VARIABLE" dotnet "$mcdec" "samples/$2" --loops "$3"; else dotnet "$mcdec" "samples/$2" --loops "$3"; fi \
+              | sed -nE 's/.* ([0-9.]+) us per frame/\1/p'
+          }
+          for s in h264-high-default.mp4:300 h264-bench-720p.mp4:40; do
+            n=${s%%:*}; l=${s##*:}
+            for i in $(seq 1 "$PAIRS"); do
+              if [ $((i % 2)) = 1 ]; then order="a b"; else order="b a"; fi
+              for x in $order; do echo "$n $x $i $(one "$x" "$n" "$l")"; done
+            done
+          done | tee ab.txt
+          python3 - <<'PY' | tee -a "$GITHUB_STEP_SUMMARY"
+          import collections, statistics as st
+          d = collections.defaultdict(dict)
+          for line in open("ab.txt"):
+              n, x, i, t = line.split()
+              d[n].setdefault(x, {})[i] = float(t)
+          for n, v in d.items():
+              r = [v["b"][i] / v["a"][i] for i in v["a"]]
+              print(f"{n}: A median {st.median(v['a'].values()):.1f} us, B median {st.median(v['b'].values()):.1f} us, "
+                    f"B/A median {st.median(r):.3f} (range {min(r):.3f} to {max(r):.3f}, B faster in {sum(x < 1 for x in r)}/{len(r)})")
+          PY

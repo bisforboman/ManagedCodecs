@@ -176,7 +176,11 @@ the H.264 rows on the runner of README's table, the MJPEG row on another):
 ci.yml's table of the Unity build on Mono against the net10.0 build, after this change (`tools/bench.py --runtime
 mono`, on a faster runner, an AMD EPYC 9V45, so not comparable with the table above by time): Mono takes 3.1 to 3.4
 times the net10.0 build's time on MJPEG, 3.1 to 8.7 on H.264 (720p 21.9 ms a frame), 4.7 to 4.8 on AAC and 7.2 to 9.1
-on HE-AAC; src/ManagedCodecs.Unity/PACKAGE.md has it.
+on HE-AAC. After all three pull requests, and after #386 put HE-AAC's QMF transforms in single precision
+in both builds (main's CI on its merge, on an EPYC 7763 runner): 4.1 to 4.3 on MJPEG, 3.2 to
+9.8 on H.264 (720p 38.7 ms a frame there; 19.2 on an EPYC 9V45 runner after #388), 6.7 to 6.8 on AAC and 6.2 to 7.8
+on HE-AAC, the net10.0 build having got faster meanwhile too (its IMDCT and QMF transforms in single precision);
+src/ManagedCodecs.Unity/PACKAGE.md has that table.
 
 The net10.0 build is unchanged where it runs: ManagedCodecs.H264.dll for net10.0 is the same file byte for byte
 (built without debug information, whose id hashes the sources), and the MJPEG change reaches CoreCLR only without
@@ -189,7 +193,7 @@ windows) takes four sums at a time with each term's offsets read once; each sum 
 output is bit-exact (VectorFft_MatchesScalarExactly and SumOfProducts_MatchesMultiplyAddATerm compare them with the
 vector paths and the definition; both builds hash the same on all 23 AAC samples on Mono). CoreCLR reaches them only
 without intrinsics. On Mono 6.12, medians of five interleaved runs against main: heaac-5.1 2.38 to 1.71 ms a frame
-(1.39 times), heaacv2-stereo 0.78 to 0.60 (1.30 times), AAC LC unchanged (it has no SBR). PACKAGE.md's table predates it.
+(1.39 times), heaacv2-stereo 0.78 to 0.60 (1.30 times), AAC LC unchanged (it has no SBR).
 
 **Then the table properties** (a third pull request for #345): CABAC's `CabacTables.RangeTabLps`, `Cabac.MpsNext` and
 `LpsNext` (read at every bin, in `Decide`), deblocking's `Tc0` (every filtered line) and the context offsets by block

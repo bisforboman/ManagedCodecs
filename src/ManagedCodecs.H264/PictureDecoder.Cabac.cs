@@ -201,8 +201,8 @@ internal sealed partial class PictureDecoder<TPixel>
     // ---- mb_skip_flag, mb_type, sub_mb_type (9.3.3.1.1.1, 9.3.3.1.1.3, 9.3.3.1.2) ----
     private int SkipFlagInc(int mbAddr)
     {
-        int a = CabacNeighborMb(mbAddr, -1, 0);
-        int b = CabacNeighborMb(mbAddr, 0, -1);
+        int a = EdgeNeighborMb(mbAddr, -1, 0);
+        int b = EdgeNeighborMb(mbAddr, 0, -1);
         return (a >= 0 && _kind[a] != MbKind.PSkip ? 1 : 0) + (b >= 0 && _kind[b] != MbKind.PSkip ? 1 : 0);
     }
 
@@ -240,8 +240,8 @@ internal sealed partial class PictureDecoder<TPixel>
         }
         else
         {
-            int a = CabacNeighborMb(mbAddr, -1, 0);
-            int b = CabacNeighborMb(mbAddr, 0, -1);
+            int a = EdgeNeighborMb(mbAddr, -1, 0);
+            int b = EdgeNeighborMb(mbAddr, 0, -1);
             int inc = (a >= 0 && _kind[a] != MbKind.Intra4x4 ? 1 : 0) + (b >= 0 && _kind[b] != MbKind.Intra4x4 ? 1 : 0);
             first = c.Decision(3 + inc);
         }
@@ -278,7 +278,7 @@ internal sealed partial class PictureDecoder<TPixel>
     private int CabacBMbType(Cabac c, int mbAddr)
     {
         int Cond(int n) => n >= 0 && _kind[n] != MbKind.PSkip && !_directMb[n] ? 1 : 0;
-        if (c.Decision(27 + Cond(CabacNeighborMb(mbAddr, -1, 0)) + Cond(CabacNeighborMb(mbAddr, 0, -1))) == 0)
+        if (c.Decision(27 + Cond(EdgeNeighborMb(mbAddr, -1, 0)) + Cond(EdgeNeighborMb(mbAddr, 0, -1))) == 0)
         {
             return 0;
         }
@@ -357,7 +357,7 @@ internal sealed partial class PictureDecoder<TPixel>
     {
         int RefInc(int nx, int ny)
         {
-            var (n, xW, yW) = CabacNeighbor(mbAddr, nx, ny);
+            var (n, xW, yW) = EdgeNeighbor(mbAddr, nx, ny);
             if (n < 0 || _kind[n] == MbKind.PSkip)
             {
                 return 0;
@@ -405,7 +405,7 @@ internal sealed partial class PictureDecoder<TPixel>
                 return absMvd[(mbAddr * 16) + ((ny >> 2) * 4) + (nx >> 2)]; // inside the macroblock
             }
 
-            var (n, xW, yW) = CabacNeighbor(mbAddr, nx, ny);
+            var (n, xW, yW) = EdgeNeighbor(mbAddr, nx, ny);
             if (n < 0)
             {
                 return 0;
@@ -540,7 +540,7 @@ internal sealed partial class PictureDecoder<TPixel>
     private int CabacChromaPredMode(Cabac c, int mbAddr)
     {
         int Cond(int n) => n >= 0 && !IsInter(n) && _kind[n] != MbKind.IPcm && _chromaPredMode[n] != 0 ? 1 : 0;
-        int inc = Cond(CabacNeighborMb(mbAddr, -1, 0)) + Cond(CabacNeighborMb(mbAddr, 0, -1));
+        int inc = Cond(EdgeNeighborMb(mbAddr, -1, 0)) + Cond(EdgeNeighborMb(mbAddr, 0, -1));
         if (c.Decision(64 + inc) == 0)
         {
             return 0;
@@ -569,7 +569,7 @@ internal sealed partial class PictureDecoder<TPixel>
                     return ((luma >> (((ny >> 3) * 2) + (nx >> 3))) & 1) != 0 ? 0 : 1; // inside the macroblock
                 }
 
-                var (n, xW, yW) = CabacNeighbor(mbAddr, nx, ny);
+                var (n, xW, yW) = EdgeNeighbor(mbAddr, nx, ny);
                 if (n < 0 || _kind[n] == MbKind.IPcm)
                 {
                     return 0;
@@ -583,8 +583,8 @@ internal sealed partial class PictureDecoder<TPixel>
             luma |= c.Decision(73 + LumaCond(x - 1, y) + (2 * LumaCond(x, y - 1))) << b8;
         }
 
-        int a = CabacNeighborMb(mbAddr, -1, 0);
-        int b = CabacNeighborMb(mbAddr, 0, -1);
+        int a = EdgeNeighborMb(mbAddr, -1, 0);
+        int b = EdgeNeighborMb(mbAddr, 0, -1);
         int ChromaCond(int n, int least)
         {
             if (n < 0 || _kind[n] == MbKind.PSkip)
@@ -645,7 +645,7 @@ internal sealed partial class PictureDecoder<TPixel>
     private int CodedBlockFlagCond(int mbAddr, BlockCategory category, int component, int px, int py)
     {
         bool chroma = category is BlockCategory.ChromaDc or BlockCategory.ChromaAc;
-        var (n, xW, yW) = CabacNeighbor(mbAddr, px, py, chroma);
+        var (n, xW, yW) = EdgeNeighbor(mbAddr, px, py, chroma);
         if (n < 0)
         {
             return IsInter(mbAddr) ? 0 : 1;

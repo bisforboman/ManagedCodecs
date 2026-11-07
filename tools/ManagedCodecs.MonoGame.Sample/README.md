@@ -1,18 +1,19 @@
 # mcplay: in-game video with MonoGame
 
-A sample for issue #254 (docs/decisions/2026-10-31-game-engines.md): plays an MP4 or AVI (H.264 or MJPEG, AAC audio)
-in a MonoGame window, decoded by ManagedCodecs, to show the pieces a game needs and what they cost. Not a media
-player: no seeking, no pause, Escape quits.
+A sample for issue #254 (docs/decisions/2026-10-31-game-engines.md): plays an MP4, Matroska or AVI (H.264 or MJPEG,
+AAC audio) in a MonoGame window with the `ManagedCodecs.MonoGame` package's `VideoTexture`, to show what in-game video
+costs. Not a media player: no seeking; space pauses, Escape quits.
 
-    dotnet run -c Release --project tools/ManagedCodecs.MonoGame -- <file.mp4>
+    dotnet run -c Release --project tools/ManagedCodecs.MonoGame.Sample -- <file.mp4>
 
-- `ManagedCodecs.Playback`'s `MediaPlayer` demuxes and decodes ahead on a thread of its own (H.264 with frame
-  threading, up to 4 threads) and converts each frame to RGBA on the CPU (`YuvToRgba`, inside the package); the game
-  loop shows the newest frame due by a clock started at the first frame (`TakeFrame` drops late ones), through one
-  `Texture2D` (`SetData` each frame). A frame's pixels go back to `MediaPlayer.Return`
+- `VideoTexture` (`ManagedCodecs.MonoGame`) runs `ManagedCodecs.Playback`'s `MediaPlayer`, which demuxes and decodes
+  ahead on a thread of its own (H.264 with frame threading, up to 4 threads) and converts each frame to RGBA on the CPU
+  (`YuvToRgba`, inside the package); each `Update` shows the newest frame due by the game's clock from the first frame
+  (`TakeFrame` drops late ones), through one `Texture2D` (`SetData` each frame). A frame's pixels go back to
+  `MediaPlayer.Return`
   once uploaded or dropped and the next frame is converted into them: a new 3.6 MB array per 720p frame meant a gen 2
   collection every 8 frames or so (31 in 240 frames of a 720p clip, 2 with the arrays reused).
-- Audio goes to a `DynamicSoundEffectInstance` as 16-bit stereo (more channels downmixed to the first two). Without
+- Audio goes to a `DynamicSoundEffectInstance` as 16-bit stereo (of more channels, the first two). Without
   an audio device (OpenAL finds none) the video plays alone, the audio decoded and dropped.
 - The window title shows the decoding's and the RGBA conversion's time per frame, means over the run on the decoding
   thread. The decoding's is the time in the decoder's calls over the frames they returned: with H.264 frame threading

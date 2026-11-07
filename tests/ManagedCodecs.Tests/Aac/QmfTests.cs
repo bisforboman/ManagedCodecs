@@ -517,6 +517,28 @@ public class QmfTests
     }
 
     /// <summary>
+    /// The smoothed gains, four subbands at a time, are the scalar sums to the bit, for every subband count (the vector
+    /// part's whole groups, then the scalar tail), on random histories over six decades.
+    /// </summary>
+    [Theory]
+    [InlineData(64)]
+    [InlineData(45)]
+    [InlineData(3)]
+    [InlineData(1)]
+    public void SbrSmoothGains_MatchesScalar(int m)
+    {
+        var random = new Random(m);
+        double Next() => random.NextDouble() * Math.Pow(10, random.Next(-3, 4));
+        double[][] history = [.. Enumerable.Range(0, 5).Select(_ => Enumerable.Range(0, 64).Select(_ => Next()).ToArray())];
+        history[2][0] = -0.0;
+        var expected = new double[m];
+        var actual = new double[m];
+        SbrChannel.SmoothGainsScalar(history, 0, expected);
+        SbrChannel.SmoothGains(history, actual);
+        Assert.Equal(expected.Select(BitConverter.DoubleToInt64Bits), actual.Select(BitConverter.DoubleToInt64Bits));
+    }
+
+    /// <summary>
     /// The HF generator's covariances, four subbands at a time, are the scalar ones to the bit, for every subband count
     /// (the vector part's whole groups, then the scalar tail), on random low-band slots over six decades.
     /// </summary>

@@ -1,7 +1,7 @@
 # Changelog
 
 Versions are git tags (`vX.Y.Z`); each one publishes every package (ManagedCodecs.Core, .Containers, .Mjpeg, .H264,
-.Aac, .Thumbnails, .Playback, .Unity and the ManagedCodecs meta-package) to nuget.org at that version, and a GitHub release with this file's section
+.Aac, .Thumbnails, .Playback, .MonoGame, .Unity and the ManagedCodecs meta-package) to nuget.org at that version, and a GitHub release with this file's section
 as its notes. `release.yml` releases on the push to main that brings a version heading not yet tagged, so a release
 is a pull request that turns "Unreleased" into "## X.Y.Z – date" and runs `tools/ship-public-api.py`. From 0.1.0 on, the
 public API changes only in a new minor version (0.2.0, 0.3.0, ...), with a "Breaking changes" entry; a patch version
@@ -20,9 +20,14 @@ run time.
   (`AudioChunk`), and gives the game loop the frame due by its clock (`TakeFrame`), dropping late ones; with
   `PlaybackOptions` (decoder threads, matrix and range, loop) and `PlaybackStatistics`. `ManagedCodecs.Unity` holds it
   too. The MonoGame, Godot and Unity samples now use it.
+- New package `ManagedCodecs.MonoGame`: `VideoTexture` plays a file into a `Texture2D` and a
+  `DynamicSoundEffectInstance` with the game's clock (`Update`, `Play`, `Pause`, `Volume`) and draws it letterboxed, at
+  its sample aspect ratio and turned upright (`Draw`). Any MonoGame 3.8 platform package, on .NET 10.
 
 ### Changed
 
+- H.264: the direct motion compensation path for frame macroblocks also takes samples above 8 bits and 4:2:2: about 2%
+  fewer instructions in 10-bit and 4:2:2 streams.
 - AAC: the IMDCT's FFT does its bit reversal and first stage in one vector pass, and its post-twiddle runs in
   vectors: 15 to 23% off an AAC LC frame on x64 and ARM64, and 3% off 5.1 HE-AAC. The output is unchanged.
 - AAC: the IMDCT (its FFT, DCT-IV and fold) runs in single precision, four values a vector where it ran two
@@ -38,6 +43,8 @@ run time.
   and 1.7% in field pictures.
 - AAC: spectral data is read through packed Huffman tables, all of a codeword's sign bits at once: AAC LC at film
   bitrates decodes 14 to 21% faster (Elephants Dream's 192 kbit/s stereo, Sintel's trailer).
+- AAC: inverse quantization runs a band without branches or calls: AAC LC at film bitrates decodes another 26 to 29%
+  faster.
 - H.264: spatial direct prediction finds a macroblock's neighbours A, B and C once for both its reference indices and
   its motion vectors, in MBAFF frames and field pictures in one call: about 2.2% fewer instructions in MBAFF frames
   with B pictures and 1.2% in field pictures.
@@ -48,8 +55,13 @@ run time.
   6.12, 720p H.264 about twice as fast (79 to 38 ms a frame), 320x240 H.264 1.3 to 1.5 times, MJPEG 1.45 times.
   The other packages' code is unchanged where it runs (docs/decisions/2026-10-31-unity-netstandard.md, Mono's
   profile).
+- ManagedCodecs.Unity on Mono: HE-AAC's QMF banks run their scalar FFT and windows by reference rather than through
+  slices: on Mono 6.12, 5.1 HE-AAC 1.39 times as fast, HE-AAC v2 1.30 times. The output is unchanged.
 - MJPEG: a flat block's rows are written as one 8-byte store each instead of a call each: about 7 to 10% off a frame of
   a test pattern, nothing on noise.
+- HE-AAC: SBR's gains smoothed over time (a header with bs_smoothing_mode 0) and parametric stereo's mixing run in
+  vectors, to the same bits: SBR's envelope adjuster takes about half its share of such a frame, about 8% of it, and
+  the mixing about a fifth less of an HE-AAC v2 frame's 5 to 8%.
 - MJPEG: the bit reader's refill takes eight bytes inline, a call only at stuffing, markers and the data's end:
   about 2 to 5% off a frame.
 

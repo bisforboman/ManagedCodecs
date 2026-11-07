@@ -1,0 +1,19 @@
+#nullable enable
+ManagedCodecs.MonoGame.VideoTexture
+ManagedCodecs.MonoGame.VideoTexture.Dispose() -> void
+ManagedCodecs.MonoGame.VideoTexture.Draw(Microsoft.Xna.Framework.Graphics.SpriteBatch! spriteBatch, Microsoft.Xna.Framework.Rectangle bounds) -> void
+ManagedCodecs.MonoGame.VideoTexture.Draw(Microsoft.Xna.Framework.Graphics.SpriteBatch! spriteBatch, Microsoft.Xna.Framework.Rectangle bounds, Microsoft.Xna.Framework.Color color) -> void
+ManagedCodecs.MonoGame.VideoTexture.IsFinished.get -> bool
+ManagedCodecs.MonoGame.VideoTexture.IsPlaying.get -> bool
+ManagedCodecs.MonoGame.VideoTexture.Pause() -> void
+ManagedCodecs.MonoGame.VideoTexture.Play() -> void
+ManagedCodecs.MonoGame.VideoTexture.Player.get -> ManagedCodecs.Playback.MediaPlayer!
+ManagedCodecs.MonoGame.VideoTexture.Position.get -> System.TimeSpan
+ManagedCodecs.MonoGame.VideoTexture.Texture.get -> Microsoft.Xna.Framework.Graphics.Texture2D?
+ManagedCodecs.MonoGame.VideoTexture.Update(Microsoft.Xna.Framework.GameTime! gameTime) -> void
+ManagedCodecs.MonoGame.VideoTexture.VideoTexture(Microsoft.Xna.Framework.Graphics.GraphicsDevice! device, string! path) -> void
+ManagedCodecs.MonoGame.VideoTexture.VideoTexture(Microsoft.Xna.Framework.Graphics.GraphicsDevice! device, string! path, ManagedCodecs.Playback.PlaybackOptions? options) -> void
+ManagedCodecs.MonoGame.VideoTexture.VideoTexture(Microsoft.Xna.Framework.Graphics.GraphicsDevice! device, System.IO.Stream! stream) -> void
+ManagedCodecs.MonoGame.VideoTexture.VideoTexture(Microsoft.Xna.Framework.Graphics.GraphicsDevice! device, System.IO.Stream! stream, ManagedCodecs.Playback.PlaybackOptions? options) -> void
+ManagedCodecs.MonoGame.VideoTexture.Volume.get -> float
+ManagedCodecs.MonoGame.VideoTexture.Volume.set -> void

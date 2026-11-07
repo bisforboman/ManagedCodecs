@@ -34,12 +34,13 @@ in between. That comparison is not measured here.
 | `src/ManagedCodecs.H264` | `H264Decoder`: Constrained Baseline, Main, High, High 10, High 4:2:2 and High 4:4:4 Predictive profile H.264 (CAVLC, CABAC, I/P/B, weighted prediction, 8x8 transform, scaling matrices, deblocking, monochrome, 4:2:0, 4:2:2 and 4:4:4, also as separate colour planes, 8 to 14 bits, lossless, progressive and interlaced), bit-exact |
 | `src/ManagedCodecs.Thumbnails` | `VideoProbe`: a video file's duration, displayed size, codecs and rotation as ffprobe reports them, without decoding; `VideoThumbnail`: a frame as a small upright RGBA image, PNG or JPEG; the `ManagedCodecs.Thumbnails` package (see Probing a video, Thumbnails; docs/decisions/2026-10-31-thumbnails.md) |
 | `src/ManagedCodecs.Playback` | `MediaPlayer`: plays a video file for a game engine, decoding on a thread of its own into RGBA frames and float stereo, and handing the game loop the frame due by its clock; the `ManagedCodecs.Playback` package (see In-game video) |
+| `src/ManagedCodecs.MonoGame` | `VideoTexture`: `MediaPlayer` for MonoGame, into a `Texture2D` and a `DynamicSoundEffectInstance`, drawn letterboxed and upright; the `ManagedCodecs.MonoGame` package (see In-game video) |
 | `src/ManagedCodecs.Unity` | The netstandard2.1 build for Unity (Mono, IL2CPP): every decoder's sources (and Thumbnails' and Playback's) in one assembly, without the vector paths, 1 to 3.4 times slower on CoreCLR; the `ManagedCodecs.Unity` package (see Unity) |
 | `src/ManagedCodecs.Aac` | `AacDecoder`: AAC LC (mono to 7.1, M/S, intensity, PNS, TNS), within 5e-7 of FFmpeg's float output; HE-AAC (spectral band replication) |
 | `src/Shared` | Source files linked into several codec projects (the VLC decoder) |
 | `tools/ManagedCodecs.Cli` | `mcdec`: decodes a file and times it, to compare with `ffmpeg -benchmark` (`--threads N` for H.264 frame threading and HE-AAC's channels) |
 | `tools/ManagedCodecs.Godot` | A Godot 4 (.NET) node that plays a video into an `ImageTexture` and an `AudioStreamGenerator` with `ManagedCodecs.Playback`; CI builds it with the Godot .NET SDK, Godot has not run it |
-| `tools/ManagedCodecs.MonoGame` | `mcplay`: a MonoGame sample that plays a file into a texture with `ManagedCodecs.Playback` (its README has the 1080p measurements; issue #254) |
+| `tools/ManagedCodecs.MonoGame.Sample` | `mcplay`: a MonoGame `Game` around `VideoTexture` (`ManagedCodecs.MonoGame`) (its README has the 1080p measurements; issue #254) |
 | `tools/ManagedCodecs.Unity.Sample` | A Unity `MonoBehaviour` that plays a video into a `Texture2D` and an `AudioClip` with the `ManagedCodecs.Unity` package (its `MediaPlayer`); CI compiles it against stubs of UnityEngine, Unity has not run it |
 | `tools/make-samples.sh` | Generates the test samples and FFmpeg's references |
 | `tools/compare.sh` | Times mcdec and FFmpeg on the same file |
@@ -141,8 +142,8 @@ dotnet add package ManagedCodecs
 
 For Unity (Mono, IL2CPP), `ManagedCodecs.Unity` instead (see Unity, below).
 For a video's facts and thumbnail in a web back end or a browser, `ManagedCodecs.Thumbnails` (see Probing a video and
-Thumbnails, below). For video in a game (MonoGame, FNA, Godot .NET, Stride), `ManagedCodecs.Playback` (see In-game
-video, below).
+Thumbnails, below). For video in a game (MonoGame, FNA, Godot .NET, Stride), `ManagedCodecs.Playback`, and for MonoGame
+`ManagedCodecs.MonoGame` (see In-game video, below).
 
 Building from source requires the .NET 10 SDK. The tests also need samples made with FFmpeg (with libx264) and ImageMagick:
 
@@ -429,12 +430,17 @@ while (player.TakeAudio() is { } audio) { /* audio.Samples at audio.SampleRate t
 
 - **Colours:** each frame by its own matrix and range, and where the stream says nothing as players assume (BT.709 from
   720 lines, BT.601 below, limited range); `PlaybackOptions.Matrix` and `Range` override them. Within 2 levels of
-  FFmpeg's scaler (tools/ManagedCodecs.MonoGame/README.md); the fast path is checked against the formula on random
+  FFmpeg's scaler (tools/ManagedCodecs.MonoGame.Sample/README.md); the fast path is checked against the formula on random
   samples of every 8-bit layout.
 - **Speed:** on 4 vCPUs at 2.1 GHz, 1080p24 and 1080p30 keep up, decoding and conversion included (mcplay's README).
 - **Not a media player:** no seeking and no clock of its own (pause by stopping the clock you pass); `Loop` plays the
   file again from its start, its frames' times running on.
-- **Samples:** `tools/ManagedCodecs.MonoGame` (MonoGame), `tools/ManagedCodecs.Godot` (a Godot 4 .NET node) and
+- **MonoGame:** `ManagedCodecs.MonoGame`'s `VideoTexture` does all of the above for a `Texture2D` and a
+  `DynamicSoundEffectInstance`, with the game's clock (`Update(gameTime)`, `Play`, `Pause`, `Volume`) and
+  `Draw(spriteBatch, bounds)`, letterboxed at the sample aspect ratio and turned by the stream's rotation. It is
+  compiled against MonoGame 3.8's API without bringing a platform package, so it works with any of them; net10.0 only,
+  like the decoders.
+- **Samples:** `tools/ManagedCodecs.MonoGame.Sample` (mcplay, around `VideoTexture`), `tools/ManagedCodecs.Godot` (a Godot 4 .NET node) and
   `tools/ManagedCodecs.Unity.Sample` (a `MonoBehaviour`; `ManagedCodecs.Unity` holds `MediaPlayer` too). Only mcplay
   has been run; CI builds the others.
 
@@ -573,7 +579,10 @@ defaults, tiered compilation and dynamic PGO, which start faster but cost a shor
 
 Dynamic PGO runs instrumented code first and pays that back only on long files (about 9% less a frame once it is done,
 but still behind after 5,000 frames here; about 14% less on a 720p CABAC stream and 18% on this one in a later
-measurement, docs/conformance.md, H.264, Performance notes, and #346). For short files, turn it off in the app's project:
+measurement, docs/conformance.md, H.264, Performance notes, and #346). The warm-up is long because each hot method
+is compiled three times and the tier-1 compiles queue on one background thread, busy to about frame 1,000; where PGO
+pays back depends on picture size (about 1,000 frames at 720p, more than 5,000 at 320x240;
+docs/notes/jit-warmup-2026-11.md). For short files, turn it off in the app's project:
 
 ```xml
 <TieredPGO>false</TieredPGO>

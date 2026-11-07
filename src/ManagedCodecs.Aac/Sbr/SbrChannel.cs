@@ -45,7 +45,7 @@ internal sealed class SbrChannel(bool downsampled = false)
     ];
 
     // The gain smoother's weights (h_smooth, 4.6.18.7.6), oldest slot first.
-    private static readonly double[] Smoothing = [0.03183050093751, 0.11516383427084, 0.21816949906249, 0.30150283239582, 0.33333333333333];
+    private static ReadOnlySpan<double> Smoothing => [0.03183050093751, 0.11516383427084, 0.21816949906249, 0.30150283239582, 0.33333333333333];
 
     // The phase of an added sinusoid, by slot (the imaginary part's sign also alternating by subband).
     private static readonly double[] SineReal = [1, 0, -1, 0];
@@ -543,6 +543,8 @@ internal sealed class SbrChannel(bool downsampled = false)
         Span<double> gain = stackalloc double[64];
         Span<double> noise = stackalloc double[64];
         Span<double> tone = stackalloc double[64];
+        Span<double> smoothedGain = stackalloc double[64];
+        Span<double> smoothedNoise = stackalloc double[64];
         for (int l = 0; l < data.NumEnvelopes; l++)
         {
             int first = 2 * data.Borders[l];
@@ -660,35 +662,16 @@ internal sealed class SbrChannel(bool downsampled = false)
                 noise[..m].CopyTo(_noiseHistory[4]);
                 if (smooth)
                 {
-                    for (int i = 0; i < m; i++)
-                    {
-                        double g = 0;
-                        double n = 0;
-                        for (int j = 0; j < 5; j++)
-                        {
-                            g += _gainHistory[j][i] * Smoothing[j];
-                            n += _noiseHistory[j][i] * Smoothing[j];
-                        }
-
-                        _noiseIndex = (_noiseIndex + 1) & 511;
-                        real[i] *= g;
-                        imaginary[i] *= g;
-                        if (tone[i] == 0 && !noNoise)
-                        {
-                            real[i] += n * SbrNoiseTable.Values[2 * _noiseIndex];
-                            imaginary[i] += n * SbrNoiseTable.Values[(2 * _noiseIndex) + 1];
-                        }
-
-                        real[i] += tone[i] * SineReal[_sineIndex];
-                        imaginary[i] += tone[i] * (((kx + i) & 1) != 0 ? -1 : 1) * SineImaginary[_sineIndex];
-                    }
+                    SmoothGains(_gainHistory, smoothedGain[..m]);
+                    SmoothGains(_noiseHistory, smoothedNoise[..m]);
+                    ApplyGains(real, imaginary, smoothedGain[..m], smoothedNoise[..m], tone[..m], kx, _noiseIndex, _sineIndex, noNoise);
                 }
                 else
                 {
                     ApplyGains(real, imaginary, gain[..m], noise[..m], tone[..m], kx, _noiseIndex, _sineIndex, noNoise);
-                    _noiseIndex = (_noiseIndex + m) & 511;
                 }
 
+                _noiseIndex = (_noiseIndex + m) & 511;
                 _sineIndex = (_sineIndex + 1) & 3;
                 (_gainHistory[0], _gainHistory[1], _gainHistory[2], _gainHistory[3], _gainHistory[4]) = (_gainHistory[1], _gainHistory[2], _gainHistory[3], _gainHistory[4], _gainHistory[0]);
                 (_noiseHistory[0], _noiseHistory[1], _noiseHistory[2], _noiseHistory[3], _noiseHistory[4]) = (_noiseHistory[1], _noiseHistory[2], _noiseHistory[3], _noiseHistory[4], _noiseHistory[0]);
@@ -788,6 +771,81 @@ internal sealed class SbrChannel(bool downsampled = false)
     }
 
     private static double[][] Buffers(int count, int length) => [.. Enumerable.Range(0, count).Select(_ => new double[length])];
+
+    /// <summary>
+    /// The gains (or noise levels) smoothed over time (4.6.18.7.5): each subband's <paramref name="history"/> rows 0 to 4,
+    /// oldest first, weighted by <see cref="Smoothing"/> and summed from zero in that order. Four subbands at a time where
+    /// Vector256 is accelerated (two with Vector128 alone), each lane with <see cref="SmoothGainsScalar"/>'s operations in its
+    /// order, so the sums are the same to the bit (<c>SbrSmoothGains_MatchesScalar</c>).
+    /// </summary>
+    internal static void SmoothGains(double[][] history, Span<double> output)
+    {
+        int m = output.Length;
+        var h0 = history[0].AsSpan(0, m);
+        var h1 = history[1].AsSpan(0, m);
+        var h2 = history[2].AsSpan(0, m);
+        var h3 = history[3].AsSpan(0, m);
+        var h4 = history[4].AsSpan(0, m);
+        var smoothing = Smoothing;
+        int i = 0;
+#if NET
+        if (Vector256.IsHardwareAccelerated)
+        {
+            var s0 = Vector256.Create(smoothing[0]);
+            var s1 = Vector256.Create(smoothing[1]);
+            var s2 = Vector256.Create(smoothing[2]);
+            var s3 = Vector256.Create(smoothing[3]);
+            var s4 = Vector256.Create(smoothing[4]);
+            for (; i + 4 <= m; i += 4)
+            {
+                var sum = Vector256<double>.Zero + (Vector256.Create<double>(h0[i..]) * s0);
+                sum += Vector256.Create<double>(h1[i..]) * s1;
+                sum += Vector256.Create<double>(h2[i..]) * s2;
+                sum += Vector256.Create<double>(h3[i..]) * s3;
+                sum += Vector256.Create<double>(h4[i..]) * s4;
+                sum.CopyTo(output[i..]);
+            }
+        }
+        else if (!Vector256.IsHardwareAccelerated && Vector128.IsHardwareAccelerated)
+        {
+            var s0 = Vector128.Create(smoothing[0]);
+            var s1 = Vector128.Create(smoothing[1]);
+            var s2 = Vector128.Create(smoothing[2]);
+            var s3 = Vector128.Create(smoothing[3]);
+            var s4 = Vector128.Create(smoothing[4]);
+            for (; i + 2 <= m; i += 2)
+            {
+                var sum = Vector128<double>.Zero + (Vector128.Create<double>(h0[i..]) * s0);
+                sum += Vector128.Create<double>(h1[i..]) * s1;
+                sum += Vector128.Create<double>(h2[i..]) * s2;
+                sum += Vector128.Create<double>(h3[i..]) * s3;
+                sum += Vector128.Create<double>(h4[i..]) * s4;
+                sum.CopyTo(output[i..]);
+            }
+        }
+#endif
+
+        SmoothGainsScalar(history, i, output);
+    }
+
+    /// <summary>
+    /// <see cref="SmoothGains"/> one subband at a time from <paramref name="start"/>, as the decoding process says it: the
+    /// reference for it and its tail.
+    /// </summary>
+    internal static void SmoothGainsScalar(double[][] history, int start, Span<double> output)
+    {
+        var smoothing = Smoothing;
+        for (int i = start; i < output.Length; i++)
+        {
+            double g = 0;
+            for (int j = 0; j < 5; j++)
+            {
+                g += history[j][i] * smoothing[j];
+            }
+
+            output[i] = g;
+        }
+    }
 
     /// <summary>
     /// One slot's subbands kx .. kx + m - 1 (<paramref name="real"/>, <paramref name="imaginary"/>) times their gains, plus

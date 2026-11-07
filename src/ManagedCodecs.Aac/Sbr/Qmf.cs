@@ -687,43 +687,52 @@ internal sealed class QmfFft
         }
 #endif
 
+        // By reference into re and im (both _length long, checked above by the slices): the Unity build runs this on
+        // Mono, which compiles a slice a group and its indexing far worse than CoreCLR does.
+        ref double r = ref MemoryMarshal.GetReference(re);
+        ref double m = ref MemoryMarshal.GetReference(im);
+        ref int swaps = ref MemoryMarshal.GetArrayDataReference(_swaps);
         for (int s = 0; s < _swaps.Length; s += 2)
         {
-            int i = _swaps[s];
-            int j = _swaps[s + 1];
-            (re[i], re[j]) = (re[j], re[i]);
-            (im[i], im[j]) = (im[j], im[i]);
+            int i = Unsafe.Add(ref swaps, s);
+            int j = Unsafe.Add(ref swaps, s + 1);
+            (Unsafe.Add(ref r, i), Unsafe.Add(ref r, j)) = (Unsafe.Add(ref r, j), Unsafe.Add(ref r, i));
+            (Unsafe.Add(ref m, i), Unsafe.Add(ref m, j)) = (Unsafe.Add(ref m, j), Unsafe.Add(ref m, i));
         }
 
         // The first stage's twiddle factor is 1.
         for (int a = 0; a < _length; a += 2)
         {
-            double tr = re[a + 1];
-            double ti = im[a + 1];
-            re[a + 1] = re[a] - tr;
-            im[a + 1] = im[a] - ti;
-            re[a] += tr;
-            im[a] += ti;
+            double tr = Unsafe.Add(ref r, a + 1);
+            double ti = Unsafe.Add(ref m, a + 1);
+            Unsafe.Add(ref r, a + 1) = Unsafe.Add(ref r, a) - tr;
+            Unsafe.Add(ref m, a + 1) = Unsafe.Add(ref m, a) - ti;
+            Unsafe.Add(ref r, a) += tr;
+            Unsafe.Add(ref m, a) += ti;
         }
 
         for (int half = 2; half < _length; half *= 2)
         {
-            var cos = _cos.AsSpan(half, half);
-            var sin = _sin.AsSpan(half, half);
+            ref double cos = ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(_cos), half);
+            ref double sin = ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(_sin), half);
             for (int start = 0; start < _length; start += 2 * half)
             {
-                var re0 = re.Slice(start, half);
-                var im0 = im.Slice(start, half);
-                var re1 = re.Slice(start + half, half);
-                var im1 = im.Slice(start + half, half);
+                ref double re0 = ref Unsafe.Add(ref r, start);
+                ref double im0 = ref Unsafe.Add(ref m, start);
+                ref double re1 = ref Unsafe.Add(ref r, start + half);
+                ref double im1 = ref Unsafe.Add(ref m, start + half);
                 for (int j = 0; j < half; j++)
                 {
-                    double tr = (re1[j] * cos[j]) - (im1[j] * sin[j]);
-                    double ti = (re1[j] * sin[j]) + (im1[j] * cos[j]);
-                    re1[j] = re0[j] - tr;
-                    im1[j] = im0[j] - ti;
-                    re0[j] += tr;
-                    im0[j] += ti;
+                    double c = Unsafe.Add(ref cos, j);
+                    double sn = Unsafe.Add(ref sin, j);
+                    double xr = Unsafe.Add(ref re1, j);
+                    double xi = Unsafe.Add(ref im1, j);
+                    double tr = (xr * c) - (xi * sn);
+                    double ti = (xr * sn) + (xi * c);
+                    Unsafe.Add(ref re1, j) = Unsafe.Add(ref re0, j) - tr;
+                    Unsafe.Add(ref im1, j) = Unsafe.Add(ref im0, j) - ti;
+                    Unsafe.Add(ref re0, j) += tr;
+                    Unsafe.Add(ref im0, j) += ti;
                 }
             }
         }

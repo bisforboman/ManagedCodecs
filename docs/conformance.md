@@ -478,7 +478,11 @@ thresholds and weighted-prediction offsets scaled by 4, CAVLC level prefixes of 
 at QP_Y -12 on noise, P and B frames, weights, constrained intra prediction, cropping, 4:2:2
 and MBAFF; I_PCM at 10 bits from hand-built streams. Motion compensation and the deblocking
 filter have vector paths for 10-bit samples too (32-bit lanes for the 6-tap filter, 16-bit
-ones for deblocking), each checked against its reference on random 10-bit input.
+ones for deblocking), each checked against its reference on random 10-bit input. So do the
+bi-predicted average (16-bit lanes, exact at any depth), explicit and implicit weights and the
+4x4, 8x8 and DC-only inverse transform adds (32-bit lanes, any depth), checked against their
+by-the-definition references at 9 to 14 bits (`VectorWeights16_MatchReference`,
+`InverseTransformAdd16_MatchesScalar`).
 
 ### 9, 12 and 14 bits
 
@@ -674,8 +678,8 @@ on clean input: `mcdec --conceal` against without, 6 interleaved pairs each, +0.
 on the 720p stream, -3.7% on `h264-high-b.mp4` with four, all within the pairs' spread. The libx264-default streams, furthest
 behind FFmpeg (then 3.4 and 3.6 times its time, now 3.1), are mostly skipped and direct macroblocks with weighted prediction:
 skipped macroblocks (their motion compensation included) take 20% there, and weighted prediction took 7%. It is now
-in vectors for 8-bit samples (16-bit lanes from one list, 32-bit for two; the by-the-definition loop stays for deeper
-samples and as the reference `VectorWeights_MatchReference` checks), 4% by the same timers. A perf profile of the
+in vectors for 8-bit samples (16-bit lanes from one list, 32-bit for two; the by-the-definition loop is the reference
+`VectorWeights_MatchReference` checks), 4% by the same timers; deeper samples since in 32-bit lanes (#337, below). A perf profile of the
 optimized code by function (CLAUDE.md, Timing) then ranked the rest of `h264-high-default.mp4`: the neighbouring
 macroblock lookup (6%, two divisions a call; now a table made with the decoder), storing motion and re-checking the
 uniform motion of direct macroblocks (4.6%, now 3%), and the deblocking filter's tC0 vector built for every edge (1%,
@@ -883,6 +887,18 @@ to 4.56. Tier-1 code is compiled after the classes' static constructors have run
 class-initialization checks and folds `static readonly` values as constants, which mcdec's tiering off cannot (docs/benchmarking.md).
 Where the rest goes is an open question (#346).
 
+Deeper samples' kernels next (#337, 2026-11-07). Above 8 bits the bi-predicted average, the explicit and implicit
+weights and the 4x4, 8x8 and DC-only inverse transform adds were the by-the-definition loops over spans. They now run
+in vectors: the average as the 8-bit one's `(a | b) - ((a ^ b) >> 1)` in 16-bit lanes (exact for any 16-bit value), the
+rest in 32-bit lanes (a 10-bit sample times a weight of 128 needs 18 bits; the transforms' columns as the 8-bit
+fallback's, whose rows' pass now builds its vectors directly, without a stack buffer, so that it inlines). Callgrind
+(AOT, x86-64-v3, loops 3 minus 1) counts 426.8 to 389.4 M instructions of `h264-10bit-b` (-8.8%), 3336 to 2893 M of
+`h264-10bit-motion` (-13.3%), and 533.9 to 533.2 M of the 8-bit `h264-b-pyramid` (-0.14%). Under the JIT (perf, 150
+loops, six runs each, the order alternating) `h264-10bit-b`'s decoder samples over those of functions it leaves alone
+(`Cabac.ResidualBlock`, `FilterEdgeRegisters16`, `FetchWindow16`) fell by a median 3.1%, every run of the branch
+below every run of the base, and the changed kernels' own samples from 0.13 to 0.033 of that set. The wall clock
+(`tools/bench.py --base`, nine interleaved runs) saw -0.2 and -1.2% steady, within its noise here.
+
 ## AAC
 
 AAC LC: channel configurations 1 to 7 and program config elements (1 to 8
@@ -910,6 +926,15 @@ those layouts as listed (aac-pce-8ch, aac-adts-pce). The rule was checked agains
 writes with `-aac_pce 1` (up to 16 channels) and on the FDK encoder's PCEs for 1 to 8 channels (configuration 0 forced in a copy of
 its tree; the 7.1 rear-surround and front-centre modes write one anyway); `ProgramConfigTests` holds the shapes,
 and the ones no encoder at hand writes, which keep the listed order.
+
+Spectral data is read through packed tables (#341): one lookup a codeword gives its length, its values and how many
+sign bits follow, one read takes all the signs, the values go straight into the quantized spectrum, and the reads go
+through a 64-bit cache (`AacBitReader.Cursor`, as H.264's CAVLC one) that reads past the end as zeros, the unit's end
+checked when it is committed. `SpectrumHuffmanTests` compares it with the reader by the definition (kept as
+`Huffman.ReadSpectrumByDefinition`) on random bits for every codebook, truncated units and long escapes among them.
+The benchmark samples (low-bitrate tones) barely reach this code; on real films' AAC it was the largest stage:
+Elephants Dream's 192 kbit/s stereo spent 31% of its decode there by perf, 16% after, and decodes 21% faster (median
+of 10 interleaved runs each, 1177 to 925 ms for its 11 minutes once warm; Sintel's trailer, 127 kbit/s, 14% faster).
 
 ## HE-AAC (spectral band replication)
 

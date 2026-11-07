@@ -31,18 +31,18 @@ internal sealed class QmfAnalysis
     public const int Bands = 32;
 
     // c(2n), the window's coefficients this bank takes, at even n and at odd n, in order.
-    private static readonly double[] EvenWindow = Window(0, 1);
-    private static readonly double[] OddWindow = Window(2, 1);
+    private static readonly float[] EvenWindow = Window(0, 1);
+    private static readonly float[] OddWindow = Window(2, 1);
 
-    // The window this bank takes, times its scale.
-    private readonly double[] _evenWindow;
-    private readonly double[] _oddWindow;
+    // The window this bank takes, times its scale, in single precision as the history and the sums are.
+    private readonly float[] _evenWindow;
+    private readonly float[] _oddWindow;
 
     // x, the last 320 samples with the newest first, kept as its values at even n and at odd n (a slot moves n by 32,
     // which keeps its parity), each from _start: each slot moves the start back by 16 rather than the samples forward,
     // and copies them to the end only when the start reaches 0.
-    private readonly double[] _even = new double[160 + (16 * 15)];
-    private readonly double[] _odd = new double[160 + (16 * 15)];
+    private readonly float[] _even = new float[160 + (16 * 15)];
+    private readonly float[] _odd = new float[160 + (16 * 15)];
     private int _start = 16 * 15;
 
     /// <summary>
@@ -56,7 +56,7 @@ internal sealed class QmfAnalysis
     }
 
     /// <summary>One time slot: 32 new samples (oldest first) in, 32 complex subband samples out.</summary>
-    public void Process(ReadOnlySpan<double> input, Span<double> real, Span<double> imaginary)
+    public void Process(ReadOnlySpan<float> input, Span<double> real, Span<double> imaginary)
     {
         if (input.Length < 32)
         {
@@ -77,29 +77,23 @@ internal sealed class QmfAnalysis
         Transform(even, odd, real, imaginary);
     }
 
-    /// <summary>As <see cref="Process(ReadOnlySpan{double}, Span{double}, Span{double})"/>, from single precision.</summary>
-    public void Process(ReadOnlySpan<float> input, Span<double> real, Span<double> imaginary)
+    /// <summary>As <see cref="Process(ReadOnlySpan{float}, Span{double}, Span{double})"/>, the samples rounded to single precision first.</summary>
+    [SkipLocalsInit]
+    public void Process(ReadOnlySpan<double> input, Span<double> real, Span<double> imaginary)
     {
         if (input.Length < 32)
         {
             throw new ArgumentException("A slot takes 32 samples.");
         }
 
-        Step();
-        var even = _even.AsSpan(_start, 160);
-        var odd = _odd.AsSpan(_start, 160);
-        for (int m = 0; m < 16; m++)
-        {
-            even[m] = input[31 - (2 * m)];
-            odd[m] = input[30 - (2 * m)];
-        }
-
-        Transform(even, odd, real, imaginary);
+        Span<float> samples = stackalloc float[32];
+        QmfState.ToSingle(input[..32], samples);
+        Process(samples, real, imaginary);
     }
 
-    // c(2(2m + offset / 2)) times scale, for m in 0..159.
-    private static double[] Window(int offset, double scale) =>
-        [.. Enumerable.Range(0, 160).Select(m => QmfWindow.Coefficients[(4 * m) + offset] * scale)];
+    // c(2(2m + offset / 2)) times scale, for m in 0..159, rounded once.
+    private static float[] Window(int offset, double scale) =>
+        [.. Enumerable.Range(0, 160).Select(m => (float)(QmfWindow.Coefficients[(4 * m) + offset] * scale))];
 
     // The slot's x from _start, at even and at odd n, its newest 16 of each still to be written.
     private void Step()
@@ -109,11 +103,11 @@ internal sealed class QmfAnalysis
     }
 
     [SkipLocalsInit]
-    private void Transform(ReadOnlySpan<double> even, ReadOnlySpan<double> odd, Span<double> real, Span<double> imaginary)
+    private void Transform(ReadOnlySpan<float> even, ReadOnlySpan<float> odd, Span<double> real, Span<double> imaginary)
     {
         // u(n) = the sum of x(n + 64 j) c(2(n + 64 j)) over j in 0..4, at even and at odd n.
-        Span<double> uEven = stackalloc double[32];
-        Span<double> uOdd = stackalloc double[32];
+        Span<float> uEven = stackalloc float[32];
+        Span<float> uOdd = stackalloc float[32];
         ReadOnlySpan<int> terms = [0, 32, 64, 96, 128];
         Vectors.SumOfProducts(uEven, even, terms, _evenWindow, terms);
         Vectors.SumOfProducts(uOdd, odd, terms, _oddWindow, terms);
@@ -147,12 +141,12 @@ internal sealed class QmfSynthesis
 
     private readonly Tables _tables;
 
-    // The tables' window, times the bank's scale.
-    private readonly double[] _window;
+    // The tables' window, times the bank's scale, in single precision as v and the sums are.
+    private readonly float[] _window;
 
     // v, the last 20B values with the newest first, at _v[_start..]: each slot moves the start back by 2B rather than
     // the values forward (as the analysis bank's samples).
-    private readonly double[] _v;
+    private readonly float[] _v;
     private int _start;
 
     /// <summary>
@@ -162,8 +156,8 @@ internal sealed class QmfSynthesis
     public QmfSynthesis(bool downsampled = false, double scale = 1)
     {
         _tables = downsampled ? Halved : Full;
-        _window = scale == 1 ? _tables.Window : [.. _tables.Window.Select(c => c * scale)];
-        _v = new double[(20 + 18) * Bands];
+        _window = [.. _tables.Window.Select(c => (float)(c * scale))];
+        _v = new float[(20 + 18) * Bands];
         _start = 18 * Bands;
     }
 
@@ -172,7 +166,7 @@ internal sealed class QmfSynthesis
 
     /// <summary>One time slot: <see cref="Bands"/> complex subband samples in, as many output samples (oldest first) out.</summary>
     [SkipLocalsInit]
-    public void Process(ReadOnlySpan<double> real, ReadOnlySpan<double> imaginary, Span<double> output)
+    public void Process(ReadOnlySpan<double> real, ReadOnlySpan<double> imaginary, Span<float> output)
     {
         var t = _tables;
         int bands = t.Bands;
@@ -205,16 +199,16 @@ internal sealed class QmfSynthesis
         Vectors.SumOfProducts(output, v, vTerms, window, windowTerms);
     }
 
-    /// <summary>
-    /// As <see cref="Process(ReadOnlySpan{double}, ReadOnlySpan{double}, Span{double})"/>, the output rounded to single
-    /// precision (<see cref="QmfState.ToSingle"/>).
-    /// </summary>
+    /// <summary>As <see cref="Process(ReadOnlySpan{double}, ReadOnlySpan{double}, Span{float})"/>, the output widened to double.</summary>
     [SkipLocalsInit]
-    public void Process(ReadOnlySpan<double> real, ReadOnlySpan<double> imaginary, Span<float> output)
+    public void Process(ReadOnlySpan<double> real, ReadOnlySpan<double> imaginary, Span<double> output)
     {
-        Span<double> samples = stackalloc double[64];
+        Span<float> samples = stackalloc float[64];
         Process(real, imaginary, samples);
-        QmfState.ToSingle(samples[..Bands], output[..Bands]);
+        for (int n = 0; n < Bands; n++)
+        {
+            output[n] = samples[n];
+        }
     }
 
     // The bank's bands and window.
@@ -304,7 +298,7 @@ internal static class QmfState
     /// <paramref name="step"/> of which the caller then writes: the start moves back by the step, and when it reaches 0
     /// the window's values that stay are copied to the buffer's end first.
     /// </summary>
-    public static int Step(double[] buffer, int start, int window, int step)
+    public static int Step<T>(T[] buffer, int start, int window, int step)
     {
         if (start >= step)
         {

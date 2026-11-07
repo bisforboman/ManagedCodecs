@@ -47,7 +47,7 @@ internal static class QmfSingle
     /// and X(k) = exp(-i pi (2k + 1) / 256) P(k) + exp(i pi (6k - 125) / 256) M(k).
     /// </summary>
     [SkipLocalsInit]
-    public static void Analysis(ReadOnlySpan<double> uEven, ReadOnlySpan<double> uOdd, Span<double> real, Span<double> imaginary, bool scalar = false)
+    public static void Analysis(ReadOnlySpan<float> uEven, ReadOnlySpan<float> uOdd, Span<double> real, Span<double> imaginary, bool scalar = false)
     {
         if (uEven.Length < 32 || uOdd.Length < 32 || real.Length < 32 || imaginary.Length < 32)
         {
@@ -126,7 +126,7 @@ internal static class QmfSingle
     /// values at p, which give v at 2p, 63 - 2p, 64 + 2p and 127 - 2p together.
     /// </summary>
     [SkipLocalsInit]
-    public static void FullSynthesis(ReadOnlySpan<double> real, ReadOnlySpan<double> imaginary, Span<double> v, bool scalar = false)
+    public static void FullSynthesis(ReadOnlySpan<double> real, ReadOnlySpan<double> imaginary, Span<float> v, bool scalar = false)
     {
         if (real.Length < 64 || imaginary.Length < 64 || v.Length < 128)
         {
@@ -143,7 +143,7 @@ internal static class QmfSingle
         Fft32.Transform(packedRe, packedIm, aRe, aIm, scalar);
         Pretransform(imaginary, alternate: true, packedRe, packedIm, scalar);
         Fft32.Transform(packedRe, packedIm, bRe, bIm, scalar);
-        ref double w = ref MemoryMarshal.GetReference(v);
+        ref float w = ref MemoryMarshal.GetReference(v);
 #if NET
         if (Vector128.IsHardwareAccelerated && !scalar)
         {
@@ -187,7 +187,7 @@ internal static class QmfSingle
     /// <see cref="QmfSynthesis"/>'s remarks derive it; its kernel, a quarter of a sample off the full bank's, is no DCT-IV.
     /// </summary>
     [SkipLocalsInit]
-    public static void HalvedSynthesis(ReadOnlySpan<double> real, ReadOnlySpan<double> imaginary, Span<double> v, bool scalar = false)
+    public static void HalvedSynthesis(ReadOnlySpan<double> real, ReadOnlySpan<double> imaginary, Span<float> v, bool scalar = false)
     {
         if (real.Length < 32 || imaginary.Length < 32 || v.Length < 64)
         {
@@ -206,7 +206,7 @@ internal static class QmfSingle
         ref float i = ref MemoryMarshal.GetReference(im);
         ref float c = ref MemoryMarshal.GetArrayDataReference(HalvedOutCos);
         ref float s = ref MemoryMarshal.GetArrayDataReference(HalvedOutSin);
-        ref double w = ref MemoryMarshal.GetReference(v);
+        ref float w = ref MemoryMarshal.GetReference(v);
         int n = 0;
 #if NET
         if (Vector128.IsHardwareAccelerated && !scalar)
@@ -214,7 +214,7 @@ internal static class QmfSingle
             for (; n < 64; n += 4)
             {
                 var x = (Vector128.LoadUnsafe(ref r, (nuint)n) * Vector128.LoadUnsafe(ref c, (nuint)n)) - (Vector128.LoadUnsafe(ref i, (nuint)n) * Vector128.LoadUnsafe(ref s, (nuint)n));
-                Store(x, ref w, n);
+                x.StoreUnsafe(ref w, (nuint)n);
             }
         }
 #endif
@@ -254,6 +254,40 @@ internal static class QmfSingle
         {
             float r = (float)Unsafe.Add(ref a, k);
             float i = (float)Unsafe.Add(ref b, k);
+            Unsafe.Add(ref x, k) = (r * Unsafe.Add(ref c, k)) - (i * Unsafe.Add(ref d, k));
+            Unsafe.Add(ref y, k) = (r * Unsafe.Add(ref d, k)) + (i * Unsafe.Add(ref c, k));
+        }
+    }
+
+    // The same rotation of inputs already in single precision (the analysis bank's windowed sums).
+    private static void Rotate(ReadOnlySpan<float> re, ReadOnlySpan<float> im, float[] cos, float[] sin, Span<float> outRe, Span<float> outIm, int count, bool scalar)
+    {
+        ref float a = ref MemoryMarshal.GetReference(re);
+        ref float b = ref MemoryMarshal.GetReference(im);
+        ref float c = ref MemoryMarshal.GetArrayDataReference(cos);
+        ref float d = ref MemoryMarshal.GetArrayDataReference(sin);
+        ref float x = ref MemoryMarshal.GetReference(outRe);
+        ref float y = ref MemoryMarshal.GetReference(outIm);
+        int k = 0;
+#if NET
+        if (Vector128.IsHardwareAccelerated && !scalar)
+        {
+            for (; k < count; k += 4)
+            {
+                var r = Vector128.LoadUnsafe(ref a, (nuint)k);
+                var i = Vector128.LoadUnsafe(ref b, (nuint)k);
+                var cs = Vector128.LoadUnsafe(ref c, (nuint)k);
+                var sn = Vector128.LoadUnsafe(ref d, (nuint)k);
+                ((r * cs) - (i * sn)).StoreUnsafe(ref x, (nuint)k);
+                ((r * sn) + (i * cs)).StoreUnsafe(ref y, (nuint)k);
+            }
+        }
+#endif
+
+        for (; k < count; k++)
+        {
+            float r = Unsafe.Add(ref a, k);
+            float i = Unsafe.Add(ref b, k);
             Unsafe.Add(ref x, k) = (r * Unsafe.Add(ref c, k)) - (i * Unsafe.Add(ref d, k));
             Unsafe.Add(ref y, k) = (r * Unsafe.Add(ref d, k)) + (i * Unsafe.Add(ref c, k));
         }
@@ -324,13 +358,13 @@ internal static class QmfSingle
         high.StoreUnsafe(ref w, (nuint)(n + 2));
     }
 
-    // even(0) odd(0) even(1) odd(1) ... even(3) odd(3) at w[n..n + 8], widened.
+    // even(0) odd(0) even(1) odd(1) ... even(3) odd(3) at w[n..n + 8].
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static void StoreZipped(ref double w, int n, Vector128<float> even, Vector128<float> odd)
+    private static void StoreZipped(ref float w, int n, Vector128<float> even, Vector128<float> odd)
     {
         var (low, high) = Zip(even, odd);
-        Store(low, ref w, n);
-        Store(high, ref w, n + 4);
+        low.StoreUnsafe(ref w, (nuint)n);
+        high.StoreUnsafe(ref w, (nuint)(n + 4));
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

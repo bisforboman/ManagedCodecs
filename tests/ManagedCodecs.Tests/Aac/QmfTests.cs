@@ -192,25 +192,28 @@ public class QmfTests
     {
         var random = new Random(9);
         static IEnumerable<long> Bits(double[] values) => values.Select(BitConverter.DoubleToInt64Bits);
+        static IEnumerable<int> SingleBits(float[] values) => values.Select(BitConverter.SingleToInt32Bits);
         for (int trial = 0; trial < 10; trial++)
         {
             double[] Values() => [.. Enumerable.Range(0, 64).Select(_ => (random.NextDouble() - 0.5) * Math.Pow(10, random.Next(0, 6)))];
             var (a, b) = (Values(), Values());
+            float[] u = [.. a.Select(x => (float)x)];
+            float[] w = [.. b.Select(x => (float)x)];
             var (vectorRe, vectorIm, scalarRe, scalarIm) = (new double[32], new double[32], new double[32], new double[32]);
-            QmfSingle.Analysis(a, b, vectorRe, vectorIm);
-            QmfSingle.Analysis(a, b, scalarRe, scalarIm, scalar: true);
+            QmfSingle.Analysis(u, w, vectorRe, vectorIm);
+            QmfSingle.Analysis(u, w, scalarRe, scalarIm, scalar: true);
             Assert.Equal(Bits(scalarRe), Bits(vectorRe));
             Assert.Equal(Bits(scalarIm), Bits(vectorIm));
 
-            var (vector, scalarV) = (new double[128], new double[128]);
+            var (vector, scalarV) = (new float[128], new float[128]);
             QmfSingle.FullSynthesis(a, b, vector);
             QmfSingle.FullSynthesis(a, b, scalarV, scalar: true);
-            Assert.Equal(Bits(scalarV), Bits(vector));
+            Assert.Equal(SingleBits(scalarV), SingleBits(vector));
 
-            (vector, scalarV) = (new double[64], new double[64]);
+            (vector, scalarV) = (new float[64], new float[64]);
             QmfSingle.HalvedSynthesis(a, b, vector);
             QmfSingle.HalvedSynthesis(a, b, scalarV, scalar: true);
-            Assert.Equal(Bits(scalarV), Bits(vector));
+            Assert.Equal(SingleBits(scalarV), SingleBits(vector));
         }
     }
 

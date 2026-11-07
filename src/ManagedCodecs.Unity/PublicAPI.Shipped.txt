@@ -276,6 +276,57 @@ ManagedCodecs.PixelFormat.Yuv444P12 = 15 -> ManagedCodecs.PixelFormat
 ManagedCodecs.PixelFormat.Yuv444P14 = 19 -> ManagedCodecs.PixelFormat
 ManagedCodecs.PixelFormat.Yuv444P9 = 11 -> ManagedCodecs.PixelFormat
 ManagedCodecs.PixelFormatExtensions
+ManagedCodecs.Playback.AudioChunk
+ManagedCodecs.Playback.AudioChunk.SampleRate.get -> int
+ManagedCodecs.Playback.AudioChunk.Samples.get -> float[]!
+ManagedCodecs.Playback.MediaPlayer
+ManagedCodecs.Playback.MediaPlayer.Audio.get -> ManagedCodecs.AudioStreamInfo?
+ManagedCodecs.Playback.MediaPlayer.Dispose() -> void
+ManagedCodecs.Playback.MediaPlayer.Error.get -> System.Exception?
+ManagedCodecs.Playback.MediaPlayer.IsFinished.get -> bool
+ManagedCodecs.Playback.MediaPlayer.MediaPlayer(System.IO.Stream! stream) -> void
+ManagedCodecs.Playback.MediaPlayer.MediaPlayer(System.IO.Stream! stream, ManagedCodecs.Playback.PlaybackOptions? options) -> void
+ManagedCodecs.Playback.MediaPlayer.MediaPlayer(string! path) -> void
+ManagedCodecs.Playback.MediaPlayer.MediaPlayer(string! path, ManagedCodecs.Playback.PlaybackOptions? options) -> void
+ManagedCodecs.Playback.MediaPlayer.Return(ManagedCodecs.Playback.RgbaFrame! frame) -> void
+ManagedCodecs.Playback.MediaPlayer.Start() -> void
+ManagedCodecs.Playback.MediaPlayer.Statistics.get -> ManagedCodecs.Playback.PlaybackStatistics
+ManagedCodecs.Playback.MediaPlayer.TakeAudio() -> ManagedCodecs.Playback.AudioChunk?
+ManagedCodecs.Playback.MediaPlayer.TakeFrame(System.TimeSpan position) -> ManagedCodecs.Playback.RgbaFrame?
+ManagedCodecs.Playback.MediaPlayer.Video.get -> ManagedCodecs.VideoStreamInfo!
+ManagedCodecs.Playback.PlaybackOptions
+ManagedCodecs.Playback.PlaybackOptions.<Clone>$() -> ManagedCodecs.Playback.PlaybackOptions!
+ManagedCodecs.Playback.PlaybackOptions.DecoderThreads.get -> int
+ManagedCodecs.Playback.PlaybackOptions.DecoderThreads.init -> void
+ManagedCodecs.Playback.PlaybackOptions.Equals(ManagedCodecs.Playback.PlaybackOptions? other) -> bool
+ManagedCodecs.Playback.PlaybackOptions.Loop.get -> bool
+ManagedCodecs.Playback.PlaybackOptions.Loop.init -> void
+ManagedCodecs.Playback.PlaybackOptions.Matrix.get -> ManagedCodecs.ColorMatrix?
+ManagedCodecs.Playback.PlaybackOptions.Matrix.init -> void
+ManagedCodecs.Playback.PlaybackOptions.PlaybackOptions() -> void
+ManagedCodecs.Playback.PlaybackOptions.Range.get -> ManagedCodecs.ColorRange?
+ManagedCodecs.Playback.PlaybackOptions.Range.init -> void
+ManagedCodecs.Playback.PlaybackStatistics
+ManagedCodecs.Playback.PlaybackStatistics.ConvertMilliseconds.get -> double
+ManagedCodecs.Playback.PlaybackStatistics.ConvertMilliseconds.init -> void
+ManagedCodecs.Playback.PlaybackStatistics.ConvertedFrames.get -> long
+ManagedCodecs.Playback.PlaybackStatistics.ConvertedFrames.init -> void
+ManagedCodecs.Playback.PlaybackStatistics.DecodeMilliseconds.get -> double
+ManagedCodecs.Playback.PlaybackStatistics.DecodeMilliseconds.init -> void
+ManagedCodecs.Playback.PlaybackStatistics.DecodedFrames.get -> long
+ManagedCodecs.Playback.PlaybackStatistics.DecodedFrames.init -> void
+ManagedCodecs.Playback.PlaybackStatistics.Deconstruct(out long DecodedFrames, out double DecodeMilliseconds, out long ConvertedFrames, out double ConvertMilliseconds, out long DroppedFrames) -> void
+ManagedCodecs.Playback.PlaybackStatistics.DroppedFrames.get -> long
+ManagedCodecs.Playback.PlaybackStatistics.DroppedFrames.init -> void
+ManagedCodecs.Playback.PlaybackStatistics.Equals(ManagedCodecs.Playback.PlaybackStatistics other) -> bool
+ManagedCodecs.Playback.PlaybackStatistics.PlaybackStatistics() -> void
+ManagedCodecs.Playback.PlaybackStatistics.PlaybackStatistics(long DecodedFrames, double DecodeMilliseconds, long ConvertedFrames, double ConvertMilliseconds, long DroppedFrames) -> void
+ManagedCodecs.Playback.RgbaFrame
+ManagedCodecs.Playback.RgbaFrame.Height.get -> int
+ManagedCodecs.Playback.RgbaFrame.Pixels.get -> byte[]!
+ManagedCodecs.Playback.RgbaFrame.SampleAspectRatio.get -> ManagedCodecs.Rational
+ManagedCodecs.Playback.RgbaFrame.Time.get -> System.TimeSpan
+ManagedCodecs.Playback.RgbaFrame.Width.get -> int
 ManagedCodecs.Rational
 ManagedCodecs.Rational.Deconstruct(out int Numerator, out int Denominator) -> void
 ManagedCodecs.Rational.Denominator.get -> int
@@ -421,6 +472,10 @@ override ManagedCodecs.AudioStreamInfo.GetHashCode() -> int
 override ManagedCodecs.AudioStreamInfo.ToString() -> string!
 override ManagedCodecs.Packet.GetHashCode() -> int
 override ManagedCodecs.PacketInfo.GetHashCode() -> int
+override ManagedCodecs.Playback.PlaybackOptions.Equals(object? obj) -> bool
+override ManagedCodecs.Playback.PlaybackOptions.GetHashCode() -> int
+override ManagedCodecs.Playback.PlaybackOptions.ToString() -> string!
+override ManagedCodecs.Playback.PlaybackStatistics.GetHashCode() -> int
 override ManagedCodecs.Rational.GetHashCode() -> int
 override ManagedCodecs.Rational.ToString() -> string!
 override ManagedCodecs.Thumbnails.AudioInfo.Equals(object? obj) -> bool
@@ -451,6 +506,10 @@ static ManagedCodecs.PixelFormatExtensions.BitDepth(this ManagedCodecs.PixelForm
 static ManagedCodecs.PixelFormatExtensions.BytesPerSample(this ManagedCodecs.PixelFormat format) -> int
 static ManagedCodecs.PixelFormatExtensions.PlaneCount(this ManagedCodecs.PixelFormat format) -> int
 static ManagedCodecs.PixelFormatExtensions.PlaneSize(this ManagedCodecs.PixelFormat format, int plane, int width, int height) -> (int Width, int Height)
+static ManagedCodecs.Playback.PlaybackOptions.operator !=(ManagedCodecs.Playback.PlaybackOptions? left, ManagedCodecs.Playback.PlaybackOptions? right) -> bool
+static ManagedCodecs.Playback.PlaybackOptions.operator ==(ManagedCodecs.Playback.PlaybackOptions? left, ManagedCodecs.Playback.PlaybackOptions? right) -> bool
+static ManagedCodecs.Playback.PlaybackStatistics.operator !=(ManagedCodecs.Playback.PlaybackStatistics left, ManagedCodecs.Playback.PlaybackStatistics right) -> bool
+static ManagedCodecs.Playback.PlaybackStatistics.operator ==(ManagedCodecs.Playback.PlaybackStatistics left, ManagedCodecs.Playback.PlaybackStatistics right) -> bool
 static ManagedCodecs.Rational.Reduce(long numerator, long denominator) -> ManagedCodecs.Rational
 static ManagedCodecs.Rational.operator !=(ManagedCodecs.Rational left, ManagedCodecs.Rational right) -> bool
 static ManagedCodecs.Rational.operator ==(ManagedCodecs.Rational left, ManagedCodecs.Rational right) -> bool
@@ -472,4 +531,6 @@ static ManagedCodecs.VideoStreamInfo.operator ==(ManagedCodecs.VideoStreamInfo? 
 ~override ManagedCodecs.Packet.ToString() -> string
 ~override ManagedCodecs.PacketInfo.Equals(object obj) -> bool
 ~override ManagedCodecs.PacketInfo.ToString() -> string
+~override ManagedCodecs.Playback.PlaybackStatistics.Equals(object obj) -> bool
+~override ManagedCodecs.Playback.PlaybackStatistics.ToString() -> string
 ~override ManagedCodecs.Rational.Equals(object obj) -> bool

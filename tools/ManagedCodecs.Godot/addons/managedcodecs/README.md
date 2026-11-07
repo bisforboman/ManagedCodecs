@@ -5,8 +5,9 @@ audio) in Godot 4's .NET build. Godot itself plays only Ogg Theora; this decodes
 [ManagedCodecs](https://github.com/bisforboman/ManagedCodecs) packages, so the same file plays on every desktop platform
 the .NET build exports to. Not for web exports: Godot's C# can't export to the web yet.
 
-**Not yet run in Godot.** It is built against Godot's C# API (GodotSharp 4.7.2) in CI, but nobody has played a video with it
-in Godot yet. A report helps (repository README, "Testing it in Godot").
+**Run in Godot 4.7.2 on Linux** (in the editor's runner and an exported build, under Xvfb with software OpenGL and no
+sound card): every frame shown, the picture upright and its colours FFmpeg's, the sound in sync. Not yet on a desktop
+with a GPU and a sound card, nor on Windows or macOS: a report helps (repository README, "Testing it in Godot").
 
 ## Installing
 
@@ -26,6 +27,9 @@ in Godot yet. A report helps (repository README, "Testing it in Godot").
 2. Copy this folder to the project's `addons/managedcodecs/` and build (the hammer icon, or `dotnet build`).
 3. Add a `ManagedCodecsVideo` node (Add Node lists it once built), set its `File Path` to the video (`res://` paths
    play from an exported `.pck` too) and, for a menu's backdrop, `Loop`.
+4. To export: a video file isn't a Godot resource, so add its pattern (`*.mp4`) to the export preset's "Filters to
+   export non-resource files/folders" (Resources tab), or it is left out of the `.pck` and the node can't read it. A C#
+   project exports from its solution (`<project>.sln`, which the editor creates once asked to build).
 
 The node reads the whole file into memory (right for cutscenes, not for films), keeps the picture's aspect ratio
 (`StretchMode` keep-aspect-centred), streams the sound through an `AudioStreamPlayer` child and prints a line every 5

@@ -35,7 +35,7 @@ tried with it yet. Please report back: [Testing it in Godot](#testing-it-in-godo
 
 ## Testing it in Godot
 
-What nobody has checked yet, and how. Report on issue #254 (or a new issue), one line a run.
+What nobody has checked yet, and how. Report in a new issue, one line a run (issue #254, now closed, has the history and the MonoGame measurements).
 
 1. **Set-up.** Godot 4.7 (.NET), the .NET 10 SDK, this folder opened in the editor.
 2. **Videos**, each copied in as `video.mp4` (or the `File Path` set to it):

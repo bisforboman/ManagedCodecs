@@ -20,7 +20,7 @@ namespace ManagedCodecs.Aac.Sbr;
 /// <remarks>
 /// The spec's sum X(k) = the sum over n in 0..63 of u(n) 2 exp(i pi/64 (k + 0.5)(2n - 0.5)) is a 64-point DFT: the
 /// exponent splits into 2 pi k n / 64 + pi n / 64 - pi (2k + 1) / 256, so X(k) = 2 exp(-i pi (2k + 1) / 256) times the
-/// DFT of u(n) exp(i pi n / 64) at k. u is real, so that DFT takes a complex FFT of 32 (<see cref="Process"/>): with
+/// DFT of u(n) exp(i pi n / 64) at k. u is real, so that DFT takes a complex FFT of 32 (<see cref="Transform"/>): with
 /// z(m) = (u(2m) + i u(2m + 1)) exp(i pi m / 32) and Z its FFT, the even samples' DFT (turned) is E(k) = (Z(k) +
 /// conj Z(31 - k)) / 2, the odd ones' O(k) = -i (Z(k) - conj Z(31 - k)) / 2, and the DFT at k is E(k) + exp(i pi (2k + 1)
 /// / 64) O(k). With the output turn, X(k) = exp(-i pi (2k + 1) / 256) P(k) + exp(i pi (6k - 125) / 256) M(k), where P
@@ -42,8 +42,12 @@ internal sealed class QmfAnalysis
     private static readonly double[] MinusSin = [.. Enumerable.Range(0, Bands).Select(k => QmfTrig.SinPi256((6 * k) - 125))];
 
     // c(2n), the window's coefficients this bank takes, at even n and at odd n, in order.
-    private static readonly double[] EvenWindow = [.. Enumerable.Range(0, 160).Select(m => QmfWindow.Coefficients[4 * m])];
-    private static readonly double[] OddWindow = [.. Enumerable.Range(0, 160).Select(m => QmfWindow.Coefficients[(4 * m) + 2])];
+    private static readonly double[] EvenWindow = Window(0, 1);
+    private static readonly double[] OddWindow = Window(2, 1);
+
+    // The window this bank takes, times its scale.
+    private readonly double[] _evenWindow;
+    private readonly double[] _oddWindow;
 
     // x, the last 320 samples with the newest first, kept as its values at even n and at odd n (a slot moves n by 32,
     // which keeps its parity), each from _start: each slot moves the start back by 16 rather than the samples forward,
@@ -52,8 +56,17 @@ internal sealed class QmfAnalysis
     private readonly double[] _odd = new double[160 + (16 * 15)];
     private int _start = 16 * 15;
 
+    /// <summary>
+    /// A bank whose input is taken as times <paramref name="scale"/>, folded into its window: a power of two (SBR's
+    /// 32768) gives the same output as scaling the samples, exactly.
+    /// </summary>
+    public QmfAnalysis(double scale = 1)
+    {
+        _evenWindow = scale == 1 ? EvenWindow : Window(0, scale);
+        _oddWindow = scale == 1 ? OddWindow : Window(2, scale);
+    }
+
     /// <summary>One time slot: 32 new samples (oldest first) in, 32 complex subband samples out.</summary>
-    [SkipLocalsInit]
     public void Process(ReadOnlySpan<double> input, Span<double> real, Span<double> imaginary)
     {
         if (input.Length < 32)
@@ -61,8 +74,7 @@ internal sealed class QmfAnalysis
             throw new ArgumentException("A slot takes 32 samples.");
         }
 
-        QmfState.Step(_odd, _start, 160, 16);
-        _start = QmfState.Step(_even, _start, 160, 16);
+        Step();
         var even = _even.AsSpan(_start, 160);
         var odd = _odd.AsSpan(_start, 160);
 
@@ -73,12 +85,49 @@ internal sealed class QmfAnalysis
             odd[m] = input[30 - (2 * m)];
         }
 
+        Transform(even, odd, real, imaginary);
+    }
+
+    /// <summary>As <see cref="Process(ReadOnlySpan{double}, Span{double}, Span{double})"/>, from single precision.</summary>
+    public void Process(ReadOnlySpan<float> input, Span<double> real, Span<double> imaginary)
+    {
+        if (input.Length < 32)
+        {
+            throw new ArgumentException("A slot takes 32 samples.");
+        }
+
+        Step();
+        var even = _even.AsSpan(_start, 160);
+        var odd = _odd.AsSpan(_start, 160);
+        for (int m = 0; m < 16; m++)
+        {
+            even[m] = input[31 - (2 * m)];
+            odd[m] = input[30 - (2 * m)];
+        }
+
+        Transform(even, odd, real, imaginary);
+    }
+
+    // c(2(2m + offset / 2)) times scale, for m in 0..159.
+    private static double[] Window(int offset, double scale) =>
+        [.. Enumerable.Range(0, 160).Select(m => QmfWindow.Coefficients[(4 * m) + offset] * scale)];
+
+    // The slot's x from _start, at even and at odd n, its newest 16 of each still to be written.
+    private void Step()
+    {
+        QmfState.Step(_odd, _start, 160, 16);
+        _start = QmfState.Step(_even, _start, 160, 16);
+    }
+
+    [SkipLocalsInit]
+    private void Transform(ReadOnlySpan<double> even, ReadOnlySpan<double> odd, Span<double> real, Span<double> imaginary)
+    {
         // u(n) = the sum of x(n + 64 j) c(2(n + 64 j)) over j in 0..4, at even and at odd n.
         Span<double> uEven = stackalloc double[32];
         Span<double> uOdd = stackalloc double[32];
         ReadOnlySpan<int> terms = [0, 32, 64, 96, 128];
-        Vectors.SumOfProducts(uEven, even, terms, EvenWindow, terms);
-        Vectors.SumOfProducts(uOdd, odd, terms, OddWindow, terms);
+        Vectors.SumOfProducts(uEven, even, terms, _evenWindow, terms);
+        Vectors.SumOfProducts(uOdd, odd, terms, _oddWindow, terms);
 
         Span<double> re = stackalloc double[32];
         Span<double> im = stackalloc double[32];
@@ -173,14 +222,22 @@ internal sealed class QmfSynthesis
 
     private readonly Tables _tables;
 
+    // The tables' window, times the bank's scale.
+    private readonly double[] _window;
+
     // v, the last 20B values with the newest first, at _v[_start..]: each slot moves the start back by 2B rather than
     // the values forward (as the analysis bank's samples).
     private readonly double[] _v;
     private int _start;
 
-    public QmfSynthesis(bool downsampled = false)
+    /// <summary>
+    /// A bank of 64 bands, or 32 <paramref name="downsampled"/>, whose output is times <paramref name="scale"/>, folded
+    /// into its window: a power of two (SBR's 1 / 32768) gives the same output as scaling the samples, exactly.
+    /// </summary>
+    public QmfSynthesis(bool downsampled = false, double scale = 1)
     {
         _tables = downsampled ? Halved : Full;
+        _window = scale == 1 ? _tables.Window : [.. _tables.Window.Select(c => c * scale)];
         _v = new double[(20 + 18) * Bands];
         _start = 18 * Bands;
     }
@@ -214,7 +271,7 @@ internal sealed class QmfSynthesis
 
         // g takes, of each 4B values of v, the first and the last B; w(n) = g(n) c(n (64 / B)); each output sample sums
         // ten of w, in the order of n.
-        var window = t.Window.AsSpan();
+        var window = _window.AsSpan();
         output = output[..bands];
         Span<int> vTerms = stackalloc int[10];
         Span<int> windowTerms = stackalloc int[10];

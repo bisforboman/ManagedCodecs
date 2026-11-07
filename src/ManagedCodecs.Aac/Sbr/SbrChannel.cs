@@ -17,7 +17,8 @@ namespace ManagedCodecs.Aac.Sbr;
 /// its first border to twice its last, which can start up to 6 slots into the frame and end up to 6 past it; the high
 /// band of slot l comes from the analysis' slot l + 2 (t_HFAdj), and the HF generator's prediction reaches 2 slots
 /// further back, so 8 slots of the previous frame's analysis are kept (t_HFGen). Samples are processed in the 16-bit
-/// range the spec's constants assume (the core's output times 32768).
+/// range the spec's constants assume (the core's output times 32768): the analysis window takes the 32768 and the
+/// synthesis window its inverse, which (a power of two) changes no value.
 /// </remarks>
 internal sealed class SbrChannel(bool downsampled = false)
 {
@@ -57,8 +58,11 @@ internal sealed class SbrChannel(bool downsampled = false)
     private static readonly double[] NoiseImaginary = [.. Enumerable.Range(0, 512 + 64).Select(i => SbrNoiseTable.Values[(2 * (i & 511)) + 1])];
     private static readonly double[] SineSign = [.. Enumerable.Range(0, 128).Select(k => (k & 1) != 0 ? -1.0 : 1)];
 
-    private readonly QmfAnalysis _analysis = new();
-    private readonly QmfSynthesis _synthesis = new(downsampled);
+    // The core's output times 32768 in, and that undone out.
+    private const double Scale = 32768;
+
+    private readonly QmfAnalysis _analysis = new(Scale);
+    private readonly QmfSynthesis _synthesis = new(downsampled, 1 / Scale);
 
     // Parametric stereo, once it comes: its processor, the right channel's synthesis bank, and the frame's synthesis
     // input for the left (with the look-ahead slots) and the right.
@@ -110,15 +114,9 @@ internal sealed class SbrChannel(bool downsampled = false)
     /// </summary>
     public void Process(SbrElement? element, int channel, ReadOnlySpan<float> core, Span<float> output, Span<float> right, AacStatistics statistics)
     {
-        Span<double> input = stackalloc double[32];
         for (int slot = 0; slot < Slots; slot++)
         {
-            for (int n = 0; n < 32; n++)
-            {
-                input[n] = core[(32 * slot) + n] * 32768.0;
-            }
-
-            _analysis.Process(input, _lowReal[Kept + slot], _lowImaginary[Kept + slot]);
+            _analysis.Process(core.Slice(32 * slot, 32), _lowReal[Kept + slot], _lowImaginary[Kept + slot]);
         }
 
         if (element is { HasFrame: true, Header: { } header, Frequencies: { } frequencies })
@@ -730,7 +728,7 @@ internal sealed class SbrChannel(bool downsampled = false)
     {
         for (int n = 0; n < count; n++)
         {
-            output[n] = (float)(samples[n] / 32768);
+            output[n] = (float)samples[n];
         }
     }
 
@@ -739,7 +737,7 @@ internal sealed class SbrChannel(bool downsampled = false)
     private void SynthesizeStereo(SbrElement? element, Span<float> left, Span<float> right, AacStatistics statistics)
     {
         _ps ??= new PsProcessor();
-        _rightSynthesis ??= new QmfSynthesis(downsampled);
+        _rightSynthesis ??= new QmfSynthesis(downsampled, 1 / Scale);
         _stereoRe ??= Buffers(Slots + PsProcessor.LookAhead, 64);
         _stereoIm ??= Buffers(Slots + PsProcessor.LookAhead, 64);
         _rightRe ??= Buffers(Slots, 64);

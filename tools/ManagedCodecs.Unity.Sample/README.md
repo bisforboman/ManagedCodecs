@@ -36,7 +36,7 @@ build; whether Unity runs it as intended needs a Unity install, which nobody has
 
 ## Testing it in Unity
 
-What nobody has checked yet, and how. Report on issue #254 (or a new issue), one line a run.
+What nobody has checked yet, and how. Report in a new issue, one line a run (issue #254, now closed, has the history and the MonoGame measurements).
 
 1. **Set-up.** Unity 2022.3 LTS or Unity 6 (2021.2 is the oldest with .NET Standard 2.1), a new 3D project, Player
    settings' API Compatibility Level at .NET Standard 2.1, then the three steps of [Using it](#using-it) on a quad

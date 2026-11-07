@@ -951,6 +951,13 @@ The benchmark samples (low-bitrate tones) barely reach this code; on real films'
 Elephants Dream's 192 kbit/s stereo spent 31% of its decode there by perf, 16% after, and decodes 21% faster (median
 of 10 interleaved runs each, 1177 to 925 ms for its 11 minutes once warm; Sintel's trailer, 127 kbit/s, 14% faster).
 
+Inverse quantization was then the largest stage (34% of Elephants Dream's decode by perf): a call a nonzero value, not
+inlined, reading the static 4/3-power table (a class-initialization check each time under tiering off) and the sign
+by a branch, after a branch on zero that dense spectra mispredict. `AacDecoder.InverseQuantize` does a band in one
+loop without branches: the magnitude's power times the gain, the sign bit then set (negating before or after the
+product gives the same bits), zero giving +0. `DequantizeTests` compares it with the definition bit for bit. About 7%
+of the decode by perf after; Elephants Dream decodes 29% faster, Sintel's trailer 26% (median of 10 interleaved runs).
+
 ## HE-AAC (spectral band replication)
 
 Samples from the Fraunhofer FDK encoder, committed in `samples/heaac/` (`tools/make-heaac-samples.sh`): stereo at

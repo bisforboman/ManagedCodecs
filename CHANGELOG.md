@@ -38,6 +38,8 @@ run time.
   and 1.7% in field pictures.
 - AAC: spectral data is read through packed Huffman tables, all of a codeword's sign bits at once: AAC LC at film
   bitrates decodes 14 to 21% faster (Elephants Dream's 192 kbit/s stereo, Sintel's trailer).
+- AAC: inverse quantization runs a band without branches or calls: AAC LC at film bitrates decodes another 26 to 29%
+  faster.
 - H.264: spatial direct prediction finds a macroblock's neighbours A, B and C once for both its reference indices and
   its motion vectors, in MBAFF frames and field pictures in one call: about 2.2% fewer instructions in MBAFF frames
   with B pictures and 1.2% in field pictures.

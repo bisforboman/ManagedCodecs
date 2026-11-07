@@ -164,3 +164,29 @@ What is left is the work per codeword, about 80 instructions:
 A gain there needs a leaner entry layout. For example, entries could carry each value's sign-bit position, and two
 codewords could be read per refill (57 bits cover two of any book's, escapes aside). By the counts that is perhaps a
 quarter of the stage, about 5 to 7% of a film's AAC frame. That is not tried here.
+
+## Tried and dropped: two codewords a reload, and a table of codewords with their signs
+
+These are the two changes the section above ended on, tried on main after #376 (391d721) with Elephants Dream's AAC.
+- **Two codewords a reload.** `Cursor.Refill()` reloads the cache unconditionally before every two pairs, so the
+  first peek's check, mispredicted 27% of the time, is always false. 57 bits cover two codewords with their signs, at
+  most 20 bits each.
+- **A table of codewords with their signs.** Books 7 to 11 get a second table of 2^12 entries indexed by the codeword
+  and its sign bits together. It gives both values already signed and the total length in one lookup. Escapes and
+  codewords whose signs run past 12 bits fall back to the packed table.
+
+Both kept the output (the film's SHA-256 and `SpectrumHuffmanTests`). The measure was spectral reading's perf samples
+over those of the stages it does not touch (the IMDCT, `Dequantize`, `Vectors`, `ApplyStereo`), four runs of each
+build, alternating:
+
+| Round | main | reload | reload and signed table |
+| --- | ---: | ---: | ---: |
+| First (two builds) | 0.570 | 0.538 | |
+| Second (three builds) | 0.552 | 0.562 | 0.577 |
+
+The first round's gain did not reproduce. The steady frame stayed at 19.2 to 20.1 µs in every build. The signed
+table may cost more in cache than it saves in instructions; that is not measured. #387 tried a close variant at the same time and found the same: 64-bit entries carrying each value's sign shift, one
+refill check per two codewords, refs without bounds checks (docs/conformance.md, AAC). Its note suggests (not
+measured) that the pace is set by a dependent chain, each codeword's table read waiting on the previous one's length,
+which neither change shortens. So the work per codeword stays as #355 left it. A further try would need counts first (callgrind on an AOT build, which resolves what perf here cannot),
+not the wall clock.

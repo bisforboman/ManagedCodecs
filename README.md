@@ -636,9 +636,18 @@ per frame, medians of 5 interleaved runs, against the JIT build of the same code
 The default target leaves AAC and HE-AAC about a third slower (their 256-bit paths); H.264 and MJPEG are within 0 to
 20% of the JIT either way, and perf profiles of the v3 and JIT builds of 720p H.264 have the same shape, no function's
 share more than a point apart (mcdec's JIT build has tiered compilation and so dynamic PGO off, so that is not the
-difference). `OptimizationPreference=Speed` changed nothing beyond the noise. Startup is AOT's own gain: in bench.py's
+difference). Startup is AOT's own gain: in bench.py's
 whole-process times (taken before the shuffle fix) the short H.264 and AAC LC runs took less under AOT than under the
 JIT.
+
+For H.264, also set `<OptimizationPreference>Speed</OptimizationPreference>` (the compiler's `--Ot`). It inlines more, and
+on a v3 mcdec it ran 2 to 5% fewer steady instructions on every H.264 sample counted. By callgrind (2026-11-07) that was
+-4.4% on `h264-bench-720p.mp4`, -4.1% on `h264-high-default.mp4`, -4.8% on `h264-mbaff-default.mp4`, -2.1% on
+`h264-10bit-b.mp4` and -4.5% on `jm/jm-paff-b.mp4`. Interleaved runs were 2 to 5% faster a frame by median. The binary
+grows by about 5% (mcdec 4.0 to 4.2 MB). MJPEG, AAC LC and HE-AAC move by under 1%: an earlier wall-clock comparison
+here saw no gain, and these counts show why. A static PGO profile (a `.mibc` from `dotnet-pgo`, passed as `MibcFile`)
+gained at most 1.8% more, and only on the streams it was trained on (issue #346), so neither mcdec nor the packages
+ship one.
 
 Cloud VMs are noisy (single runs differed by up to a third), so compare before and after on one machine. For
 statistics on the decoder alone there is BenchmarkDotNet, `dotnet run -c Release --project

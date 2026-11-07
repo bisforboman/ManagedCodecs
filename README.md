@@ -526,7 +526,8 @@ defaults, tiered compilation and dynamic PGO, which start faster but cost a shor
 | ReadyToRun (`--instruction-set:x86-64-v3`), tiering off | 0.41 s | about 1.56 s | | |
 
 Dynamic PGO runs instrumented code first and pays that back only on long files (about 9% less a frame once it is done,
-but still behind after 5,000 frames here). For short files, turn it off in the app's project:
+but still behind after 5,000 frames here; about 14% less on a 720p CABAC stream and 18% on this one in a later
+measurement, docs/conformance.md, H.264, Performance notes, and #346). For short files, turn it off in the app's project:
 
 ```xml
 <TieredPGO>false</TieredPGO>

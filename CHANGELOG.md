@@ -11,6 +11,14 @@ share internals, so each depends on the others at exactly its own version (`[X]`
 then reports a mix of versions (NU1107, or NU1608 for a newer one referenced directly) rather than letting it fail at
 run time.
 
+## Unreleased
+
+### Changed
+
+- H.264: intra prediction's vertical, horizontal and DC modes (4x4, 8x8, chroma DC) write a row at a time: 10% fewer
+  instructions in an 8-bit intra-only stream under Native AOT, about 1% of its time under the JIT. The output is
+  unchanged.
+
 ## 0.9.0 – 2026-11-07
 
 Playback for game engines: the new packages `ManagedCodecs.Playback` (`MediaPlayer`, also in ManagedCodecs.Unity) and

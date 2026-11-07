@@ -961,6 +961,21 @@ loops, six runs each, the order alternating) `h264-10bit-b`'s decoder samples ov
 (`Cabac.ResidualBlock`, `FilterEdgeRegisters16`, `FetchWindow16`) fell by a median 3.1%, every run of the branch
 below every run of the base, and the changed kernels' own samples from 0.13 to 0.033 of that set. The wall clock
 (`tools/bench.py --base`, nine interleaved runs) saw -0.2 and -1.2% steady, within its noise here.
+
+Intra prediction a row at a time (#393, 2026-11-07). On 8-bit intra-only streams `IntraPrediction` took 6.6 to 8.3% of
+the JIT build's samples (`h264-main-intra`, `h264-high-intra`; 2.6% on noise at QP 4, where the residual dominates),
+against the issue's 1 to 2% at 10 bits, and vertical, horizontal and DC were 85 to 90% of the 4x4 and 8x8 blocks on
+clean content (about 45% on the noise). Those three modes, 4x4 and 8x8, and chroma DC now write a row at a time (one
+4-, 8- or 16-byte store, the top row copied, the value repeated), 4x4 straight from the plane's neighbours without the
+edge array; the other modes and blocks at the plane's first row or column keep the sample-by-sample code, which is
+the reference `IntraPredictionTests` compares them with on random planes at 8, 10 and 14 bits, every mode and every
+combination of neighbours. Callgrind (AOT, x86-64-v3, loops 41 minus 1) counts 1541.7 to 1386.5 M instructions of
+`h264-high-intra` (-10.1%) and (loops 3 minus 1) 3887.5 to 3858.6 M of `h264-bench-720p` (-0.74%). Under the JIT the gain
+is smaller, as docs/benchmarking.md warns: `h264-high-intra` by perf (400 loops, six runs each, the order alternating),
+the intra functions' samples over those of functions it leaves alone (`Cabac.ResidualBlock`, the deblocking filters,
+the inverse transforms) fell from a median 0.233 to 0.212, every run of the branch below every run of the base, about
+a point of the frame; the whole decoder's over the same set by 0.3%, within the runs' spread. Left: the 8x8 edges'
+filter (`FilteredEdges8x8`, now the largest intra function by count), plane prediction and the diagonal modes.
 The per-partition path (`PredictFromOne`, `PredictFromTwo`: one call to the kernels a component, without
 `PartitionPlace`, `Weighting` for default bi-prediction or `PredictComponent`) then took frame macroblocks of frames
 at any depth and in 4:2:2 too, not only 8-bit 4:2:0; MBAFF frames and field pictures keep `PredictPartitionGeneral`.

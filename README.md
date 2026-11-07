@@ -109,8 +109,9 @@ and code that reproduces FFmpeg's reading where it differs from the spec), and n
   one class's (the CAVLC residual reader's compiled code is clean). MBAFF frames and field pictures find the pairs
   around a macroblock once (#177: 2.9% off `h264-mbaff-default.mp4`'s time, 4.0% off `jm-paff-b.mp4`'s), and motion
   vector prediction finds its three neighbours in one call (1.8% off `h264-mbaff-default.mp4`'s instructions) and
-  CABAC's context selection reads its left and above neighbours from a table found once a macroblock (1.6% more), but
-  the other neighbour lookups (intra prediction, spatial direct, the deblocking filter's) are still a call each; their
+  CABAC's context selection reads its left and above neighbours from a table found once a macroblock (1.6% more), as
+  does spatial direct prediction its three, once for both its uses (2.2% more), but the other neighbour lookups
+  (intra prediction, the deblocking filter's) are still a call each; their
   case analysis on (xN, yN) is not the cost (a table in its place counted no fewer instructions; docs/conformance.md, Performance notes;
   docs/decisions/2026-10-28-h264-neighbour-context.md).
   With 4 threads a 720p P chain takes 0.52 of one thread's time over 50 frames and 0.41 over 250 (one IDR picture

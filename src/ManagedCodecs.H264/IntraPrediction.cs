@@ -28,14 +28,18 @@ internal static class IntraPrediction
             return;
         }
 
-        ref TPixel block = ref plane[offset];
+        // From the row above and the column to the left, so that every Unsafe.Add offset is non-negative: Mono 6.12 (the
+        // Unity build) crashed reading at Unsafe.Add(ref block, -stride).
+        ref TPixel above = ref plane[offset - stride];
+        ref TPixel block = ref Unsafe.Add(ref above, stride);
+        ref TPixel left = ref plane[offset - 1];
         switch (mode)
         {
             case 0: // Vertical
                 Require(n.Top, mode);
                 for (int y = 0; y < 4; y++)
                 {
-                    CopyRow(ref Unsafe.Add(ref block, -stride), ref Unsafe.Add(ref block, y * stride), 4);
+                    CopyRow(ref above, ref Unsafe.Add(ref block, y * stride), 4);
                 }
 
                 break;
@@ -44,7 +48,7 @@ internal static class IntraPrediction
                 Require(n.Left, mode);
                 for (int y = 0; y < 4; y++)
                 {
-                    FillRow(ref Unsafe.Add(ref block, y * stride), 4, Samples.ToInt(Unsafe.Add(ref block, (y * stride) - 1)));
+                    FillRow(ref Unsafe.Add(ref block, y * stride), 4, Samples.ToInt(Unsafe.Add(ref left, y * stride)));
                 }
 
                 break;
@@ -54,8 +58,8 @@ internal static class IntraPrediction
                 int sumLeft = 0;
                 for (int i = 0; i < 4; i++)
                 {
-                    sumTop += n.Top ? Samples.ToInt(Unsafe.Add(ref block, i - stride)) : 0;
-                    sumLeft += n.Left ? Samples.ToInt(Unsafe.Add(ref block, (i * stride) - 1)) : 0;
+                    sumTop += n.Top ? Samples.ToInt(Unsafe.Add(ref above, i)) : 0;
+                    sumLeft += n.Left ? Samples.ToInt(Unsafe.Add(ref left, i * stride)) : 0;
                 }
 
                 int dc = (n.Left, n.Top) switch
@@ -597,15 +601,18 @@ internal static class IntraPrediction
     private static void PredictChromaDc<TPixel>(TPixel[] plane, int offset, int stride, IntraNeighbors n, int leftBlocks, int height, int bitDepth)
         where TPixel : unmanaged
     {
-        ref TPixel block = ref plane[offset];
+        // From the row above and the column to the left, so that every offset is non-negative (as Predict4x4's).
+        ref TPixel above = ref plane[offset - stride];
+        ref TPixel block = ref Unsafe.Add(ref above, stride);
+        ref TPixel leftColumn = ref plane[offset - 1];
         int top0 = 0;
         int top1 = 0;
         if (n.Top)
         {
             for (int i = 0; i < 4; i++)
             {
-                top0 += Samples.ToInt(Unsafe.Add(ref block, i - stride));
-                top1 += Samples.ToInt(Unsafe.Add(ref block, 4 + i - stride));
+                top0 += Samples.ToInt(Unsafe.Add(ref above, i));
+                top1 += Samples.ToInt(Unsafe.Add(ref above, 4 + i));
             }
         }
 
@@ -618,7 +625,7 @@ internal static class IntraPrediction
             {
                 for (int i = 0; i < 4; i++)
                 {
-                    sumLeft += Samples.ToInt(Unsafe.Add(ref block, ((yO + i) * stride) - 1));
+                    sumLeft += Samples.ToInt(Unsafe.Add(ref leftColumn, (yO + i) * stride));
                 }
             }
 

@@ -132,8 +132,8 @@ internal sealed class QmfAnalysis
         Span<double> re = stackalloc double[32];
         Span<double> im = stackalloc double[32];
         QmfState.Rotate(uEven, uOdd, InCos, InSin, re, im);
-        Fft.Transform(re, im);
-        Output(re, im, real, imaginary);
+        Fft.Transform(re, im, uEven, uOdd); // into u's buffers, which are done with
+        Output(uEven, uOdd, real, imaginary);
     }
 
     /// <summary>X(k) from Z, the FFT (<paramref name="re"/>, <paramref name="im"/>), at k in 0..31.</summary>
@@ -430,6 +430,7 @@ internal sealed class QmfDctIV(double scale = 1)
     /// The FFT of 32 of <paramref name="x"/>'s values packed and turned (<paramref name="re"/>, <paramref name="im"/>, 32
     /// each), whose value at p <see cref="Output(double, double, int)"/> turns into the outputs at 2p and 63 - 2p.
     /// </summary>
+    [SkipLocalsInit]
     public static void Pretransform(ReadOnlySpan<double> x, bool alternate, Span<double> re, Span<double> im, bool scalar = false)
     {
         if (x.Length < 64 || re.Length < 32 || im.Length < 32)
@@ -437,10 +438,13 @@ internal sealed class QmfDctIV(double scale = 1)
             throw new ArgumentException("The DCT-IV takes 64 values, through 32 complex ones.");
         }
 
+        // Packed into a scratch, which the FFT reads into (re, im).
+        Span<double> packedRe = stackalloc double[32];
+        Span<double> packedIm = stackalloc double[32];
         double odd = alternate ? -1 : 1;
         ref double input = ref MemoryMarshal.GetReference(x);
-        ref double r = ref MemoryMarshal.GetReference(re);
-        ref double i = ref MemoryMarshal.GetReference(im);
+        ref double r = ref MemoryMarshal.GetReference(packedRe);
+        ref double i = ref MemoryMarshal.GetReference(packedIm);
         ref double preCos = ref MemoryMarshal.GetArrayDataReference(PreCos);
         ref double preSin = ref MemoryMarshal.GetArrayDataReference(PreSin);
         int m = 0;
@@ -473,7 +477,7 @@ internal sealed class QmfDctIV(double scale = 1)
             Unsafe.Add(ref i, m) = (a * s) - (b * c);
         }
 
-        Fft.Transform(re, im);
+        Fft.Transform(packedRe, packedIm, re, im, scalar);
     }
 
     /// <summary>The outputs at 2p and 63 - 2p (times the scale) from the FFT's value at p, (yr, yi).</summary>
@@ -674,6 +678,7 @@ internal sealed class QmfFft
     /// does the scalar arithmetic in the same order (no fused multiply-add), so the result is the same to the bit
     /// (<paramref name="scalar"/> for tests).
     /// </summary>
+    [SkipLocalsInit]
     public void Transform(Span<double> re, Span<double> im, bool scalar = false)
     {
         re = re[.._length];
@@ -681,7 +686,11 @@ internal sealed class QmfFft
 #if NET
         if (Vector128.IsHardwareAccelerated && !scalar)
         {
-            ReorderFirstStage(re, im);
+            Span<double> copyRe = stackalloc double[_length];
+            Span<double> copyIm = stackalloc double[_length];
+            re.CopyTo(copyRe);
+            im.CopyTo(copyIm);
+            ReorderFirstStage(copyRe, copyIm, re, im);
             VectorStages(re, im);
             return;
         }
@@ -729,38 +738,94 @@ internal sealed class QmfFft
         }
     }
 
-    // The stages from a half-span of 2, two or four butterflies at a time.
     /// <summary>
-    /// The bit-reversal permutation and the first stage (whose twiddle factor is 1) in one pass, from a copy of the
-    /// input: each pair is read from its bit-reversed places, with the scalar path's sums (a + b and a - b; addition
-    /// commutes to the bit), so the result is the same.
+    /// As <see cref="Transform(Span{double}, Span{double}, bool)"/>, from (<paramref name="sourceRe"/>,
+    /// <paramref name="sourceIm"/>) into (<paramref name="re"/>, <paramref name="im"/>), which must not overlap: the
+    /// source stays as it was, and the vector path reads it in place of a copy.
     /// </summary>
-    [SkipLocalsInit]
-    private void ReorderFirstStage(Span<double> re, Span<double> im)
+    public void Transform(ReadOnlySpan<double> sourceRe, ReadOnlySpan<double> sourceIm, Span<double> re, Span<double> im, bool scalar = false)
     {
-        Span<double> copyRe = stackalloc double[_length];
-        Span<double> copyIm = stackalloc double[_length];
-        re.CopyTo(copyRe);
-        im.CopyTo(copyIm);
-        ref double sourceRe = ref MemoryMarshal.GetReference(copyRe);
-        ref double sourceIm = ref MemoryMarshal.GetReference(copyIm);
+        sourceRe = sourceRe[.._length];
+        sourceIm = sourceIm[.._length];
+        re = re[.._length];
+        im = im[.._length];
+#if NET
+        if (Vector128.IsHardwareAccelerated && !scalar)
+        {
+            ReorderFirstStage(sourceRe, sourceIm, re, im);
+            VectorStages(re, im);
+            return;
+        }
+#endif
+
+        sourceRe.CopyTo(re);
+        sourceIm.CopyTo(im);
+        Transform(re, im, scalar);
+    }
+
+    /// <summary>
+    /// The bit-reversal permutation and the first stage (whose twiddle factor is 1) in one pass, from the source into
+    /// the output, with the scalar path's sums (a + b and a - b; addition commutes to the bit), so the result is the same. The
+    /// pair at places 2j and 2j + 1 comes from points m and m + N/2 (m = the reversal of 2j, below N/2), so the pairs of
+    /// a run of m are two runs of the input: sums and differences in vectors, each pair stored zipped at its place.
+    /// </summary>
+    private void ReorderFirstStage(ReadOnlySpan<double> fromRe, ReadOnlySpan<double> fromIm, Span<double> re, Span<double> im)
+    {
+        ref double sourceRe = ref MemoryMarshal.GetReference(fromRe);
+        ref double sourceIm = ref MemoryMarshal.GetReference(fromIm);
         ref double r = ref MemoryMarshal.GetReference(re);
         ref double i = ref MemoryMarshal.GetReference(im);
         ref int reversed = ref MemoryMarshal.GetArrayDataReference(_reversed);
-        for (int a = 0; a < _length; a += 2)
+        int half = _length / 2;
+        int m = 0;
+#if NET
+        if (Avx.IsSupported)
         {
-            int x = Unsafe.Add(ref reversed, a);
-            int y = Unsafe.Add(ref reversed, a + 1);
-            double xr = Unsafe.Add(ref sourceRe, x);
-            double xi = Unsafe.Add(ref sourceIm, x);
-            double yr = Unsafe.Add(ref sourceRe, y);
-            double yi = Unsafe.Add(ref sourceIm, y);
-            Unsafe.Add(ref r, a) = xr + yr;
-            Unsafe.Add(ref i, a) = xi + yi;
-            Unsafe.Add(ref r, a + 1) = xr - yr;
-            Unsafe.Add(ref i, a + 1) = xi - yi;
+            for (; m <= half - Vector256<double>.Count; m += Vector256<double>.Count)
+            {
+                var xr = Vector256.LoadUnsafe(ref sourceRe, (nuint)m);
+                var yr = Vector256.LoadUnsafe(ref sourceRe, (nuint)(m + half));
+                var xi = Vector256.LoadUnsafe(ref sourceIm, (nuint)m);
+                var yi = Vector256.LoadUnsafe(ref sourceIm, (nuint)(m + half));
+                Store4(ref r, ref reversed, m, xr + yr, xr - yr);
+                Store4(ref i, ref reversed, m, xi + yi, xi - yi);
+            }
         }
+
+        for (; m < half; m += Vector128<double>.Count)
+        {
+            var xr = Vector128.LoadUnsafe(ref sourceRe, (nuint)m);
+            var yr = Vector128.LoadUnsafe(ref sourceRe, (nuint)(m + half));
+            var xi = Vector128.LoadUnsafe(ref sourceIm, (nuint)m);
+            var yi = Vector128.LoadUnsafe(ref sourceIm, (nuint)(m + half));
+            Store2(ref r, ref reversed, m, xr + yr, xr - yr);
+            Store2(ref i, ref reversed, m, xi + yi, xi - yi);
+        }
+#endif
     }
+
+#if NET
+    // (sum(j), difference(j)) at the reversal of m + j, for j = 0 and 1.
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void Store2(ref double target, ref int reversed, int m, Vector128<double> sum, Vector128<double> difference)
+    {
+        (var low, var high) = QmfState.Zip(sum, difference);
+        low.StoreUnsafe(ref target, (nuint)Unsafe.Add(ref reversed, m));
+        high.StoreUnsafe(ref target, (nuint)Unsafe.Add(ref reversed, m + 1));
+    }
+
+    // The same for j in 0..3: the in-lane unpacks give the pairs of m and m + 2, then of m + 1 and m + 3.
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void Store4(ref double target, ref int reversed, int m, Vector256<double> sum, Vector256<double> difference)
+    {
+        var even = Avx.UnpackLow(sum, difference);
+        var odd = Avx.UnpackHigh(sum, difference);
+        even.GetLower().StoreUnsafe(ref target, (nuint)Unsafe.Add(ref reversed, m));
+        odd.GetLower().StoreUnsafe(ref target, (nuint)Unsafe.Add(ref reversed, m + 1));
+        even.GetUpper().StoreUnsafe(ref target, (nuint)Unsafe.Add(ref reversed, m + 2));
+        odd.GetUpper().StoreUnsafe(ref target, (nuint)Unsafe.Add(ref reversed, m + 3));
+    }
+#endif
 
 #if NET
     private void VectorStages(Span<double> re, Span<double> im)

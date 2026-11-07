@@ -127,8 +127,12 @@ public class QmfTests
         Assert.True(worstGain < 6e-3 && worstQuadrature < 6e-3, $"Gain off by up to {worstGain:e2}, quadrature up to {worstQuadrature:e2}.");
     }
 
-    /// <summary>The vector FFT does each butterfly's arithmetic in the scalar order: the same doubles, to the bit.</summary>
+    /// <summary>
+    /// The vector FFT does each butterfly's arithmetic in the scalar order: the same doubles, to the bit, in place and
+    /// from a source it leaves as it was.
+    /// </summary>
     [Theory]
+    [InlineData(32)]
     [InlineData(64)]
     [InlineData(128)]
     public void VectorFft_MatchesScalarExactly(int length)
@@ -145,9 +149,16 @@ public class QmfTests
                 im[k] = (random.NextDouble() - 0.5) * Math.Pow(10, random.Next(0, 6));
             }
 
+            var (sourceRe, sourceIm) = ((double[])re.Clone(), (double[])im.Clone());
             var expectedRe = (double[])re.Clone();
             var expectedIm = (double[])im.Clone();
             fft.Transform(expectedRe, expectedIm, scalar: true);
+            var (fromRe, fromIm) = (new double[length], new double[length]);
+            fft.Transform(re, im, fromRe, fromIm);
+            Assert.Equal(sourceRe, re);
+            Assert.Equal(sourceIm, im);
+            Assert.Equal(expectedRe, fromRe);
+            Assert.Equal(expectedIm, fromIm);
             fft.Transform(re, im);
             Assert.Equal(expectedRe, re);
             Assert.Equal(expectedIm, im);

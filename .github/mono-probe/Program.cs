@@ -68,6 +68,17 @@ static class Program
         Time("small static call (AggressiveInlining)", () => { int t = 0; for (int i = 0; i < N; i++) t += Clamp255(i - 100); sink = t; }, reps);
         Time("same, written inline", () => { int t = 0; for (int i = 0; i < N; i++) { int v = i - 100; t += v < 0 ? 0 : v > 255 ? 255 : v; } sink = t; }, reps);
         Time("BitOperations-like LeadingZeroCount (loop)", () => { int t = 0; for (int i = 0; i < N; i++) t += Lzc((uint)(i * 2654435761u)); sink = t; }, reps);
+        Time("table: static ReadOnlySpan<byte> property", () => { int t = 0; for (int i = 0; i < N; i++) t += Table[i & 63]; sink = t; }, reps);
+        Time("table: same, getter AggressiveInlining", () => { int t = 0; for (int i = 0; i < N; i++) t += TableInlined[i & 63]; sink = t; }, reps);
+        Time("table: same, Unsafe.Add(GetReference(prop))", () => { int t = 0; for (int i = 0; i < N; i++) t += Unsafe.Add(ref MemoryMarshal.GetReference(Table), i & 63); sink = t; }, reps);
+        Time("table: same, hoisted to a local span", () => { int t = 0; ReadOnlySpan<byte> tb = Table; for (int i = 0; i < N; i++) t += tb[i & 63]; sink = t; }, reps);
+        Time("table: static readonly byte[]", () => { int t = 0; for (int i = 0; i < N; i++) t += TableArray[i & 63]; sink = t; }, reps);
+        Time("call taking ReadOnlySpan, passed a Span", () => { Span<byte> sp = a; int t = 0; for (int i = 0; i < N; i++) t += First(sp); sink = t; }, reps);
+        Time("call taking Span, passed a Span", () => { Span<byte> sp = a; int t = 0; for (int i = 0; i < N; i++) t += FirstSpan(sp); sink = t; }, reps);
+        Time("call taking ReadOnlySpan, passed a ROS", () => { ReadOnlySpan<byte> sp = a; int t = 0; for (int i = 0; i < N; i++) t += First(sp); sink = t; }, reps);
+        Time("Span.Slice(i, 4)[0]", () => { Span<byte> sp = a; int t = 0; for (int i = 0; i < N; i++) t += sp.Slice(i, 4)[0]; sink = t; }, reps);
+        Time("LZC polyfill: bit loop", () => { int t = 0; for (int i = 0; i < N; i++) t += Lzc((uint)(i * 2654435761u) >> (i & 15)); sink = t; }, reps);
+        Time("LZC polyfill: binary search", () => { int t = 0; for (int i = 0; i < N; i++) t += Lzc2((uint)(i * 2654435761u) >> (i & 15)); sink = t; }, reps);
         Time("2D index into byte[] via stride", () => { int t = 0; for (int y = 0; y < 64; y++) for (int x = 0; x < 64; x++) t += a[y * 64 + x]; sink = t; }, reps);
     }
 
@@ -109,5 +120,21 @@ static class Program
     [MethodImpl(MethodImplOptions.AggressiveInlining)] static int ByValue(Big p, int i) => (int)p.A + i;
     [MethodImpl(MethodImplOptions.AggressiveInlining)] static int ByIn(in Big p, int i) => (int)p.A + i;
     [MethodImpl(MethodImplOptions.AggressiveInlining)] static int Clamp255(int v) => v < 0 ? 0 : v > 255 ? 255 : v;
+    static ReadOnlySpan<byte> Table => new byte[] { 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64 };
+    static ReadOnlySpan<byte> TableInlined { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => new byte[] { 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64 }; }
+    static readonly byte[] TableArray = Table.ToArray();
+    [MethodImpl(MethodImplOptions.NoInlining)] static int First(ReadOnlySpan<byte> s) => s[0];
+    [MethodImpl(MethodImplOptions.NoInlining)] static int FirstSpan(Span<byte> s) => s[0];
+    static int Lzc2(uint v)
+    {
+        if (v == 0) return 32;
+        int n = 0;
+        if (v <= 0x0000FFFFu) { n += 16; v <<= 16; }
+        if (v <= 0x00FFFFFFu) { n += 8; v <<= 8; }
+        if (v <= 0x0FFFFFFFu) { n += 4; v <<= 4; }
+        if (v <= 0x3FFFFFFFu) { n += 2; v <<= 2; }
+        if (v <= 0x7FFFFFFFu) { n += 1; }
+        return n;
+    }
     static int Lzc(uint v) { int n = 0; if (v == 0) return 32; while ((v & 0x80000000u) == 0) { v <<= 1; n++; } return n; }
 }

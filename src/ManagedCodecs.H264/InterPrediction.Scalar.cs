@@ -2,9 +2,12 @@
 // InterPrediction.Fast16.cs, which only the net10.0 build compiles. Each block's reference samples are read once,
 // clamped, into a window, and the filters run over its rows and columns (the vector paths' order, in scalar code):
 // the *Reference versions recompute and clamp every tap of every sample through local functions, which on Mono cost
-// most of a P frame (docs/decisions/2026-10-31-unity-netstandard.md, Mono's profile). InterPredictionTests compares
-// them with the references on random blocks in the Unity build's test run.
+// most of a P frame (docs/decisions/2026-10-31-unity-netstandard.md, Mono's profile). Spans are passed as Span, not
+// ReadOnlySpan: Mono calls the conversion between them rather than inlining it. InterPredictionTests compares them
+// with the references on random blocks in the Unity build's test run.
 #if !NET
+using System.Runtime.CompilerServices;
+
 namespace ManagedCodecs.H264;
 
 internal static partial class InterPrediction
@@ -182,10 +185,10 @@ internal static partial class InterPrediction
             Span<int> row = window.Slice(j * windowStride, width);
             if (inside)
             {
-                ReadOnlySpan<TPixel> source = plane.AsSpan(origin + (sy * stride) + left, width);
+                int start = origin + (sy * stride) + left;
                 for (int i = 0; i < row.Length; i++)
                 {
-                    row[i] = Samples.ToInt(source[i]);
+                    row[i] = Samples.ToInt(plane[start + i]);
                 }
             }
             else
@@ -202,7 +205,7 @@ internal static partial class InterPrediction
     }
 
     /// <summary>The integer samples from window position <paramref name="at"/> on.</summary>
-    private static void Full(ReadOnlySpan<int> window, int at, int width, int height, Span<int> output)
+    private static void Full(Span<int> window, int at, int width, int height, Span<int> output)
     {
         for (int j = 0; j < height; j++)
         {
@@ -211,11 +214,11 @@ internal static partial class InterPrediction
     }
 
     /// <summary>The horizontal half samples b (8-241, 8-243), their G at window position <paramref name="at"/> on.</summary>
-    private static void HalfHorizontal(ReadOnlySpan<int> window, int at, int width, int height, int max, Span<int> output)
+    private static void HalfHorizontal(Span<int> window, int at, int width, int height, int max, Span<int> output)
     {
         for (int j = 0; j < height; j++)
         {
-            ReadOnlySpan<int> s = window.Slice(at + (j * LumaWindow) - 2, width + 5);
+            Span<int> s = window.Slice(at + (j * LumaWindow) - 2, width + 5);
             Span<int> o = output.Slice(j * 16, width);
             for (int i = 0; i < o.Length; i++)
             {
@@ -226,7 +229,7 @@ internal static partial class InterPrediction
     }
 
     /// <summary>The vertical half samples h (8-242, 8-244), their G at window position <paramref name="at"/> on.</summary>
-    private static void HalfVertical(ReadOnlySpan<int> window, int at, int width, int height, int max, Span<int> output)
+    private static void HalfVertical(Span<int> window, int at, int width, int height, int max, Span<int> output)
     {
         for (int j = 0; j < height; j++)
         {
@@ -243,12 +246,12 @@ internal static partial class InterPrediction
     }
 
     /// <summary>The center half samples j (8-245, 8-247): the vertical filter over unrounded b1 of every window row.</summary>
-    private static void Center(ReadOnlySpan<int> window, int width, int height, int max, Span<int> output)
+    private static void Center(Span<int> window, int width, int height, int max, Span<int> output)
     {
         Span<int> b1 = stackalloc int[LumaWindow * 16];
         for (int r = 0; r < height + 5; r++)
         {
-            ReadOnlySpan<int> s = window.Slice(r * LumaWindow, width + 5);
+            Span<int> s = window.Slice(r * LumaWindow, width + 5);
             Span<int> o = b1.Slice(r * 16, width);
             for (int i = 0; i < o.Length; i++)
             {
@@ -269,6 +272,7 @@ internal static partial class InterPrediction
         }
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static int ClipHalf(int value, int max)
     {
         value = (value + 16) >> 5;

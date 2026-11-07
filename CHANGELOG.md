@@ -25,6 +25,8 @@ run time.
 
 - AAC: the IMDCT's FFT does its bit reversal and first stage in one vector pass, and its post-twiddle runs in
   vectors: 15 to 23% off an AAC LC frame on x64 and ARM64, and 3% off 5.1 HE-AAC. The output is unchanged.
+- H.264: above 8 bits, the bi-predicted average, weighted prediction and the inverse transform adds run in vectors
+  instead of a loop per sample: about 9 to 13% fewer instructions in 10-bit streams (3% of the frame under the JIT).
 - H.264: in MBAFF frames and field pictures, motion vector prediction finds its neighbours A, B and C in one call:
   about 1.8% fewer instructions in MBAFF frames, 1.6% in field pictures and 1.1% in progressive CAVLC frames.
 - H.264: in MBAFF frames and field pictures, CABAC's context selection reads a macroblock's left and above neighbours

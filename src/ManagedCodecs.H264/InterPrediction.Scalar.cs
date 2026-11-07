@@ -34,6 +34,9 @@ internal static partial class InterPrediction
     {
     }
 
+    public static void AverageBlock16(ReadOnlySpan<ushort> a, ReadOnlySpan<ushort> b, int stride, int width, int height, Span<ushort> output, int outputStride) =>
+        AverageBlockReference(a, b, stride, width, height, output, outputStride);
+
     public static void Average(ReadOnlySpan<byte> a, ReadOnlySpan<byte> b, int stride, int width, int height, Span<byte> output, int outputStride)
     {
         for (int j = 0; j < height; j++)

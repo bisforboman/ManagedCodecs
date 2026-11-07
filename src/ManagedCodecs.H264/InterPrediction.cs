@@ -156,6 +156,13 @@ internal static partial class InterPrediction
             return;
         }
 
+        AverageBlock16(MemoryMarshal.Cast<TPixel, ushort>(a), MemoryMarshal.Cast<TPixel, ushort>(b), stride, width, height, MemoryMarshal.Cast<TPixel, ushort>(output), outputStride);
+    }
+
+    /// <summary><see cref="AverageBlock{TPixel}"/> by the definition (8-448), which the vector versions are tested against.</summary>
+    public static void AverageBlockReference<TPixel>(ReadOnlySpan<TPixel> a, ReadOnlySpan<TPixel> b, int stride, int width, int height, Span<TPixel> output, int outputStride)
+        where TPixel : unmanaged
+    {
         for (int j = 0; j < height; j++)
         {
             for (int i = 0; i < width; i++)

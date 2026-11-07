@@ -1,14 +1,16 @@
 using Godot;
 using ManagedCodecs.Playback;
 
-namespace ManagedCodecs.GodotSample;
+namespace ManagedCodecs.GodotAddon;
 
 /// <summary>
 /// Plays a video file (H.264 or MJPEG, AAC audio; MP4, Matroska or AVI) into this rectangle's texture, decoded by
 /// ManagedCodecs.Playback: a thread of its own decodes ahead (<see cref="MediaPlayer"/>), <see cref="_Process"/> shows
 /// the newest frame due by a clock started at the first frame (late ones are dropped), and the audio streams through
-/// an <see cref="AudioStreamGenerator"/>. Not a media player: no seeking, no pause.
+/// an <see cref="AudioStreamGenerator"/>. Not a media player: no seeking, no pause. A global class, so the editor's Add
+/// Node dialog lists it once the project has built.
 /// </summary>
+[GlobalClass]
 public partial class ManagedCodecsVideo : TextureRect
 {
     private MediaPlayer? _player;

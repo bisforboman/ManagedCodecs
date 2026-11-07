@@ -262,6 +262,54 @@ public class InterPredictionTests
 
 #if !UNITY_BUILD
     /// <summary>
+    /// The 16-bit weights and average against their references, at every bit depth above 8 (sums up to 14-bit samples
+    /// times 128), every block width, with extreme samples and weights one draw in ten.
+    /// </summary>
+    [Fact]
+    public void VectorWeights16_MatchReference()
+    {
+        var random = new Random(16);
+        var p0 = new ushort[16 * 16];
+        var p1 = new ushort[16 * 16];
+        var expected = new ushort[16 * 20];
+        var actual = new ushort[16 * 20];
+        for (int n = 0; n < 20000; n++)
+        {
+            int bitDepth = 9 + random.Next(6);
+            int max = (1 << bitDepth) - 1;
+            bool extreme = n % 10 == 0;
+            for (int i = 0; i < p0.Length; i++)
+            {
+                p0[i] = extreme ? (ushort)(random.Next(2) * max) : (ushort)random.Next(max + 1);
+                p1[i] = extreme ? (ushort)(random.Next(2) * max) : (ushort)random.Next(max + 1);
+            }
+
+            int width = new[] { 2, 4, 8, 16 }[random.Next(4)];
+            int height = new[] { 2, 4, 8, 16 }[random.Next(4)];
+            int logWd = random.Next(8);
+            int w0 = extreme ? (random.Next(2) == 0 ? -128 : 127) : random.Next(-128, 128);
+            int w1 = extreme ? (random.Next(2) == 0 ? -64 : 128) : random.Next(-128, 129);
+            int o = (extreme ? (random.Next(2) == 0 ? -128 : 127) : random.Next(-128, 128)) << (bitDepth - 8);
+            Array.Clear(expected);
+            Array.Clear(actual);
+
+            InterPrediction.WeightOneReference<ushort>(p0, 16, width, height, expected, 20, w0, o, logWd, max);
+            InterPrediction.WeightOne16(p0, 16, width, height, actual, 20, w0, o, logWd, max);
+            Assert.Equal(expected, actual);
+
+            InterPrediction.WeightBothReference<ushort>(p0, p1, 16, width, height, expected, 20, w0, w1, o, logWd, max);
+            InterPrediction.WeightBoth16(p0, p1, 16, width, height, actual, 20, w0, w1, o, logWd, max);
+            Assert.Equal(expected, actual);
+
+            InterPrediction.AverageBlockReference<ushort>(p0, p1, 16, width, height, expected, 20);
+            InterPrediction.AverageBlock16(p0, p1, 16, width, height, actual, 20);
+            Assert.Equal(expected, actual);
+        }
+    }
+#endif
+
+#if !UNITY_BUILD
+    /// <summary>
     /// The deep-sample window copy widens 8 samples a step: every width a window row takes, from starts where the
     /// plane holds a whole vector and from ones near its end where only the scalar tail may read.
     /// </summary>

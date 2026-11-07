@@ -49,22 +49,7 @@ jobs:
           BASE: ${{ inputs.base }}
           SAMPLES: ${{ inputs.samples }}
         run: |
-          # SCRATCH (#346, not for merging): the branch side is the same mcdec with tiering off reading a recorded
-          # dynamic-PGO profile (ReadPGOData), trained on samples the comparison does not time.
-          mcdec="$PWD/tools/ManagedCodecs.Cli/bin/Release/net10.0/mcdec.dll"
-          DOTNET_TieredCompilation=1 DOTNET_WritePGOData=1 DOTNET_PGODataPath="$RUNNER_TEMP/pgo-cabac.txt" \
-            dotnet "$mcdec" samples/h264-high-default.mp4 --loops 300 | grep "last loop"
-          DOTNET_TieredCompilation=1 DOTNET_WritePGOData=1 DOTNET_PGODataPath="$RUNNER_TEMP/pgo-cavlc.txt" \
-            dotnet "$mcdec" samples/h264-p-refs.mp4 --loops 400 | grep "last loop"
-          ls -la "$RUNNER_TEMP"/pgo-*.txt
-          {
-            echo '#!/bin/bash'
-            echo "case \"\$1\" in *bench-720p*) p=$RUNNER_TEMP/pgo-cavlc.txt ;; *) p=$RUNNER_TEMP/pgo-cabac.txt ;; esac"
-            echo "DOTNET_ReadPGOData=1 DOTNET_PGODataPath=\$p exec dotnet $mcdec \"\$@\""
-          } > "$RUNNER_TEMP/mcdec-static"
-          chmod +x "$RUNNER_TEMP/mcdec-static"
-          cat "$RUNNER_TEMP/mcdec-static"
           # shellcheck disable=SC2086
-          tools/bench.py --mcdec "$RUNNER_TEMP/mcdec-static" --base "$RUNNER_TEMP/base/tools/ManagedCodecs.Cli/bin/Release/net10.0/mcdec.dll" --runs 7 \
+          tools/bench.py --base "$RUNNER_TEMP/base/tools/ManagedCodecs.Cli/bin/Release/net10.0/mcdec.dll" --runs 7 \
             ${SAMPLES:+--only $SAMPLES} --report compare.md
           { echo "### $(uname -m): $(git rev-parse --short HEAD) against $BASE"; echo; cat compare.md; } >> "$GITHUB_STEP_SUMMARY"

@@ -191,12 +191,19 @@ vector paths and the definition; both builds hash the same on all 23 AAC samples
 without intrinsics. On Mono 6.12, medians of five interleaved runs against main: heaac-5.1 2.38 to 1.71 ms a frame
 (1.39 times), heaacv2-stereo 0.78 to 0.60 (1.30 times), AAC LC unchanged (it has no SBR). PACKAGE.md's table predates it.
 
+**Then the table properties** (a third pull request for #345): CABAC's `CabacTables.RangeTabLps`, `Cabac.MpsNext` and
+`LpsNext` (read at every bin, in `Decide`), deblocking's `Tc0` (every filtered line) and the context offsets by block
+category (`CodedBlockFlagCatOffset`, `SignificantCatOffset`, `AbsLevelCatOffset`, every block) are `static readonly`
+arrays in the Unity build: one declaration, the `ReadOnlySpan<byte>` property under `#if NET` and the array otherwise,
+so the data is written once; the reads that index stay as they are, and `Decide`'s three `Unsafe.Add` reads have an
+indexed form for the Unity build. ManagedCodecs.H264.dll for net10.0 is the same file byte for byte. On Mono 6.12,
+medians of five interleaved runs against main: h264-b-pyramid 4.47 to 3.88 ms a frame (1.15 times), h264-main-p-refs
+3.18 to 2.86 (1.11), h264-high-default 4.27 to 3.91 (1.09); the CAVLC streams, where only `Tc0` was hot, are unchanged
+(h264-bench-720p 39.7 and 39.4, h264-p-refs 2.59 and 2.60); both builds hash the same on all 337 H.264 samples.
+
 **Left** (not fixed here):
 
-- The table properties (`CabacTables.RangeTabLps`, `Cabac.MpsNext` and `LpsNext`, deblocking's `Tc0`,
-  `SignificantCatOffset`, `ScanPositionInc`, MJPEG's `ZigZag`): about 9% of a CABAC frame and 3.4% of the 720p CAVLC one
-  on Mono after this change. A Unity-only spelling (a `static readonly` array read where the net10.0 build keeps the
-  property) would remove most of it without touching CoreCLR's code.
+- MJPEG's `ZigZag` and CABAC's `ScanPositionInc`, read once a block into a local (one getter call a block, about 1%).
 - The remaining `Span`-to-`ReadOnlySpan` conversions and slices in hot code (about 1 to 3% of each profile).
 - Unity's own Mono and IL2CPP (above).
 

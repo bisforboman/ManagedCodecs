@@ -63,6 +63,9 @@ run time.
   profile).
 - ManagedCodecs.Unity on Mono: HE-AAC's QMF banks run their scalar FFT and windows by reference rather than through
   slices: on Mono 6.12, 5.1 HE-AAC 1.39 times as fast, HE-AAC v2 1.30 times. The output is unchanged.
+- ManagedCodecs.Unity on Mono: CABAC's and deblocking's tables are plain arrays in this build, which Mono reads
+  directly where it called a property's getter at every use: CABAC streams 1.09 to 1.15 times as fast on Mono 6.12.
+  The output, and the other packages' code, are unchanged.
 - MJPEG: a flat block's rows are written as one 8-byte store each instead of a call each: about 7 to 10% off a frame of
   a test pattern, nothing on noise.
 - HE-AAC: SBR's gains smoothed over time (a header with bs_smoothing_mode 0) and parametric stereo's mixing run in

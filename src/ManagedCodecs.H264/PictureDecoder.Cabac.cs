@@ -12,11 +12,32 @@ internal sealed partial class PictureDecoder<TPixel>
 {
     // ctxBlockCatOffset (Table 9-40) for ctxBlockCat 0..4: coded_block_flag,
     // significant_coeff_flag / last_significant_coeff_flag, coeff_abs_level_minus1.
-    private static ReadOnlySpan<byte> CodedBlockFlagCatOffset => [0, 4, 8, 12, 16];
+#if NET
+    private static ReadOnlySpan<byte> CodedBlockFlagCatOffset =>
+#else
+    // An array in the Unity build: Mono calls a ReadOnlySpan property's getter at every use, where CoreCLR reads the
+    // constant data in place (docs/decisions/2026-10-31-unity-netstandard.md, Mono's profile).
+    private static readonly byte[] CodedBlockFlagCatOffset =
+#endif
+        [0, 4, 8, 12, 16];
 
-    private static ReadOnlySpan<byte> SignificantCatOffset => [0, 15, 29, 44, 47];
+#if NET
+    private static ReadOnlySpan<byte> SignificantCatOffset =>
+#else
+    // An array in the Unity build: Mono calls a ReadOnlySpan property's getter at every use, where CoreCLR reads the
+    // constant data in place (docs/decisions/2026-10-31-unity-netstandard.md, Mono's profile).
+    private static readonly byte[] SignificantCatOffset =
+#endif
+        [0, 15, 29, 44, 47];
 
-    private static ReadOnlySpan<byte> AbsLevelCatOffset => [0, 10, 20, 30, 39];
+#if NET
+    private static ReadOnlySpan<byte> AbsLevelCatOffset =>
+#else
+    // An array in the Unity build: Mono calls a ReadOnlySpan property's getter at every use, where CoreCLR reads the
+    // constant data in place (docs/decisions/2026-10-31-unity-netstandard.md, Mono's profile).
+    private static readonly byte[] AbsLevelCatOffset =
+#endif
+        [0, 10, 20, 30, 39];
 
     // ctxIdxInc of significant_coeff_flag and last_significant_coeff_flag in 8x8 blocks of frames
     // by scan position (Table 9-43), for positions 0..62.

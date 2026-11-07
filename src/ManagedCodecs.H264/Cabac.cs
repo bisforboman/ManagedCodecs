@@ -231,13 +231,21 @@ internal sealed class Cabac
     {
         int ctx = context;
         int state = ctx & 63;
+#if NET
         int lps = Unsafe.Add(ref MemoryMarshal.GetReference(CabacTables.RangeTabLps), (state << 2) + ((range >> 6) & 3)); // state < 64, so under 256
+#else
+        int lps = CabacTables.RangeTabLps[(state << 2) + ((range >> 6) & 3)]; // the Unity build's arrays
+#endif
         range -= lps;
         ulong scaledRange = (ulong)range << bits;
         int bin = ctx >> 6;
         if (value < scaledRange)
         {
+#if NET
             context = Unsafe.Add(ref MemoryMarshal.GetReference(MpsNext), ctx); // ctx < 128
+#else
+            context = MpsNext[ctx];
+#endif
             if (range >= 256)
             {
                 return bin;
@@ -248,7 +256,11 @@ internal sealed class Cabac
             value -= scaledRange;
             range = lps;
             bin ^= 1;
+#if NET
             context = Unsafe.Add(ref MemoryMarshal.GetReference(LpsNext), ctx);
+#else
+            context = LpsNext[ctx];
+#endif
         }
 
         int shift = BitOperations.LeadingZeroCount((uint)range) - 23;
@@ -328,7 +340,13 @@ internal sealed class Cabac
     /// compiled before the class's static constructor ran (mcdec compiles each method once, at its first call) checks
     /// that the constructor ran and loads the array at every use. The tests derive it from Table 9-45.
     /// </remarks>
+#if NET
     internal static ReadOnlySpan<byte> MpsNext =>
+#else
+    // An array in the Unity build: Mono calls a ReadOnlySpan property's getter at every use, where CoreCLR reads the
+    // constant data in place (docs/decisions/2026-10-31-unity-netstandard.md, Mono's profile).
+    internal static readonly byte[] MpsNext =
+#endif
     [
         1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16,
         17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32,
@@ -344,7 +362,13 @@ internal sealed class Cabac
     /// The context after an LPS, by context: transIdxLPS of its state (Table 9-45), valMPS switched at state 0
     /// (9.3.3.2.1.1). Constant data, as <see cref="MpsNext"/>.
     /// </summary>
+#if NET
     internal static ReadOnlySpan<byte> LpsNext =>
+#else
+    // An array in the Unity build: Mono calls a ReadOnlySpan property's getter at every use, where CoreCLR reads the
+    // constant data in place (docs/decisions/2026-10-31-unity-netstandard.md, Mono's profile).
+    internal static readonly byte[] LpsNext =
+#endif
     [
         64, 0, 1, 2, 2, 4, 4, 5, 6, 7, 8, 9, 9, 11, 11, 12,
         13, 13, 15, 15, 16, 16, 18, 18, 19, 19, 21, 21, 22, 22, 23, 24,

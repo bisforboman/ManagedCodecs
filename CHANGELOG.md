@@ -11,7 +11,9 @@ share internals, so each depends on the others at exactly its own version (`[X]`
 then reports a mix of versions (NU1107, or NU1608 for a newer one referenced directly) rather than letting it fail at
 run time.
 
-## Unreleased
+## 0.8.1 – 2026-11-07
+
+H.264 decodes a little faster. No change to the public API, hence a patch version.
 
 ### Changed
 

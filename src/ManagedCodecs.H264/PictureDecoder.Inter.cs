@@ -1003,9 +1003,59 @@ internal sealed partial class PictureDecoder<TPixel>
     /// (rounded towards zero) and twice the reference index, a field neighbour of a frame
     /// macroblock with twice the motion and half the index.
     /// </remarks>
-    private Motion MotionNeighbor(int list, int mbAddr, int x, int y, int currentBlock)
+    private Motion MotionNeighbor(int list, int mbAddr, int x, int y, int currentBlock) =>
+        MotionAt(list, mbAddr, currentBlock, Neighbor(mbAddr, x, y));
+
+    /// <summary>Luma motion vector prediction for list <paramref name="list"/> (8.4.1.3).</summary>
+    private (int X, int Y) PredictMv(int list, int mbAddr, int x, int y, int w, int h, int refIdx, PartitionShape shape)
     {
-        var (n, xW, yW) = Neighbor(mbAddr, x, y);
+        int current = BlockIndex(x / 4, y / 4);
+        if (_pairSlots)
+        {
+            var (pa, pb, pc) = AffMotionNeighbors(list, mbAddr, x, y, w, current);
+            return PredictMv(x, y, refIdx, shape, pa, pb, pc);
+        }
+
+        var a = MotionNeighbor(list, mbAddr, x - 1, y, current);
+        var b = MotionNeighbor(list, mbAddr, x, y - 1, current);
+        return PredictMv(list, mbAddr, x, y, w, refIdx, shape, a, b);
+    }
+
+    /// <summary>
+    /// A, B and C (D where C is not available) of a partition in an MBAFF frame or field picture: what
+    /// <see cref="MotionNeighbor"/> reads, with the pairs around the macroblock found once for the three or four
+    /// lookups (<see cref="AffPairsOf"/>) rather than once each.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private (Motion A, Motion B, Motion C) AffMotionNeighbors(int list, int mbAddr, int x, int y, int w, int current)
+    {
+        ref readonly var pairs = ref AffPairsOf(mbAddr);
+        var a = MotionAt(list, mbAddr, current, x - 1 >= 0 ? (mbAddr, x - 1, y) : AffNeighbor(in pairs, x - 1, y, 16, 16));
+        var b = MotionAt(list, mbAddr, current, y - 1 >= 0 ? (mbAddr, x, y - 1) : AffNeighbor(in pairs, x, y - 1, 16, 16));
+        var c = MotionAt(list, mbAddr, current, y - 1 >= 0 && x + w < 16 ? (mbAddr, x + w, y - 1) : AffNeighbor(in pairs, x + w, y - 1, 16, 16));
+        if (!c.Available)
+        {
+            c = MotionAt(list, mbAddr, current, x - 1 >= 0 && y - 1 >= 0 ? (mbAddr, x - 1, y - 1) : AffNeighbor(in pairs, x - 1, y - 1, 16, 16));
+        }
+
+        if (CheckMotionNeighbors)
+        {
+            var c1 = MotionNeighbor(list, mbAddr, x + w, y - 1, current);
+            var expected = (MotionNeighbor(list, mbAddr, x - 1, y, current), MotionNeighbor(list, mbAddr, x, y - 1, current), c1.Available ? c1 : MotionNeighbor(list, mbAddr, x - 1, y - 1, current));
+            if ((a, b, c) != expected)
+            {
+                throw new InvalidOperationException($"Macroblock {mbAddr}, partition at ({x}, {y}), list {list}: neighbours {(a, b, c)} found once, {expected} one by one.");
+            }
+        }
+
+        return (a, b, c);
+    }
+
+    /// <summary><see cref="MotionNeighbor"/> at a location already found (6.4.12).</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private Motion MotionAt(int list, int mbAddr, int currentBlock, (int Mb, int X, int Y) location)
+    {
+        var (n, xW, yW) = location;
         if (n < 0)
         {
             return new Motion(false, -1, 0, 0);
@@ -1029,15 +1079,6 @@ internal sealed partial class PictureDecoder<TPixel>
         return new Motion(true, refIdx, _mvX[list][block], mvY);
     }
 
-    /// <summary>Luma motion vector prediction for list <paramref name="list"/> (8.4.1.3).</summary>
-    private (int X, int Y) PredictMv(int list, int mbAddr, int x, int y, int w, int h, int refIdx, PartitionShape shape)
-    {
-        int current = BlockIndex(x / 4, y / 4);
-        var a = MotionNeighbor(list, mbAddr, x - 1, y, current);
-        var b = MotionNeighbor(list, mbAddr, x, y - 1, current);
-        return PredictMv(list, mbAddr, x, y, w, refIdx, shape, a, b);
-    }
-
     /// <summary><see cref="PredictMv(int, int, int, int, int, int, int, PartitionShape)"/> with neighbours A and B already read (P_Skip reads them first).</summary>
     private (int X, int Y) PredictMv(int list, int mbAddr, int x, int y, int w, int refIdx, PartitionShape shape, Motion a, Motion b)
     {
@@ -1048,6 +1089,13 @@ internal sealed partial class PictureDecoder<TPixel>
             c = MotionNeighbor(list, mbAddr, x - 1, y - 1, current); // D replaces C
         }
 
+        return PredictMv(x, y, refIdx, shape, a, b, c);
+    }
+
+    /// <summary>Luma motion vector prediction (8.4.1.3) from neighbours A, B and C (D where C is not available).</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static (int X, int Y) PredictMv(int x, int y, int refIdx, PartitionShape shape, Motion a, Motion b, Motion c)
+    {
         // Directional prediction for 16x8 and 8x16 partitions (8.4.1.3).
         if (shape == PartitionShape.Wide16x8)
         {

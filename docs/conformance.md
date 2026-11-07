@@ -909,6 +909,10 @@ parent), callgrind counted 247.25 to 233.40 M instructions a steady loop of `h26
 to 1945.3 M of `h264-bench-720p.mp4` (-3.1%). The first loop fell by as much (256.1 to 242.3 M and 2004 to 1943 M):
 there is no JIT at startup to pay for the larger methods. The binary grew by 81 KB. The cloud VM's wall clock
 (`tools/bench.py --base`, nine interleaved runs) spread from 0.955 to 1.051 over five samples, within its noise.
+PGO's warm-up, as against its steady gain (2026-11-07, #347): each hot method is compiled three times, and the tier-1
+compiles queue on one background thread, busy until about frame 1,000; the per-picture methods wait late in that
+queue. `AggressiveOptimization` on the slice and picture drivers was tried and dropped (4 to 6% faster on one
+stream, 4% slower on two). The measurements, here and on GitHub's runners, are in docs/notes/jit-warmup-2026-11.md.
 
 Deeper samples' kernels next (#337, 2026-11-07). Above 8 bits the bi-predicted average, the explicit and implicit
 weights and the 4x4, 8x8 and DC-only inverse transform adds were the by-the-definition loops over spans. They now run

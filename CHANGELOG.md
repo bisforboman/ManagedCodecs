@@ -1,7 +1,7 @@
 # Changelog
 
 Versions are git tags (`vX.Y.Z`); each one publishes every package (ManagedCodecs.Core, .Containers, .Mjpeg, .H264,
-.Aac, .Thumbnails, .Playback, .Unity and the ManagedCodecs meta-package) to nuget.org at that version, and a GitHub release with this file's section
+.Aac, .Thumbnails, .Playback, .MonoGame, .Unity and the ManagedCodecs meta-package) to nuget.org at that version, and a GitHub release with this file's section
 as its notes. `release.yml` releases on the push to main that brings a version heading not yet tagged, so a release
 is a pull request that turns "Unreleased" into "## X.Y.Z – date" and runs `tools/ship-public-api.py`. From 0.1.0 on, the
 public API changes only in a new minor version (0.2.0, 0.3.0, ...), with a "Breaking changes" entry; a patch version
@@ -20,6 +20,9 @@ run time.
   (`AudioChunk`), and gives the game loop the frame due by its clock (`TakeFrame`), dropping late ones; with
   `PlaybackOptions` (decoder threads, matrix and range, loop) and `PlaybackStatistics`. `ManagedCodecs.Unity` holds it
   too. The MonoGame, Godot and Unity samples now use it.
+- New package `ManagedCodecs.MonoGame`: `VideoTexture` plays a file into a `Texture2D` and a
+  `DynamicSoundEffectInstance` with the game's clock (`Update`, `Play`, `Pause`, `Volume`) and draws it letterboxed, at
+  its sample aspect ratio and turned upright (`Draw`). Any MonoGame 3.8 platform package, on .NET 10.
 
 ### Changed
 

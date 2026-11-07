@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- ManagedCodecs.Playback for MonoGame (issue #352): VideoTexture puts MediaPlayer's frames in a Texture2D, its
+       audio in a DynamicSoundEffectInstance, and draws the picture letterboxed, at its aspect ratio and turned upright.
+       net10.0 only, like the other packages (the owner, #352), so a game that uses it is on .NET 10. -->
+  <PropertyGroup>
+    <RootNamespace>ManagedCodecs.MonoGame</RootNamespace>
+    <PackageId>ManagedCodecs.MonoGame</PackageId>
+    <Description>Video for MonoGame games: VideoTexture plays an MP4, Matroska, WebM or AVI file (H.264 or MJPEG, AAC audio) into a Texture2D and a DynamicSoundEffectInstance, decoded on a thread of its own by ManagedCodecs.Playback, in pure managed C#. Any MonoGame 3.8 platform.</Description>
+    <PackageTags>$(PackageTags);playback;video-player;game;monogame;fna</PackageTags>
+    <!-- No release of this package on nuget.org yet, so package validation has no baseline to compare with (the one in
+         Directory.Build.props is the other packages'); the pull request that sets the baseline after its first release
+         removes this line. -->
+    <PackageValidationBaselineVersion></PackageValidationBaselineVersion>
+  </PropertyGroup>
+
+  <!-- Its own page on nuget.org in place of the shared PACKAGE.md (Directory.Build.props). -->
+  <ItemGroup>
+    <None Remove="$(MSBuildThisFileDirectory)..\..\PACKAGE.md" />
+    <None Include="PACKAGE.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="ManagedCodecs.Tests" />
+  </ItemGroup>
+
+  <!-- Compiled against DesktopGL's MonoGame.Framework, the same API every platform package (WindowsDX, Android, iOS)
+       has, and not passed on: the game brings its own platform's package. -->
+  <ItemGroup>
+    <PackageReference Include="MonoGame.Framework.DesktopGL" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ManagedCodecs.Playback\ManagedCodecs.Playback.csproj" />
+  </ItemGroup>
+
+</Project>

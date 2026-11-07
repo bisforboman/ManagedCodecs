@@ -67,7 +67,7 @@ The owner (2026-10-31), against the recommendation to keep it parked:
   Godot yet.
 - mcplay (the MonoGame sample) run under Xvfb with Mesa's software renderer (2026-11-04): Caminandes plays at its
   24 fps, decoding 4.7 ms a frame and converting to RGBA 13.0 ms; a 37 Mbps 1080p30 clip keeps up too, 9.0 and
-  18.9 ms. The CPU conversion, not the decoder, is the larger cost (tools/ManagedCodecs.MonoGame/README.md). The run
+  18.9 ms. The CPU conversion, not the decoder, is the larger cost (tools/ManagedCodecs.MonoGame.Sample/README.md). The run
   found a crash without an audio device (OpenAL's NoAudioHardwareException), now caught: the video plays alone.
 - The RGBA conversion (mcplay's, linked into the Godot and Unity samples) by 128-bit vectors and over threads
   (2026-11-04): Caminandes' 1080p frames from 6.5 ms to 1.9 ms each alone, from about 12 to 8 ms in mcplay beside the
@@ -80,5 +80,10 @@ The owner (2026-10-31), against the recommendation to keep it parked:
   samples linked from mcplay are now a package. `MediaPlayer` hands the game loop the frame due by the game's own clock
   (`TakeFrame`, which drops late ones; every sample did that step itself) and the audio as float stereo (`TakeAudio`);
   a damaged file ends playback with the exception in `Error` instead of an unhandled one on its thread; `Loop` plays
-  it again. No engine's API in it; `ManagedCodecs.Unity` compiles it too. A thin MonoGame adapter (a `Texture2D` and a
-  `DynamicSoundEffectInstance`, net10.0 only like the rest) is to follow as `ManagedCodecs.MonoGame`.
+  it again. No engine's API in it; `ManagedCodecs.Unity` compiles it too.
+- `ManagedCodecs.MonoGame` (#352): `VideoTexture`, `MediaPlayer` into a `Texture2D` and a `DynamicSoundEffectInstance`
+  with the game's clock (play, pause, volume) and a letterboxed, upright `Draw`. Compiled against
+  `MonoGame.Framework.DesktopGL` without passing it on, so a game on any MonoGame platform package can use it (they
+  share one API); net10.0 only like the rest (the owner). mcplay, now `tools/ManagedCodecs.MonoGame.Sample` (the
+  package took the name), is a `Game` around it; run under Xvfb, it plays a clip and a 90-degree one turned as FFmpeg
+  turns it.

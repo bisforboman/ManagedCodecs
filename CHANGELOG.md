@@ -11,6 +11,13 @@ share internals, so each depends on the others at exactly its own version (`[X]`
 then reports a mix of versions (NU1107, or NU1608 for a newer one referenced directly) rather than letting it fail at
 run time.
 
+## Unreleased
+
+### Changed
+
+- H.264: in MBAFF frames and field pictures, motion vector prediction finds its neighbours A, B and C in one call:
+  about 1.8% fewer instructions in MBAFF frames, 1.6% in field pictures and 1.1% in progressive CAVLC frames.
+
 ## 0.8.1 – 2026-11-07
 
 H.264 decodes a little faster. No change to the public API, hence a patch version.

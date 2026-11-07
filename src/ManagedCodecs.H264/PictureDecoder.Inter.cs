@@ -601,29 +601,66 @@ internal sealed partial class PictureDecoder<TPixel>
         int block = (mbAddr * 16) + ((y >> 2) * 4) + (x >> 2);
         var ref0 = PictureOf(_refHandle[0][part]);
         var ref1 = PictureOf(_refHandle[1][part]);
-        if (_mbWidthC == 8 && !_pairSlots)
+        if (_mbWidthC == 8)
         {
-            if ((ref0 is null) != (ref1 is null))
+            if (!_pairSlots)
             {
-                if (slice.Header.Weights is null)
+                if ((ref0 is null) != (ref1 is null))
                 {
-                    PredictFromOne(ref0 ?? ref1!, ref0 is null ? 1 : 0, mbAddr, block, x, y, w, h, DefaultWeights);
+                    if (slice.Header.Weights is null)
+                    {
+                        PredictFromOne<FrameLayout>(ref0 ?? ref1!, ref0 is null ? 1 : 0, mbAddr, block, x, y, w, h, DefaultWeights);
+                        return;
+                    }
+
+                    var weights = Weighting(slice, _refIdx[0][part], _refIdx[1][part], bi: false, mbAddr, ref0, ref1);
+                    PredictFromOne<FrameLayout>(ref0 ?? ref1!, ref0 is null ? 1 : 0, mbAddr, block, x, y, w, h, weights);
                     return;
                 }
 
-                var weights = Weighting(slice, _refIdx[0][part], _refIdx[1][part], bi: false, mbAddr, ref0, ref1);
-                PredictFromOne(ref0 ?? ref1!, ref0 is null ? 1 : 0, mbAddr, block, x, y, w, h, weights);
-                return;
+                if (ref0 is not null)
+                {
+                    PredictFromTwo<FrameLayout>(slice, ref0, ref1!, mbAddr, part, block, x, y, w, h);
+                    return;
+                }
             }
-
-            if (ref0 is not null)
+            else if (PredictPairsFast(slice, mbAddr, part, block, x, y, w, h, ref0, ref1))
             {
-                PredictFromTwo(slice, ref0, ref1!, mbAddr, part, block, x, y, w, h);
                 return;
             }
         }
 
         PredictPartitionGeneral(slice, mbAddr, x, y, w, h, part, block, ref0, ref1);
+    }
+
+    /// <summary>
+    /// <see cref="PredictPartition"/>'s direct path in MBAFF frames and field pictures, out of line so that frames inline
+    /// only their own: false, and nothing done, for a partition it does not take.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private bool PredictPairsFast(SliceState slice, int mbAddr, int part, int block, int x, int y, int w, int h, Picture? ref0, Picture? ref1)
+    {
+        if ((ref0 is null) != (ref1 is null))
+        {
+            if (slice.Header.Weights is null)
+            {
+                PredictFromOne<PairLayout>(ref0 ?? ref1!, ref0 is null ? 1 : 0, mbAddr, block, x, y, w, h, DefaultWeights);
+                return true;
+            }
+
+            int shift = FieldIndexShift<PairLayout>(mbAddr);
+            var weights = Weighting(slice, _refIdx[0][part] >> shift, _refIdx[1][part] >> shift, bi: false, mbAddr, ref0, ref1);
+            PredictFromOne<PairLayout>(ref0 ?? ref1!, ref0 is null ? 1 : 0, mbAddr, block, x, y, w, h, weights);
+            return true;
+        }
+
+        if (ref0 is not null)
+        {
+            PredictFromTwo<PairLayout>(slice, ref0, ref1!, mbAddr, part, block, x, y, w, h);
+            return true;
+        }
+
+        return false;
     }
 
     /// <summary><see cref="PredictPartition"/> for every other partition.</summary>
@@ -676,28 +713,25 @@ internal sealed partial class PictureDecoder<TPixel>
     }
 
     /// <summary>
-    /// <see cref="PredictPartition"/> for the most common partition, straight to the kernels: one reference, a frame
-    /// macroblock of a frame (so a frame reference, and no chroma field offset), 4:2:0 or 4:2:2, any bit depth. With
+    /// <see cref="PredictPartition"/> for the most common partition, straight to the kernels: one reference, 4:2:0 or
+    /// 4:2:2, any bit depth, in frames, MBAFF frames and field pictures (<see cref="ReferencePlace{TLayout}"/>). With
     /// explicit weights (<paramref name="weights"/> not the default; implicit ones apply to two references) each
     /// component goes through the scratch block and <see cref="WeightOne"/>.
     /// </summary>
-    private void PredictFromOne(Picture reference, int list, int mbAddr, int block, int x, int y, int w, int h, in PartitionWeights weights)
+    private void PredictFromOne<TLayout>(Picture reference, int list, int mbAddr, int block, int x, int y, int w, int h, in PartitionWeights weights)
     {
         int mvX = _mvX[list][block];
         int mvY = _mvY[list][block];
-        int lumaX = (_mbColumn[mbAddr] * 16) + x;
-        int lumaY = (_mbRow[mbAddr] * 16) + y;
+        var (lumaX, lumaY) = ReferencePlace<TLayout>(mbAddr, x, y);
 
         // As in PredictComponent: the lowest row the 6-tap filter reads, and one more for chroma's.
         int lowestRow = lumaY + (mvY >> 2) + h + 3;
         reference.WaitForRow(lowestRow);
         CheckRowsFinal(reference, lumaY + (mvY >> 2) + h + 3);
         var picture = Picture;
-        int lumaStride = picture.LumaStride;
-        var luma = picture.Plane<TPixel>(0).AsSpan((lumaY * lumaStride) + lumaX);
-        var (chromaX, chromaY, chromaH, chromaMvY) = ChromaOfPartition(lumaX, lumaY, h, mvY);
-        int chromaStride = picture.ChromaStride;
-        int chromaOut = (chromaY * chromaStride) + chromaX;
+        var (lumaOut, lumaStride, chromaOut, chromaStride) = PicturePlace<TLayout>(mbAddr, x, y, lumaX, lumaY);
+        var luma = picture.Plane<TPixel>(0).AsSpan(lumaOut);
+        var (chromaX, chromaY, chromaH, chromaMvY) = ChromaOfPartition<TLayout>(lumaX, lumaY, h, mvY, mbAddr, reference);
         var cb = picture.Plane<TPixel>(1).AsSpan(chromaOut);
         var cr = picture.Plane<TPixel>(2).AsSpan(chromaOut);
         if (weights.IsDefault)
@@ -717,7 +751,7 @@ internal sealed partial class PictureDecoder<TPixel>
             }
         }
 
-        if (typeof(TPixel) == typeof(byte) && _mbHeightC == 8 && (x | y) == 0)
+        if (typeof(TPixel) == typeof(byte) && _mbHeightC == 8 && typeof(TLayout) == typeof(FrameLayout) && (x | y) == 0)
         {
             InterPrediction.PrefetchAhead(reference, lumaX + (mvX >> 2), lumaY + (mvY >> 2), _mbColumn[mbAddr] & 3);
         }
@@ -729,20 +763,19 @@ internal sealed partial class PictureDecoder<TPixel>
     }
 
     /// <summary>
-    /// <see cref="PredictPartition"/> for a bi-predicted partition under the same conditions as <see cref="PredictFromOne"/>:
+    /// <see cref="PredictPartition"/> for a bi-predicted partition under the same conditions as <see cref="PredictFromOne{TLayout}"/>:
     /// both predictions into the scratch blocks, then their rounded average, or the explicit or implicit weights where they
     /// differ from it.
     /// </summary>
-    private void PredictFromTwo(SliceState slice, Picture ref0, Picture ref1, int mbAddr, int part, int block, int x, int y, int w, int h)
+    private void PredictFromTwo<TLayout>(SliceState slice, Picture ref0, Picture ref1, int mbAddr, int part, int block, int x, int y, int w, int h)
     {
         int mvX0 = _mvX[0][block];
         int mvY0 = _mvY[0][block];
         int mvX1 = _mvX[1][block];
         int mvY1 = _mvY[1][block];
-        int lumaX = (_mbColumn[mbAddr] * 16) + x;
-        int lumaY = (_mbRow[mbAddr] * 16) + y;
+        var (lumaX, lumaY) = ReferencePlace<TLayout>(mbAddr, x, y);
         var weighting = slice.Header.Weights is not null || slice.Pps.WeightedBipredIdc == 2
-            ? Weighting(slice, _refIdx[0][part], _refIdx[1][part], bi: true, mbAddr, ref0, ref1)
+            ? Weighting(slice, _refIdx[0][part] >> FieldIndexShift<TLayout>(mbAddr), _refIdx[1][part] >> FieldIndexShift<TLayout>(mbAddr), bi: true, mbAddr, ref0, ref1)
             : DefaultWeights;
 
         // As in PredictComponent: each reference's lowest row the 6-tap filter reads, and one more for chroma's.
@@ -751,23 +784,21 @@ internal sealed partial class PictureDecoder<TPixel>
         int lowestRow1 = lumaY + (mvY1 >> 2) + h + 3;
         ref1.WaitForRow(lowestRow1);
         var picture = Picture;
+        var (lumaOut, lumaStride, chromaOut, chromaStride) = PicturePlace<TLayout>(mbAddr, x, y, lumaX, lumaY);
         var prediction0 = _predictionL0.AsSpan();
         var prediction1 = _predictionL1.AsSpan();
-        int lumaStride = picture.LumaStride;
         CheckRowsFinal(ref0, lumaY + (mvY0 >> 2) + h + 3);
         CheckRowsFinal(ref1, lumaY + (mvY1 >> 2) + h + 3);
         InterPrediction.PredictLumaBlock(ref0, lumaX, lumaY, w, h, mvX0, mvY0, prediction0, 16);
         InterPrediction.PredictLumaBlock(ref1, lumaX, lumaY, w, h, mvX1, mvY1, prediction1, 16);
-        Combine(picture.Plane<TPixel>(0).AsSpan((lumaY * lumaStride) + lumaX), lumaStride, w, h, 0);
-        if (typeof(TPixel) == typeof(byte) && _mbHeightC == 8 && (x | y) == 0)
+        Combine(picture.Plane<TPixel>(0).AsSpan(lumaOut), lumaStride, w, h, 0);
+        if (typeof(TPixel) == typeof(byte) && _mbHeightC == 8 && typeof(TLayout) == typeof(FrameLayout) && (x | y) == 0)
         {
             InterPrediction.PrefetchAhead(ref0, lumaX + (mvX0 >> 2), lumaY + (mvY0 >> 2), _mbColumn[mbAddr] & 3);
         }
 
-        var (chromaX, chromaY, chromaH, chromaMvY0) = ChromaOfPartition(lumaX, lumaY, h, mvY0);
-        int chromaMvY1 = ChromaOfPartition(lumaX, lumaY, h, mvY1).MvY;
-        int chromaStride = picture.ChromaStride;
-        int chromaOut = (chromaY * chromaStride) + chromaX;
+        var (chromaX, chromaY, chromaH, chromaMvY0) = ChromaOfPartition<TLayout>(lumaX, lumaY, h, mvY0, mbAddr, ref0);
+        int chromaMvY1 = ChromaOfPartition<TLayout>(lumaX, lumaY, h, mvY1, mbAddr, ref1).MvY;
 
         // Each list's Cb and Cr side by side in its scratch block (columns 0 and 8: chroma blocks are at most 8 wide here).
         PredictChromaPair(ref0, chromaX, chromaY, w >> 1, chromaH, mvX0, chromaMvY0, prediction0, prediction0[8..], 16);
@@ -790,12 +821,74 @@ internal sealed partial class PictureDecoder<TPixel>
     }
 
     /// <summary>
-    /// A frame macroblock's partition in chroma (8.4.1.4, 8.4.2.2.2): its top-left sample, its height, and the vertical
-    /// vector in eighth chroma samples. 4:2:0 halves both sides; 4:2:2 keeps the luma's rows, so the vector doubles.
+    /// Type arguments of <see cref="PredictFromOne{TLayout}"/> and <see cref="PredictFromTwo{TLayout}"/>: frames, or
+    /// MBAFF frames and field pictures (<see cref="_pairSlots"/>), compiled apart as <typeparamref name="TPixel"/> is, so
+    /// that frames pay nothing for the pairs' place and chroma field offset.
+    /// </summary>
+    private struct FrameLayout
+    {
+    }
+
+    /// <summary>The pairs' layout: see <see cref="FrameLayout"/>.</summary>
+    private struct PairLayout
+    {
+    }
+
+    /// <summary>
+    /// A partition in chroma (8.4.1.4, 8.4.2.2.2): its top-left sample in the reference's coordinates (a field
+    /// macroblock's are its field's), its height, and the vertical vector in eighth chroma samples. 4:2:0 halves both
+    /// sides and adds the offset of a field predicting from the other parity; 4:2:2 keeps the luma's rows, so the vector
+    /// doubles (<see cref="ChromaMvY"/>).
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private (int X, int Y, int Height, int MvY) ChromaOfPartition(int lumaX, int lumaY, int h, int mvY) =>
-        _mbHeightC == 16 ? (lumaX >> 1, lumaY, h, mvY * 2) : (lumaX >> 1, lumaY >> 1, h >> 1, mvY);
+    private (int X, int Y, int Height, int MvY) ChromaOfPartition<TLayout>(int lumaX, int lumaY, int h, int mvY, int mbAddr, Picture reference) =>
+        _mbHeightC == 16
+        ? (lumaX >> 1, lumaY, h, mvY * 2)
+        : (lumaX >> 1, lumaY >> 1, h >> 1, typeof(TLayout) == typeof(PairLayout) ? mvY + ChromaFieldOffset(mbAddr, reference) : mvY);
+
+    /// <summary>
+    /// The partition's top-left luma sample in the reference's coordinates (a field macroblock's are its field's), as
+    /// <see cref="PartitionPlace"/>.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private (int LumaX, int LumaY) ReferencePlace<TLayout>(int mbAddr, int x, int y)
+    {
+        if (typeof(TLayout) == typeof(FrameLayout))
+        {
+            return ((_mbColumn[mbAddr] * 16) + x, (_mbRow[mbAddr] * 16) + y);
+        }
+
+        int pair = mbAddr >> 1;
+        int lumaY = _fieldMb[mbAddr] ? (_mbRow[pair] * 16) + y : (_mbRow[pair] * 32) + ((mbAddr & 1) * 16) + y;
+        return ((_mbColumn[pair] * 16) + x, lumaY);
+    }
+
+    /// <summary>
+    /// Where the partition's samples go in the picture, as <see cref="PartitionPlace"/>: in frames straight from its
+    /// reference position, which is the picture's.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private (int LumaOut, int LumaStride, int ChromaOut, int ChromaStride) PicturePlace<TLayout>(int mbAddr, int x, int y, int lumaX, int lumaY)
+    {
+        if (typeof(TLayout) == typeof(FrameLayout))
+        {
+            int frameLumaStride = Picture.LumaStride;
+            int frameChromaStride = Picture.ChromaStride;
+            int chromaRow = _mbHeightC == 16 ? lumaY : lumaY >> 1;
+            return ((lumaY * frameLumaStride) + lumaX, frameLumaStride, (chromaRow * frameChromaStride) + (lumaX >> 1), frameChromaStride);
+        }
+
+        var (luma, lumaStride) = LumaPlace(mbAddr);
+        var (chroma, chromaStride) = ChromaPlace(mbAddr);
+        return (luma + (y * lumaStride) + x, lumaStride, chroma + ((_mbHeightC == 16 ? y : y / 2) * chromaStride) + (x / 2), chromaStride);
+    }
+
+    /// <summary>
+    /// 1 for a field macroblock of an MBAFF frame, whose reference indices count fields while the explicit weights
+    /// table counts frames (8.4.2.3); 0 otherwise.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private int FieldIndexShift<TLayout>(int mbAddr) => typeof(TLayout) == typeof(PairLayout) && IsMbaffFieldMb(mbAddr) ? 1 : 0;
 
     /// <summary>Both chroma components of one block: the 8-bit kernel's shared setup, or each in turn for deeper samples.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

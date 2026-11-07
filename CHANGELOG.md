@@ -25,6 +25,8 @@ run time.
 
 - H.264: the direct motion compensation path for frame macroblocks also takes samples above 8 bits and 4:2:2: about 2%
   fewer instructions in 10-bit and 4:2:2 streams.
+- H.264: MBAFF frames and field pictures take the direct motion compensation path too: about 1.8% fewer instructions
+  in MBAFF frames and 3% in field pictures.
 - AAC: the IMDCT's FFT does its bit reversal and first stage in one vector pass, and its post-twiddle runs in
   vectors: 15 to 23% off an AAC LC frame on x64 and ARM64, and 3% off 5.1 HE-AAC. The output is unchanged.
 - AAC: the IMDCT (its FFT, DCT-IV and fold) runs in single precision, four values a vector where it ran two

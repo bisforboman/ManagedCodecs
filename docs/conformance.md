@@ -62,6 +62,11 @@ tables, gray, noise) at 14 places each, with and without an EOI after the cut: 3
 - After an interlaced packet it refuses for a cut first field, FFmpeg pairs fields across packets, so its next frame
   is not that packet's two fields; the decoder's is.
 
+The Huffman decoder's table lookups (a whole coefficient, or a code and its length, in one lookup of 10 bits; MAXCODE
+from 11 bits on) are checked against T.81's Figure F.16 read bit by bit (`HuffmanTable.Decode`) by
+`HuffmanTableTests`, on the Annex K tables and on random ones, complete or not, with invalid DC sizes; the samples
+mostly reach the whole-coefficient entries. Its speed: docs/notes/mjpeg-entropy-2026-11.md.
+
 ## Real films
 
 Every sample above is a test pattern encoded to isolate a feature. `tools/realworld.py` (nightly, `realworld.yml`, a job
@@ -967,6 +972,22 @@ the LFE's included; only `QmfTests`' bounds of 1e-6 against the banks' sums in d
 162). But under the JIT the windowing's share of `heaac-5.1.mp4` fell only from 11.8 to 11.2% (six alternating pairs),
 and the wall clock did not move: twice the lanes did not halve the work. The banks stay in double; the rest of a float
 port (the FFTs, the DCT-IVs, the rotations, about 900 lines laid out for two-lane vectors of doubles) was not tried.
+
+The QMF transforms across time slots, one slot a vector lane, tried for speed and dropped (2026-11-07, #338). By perf
+the transforms take about 24% of `heaac-5.1.mp4`'s frame: the FFTs' vector stages 8.3%, their bit-reversal and first
+stage (scalar, from a copy) 5.0%, the DCT-IVs' packing 3.9%, the full synthesis bank's output stage 3.3%, the
+analysis bank's 2.5%, the rotations 0.8% (the windowing, apart, 9.3%). Eight slots at a time, laid out by point then
+slot, every FFT stage ran in whole vectors with its twiddle broadcast and the bit reversal folded into the transpose
+in (the analysis bank's FFT of 32, and the synthesis bank's two DCT-IVs side by side in 16 lanes), bit-identical to the
+slot-by-slot transforms (on random input, with AVX, with 128-bit vectors only and without intrinsics). It was slower: normalized by functions it
+leaves alone (the IMDCT, Huffman decoding, the covariances, the gains, dequantization; perf, six runs each, the order
+alternating) the frame took a median 5.7% more, and the wall clock agreed (steady +4 and +11% on two sets of ten
+interleaved runs; `heaacv2-stereo.mp4` -1 and -4%). The FFT in lanes took as long as the slot-by-slot vector stages it
+replaced (8.5% each): those are already full-width from a half-span of 4, so only the reorder and first stage (5%)
+went, and the 4x4 transposes in and out cost more than that. The banks' neighbours keep the slots' own layout (the
+windowing and the HF generator read by slot), so the transposes stay; built from 128-bit halves loaded from memory, one
+unpack a row, they are as cheap as they get. Sixteen slots at a time was slower still (its scratch outgrows L1). The
+code is on the branch `heaac-qmf-lanes-experiment`.
 
 Downsampled SBR (the config gives SBR the core's own rate, 44.1 kHz in the sample's sync extension) runs as for twice
 that rate, its frequency tables too (the sample's band runs from QMF band 9 to 23 of the 88.2 kHz grid), and

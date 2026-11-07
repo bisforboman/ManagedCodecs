@@ -4,7 +4,10 @@ name: Profile
 # tiered compilation off, enough loops that the JIT's start is a few percent) and the run summary lists the functions
 # above a share, by symbol and by library. For a machine the cloud VM can't be (ARM64), before a change aimed at it;
 # CLAUDE.md, Timing, says how to read perf shares. Dispatch it ("Run workflow", or `gh workflow run profile.yml
-# --ref <branch> -f sample=<name>`).
+# --ref <branch> -f sample=<name>`). `tiering: pgo` profiles the runtime's defaults instead (tiered compilation and
+# dynamic PGO), from `delay` ms on so that the warm-up is left out; `event: instructions` samples by retired
+# instructions where the runner has hardware counters (the ARM64 one; the x64 one falls back to the clock). Both
+# report `perf stat`'s instruction and cycle totals where counters exist (issue #346).
 on:
   workflow_dispatch:
     inputs:
@@ -17,6 +20,19 @@ on:
       threshold:
         description: The smallest share listed, in percent
         default: '0.5'
+      tiering:
+        description: off (mcdec's own setting, fully optimized at the first call) or pgo (the runtime's defaults)
+        type: choice
+        options: ['off', pgo]
+        default: 'off'
+      delay:
+        description: Milliseconds before perf starts sampling (leave out the warm-up, under pgo especially)
+        default: '0'
+      event:
+        description: cpu-clock, or instructions where the runner has hardware counters
+        type: choice
+        options: [cpu-clock, instructions]
+        default: cpu-clock
 
 permissions:
   contents: read
@@ -54,19 +70,38 @@ jobs:
           SAMPLE: ${{ inputs.sample }}
           LOOPS: ${{ inputs.loops }}
           THRESHOLD: ${{ inputs.threshold }}
+          TIERING: ${{ inputs.tiering }}
+          DELAY: ${{ inputs.delay }}
+          EVENT: ${{ inputs.event }}
           # The JIT's code by name (a perf map), without double mapping (else it shows as bare addresses).
           DOTNET_PerfMapEnabled: '1'
           DOTNET_EnableWriteXorExecute: '0'
-          DOTNET_TieredCompilation: '0'
         run: |
           mcdec=tools/ManagedCodecs.Cli/bin/Release/net10.0/mcdec.dll
-          "$PERF" record -q -e cpu-clock -F 2000 -o perf.data dotnet "$mcdec" "samples/$SAMPLE" --loops "$LOOPS" | tee mcdec.txt
+          # mcdec's project turns tiering off; the variable overrides it for pgo.
+          if [ "$TIERING" = pgo ]; then export DOTNET_TieredCompilation=1; else export DOTNET_TieredCompilation=0; fi
+          # Sampling by instructions needs hardware counters; without them, the clock.
+          if [ "$EVENT" = instructions ] && ! "$PERF" stat -e instructions -x, true 2>&1 | grep -qE 'not (supported|counted)'; then
+            sampling=(-e instructions -c 1000000)
+          else
+            EVENT=cpu-clock
+            sampling=(-e cpu-clock -F 2000)
+          fi
+          "$PERF" record -q "${sampling[@]}" -D "$DELAY" -o perf.data dotnet "$mcdec" "samples/$SAMPLE" --loops "$LOOPS" | tee mcdec.txt
+          # Totals for the whole process (warm-up included), where the runner counts them.
+          "$PERF" stat -e instructions,cycles -x, -o stat.txt dotnet "$mcdec" "samples/$SAMPLE" --loops "$LOOPS" > /dev/null || true
           cpu="$(grep -m1 -E '^(model name|Model)' /proc/cpuinfo | cut -d: -f2 | xargs || uname -m)"
           {
-            echo "### $(uname -m) ($cpu): \`$SAMPLE\`, $LOOPS loops, $(git rev-parse --short HEAD)"
+            echo "### $(uname -m) ($cpu): \`$SAMPLE\`, $LOOPS loops, tiering $TIERING, $EVENT from $DELAY ms, $(git rev-parse --short HEAD)"
             echo
             echo '```'
             grep -E '^(decoded|bench|last loop)' mcdec.txt
+            echo '```'
+            echo
+            echo 'perf stat, the whole process (another run):'
+            echo
+            echo '```'
+            grep -E 'instructions|cycles' stat.txt || echo 'no counters'
             echo '```'
             echo
             echo "By library:"

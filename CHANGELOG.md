@@ -15,6 +15,8 @@ run time.
 
 ### Changed
 
+- AAC: the IMDCT's FFT does its bit reversal and first stage in one vector pass, and its post-twiddle runs in
+  vectors: 12 to 15% off an AAC LC frame on x64 and 3% off 5.1 HE-AAC. The output is unchanged.
 - H.264: in MBAFF frames and field pictures, motion vector prediction finds its neighbours A, B and C in one call:
   about 1.8% fewer instructions in MBAFF frames, 1.6% in field pictures and 1.1% in progressive CAVLC frames.
 - H.264: in MBAFF frames and field pictures, CABAC's context selection reads a macroblock's left and above neighbours
@@ -23,6 +25,8 @@ run time.
 - H.264: spatial direct prediction finds a macroblock's neighbours A, B and C once for both its reference indices and
   its motion vectors, in MBAFF frames and field pictures in one call: about 2.2% fewer instructions in MBAFF frames
   with B pictures and 1.2% in field pictures.
+- MJPEG: the Huffman decoder keeps its bit buffer in registers, and a short code with long magnitude bits takes one
+  table lookup instead of two: about 6 to 7% off a frame.
 
 ## 0.8.1 – 2026-11-07
 

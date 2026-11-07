@@ -97,6 +97,12 @@ the class's static constructor has run, and Native AOT checks the same way. Cons
 `static ReadOnlySpan<byte> X => [...]` don't pay it (#313, `MpsNext` and `LpsNext`: 2.8% of a CABAC frame by count, about
 1.7% by perf).
 `DOTNET_ReadyToRun=0 DOTNET_JitDisasm=<method>` shows the JIT's code, checks included.
+Counting them in all of a decoder (`DOTNET_JitDisasm='ManagedCodecs.H264.*:*' DOTNET_JitStdOutFile=<file>`, the
+`CORINFO_HELP_GET*STATIC_BASE` calls by method) found few left in H.264 by 2026-11 (issue #346): `Cavlc.ReadResidualBlock`
+(six), CABAC's context bases and the deblocking filter's tC0 rows, now constant data or initialized before the first
+slice. That took about 0.15% (High, CABAC) to 0.5% (MBAFF) of the AOT build's instructions and less than the JIT build's
+noise: they do not explain dynamic PGO's gain. A class whose static constructor is run up front (`PictureDecoder`'s,
+`Cavlc`'s) gets no checks from the JIT, but still does from Native AOT, unless the compiler preinitializes it.
 
 Not the JIT build: under valgrind (seen on runtime 10.0.13) the JIT's full-optimization compiles fail and fall back to
 MinOpts, where every span index is a call (the QMF FFT's profile, all MinOpts, was 7 times the native instruction

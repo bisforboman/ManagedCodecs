@@ -76,3 +76,9 @@ The owner (2026-10-31), against the recommendation to keep it parked:
   without Wine on Linux (MGFXC0001), and the CPU conversion is now about 2 ms a 1080p frame. Wine in CI, a committed
   compiled shader and a third-party compiler (ShadowDusk) were the other options. Revisit when MonoGame compiles
   shaders natively.
+- `ManagedCodecs.Playback` (the owner, 2026-11-07, issue #352): the decoding thread and the RGBA conversion the three
+  samples linked from mcplay are now a package. `MediaPlayer` hands the game loop the frame due by the game's own clock
+  (`TakeFrame`, which drops late ones; every sample did that step itself) and the audio as float stereo (`TakeAudio`);
+  a damaged file ends playback with the exception in `Error` instead of an unhandled one on its thread; `Loop` plays
+  it again. No engine's API in it; `ManagedCodecs.Unity` compiles it too. A thin MonoGame adapter (a `Texture2D` and a
+  `DynamicSoundEffectInstance`, net10.0 only like the rest) is to follow as `ManagedCodecs.MonoGame`.

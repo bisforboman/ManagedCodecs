@@ -683,9 +683,9 @@ internal sealed partial class PictureDecoder<TPixel>
     {
         if (category == BlockCategory.Luma8x8)
         {
-            var b = Contexts8x8[(component * 2) + (field ? 1 : 0)];
+            var b = Contexts8x8.Slice(((component * 2) + (field ? 1 : 0)) * 3, 3);
             int cbf = codedBlockFlagInc < 0 ? -1 : 1012 + (component * 4) + codedBlockFlagInc;
-            return c.ResidualBlock(cbf, b.Significant, b.Last, field ? Significant8x8FieldInc : Significant8x8Inc, Last8x8Inc, b.Abs, 4, maxNumCoeff, block, scan);
+            return c.ResidualBlock(cbf, b[0], b[1], field ? Significant8x8FieldInc : Significant8x8Inc, Last8x8Inc, b[2], 4, maxNumCoeff, block, scan);
         }
 
         int cat = (int)category;
@@ -709,14 +709,14 @@ internal sealed partial class PictureDecoder<TPixel>
                 scan);
         }
 
-        var bases = Contexts4x4[(set * 2) + (field ? 1 : 0)];
+        var bases = Contexts4x4.Slice(((set * 2) + (field ? 1 : 0)) * 4, 4);
         return c.ResidualBlock(
-            bases.CodedBlockFlag + CodedBlockFlagCatOffset[cat] + codedBlockFlagInc,
-            bases.Significant + SignificantCatOffset[cat],
-            bases.Last + SignificantCatOffset[cat],
+            bases[0] + CodedBlockFlagCatOffset[cat] + codedBlockFlagInc,
+            bases[1] + SignificantCatOffset[cat],
+            bases[2] + SignificantCatOffset[cat],
             inc,
             inc,
-            bases.Abs + AbsLevelCatOffset[cat],
+            bases[3] + AbsLevelCatOffset[cat],
             4,
             maxNumCoeff,
             block,
@@ -725,19 +725,21 @@ internal sealed partial class PictureDecoder<TPixel>
 
     // ctxIdxOffset of coded_block_flag, significant_coeff_flag, last_significant_coeff_flag and
     // coeff_abs_level_minus1 (Table 9-34) for blocks of ctxBlockCat < 5 by component (luma and
-    // 4:2:0/4:2:2 chroma; 4:4:4 Cb; Cr) and frame or field macroblock, then for 8x8 blocks.
-    private static readonly (int CodedBlockFlag, int Significant, int Last, int Abs)[] Contexts4x4 =
+    // 4:2:0/4:2:2 chroma; 4:4:4 Cb; Cr) and frame or field macroblock, then for 8x8 blocks (without coded_block_flag).
+    // Constant data, not arrays: an array checked its class's initialization at every block in the code compiled
+    // before the class's static constructor ran (mcdec compiles each method at its first call; Native AOT likewise).
+    private static ReadOnlySpan<short> Contexts4x4 =>
     [
-        (85, 105, 166, 227), (85, 277, 338, 227),
-        (460, 484, 572, 952), (460, 776, 864, 952),
-        (472, 528, 616, 982), (472, 820, 908, 982),
+        85, 105, 166, 227, 85, 277, 338, 227,
+        460, 484, 572, 952, 460, 776, 864, 952,
+        472, 528, 616, 982, 472, 820, 908, 982,
     ];
 
-    private static readonly (int Significant, int Last, int Abs)[] Contexts8x8 =
+    private static ReadOnlySpan<short> Contexts8x8 =>
     [
-        (402, 417, 426), (436, 451, 426),
-        (660, 690, 708), (675, 699, 708),
-        (718, 748, 766), (733, 757, 766),
+        402, 417, 426, 436, 451, 426,
+        660, 690, 708, 675, 699, 708,
+        718, 748, 766, 733, 757, 766,
     ];
 
     // ctxIdxInc of significant_coeff_flag and last_significant_coeff_flag in 4x4 blocks: the scan

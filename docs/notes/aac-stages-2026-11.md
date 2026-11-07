@@ -110,3 +110,17 @@ channel's 1024 doubles) and page faults.
 The largest single stage with no issue yet was inverse quantization. It is one table lookup and one multiply a
 coefficient, but its call and two data-dependent branches cost 16% of all of 5.1's samples: #373. After it, the
 IMDCT's two halves and the window remain, each already worked on.
+
+## Tried and dropped: the post-twiddle and the fold in one pass
+
+After #343, `Imdct.InverseVector` writes the post-twiddle's two halves to buffers (`re` in place and `q`), interleaves
+them into the DCT-IV's `u`, then reads `u` back for the three loops of the fold. I tried computing each block of eight of
+u's values in registers instead: four l's real parts and their mirror's negated imaginary parts, zipped. Each block
+was scaled once and stored straight to its two places in the output, one of them reversed, with no `u` or `q`. The
+output was the same to the bit (`VectorImdct_MatchesScalarExactly`, and the hashes of all 54 AAC and HE-AAC samples).
+
+The wall clock could not see it. Over 15 interleaved runs, steady time branch / main was 1.020 for `aac-stereo-48k`,
+0.992 for `aac-5.1` and 0.984 for `heaac/heaac-5.1`. By perf (three runs of each build, alternating), `InverseVector`'s
+samples over those of functions it does not touch fell by 4% in 5.1 (medians 0.277 and 0.265) and by about 7% in
+stereo, where the runs overlap. That is about 0.6% of a frame, below what this method resolves. The memory traffic
+it saved is small next to the FFT's passes, all of which stay in the L1 cache.

@@ -87,7 +87,14 @@ jobs:
             EVENT=cpu-clock
             sampling=(-e cpu-clock -F 2000)
           fi
-          "$PERF" record -q "${sampling[@]}" -D "$DELAY" -o perf.data dotnet "$mcdec" "samples/$SAMPLE" --loops "$LOOPS" | tee mcdec.txt
+          # -D only for a real delay: the runner's perf (Ubuntu's generic 6.8) rejects -D 0, which is the default.
+          delay=()
+          if [ "$DELAY" -gt 0 ] 2>/dev/null; then delay=(-D "$DELAY"); fi
+          "$PERF" record -q "${sampling[@]}" "${delay[@]}" -o perf.data dotnet "$mcdec" "samples/$SAMPLE" --loops "$LOOPS" | tee mcdec.txt
+          if ! "$PERF" report -i perf.data --stdio 2>/dev/null | grep -q '%'; then
+            echo "::error::perf recorded no samples: the delay ($DELAY ms) outlasted the decode; raise loops or lower the delay."
+            exit 1
+          fi
           # Totals for the whole process (warm-up included), where the runner counts them.
           "$PERF" stat -e instructions,cycles -x, -o stat.txt dotnet "$mcdec" "samples/$SAMPLE" --loops "$LOOPS" > /dev/null || true
           cpu="$(grep -m1 -E '^(model name|Model)' /proc/cpuinfo | cut -d: -f2 | xargs || uname -m)"

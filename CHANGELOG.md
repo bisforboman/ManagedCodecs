@@ -15,6 +15,8 @@ run time.
 
 ### Changed
 
+- AAC: the IMDCT's FFT does its bit reversal and first stage in one vector pass, and its post-twiddle runs in
+  vectors: 12 to 15% off an AAC LC frame on x64 and 3% off 5.1 HE-AAC. The output is unchanged.
 - H.264: in MBAFF frames and field pictures, motion vector prediction finds its neighbours A, B and C in one call:
   about 1.8% fewer instructions in MBAFF frames, 1.6% in field pictures and 1.1% in progressive CAVLC frames.
 - H.264: in MBAFF frames and field pictures, CABAC's context selection reads a macroblock's left and above neighbours
@@ -22,6 +24,8 @@ run time.
   and 1.7% in field pictures.
 - AAC: spectral data is read through packed Huffman tables, all of a codeword's sign bits at once: AAC LC at film
   bitrates decodes 14 to 21% faster (Elephants Dream's 192 kbit/s stereo, Sintel's trailer).
+- MJPEG: the Huffman decoder keeps its bit buffer in registers, and a short code with long magnitude bits takes one
+  table lookup instead of two: about 6 to 7% off a frame.
 
 ## 0.8.1 – 2026-11-07
 

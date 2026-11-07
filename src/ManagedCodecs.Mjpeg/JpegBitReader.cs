@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Diagnostics;
 
 namespace ManagedCodecs.Mjpeg;
 
@@ -79,16 +80,35 @@ internal ref struct JpegBitReader
         return value;
     }
 
-    /// <summary>Reads an <paramref name="n"/>-bit magnitude and sign-extends it (T.81 F.2.2.1, EXTEND).</summary>
-    public int ReceiveExtend(int n)
-    {
-        if (n == 0)
-        {
-            return 0;
-        }
+    /// <summary>The buffered bits, left-aligned: with <see cref="Count"/>, the state a caller holds in its locals.</summary>
+    public readonly ulong Buffer => _buffer;
 
-        return HuffmanTable.Extend(ReadBits(n), n);
+    /// <summary>How many of <see cref="Buffer"/>'s bits are valid.</summary>
+    public readonly int Count => _count;
+
+    /// <summary>Puts back the state a caller held in its locals (<see cref="Buffer"/>, <see cref="Count"/>).</summary>
+    public void Restore(ulong buffer, int count)
+    {
+        _buffer = buffer;
+        _count = count;
     }
+
+    /// <summary>
+    /// Refills a caller's state held in locals: <paramref name="buffer"/> with <paramref name="count"/> valid bits.
+    /// Returns the new buffer; its count is <see cref="FilledCount"/> of <paramref name="count"/>. Taking and returning
+    /// values (not references) keeps the caller's locals in registers.
+    /// </summary>
+    public ulong Fill(ulong buffer, int count)
+    {
+        _buffer = buffer;
+        _count = count;
+        Fill();
+        Debug.Assert(_count == FilledCount(count), "A refill takes whole bytes up to more than 56 bits.");
+        return _buffer;
+    }
+
+    /// <summary>The count of valid bits after a refill from <paramref name="count"/>: whole bytes up to more than 56.</summary>
+    public static int FilledCount(int count) => count + ((64 - count) & ~7);
 
     /// <summary>
     /// Drops buffered bits and consumes the RSTn marker that must come next.

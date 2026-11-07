@@ -1,0 +1,51 @@
+name: Mono table timing (scratch, #345)
+# Temporary: on a scratch branch only, never merged.
+on:
+  push:
+    branches: [scratch/mono-tables-345]
+permissions:
+  contents: read
+jobs:
+  mono:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
+        with:
+          dotnet-version: 10.0.x
+      - uses: ./.github/actions/samples
+      - name: Install Mono 6.12
+        run: |
+          sudo gpg --homedir /tmp --no-default-keyring --keyring /usr/share/keyrings/mono-official-archive-keyring.gpg \
+            --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys 3FA7E0328081BFF6A14DA29AA6A19B38D3D831EF
+          echo "deb [signed-by=/usr/share/keyrings/mono-official-archive-keyring.gpg] https://download.mono-project.com/repo/ubuntu stable-focal main" \
+            | sudo tee /etc/apt/sources.list.d/mono-official-stable.list
+          sudo apt-get update -q
+          sudo apt-get install -y -q mono-runtime mono-devel > /dev/null
+          mono --version | head -1
+      - name: Build
+        run: |
+          git fetch -q --depth 1 origin main
+          git worktree add -q ../base FETCH_HEAD
+          dotnet build ../base/tools/ManagedCodecs.Cli.Unity -c Release -v q -nologo
+          dotnet build tools/ManagedCodecs.Cli.Unity -c Release -v q -nologo
+      - name: Time interleaved
+        shell: bash
+        run: |
+          set -euo pipefail
+          b=../base/tools/ManagedCodecs.Cli.Unity/bin/Release/netstandard2.1/mcdec.dll
+          n=tools/ManagedCodecs.Cli.Unity/bin/Release/netstandard2.1/mcdec.dll
+          for spec in "h264-b-pyramid.mp4 20" "h264-main-p-refs.mp4 20" "h264-high-default.mp4 20" "h264-bench-720p.mp4 3" "h264-p-refs.mp4 20"; do
+            set -- $spec
+            for r in 1 2 3 4 5; do
+              if [ $((r % 2)) = 1 ]; then order="$b $n"; else order="$n $b"; fi
+              for u in $order; do
+                tag=new; [ "$u" = "$b" ] && tag=base
+                echo "$1 $tag $(mono "$u" "samples/$1" --loops $2 | grep -E '^last loop')"
+              done
+            done
+          done
+          mono $b --hash samples/*.mp4 samples/jm/*.mp4 samples/openh264/*.mp4 > base.txt 2>/dev/null
+          mono $n --hash samples/*.mp4 samples/jm/*.mp4 samples/openh264/*.mp4 > new.txt 2>/dev/null
+          diff base.txt new.txt && echo "same output on $(wc -l < new.txt) files"

@@ -55,6 +55,8 @@ run time.
   6.12, 720p H.264 about twice as fast (79 to 38 ms a frame), 320x240 H.264 1.3 to 1.5 times, MJPEG 1.45 times.
   The other packages' code is unchanged where it runs (docs/decisions/2026-10-31-unity-netstandard.md, Mono's
   profile).
+- ManagedCodecs.Unity on Mono: HE-AAC's QMF banks run their scalar FFT and windows by reference rather than through
+  slices: on Mono 6.12, 5.1 HE-AAC 1.39 times as fast, HE-AAC v2 1.30 times. The output is unchanged.
 - MJPEG: a flat block's rows are written as one 8-byte store each instead of a call each: about 7 to 10% off a frame of
   a test pattern, nothing on noise.
 - HE-AAC: SBR's gains smoothed over time (a header with bs_smoothing_mode 0) and parametric stereo's mixing run in

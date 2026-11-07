@@ -320,7 +320,7 @@ MUTATIONS = [
          find="negated: (0, 1));", replace="negated: (-1, -1));",
          tests="DisplayName~heaacv2-ipd"),
     dict(file="src/ManagedCodecs.Aac/Sbr/PsProcessor.cs",
-         find="double e11 = (hIm[bin] - g11) / length;", replace="double e11 = ((sign * hIm[bin]) - g11) / length;",
+         find="var dg = new Matrix((hIm[bin] - g0.M11) / length,", replace="var dg = new Matrix(((sign * hIm[bin]) - g0.M11) / length,",
          tests="DisplayName~heaacv2-ipd"),
     # Parametric stereo in 34 bands, which only the patched-FDK heaacv2-34 and heaacv2-34-ipd samples send, as FFmpeg
     # processes it: 34 bands when either IID or ICC is in 34, a switch clearing the decorrelator and moving the matrices,

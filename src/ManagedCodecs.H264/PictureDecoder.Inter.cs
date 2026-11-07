@@ -74,8 +74,9 @@ internal sealed partial class PictureDecoder<TPixel>
     private bool[] _direct = [];
 
     // Bi-prediction: each list's prediction of one partition before they are averaged.
-    private readonly TPixel[] _predictionL0 = new TPixel[16 * 16];
-    private readonly TPixel[] _predictionL1 = new TPixel[16 * 16];
+    // 16 x 16, and slack for whole-vector row reads (16 bytes) of a 4:2:2 Cr block at column 8 (PredictFromTwo).
+    private readonly TPixel[] _predictionL0 = new TPixel[(16 * 16) + 16];
+    private readonly TPixel[] _predictionL1 = new TPixel[(16 * 16) + 16];
 
     private enum PartitionShape
     {
@@ -600,7 +601,7 @@ internal sealed partial class PictureDecoder<TPixel>
         int block = (mbAddr * 16) + ((y >> 2) * 4) + (x >> 2);
         var ref0 = PictureOf(_refHandle[0][part]);
         var ref1 = PictureOf(_refHandle[1][part]);
-        if (typeof(TPixel) == typeof(byte) && _mbWidthC == 8 && _mbHeightC == 8 && !_pairSlots)
+        if (_mbWidthC == 8 && !_pairSlots)
         {
             if ((ref0 is null) != (ref1 is null))
             {
@@ -675,10 +676,10 @@ internal sealed partial class PictureDecoder<TPixel>
     }
 
     /// <summary>
-    /// <see cref="PredictPartition"/> for the most common partition, straight to the 8-bit kernels: one reference, a
-    /// frame macroblock of a frame (so a frame reference, and no chroma field offset), 4:2:0. With explicit weights
-    /// (<paramref name="weights"/> not the default; implicit ones apply to two references) each component goes through
-    /// the scratch block and <see cref="WeightOne"/>.
+    /// <see cref="PredictPartition"/> for the most common partition, straight to the kernels: one reference, a frame
+    /// macroblock of a frame (so a frame reference, and no chroma field offset), 4:2:0 or 4:2:2, any bit depth. With
+    /// explicit weights (<paramref name="weights"/> not the default; implicit ones apply to two references) each
+    /// component goes through the scratch block and <see cref="WeightOne"/>.
     /// </summary>
     private void PredictFromOne(Picture reference, int list, int mbAddr, int block, int x, int y, int w, int h, in PartitionWeights weights)
     {
@@ -693,36 +694,37 @@ internal sealed partial class PictureDecoder<TPixel>
         CheckRowsFinal(reference, lumaY + (mvY >> 2) + h + 3);
         var picture = Picture;
         int lumaStride = picture.LumaStride;
-        var luma = picture.Y.AsSpan((lumaY * lumaStride) + lumaX);
-        int chromaX = lumaX >> 1;
-        int chromaY = lumaY >> 1;
+        var luma = picture.Plane<TPixel>(0).AsSpan((lumaY * lumaStride) + lumaX);
+        var (chromaX, chromaY, chromaH, chromaMvY) = ChromaOfPartition(lumaX, lumaY, h, mvY);
         int chromaStride = picture.ChromaStride;
         int chromaOut = (chromaY * chromaStride) + chromaX;
+        var cb = picture.Plane<TPixel>(1).AsSpan(chromaOut);
+        var cr = picture.Plane<TPixel>(2).AsSpan(chromaOut);
         if (weights.IsDefault)
         {
-            InterPrediction.PredictLuma(reference, lumaX, lumaY, w, h, mvX, mvY, luma, lumaStride);
+            InterPrediction.PredictLumaBlock(reference, lumaX, lumaY, w, h, mvX, mvY, luma, lumaStride);
         }
         else
         {
             // Explicit weights (8.4.2.3.2): each component predicted into the scratch block, then weighted into the picture.
-            var prediction = (byte[])(object)_predictionL0;
-            InterPrediction.PredictLuma(reference, lumaX, lumaY, w, h, mvX, mvY, prediction, 16);
-            WeightOne(_predictionL0, 16, w, h, MemoryMarshal.Cast<byte, TPixel>(luma), lumaStride, weights, list, 0);
+            var prediction = _predictionL0.AsSpan();
+            InterPrediction.PredictLumaBlock(reference, lumaX, lumaY, w, h, mvX, mvY, prediction, 16);
+            WeightOne(prediction, 16, w, h, luma, lumaStride, weights, list, 0);
             for (int c = 1; c <= 2; c++)
             {
-                InterPrediction.PredictChroma(reference, c, chromaX, chromaY, w >> 1, h >> 1, mvX, mvY, prediction, 16);
-                WeightOne(_predictionL0, 16, w >> 1, h >> 1, MemoryMarshal.Cast<byte, TPixel>((c == 1 ? picture.Cb : picture.Cr).AsSpan(chromaOut)), chromaStride, weights, list, c);
+                InterPrediction.PredictChromaBlock(reference, c, chromaX, chromaY, w >> 1, chromaH, mvX, chromaMvY, prediction, 16);
+                WeightOne(prediction, 16, w >> 1, chromaH, c == 1 ? cb : cr, chromaStride, weights, list, c);
             }
         }
 
-        if ((x | y) == 0)
+        if (typeof(TPixel) == typeof(byte) && _mbHeightC == 8 && (x | y) == 0)
         {
             InterPrediction.PrefetchAhead(reference, lumaX + (mvX >> 2), lumaY + (mvY >> 2), _mbColumn[mbAddr] & 3);
         }
 
         if (weights.IsDefault)
         {
-            InterPrediction.PredictChromaPair(reference, chromaX, chromaY, w >> 1, h >> 1, mvX, mvY, picture.Cb.AsSpan(chromaOut), picture.Cr.AsSpan(chromaOut), chromaStride);
+            PredictChromaPair(reference, chromaX, chromaY, w >> 1, chromaH, mvX, chromaMvY, cb, cr, chromaStride);
         }
     }
 
@@ -749,42 +751,64 @@ internal sealed partial class PictureDecoder<TPixel>
         int lowestRow1 = lumaY + (mvY1 >> 2) + h + 3;
         ref1.WaitForRow(lowestRow1);
         var picture = Picture;
-        var prediction0 = (byte[])(object)_predictionL0;
-        var prediction1 = (byte[])(object)_predictionL1;
+        var prediction0 = _predictionL0.AsSpan();
+        var prediction1 = _predictionL1.AsSpan();
         int lumaStride = picture.LumaStride;
         CheckRowsFinal(ref0, lumaY + (mvY0 >> 2) + h + 3);
         CheckRowsFinal(ref1, lumaY + (mvY1 >> 2) + h + 3);
-        InterPrediction.PredictLuma(ref0, lumaX, lumaY, w, h, mvX0, mvY0, prediction0, 16);
-        InterPrediction.PredictLuma(ref1, lumaX, lumaY, w, h, mvX1, mvY1, prediction1, 16);
-        Combine(picture.Y.AsSpan((lumaY * lumaStride) + lumaX), lumaStride, w, h, 0);
-        if ((x | y) == 0)
+        InterPrediction.PredictLumaBlock(ref0, lumaX, lumaY, w, h, mvX0, mvY0, prediction0, 16);
+        InterPrediction.PredictLumaBlock(ref1, lumaX, lumaY, w, h, mvX1, mvY1, prediction1, 16);
+        Combine(picture.Plane<TPixel>(0).AsSpan((lumaY * lumaStride) + lumaX), lumaStride, w, h, 0);
+        if (typeof(TPixel) == typeof(byte) && _mbHeightC == 8 && (x | y) == 0)
         {
             InterPrediction.PrefetchAhead(ref0, lumaX + (mvX0 >> 2), lumaY + (mvY0 >> 2), _mbColumn[mbAddr] & 3);
         }
 
-        int chromaX = lumaX >> 1;
-        int chromaY = lumaY >> 1;
+        var (chromaX, chromaY, chromaH, chromaMvY0) = ChromaOfPartition(lumaX, lumaY, h, mvY0);
+        int chromaMvY1 = ChromaOfPartition(lumaX, lumaY, h, mvY1).MvY;
         int chromaStride = picture.ChromaStride;
         int chromaOut = (chromaY * chromaStride) + chromaX;
 
         // Each list's Cb and Cr side by side in its scratch block (columns 0 and 8: chroma blocks are at most 8 wide here).
-        InterPrediction.PredictChromaPair(ref0, chromaX, chromaY, w >> 1, h >> 1, mvX0, mvY0, prediction0, prediction0.AsSpan(8), 16);
-        InterPrediction.PredictChromaPair(ref1, chromaX, chromaY, w >> 1, h >> 1, mvX1, mvY1, prediction1, prediction1.AsSpan(8), 16);
-        Combine(picture.Cb.AsSpan(chromaOut), chromaStride, w >> 1, h >> 1, 1);
-        Combine(picture.Cr.AsSpan(chromaOut), chromaStride, w >> 1, h >> 1, 2);
+        PredictChromaPair(ref0, chromaX, chromaY, w >> 1, chromaH, mvX0, chromaMvY0, prediction0, prediction0[8..], 16);
+        PredictChromaPair(ref1, chromaX, chromaY, w >> 1, chromaH, mvX1, chromaMvY1, prediction1, prediction1[8..], 16);
+        Combine(picture.Plane<TPixel>(1).AsSpan(chromaOut), chromaStride, w >> 1, chromaH, 1);
+        Combine(picture.Plane<TPixel>(2).AsSpan(chromaOut), chromaStride, w >> 1, chromaH, 2);
 
-        void Combine(Span<byte> output, int outputStride, int width, int height, int component)
+        void Combine(Span<TPixel> output, int outputStride, int width, int height, int component)
         {
             int column = component == 2 ? 8 : 0;
             if (weighting.IsDefault)
             {
-                InterPrediction.Average(prediction0.AsSpan(column), prediction1.AsSpan(column), 16, width, height, output, outputStride);
+                InterPrediction.AverageBlock<TPixel>(_predictionL0.AsSpan(column), _predictionL1.AsSpan(column), 16, width, height, output, outputStride);
             }
             else
             {
-                WeightBoth(_predictionL0.AsSpan(column), _predictionL1.AsSpan(column), 16, width, height, MemoryMarshal.Cast<byte, TPixel>(output), outputStride, weighting, component);
+                WeightBoth(_predictionL0.AsSpan(column), _predictionL1.AsSpan(column), 16, width, height, output, outputStride, weighting, component);
             }
         }
+    }
+
+    /// <summary>
+    /// A frame macroblock's partition in chroma (8.4.1.4, 8.4.2.2.2): its top-left sample, its height, and the vertical
+    /// vector in eighth chroma samples. 4:2:0 halves both sides; 4:2:2 keeps the luma's rows, so the vector doubles.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private (int X, int Y, int Height, int MvY) ChromaOfPartition(int lumaX, int lumaY, int h, int mvY) =>
+        _mbHeightC == 16 ? (lumaX >> 1, lumaY, h, mvY * 2) : (lumaX >> 1, lumaY >> 1, h >> 1, mvY);
+
+    /// <summary>Both chroma components of one block: the 8-bit kernel's shared setup, or each in turn for deeper samples.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void PredictChromaPair(Picture reference, int x, int y, int width, int height, int mvX, int mvY, Span<TPixel> cb, Span<TPixel> cr, int outputStride)
+    {
+        if (typeof(TPixel) == typeof(byte))
+        {
+            InterPrediction.PredictChromaPair(reference, x, y, width, height, mvX, mvY, MemoryMarshal.Cast<TPixel, byte>(cb), MemoryMarshal.Cast<TPixel, byte>(cr), outputStride);
+            return;
+        }
+
+        InterPrediction.PredictChromaBlock(reference, 1, x, y, width, height, mvX, mvY, cb, outputStride);
+        InterPrediction.PredictChromaBlock(reference, 2, x, y, width, height, mvX, mvY, cr, outputStride);
     }
 
     /// <summary>

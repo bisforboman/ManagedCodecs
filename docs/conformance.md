@@ -898,6 +898,16 @@ loops, six runs each, the order alternating) `h264-10bit-b`'s decoder samples ov
 (`Cabac.ResidualBlock`, `FilterEdgeRegisters16`, `FetchWindow16`) fell by a median 3.1%, every run of the branch
 below every run of the base, and the changed kernels' own samples from 0.13 to 0.033 of that set. The wall clock
 (`tools/bench.py --base`, nine interleaved runs) saw -0.2 and -1.2% steady, within its noise here.
+The per-partition path (`PredictFromOne`, `PredictFromTwo`: one call to the kernels a component, without
+`PartitionPlace`, `Weighting` for default bi-prediction or `PredictComponent`) then took frame macroblocks of frames
+at any depth and in 4:2:2 too, not only 8-bit 4:2:0; MBAFF frames and field pictures keep `PredictPartitionGeneral`.
+4:2:2's 16-row Cr block at column 8 of the scratch block needed 16 samples of slack for the 8-bit average's
+whole-row reads. Callgrind (as above) counts -2.5% on `h264-10bit-b`, -2.4% on `h264-422-b`, -1.7% on
+`h264-422-10bit-b` and +0.02% on `h264-b-pyramid`; the thin wrappers it goes through (`PredictLumaBlock`,
+`AverageBlock`, the chroma pair) needed `AggressiveInlining`, which the AOT compiler otherwise skipped (+0.36% on the
+8-bit stream before). Under the JIT (perf as above, six runs each) the partition functions' samples fell from 0.055 to
+0.022 of the untouched set on `h264-10bit-b` and from 0.073 to 0.040 on `h264-422-b`, in every run: about 1 to 1.3%
+of the frame, the issue's ceiling for this step.
 
 ## AAC
 

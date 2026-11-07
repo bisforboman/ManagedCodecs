@@ -927,6 +927,18 @@ whole-row reads. Callgrind (as above) counts -2.5% on `h264-10bit-b`, -2.4% on `
 8-bit stream before). Under the JIT (perf as above, six runs each) the partition functions' samples fell from 0.055 to
 0.022 of the untouched set on `h264-10bit-b` and from 0.073 to 0.040 on `h264-422-b`, in every run: about 1 to 1.3%
 of the frame, the issue's ceiling for this step.
+MBAFF frames and field pictures last: the same path took them too (`PredictPairsFast`, out of line so that frames
+inline only theirs), with the place of `PartitionPlace` split in two (the reference position before the waits,
+the output offsets after them: computed before, they stayed live across the waits' calls and cost frames 0.08%),
+the chroma field offset, and a field macroblock's reference index halved for the explicit weights. The two
+functions are compiled per layout (`FrameLayout`, `PairLayout`, type arguments the JIT folds as it does
+`TPixel`): with `_pairSlots` tested inside, frames counted +0.16%. Callgrind (as above, against main after #372's
+inlining): -2.21% on `h264-mbaff-default`, -3.41% on `jm-paff-b`, -1.41% on `h264-422-mbaff-default`, +0.07% on
+`h264-b-pyramid` and +0.05% on `h264-10bit-b` (spread over the callers, no function standing out). Under the JIT
+(perf as above, six runs each; the changed set `PredictPartitionGeneral`, the fast path, `PredictComponent`,
+`Weighting`, `LumaPlace`, `ChromaPlace`) the partition functions fell from 0.224 to 0.196 of the untouched set on
+`h264-mbaff-default` (every branch run below every base run) and from 0.191 to 0.137 on `jm-paff-b`: about 0.6 and
+1.4% of the frame.
 
 ## AAC
 

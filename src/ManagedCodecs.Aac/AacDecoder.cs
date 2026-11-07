@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.Runtime.CompilerServices;
 using System.Runtime.ExceptionServices;
 using ManagedCodecs.Aac.Sbr;
 
@@ -857,6 +858,10 @@ public sealed class AacDecoder : IAudioDecoder
             }
         }
 
+        // The tables in locals: read in the loop, a static array costs a class-initialization check each time
+        // (docs/benchmarking.md).
+        double[] powers = PowFourThirds;
+        double[] gains = Gains;
         int windowBase = 0;
         for (int g = 0; g < info.WindowGroups; g++)
         {
@@ -882,18 +887,11 @@ public sealed class AacDecoder : IAudioDecoder
                     continue;
                 }
 
-                double gain = Gains[stream.Scalefactor[index]];
+                double gain = gains[stream.Scalefactor[index]];
                 for (int w = 0; w < info.GroupLength[g]; w++)
                 {
-                    int window = (windowBase + w) * 128;
-                    for (int k = start; k < end; k++)
-                    {
-                        int value = q[window + k];
-                        if (value != 0)
-                        {
-                            spectrum[window + k] = InverseQuantize(value) * gain;
-                        }
-                    }
+                    int window = ((windowBase + w) * 128) + start;
+                    InverseQuantize(q.AsSpan(window, end - start), spectrum.AsSpan(window, end - start), powers, gain);
                 }
             }
 
@@ -931,16 +929,30 @@ public sealed class AacDecoder : IAudioDecoder
         return x * y;
     }
 
-    private static double InverseQuantize(int value)
+    /// <summary>
+    /// sign(q) |q|^(4/3) <paramref name="gain"/> for each q of <paramref name="quantized"/>, without a branch: the
+    /// magnitude's power (<paramref name="powers"/>, <see cref="PowFourThirds"/>) times the gain, its sign bit then set
+    /// for a negative q (negating before or after the product gives the same bits); q = 0 gives +0.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static void InverseQuantize(ReadOnlySpan<int> quantized, Span<double> spectrum, double[] powers, double gain)
     {
-        int magnitude = Math.Abs(value);
-        if (magnitude >= PowFourThirds.Length)
+        for (int k = 0; k < quantized.Length; k++)
         {
-            throw new InvalidDataException("Quantized value is out of range.");
-        }
+            int value = quantized[k];
+            int sign = value >> 31;
+            uint magnitude = (uint)((value ^ sign) - sign);
+            if (magnitude >= (uint)powers.Length)
+            {
+                ThrowQuantizedOutOfRange();
+            }
 
-        return value < 0 ? -PowFourThirds[magnitude] : PowFourThirds[magnitude];
+            long bits = BitConverter.DoubleToInt64Bits(powers[magnitude] * gain);
+            spectrum[k] = BitConverter.Int64BitsToDouble(bits | ((long)sign << 63));
+        }
     }
+
+    private static void ThrowQuantizedOutOfRange() => throw new InvalidDataException("Quantized value is out of range.");
 
     /// <summary>2^(<paramref name="quarters"/> / 4), correctly rounded and the same bits on every runtime, without Math.Pow.</summary>
     internal static double QuarterPowerOfTwo(int quarters) => Math.ScaleB(QuarterPowers[quarters & 3], quarters >> 2);

@@ -36,37 +36,9 @@ jobs:
           dotnet build tools/ManagedCodecs.Cli -c Release -v q -nologo
           dotnet build tools/ManagedCodecs.Cli.Unity -c Release -v q -nologo
           dotnet build .github/mono-probe -c Release -v q -nologo
-      - name: Probe
-        run: |
-          echo "## Mono"; mono .github/mono-probe/bin/Release/netstandard2.1/MonoProbe.dll
-          echo "## CoreCLR"; dotnet .github/mono-probe/bin/Release/net10.0/MonoProbe.dll
-      - name: Profile
+      - name: Table as ci.yml
         shell: bash
         run: |
-          set -euo pipefail
-          for build in base new; do
-            if [ $build = base ]; then u=../base/tools/ManagedCodecs.Cli.Unity/bin/Release/netstandard2.1/mcdec.dll; else u=tools/ManagedCodecs.Cli.Unity/bin/Release/netstandard2.1/mcdec.dll; fi
-            for spec in "h264-bench-720p.mp4 3" "heaac/heaac-5.1.mp4 30" "aac-stereo-48k.mp4 60" "h264-b-pyramid.mp4 20" "testsrc-420.avi 20"; do
-              set -- $spec
-              echo "=================== $build: $1 ($2 loops) on Mono"
-              "$PERF" record -q -e cpu-clock -F 2000 -o perf.data mono --jitmap "$u" "samples/$1" --loops "$2" | grep -E "^last loop"
-              "$PERF" report -i perf.data --no-children --sort dso --percent-limit 2 --stdio 2>/dev/null | grep -v '^#' | grep -v '^$'
-              "$PERF" report -i perf.data --no-children --sort symbol --percent-limit 0.7 --stdio 2>/dev/null | grep -v '^#' | grep -v '^$' | cut -c1-180
-            done
-          done
-      - name: Time interleaved
-        shell: bash
-        run: |
-          set -euo pipefail
-          for f in h264-bench-720p.mp4 h264-b-pyramid.mp4 h264-10bit-b.mp4 h264-high-motion.mp4 testsrc-420.avi heaac/heaac-5.1.mp4 aac-stereo-48k.mp4; do
-            loops=20; case $f in h264-bench-720p.mp4) loops=3;; h264-high-motion.mp4) loops=5;; esac
-            for r in 1 2 3; do
-              for build in base new base; do
-                [ $r = 2 ] && [ $build = new ] && continue
-                if [ $build = base ]; then u=../base/tools/ManagedCodecs.Cli.Unity/bin/Release/netstandard2.1/mcdec.dll; else u=tools/ManagedCodecs.Cli.Unity/bin/Release/netstandard2.1/mcdec.dll; fi
-                echo "$f $build $(mono "$u" "samples/$f" --loops $loops | grep -E '^last loop')"
-              done
-              u=tools/ManagedCodecs.Cli.Unity/bin/Release/netstandard2.1/mcdec.dll
-              echo "$f new $(mono "$u" "samples/$f" --loops $loops | grep -E '^last loop')"
-            done
-          done
+          tools/bench.py --base tools/ManagedCodecs.Cli/bin/Release/net10.0/mcdec.dll \
+            --mcdec tools/ManagedCodecs.Cli.Unity/bin/Release/netstandard2.1/mcdec.dll --runtime mono --runs 3 --report unity-bench.md
+          cat unity-bench.md

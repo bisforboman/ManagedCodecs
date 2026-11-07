@@ -716,33 +716,6 @@ internal static class Vectors
         }
 #endif
 
-        // Four sums at once, by reference (the offsets are checked above): each term's offsets are read once for four
-        // values, and each sum is the same chain as below. What the Unity build runs (Mono's profile:
-        // docs/decisions/2026-10-31-unity-netstandard.md).
-        ref int bOffset = ref MemoryMarshal.GetReference(bOffsets);
-        ref int wOffset = ref MemoryMarshal.GetReference(wOffsets);
-        for (; n <= a.Length - 4; n += 4)
-        {
-            double sum0 = 0;
-            double sum1 = 0;
-            double sum2 = 0;
-            double sum3 = 0;
-            for (int t = 0; t < terms; t++)
-            {
-                ref double bt = ref Unsafe.Add(ref u, Unsafe.Add(ref bOffset, t) + n);
-                ref double wt = ref Unsafe.Add(ref y, Unsafe.Add(ref wOffset, t) + n);
-                sum0 += bt * wt;
-                sum1 += Unsafe.Add(ref bt, 1) * Unsafe.Add(ref wt, 1);
-                sum2 += Unsafe.Add(ref bt, 2) * Unsafe.Add(ref wt, 2);
-                sum3 += Unsafe.Add(ref bt, 3) * Unsafe.Add(ref wt, 3);
-            }
-
-            Unsafe.Add(ref x, n) = sum0;
-            Unsafe.Add(ref x, n + 1) = sum1;
-            Unsafe.Add(ref x, n + 2) = sum2;
-            Unsafe.Add(ref x, n + 3) = sum3;
-        }
-
         for (; n < a.Length; n++)
         {
             double sum = 0;

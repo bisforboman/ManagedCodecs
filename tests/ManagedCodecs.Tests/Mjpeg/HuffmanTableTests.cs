@@ -104,7 +104,10 @@ public class HuffmanTableTests
         return [.. data];
     }
 
-    /// <summary>A random canonical table, complete or not: random counts within what each length leaves free.</summary>
+    /// <summary>
+    /// A random canonical table, complete or not: random counts within what each length leaves free. A DC table's
+    /// values are sizes, sometimes above 11 or with a run's high bits, which are invalid.
+    /// </summary>
     private static HuffmanTable RandomTable(Random random, bool ac)
     {
         var bits = new byte[16];
@@ -125,7 +128,7 @@ public class HuffmanTableTests
         int total = bits.Sum(b => b);
         byte[] values = ac
             ? [.. Enumerable.Range(0, 256).OrderBy(_ => random.Next()).Take(total).Select(v => (byte)v)]
-            : [.. Enumerable.Range(0, total).Select(_ => (byte)random.Next(random.Next(4) == 0 ? 16 : 12))];
+            : [.. Enumerable.Range(0, total).Select(_ => (byte)random.Next(random.Next(8) switch { 0 => 256, 1 => 16, _ => 12 }))];
         return new HuffmanTable(bits, values);
     }
 }

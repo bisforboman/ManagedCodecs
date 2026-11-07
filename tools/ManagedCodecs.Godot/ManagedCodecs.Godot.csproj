@@ -1,12 +1,13 @@
 <Project Sdk="Godot.NET.Sdk/4.7.2">
 
-  <!-- A Godot 4 (.NET) sample for issue #254: ManagedCodecsVideo.cs, a TextureRect that plays a video file into an
-       ImageTexture, its audio through an AudioStreamGenerator, decoded by the ManagedCodecs.Playback package. CI
+  <!-- A Godot 4 (.NET) sample for issue #254: addons/managedcodecs/, an addon whose ManagedCodecsVideo is a
+       TextureRect that plays a video file into an ImageTexture, its audio through an AudioStreamGenerator, decoded by
+       the ManagedCodecs.Playback package. CI
        builds it with the Godot .NET SDK from nuget.org; Godot itself (the editor, which runs it) is not installed
        there, so it has not been run (README.md). -->
   <PropertyGroup>
     <AssemblyName>ManagedCodecs.Godot</AssemblyName>
-    <RootNamespace>ManagedCodecs.GodotSample</RootNamespace>
+    <RootNamespace>ManagedCodecs.GodotAddon</RootNamespace>
     <IsPackable>false</IsPackable>
   </PropertyGroup>
 

@@ -1,8 +1,8 @@
 # A Godot sample
 
-For issue #254 (docs/decisions/2026-10-31-game-engines.md): `ManagedCodecsVideo.cs`, a `TextureRect` node that plays a
-video (H.264 or MJPEG, AAC audio; MP4, Matroska or AVI) into an `ImageTexture` with the ManagedCodecs packages, on
-Godot 4.7's .NET build. Not a media player: no seeking, no pause.
+For issue #254 (docs/decisions/2026-10-31-game-engines.md): an addon, `addons/managedcodecs/`, whose
+`ManagedCodecsVideo` is a `TextureRect` node that plays a video (H.264 or MJPEG, AAC audio; MP4, Matroska or AVI) into
+an `ImageTexture` with the ManagedCodecs packages, on Godot 4.7's .NET build. Not a media player: no seeking, no pause.
 
 **Not run in Godot.** CI builds it with the Godot .NET SDK (`Godot.NET.Sdk` and `GodotSharp` 4.7.2, from nuget.org), so
 it compiles against Godot's real C# API. Whether Godot runs it as intended needs the Godot editor, which nobody has
@@ -11,8 +11,9 @@ tried with it yet. Please report back: [Testing it in Godot](#testing-it-in-godo
 ## Using it
 
 1. Godot 4.7, the .NET build, and the .NET 10 SDK (the project targets net10.0, as the packages do).
-2. Open this folder (`project.godot`) in the editor, or copy `ManagedCodecsVideo.cs` into a project of your own, which
-   then references the `ManagedCodecs.Playback` package.
+2. Open this folder (`project.godot`) in the editor, or copy `addons/managedcodecs/` into a project of your own, which
+   then references the `ManagedCodecs.Playback` package (the addon's README says how). The node is a global class:
+   once built, the Add Node dialog lists `ManagedCodecsVideo`.
 3. Copy a video in as `video.mp4` (ignored by git), or set the node's `File Path`, and run: `Main.tscn` is a
    `TextureRect` filling the window.
 

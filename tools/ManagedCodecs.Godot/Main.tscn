@@ -1,6 +1,6 @@
 [gd_scene load_steps=2 format=3]
 
-[ext_resource type="Script" path="res://ManagedCodecsVideo.cs" id="1"]
+[ext_resource type="Script" path="res://addons/managedcodecs/ManagedCodecsVideo.cs" id="1"]
 
 [node name="Video" type="TextureRect"]
 anchors_preset = 15

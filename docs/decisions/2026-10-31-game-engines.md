@@ -87,3 +87,6 @@ The owner (2026-10-31), against the recommendation to keep it parked:
   share one API); net10.0 only like the rest (the owner). mcplay, now `tools/ManagedCodecs.MonoGame.Sample` (the
   package took the name), is a `Game` around it; run under Xvfb, it plays a clip and a 90-degree one turned as FFmpeg
   turns it.
+- The Godot node as an addon (#352, step 2's layout): `tools/ManagedCodecs.Godot/addons/managedcodecs/`, with its own
+  README (the package reference, net10.0) and LICENSE, the node a `[GlobalClass]` so Add Node lists it. Not on the
+  Asset Library: that waits for a run in Godot (step 1).

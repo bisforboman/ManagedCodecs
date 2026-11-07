@@ -87,3 +87,26 @@ On the hosted runners (`compare.yml` run 42374598337, medians of 7 interleaved r
 | ARM64 | 0.831 | 0.846 | 0.970 | 0.990 |
 
 The runners gain more than the cloud VM: 19 to 23% off AAC LC on x64 and 15 to 17% on ARM64.
+
+## Again on main after #343 and #355
+
+Main is now at c954bff: the IMDCT is in single precision (#343) and spectral decoding uses packed tables (#355). Same
+VM and method, two perf runs each.
+
+| Stage, share of decoder code | `aac-5.1.mp4` | `aac-stereo-48k.mp4` |
+| --- | ---: | ---: |
+| Spectral decoding | 42.3% | 28.6% |
+| of which `Dequantize` and `InverseQuantize` | 21% | 11% |
+| IMDCT FFT (`Imdct+Plan::*`) | 22.5% | 24.8% |
+| IMDCT twiddles and fold (`InverseVector`) | 19.5% | 23.3% |
+| Window, overlap, output | 12.2% | 16.0% |
+| Stereo, TNS, other | 2.5% | 3.5% |
+
+The steady frame is now 39 to 44 µs for 5.1 and 12.6 for stereo, against 60 and 17 after #354. Outside the decoder's
+code (26 to 38% of the samples), the time is mostly startup: coreclr and the JIT take 11.6%, and 1000 loops take only
+7% longer than their steady time alone would. The rest is `memset` (2.2 to 2.4%, mostly `Array.Clear` of each
+channel's 1024 doubles) and page faults.
+
+The largest single stage with no issue yet was inverse quantization. It is one table lookup and one multiply a
+coefficient, but its call and two data-dependent branches cost 16% of all of 5.1's samples: #373. After it, the
+IMDCT's two halves and the window remain, each already worked on.

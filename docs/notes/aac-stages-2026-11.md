@@ -185,6 +185,8 @@ build, alternating:
 | Second (three builds) | 0.552 | 0.562 | 0.577 |
 
 The first round's gain did not reproduce. The steady frame stayed at 19.2 to 20.1 µs in every build. The signed
-table may cost more in cache than it saves in instructions; that is not measured. So the work per codeword stays as
-#355 left it. A further try would need counts first (callgrind on an AOT build, which resolves what perf here cannot),
+table may cost more in cache than it saves in instructions; that is not measured. #387 tried a close variant at the same time and found the same: 64-bit entries carrying each value's sign shift, one
+refill check per two codewords, refs without bounds checks (docs/conformance.md, AAC). Its note suggests (not
+measured) that the pace is set by a dependent chain, each codeword's table read waiting on the previous one's length,
+which neither change shortens. So the work per codeword stays as #355 left it. A further try would need counts first (callgrind on an AOT build, which resolves what perf here cannot),
 not the wall clock.

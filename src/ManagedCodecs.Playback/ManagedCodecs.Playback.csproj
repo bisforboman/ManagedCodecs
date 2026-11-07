@@ -10,10 +10,6 @@
     <Description>Video playback for game engines (MonoGame, FNA, Godot .NET, Stride): H.264 or MJPEG with AAC from MP4, Matroska, WebM or AVI, decoded on a thread of its own into RGBA frames for a texture and 32-bit float stereo for a sound, in pure managed C#.</Description>
     <PackageTags>$(PackageTags);playback;video-player;game;monogame;godot</PackageTags>
     <IsAotCompatible>true</IsAotCompatible>
-    <!-- No release of this package on nuget.org yet, so package validation has no baseline to compare with (the one in
-         Directory.Build.props is the other packages'); the pull request that sets the baseline after its first release
-         removes this line. -->
-    <PackageValidationBaselineVersion></PackageValidationBaselineVersion>
   </PropertyGroup>
 
   <!-- Its own page on nuget.org in place of the shared PACKAGE.md (Directory.Build.props). -->

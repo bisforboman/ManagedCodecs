@@ -712,6 +712,16 @@ JIT (perf, six runs each, the order alternating, normalized by the deblocking, m
 functions): motion prediction and the functions it inlines into fell from 5.1 to 3.75 points of
 `h264-mbaff-default`'s frame and from 6.5 to 5.3 of `h264-bench-720p.mp4`'s; the whole frame by -0.3 and -0.7%,
 within that ratio's noise.
+CABAC's context selection next (2026-11-07): mb_skip_flag, mb_type, coded_block_pattern, ref_idx, mvd,
+intra_chroma_pred_mode and coded_block_flag ask only for the left neighbour at a row that is a multiple of 4 or the
+one above, about 11.7 out-of-line lookups a macroblock of `h264-mbaff-default`. `CabacNeighbor` reads them from a
+table of ten (luma and chroma left at rows 0, 4, 8 and 12, luma and chroma above), `FindAffEdges`, found once a
+macroblock under `AffPairsOf`'s rule and checked against Table 6-4 in `PairsFoundOnce_MatchTheLookup`; frames keep
+`Neighbor`. Filled with ten general lookups it saved only 0.23% (the fill, about 880 instructions a macroblock, took
+the calls' place); filled from the pairs directly (`AffLeft` for each row, the B case once), callgrind (AOT, steady
+loops) counts 442.7 to 435.8 M instructions a loop of `h264-mbaff-default` (-1.6%), 79.50 to 78.14 M of `jm-paff-b`
+(-1.7%) and no change in `h264-bench-720p.mp4` (-0.04%). Under the JIT (perf, 150 loops, six runs each, the order
+alternating, normalized as above) `h264-mbaff-default`'s frame took a median 1.7% less (five runs of six faster).
 
 A profile of a
 720p libx264 default stream (2026-10-22) is flat: CABAC residual decoding takes 14%, deblocking 21%

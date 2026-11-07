@@ -140,6 +140,33 @@ public class MbaffNeighborTests
                         }
                     }
                 }
+
+                // CABAC's table of the left neighbours at rows 0, 4, 8 and 12 and the one above, luma and chroma.
+                foreach (int heightC in new[] { 8, 16 })
+                {
+                    var edges = new int[2 * PictureDecoder<byte>.AffEdgeCount];
+                    PictureDecoder<byte>.FindAffEdges(in pairs, heightC, edges);
+                    for (int r = 0; r < 4; r++)
+                    {
+                        var luma = PictureDecoder<byte>.AffNeighbor(field, slices, PairsWide, mb, -1, 4 * r, 16, 16, anySlice: false, slotParity);
+                        Assert.Equal((luma.Mb, luma.Y), (edges[2 * r], edges[(2 * r) + 1]));
+                        int c = PictureDecoder<byte>.AffEdgeLeftChroma + r;
+                        var chroma = 4 * r < heightC ? PictureDecoder<byte>.AffNeighbor(field, slices, PairsWide, mb, -1, 4 * r, 8, heightC, anySlice: false, slotParity) : (Mb: -1, X: 0, Y: 0);
+                        Assert.Equal((chroma.Mb, chroma.Y), (edges[2 * c], edges[(2 * c) + 1]));
+                    }
+
+                    int a = PictureDecoder<byte>.AffEdgeAbove;
+                    for (int x = 0; x < 16; x++)
+                    {
+                        var luma = PictureDecoder<byte>.AffNeighbor(field, slices, PairsWide, mb, x, -1, 16, 16, anySlice: false, slotParity);
+                        Assert.Equal((luma.Mb, luma.Y), (edges[2 * a], edges[(2 * a) + 1]));
+                        if (x < 8)
+                        {
+                            var chroma = PictureDecoder<byte>.AffNeighbor(field, slices, PairsWide, mb, x, -1, 8, heightC, anySlice: false, slotParity);
+                            Assert.Equal((chroma.Mb, chroma.Y), (edges[2 * (a + 1)], edges[(2 * (a + 1)) + 1]));
+                        }
+                    }
+                }
             }
         }
     }

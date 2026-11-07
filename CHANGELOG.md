@@ -17,6 +17,9 @@ run time.
 
 - H.264: in MBAFF frames and field pictures, motion vector prediction finds its neighbours A, B and C in one call:
   about 1.8% fewer instructions in MBAFF frames, 1.6% in field pictures and 1.1% in progressive CAVLC frames.
+- H.264: in MBAFF frames and field pictures, CABAC's context selection reads a macroblock's left and above neighbours
+  from a table found once a macroblock instead of a call each: about 1.6% fewer instructions in CABAC MBAFF frames
+  and 1.7% in field pictures.
 
 ## 0.8.1 – 2026-11-07
 

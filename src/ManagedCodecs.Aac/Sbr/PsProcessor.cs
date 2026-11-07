@@ -804,73 +804,24 @@ internal sealed class PsProcessor
                 bool hybrid = gr < layout.SubQmfGroups;
                 int first = layout.GroupBorders[gr];
                 int last = hybrid ? first + 1 : layout.GroupBorders[gr + 1];
-                double h11 = _previousH[0][bin];
-                double h12 = _previousH[1][bin];
-                double h21 = _previousH[2][bin];
-                double h22 = _previousH[3][bin];
-                double d11 = (h[bin] - h11) / length;
-                double d12 = (h[MaxBins + bin] - h12) / length;
-                double d21 = (h[(2 * MaxBins) + bin] - h21) / length;
-                double d22 = (h[(3 * MaxBins) + bin] - h22) / length;
+                var mRe = hybrid ? _leftRe : re;
+                var mIm = hybrid ? _leftIm : im;
+                var dRe = hybrid ? _rightRe : rightRe;
+                var dIm = hybrid ? _rightIm : rightIm;
+                var h0 = new Matrix(_previousH[0][bin], _previousH[1][bin], _previousH[2][bin], _previousH[3][bin]);
+                var dh = new Matrix((h[bin] - h0.M11) / length, (h[MaxBins + bin] - h0.M12) / length, (h[(2 * MaxBins) + bin] - h0.M21) / length, (h[(3 * MaxBins) + bin] - h0.M22) / length);
                 if (!phases)
                 {
-                    for (int i = starts[e]; i < starts[e + 1]; i++)
-                    {
-                        h11 += d11;
-                        h12 += d12;
-                        h21 += d21;
-                        h22 += d22;
-                        var mRe = hybrid ? _leftRe[i] : re[i];
-                        var mIm = hybrid ? _leftIm[i] : im[i];
-                        var dRe = hybrid ? _rightRe[i] : rightRe[i];
-                        var dIm = hybrid ? _rightIm[i] : rightIm[i];
-                        for (int sb = first; sb < last; sb++)
-                        {
-                            (mRe[sb], dRe[sb]) = ((h11 * mRe[sb]) + (h21 * dRe[sb]), (h12 * mRe[sb]) + (h22 * dRe[sb]));
-                            (mIm[sb], dIm[sb]) = ((h11 * mIm[sb]) + (h21 * dIm[sb]), (h12 * mIm[sb]) + (h22 * dIm[sb]));
-                        }
-                    }
-
+                    MixGroup(mRe, mIm, dRe, dIm, starts[e], starts[e + 1], first, last, h0, dh);
                     continue;
                 }
 
                 // The imaginary parts start from the previous envelope's, negated in the sub-subbands of negative
                 // frequency (groups 0 and 1), as FFmpeg starts them (it doesn't negate the end).
                 double sign = gr >= layout.Negated.First && gr <= layout.Negated.Last ? -1 : 1;
-                double g11 = sign * _previousHIm[0][bin];
-                double g12 = sign * _previousHIm[1][bin];
-                double g21 = sign * _previousHIm[2][bin];
-                double g22 = sign * _previousHIm[3][bin];
-                double e11 = (hIm[bin] - g11) / length;
-                double e12 = (hIm[MaxBins + bin] - g12) / length;
-                double e21 = (hIm[(2 * MaxBins) + bin] - g21) / length;
-                double e22 = (hIm[(3 * MaxBins) + bin] - g22) / length;
-                for (int i = starts[e]; i < starts[e + 1]; i++)
-                {
-                    h11 += d11;
-                    h12 += d12;
-                    h21 += d21;
-                    h22 += d22;
-                    g11 += e11;
-                    g12 += e12;
-                    g21 += e21;
-                    g22 += e22;
-                    var mRe = hybrid ? _leftRe[i] : re[i];
-                    var mIm = hybrid ? _leftIm[i] : im[i];
-                    var dRe = hybrid ? _rightRe[i] : rightRe[i];
-                    var dIm = hybrid ? _rightIm[i] : rightIm[i];
-                    for (int sb = first; sb < last; sb++)
-                    {
-                        double mr = mRe[sb];
-                        double mi = mIm[sb];
-                        double dr = dRe[sb];
-                        double di = dIm[sb];
-                        mRe[sb] = (h11 * mr) + (h21 * dr) - (g11 * mi) - (g21 * di);
-                        mIm[sb] = (h11 * mi) + (h21 * di) + (g11 * mr) + (g21 * dr);
-                        dRe[sb] = (h12 * mr) + (h22 * dr) - (g12 * mi) - (g22 * di);
-                        dIm[sb] = (h12 * mi) + (h22 * di) + (g12 * mr) + (g22 * dr);
-                    }
-                }
+                var g0 = new Matrix(sign * _previousHIm[0][bin], sign * _previousHIm[1][bin], sign * _previousHIm[2][bin], sign * _previousHIm[3][bin]);
+                var dg = new Matrix((hIm[bin] - g0.M11) / length, (hIm[MaxBins + bin] - g0.M12) / length, (hIm[(2 * MaxBins) + bin] - g0.M21) / length, (hIm[(3 * MaxBins) + bin] - g0.M22) / length);
+                MixGroupPhases(mRe, mIm, dRe, dIm, starts[e], starts[e + 1], first, last, h0, dh, g0, dg);
             }
 
             for (int bin = 0; bin < layout.Bins; bin++)
@@ -885,6 +836,228 @@ internal sealed class PsProcessor
                 }
             }
         }
+    }
+
+    /// <summary>
+    /// A group's subbands <paramref name="first"/> to <paramref name="last"/> - 1 over slots <paramref name="start"/> to
+    /// <paramref name="end"/> - 1, mixed in place by the real matrix stepped from <paramref name="h"/> by
+    /// <paramref name="step"/> before each slot: left (<paramref name="mRe"/>, <paramref name="mIm"/>) = h11 M + h21 D,
+    /// right (<paramref name="dRe"/>, <paramref name="dIm"/>) = h12 M + h22 D. Four subbands at a time where Vector256 is
+    /// accelerated (two with Vector128 alone), each lane with <see cref="MixGroupScalar"/>'s operations in its order, so the
+    /// output is the same to the bit (<c>PsMixGroup_MatchesScalar</c>); a group narrower than a vector, most of them, as
+    /// that.
+    /// </summary>
+    internal static void MixGroup(double[][] mRe, double[][] mIm, double[][] dRe, double[][] dIm, int start, int end, int first, int last, Matrix h, Matrix step)
+    {
+        int count = last - first;
+#if NET
+        if (Vector256.IsHardwareAccelerated && count >= 4)
+        {
+            for (int i = start; i < end; i++)
+            {
+                h = h.Add(step);
+                var a11 = Vector256.Create(h.M11);
+                var a12 = Vector256.Create(h.M12);
+                var a21 = Vector256.Create(h.M21);
+                var a22 = Vector256.Create(h.M22);
+                var rowMRe = mRe[i].AsSpan(first, count);
+                var rowMIm = mIm[i].AsSpan(first, count);
+                var rowDRe = dRe[i].AsSpan(first, count);
+                var rowDIm = dIm[i].AsSpan(first, count);
+                int sb = 0;
+                for (; sb + 4 <= count; sb += 4)
+                {
+                    var mr = Vector256.Create<double>(rowMRe[sb..]);
+                    var mi = Vector256.Create<double>(rowMIm[sb..]);
+                    var dr = Vector256.Create<double>(rowDRe[sb..]);
+                    var di = Vector256.Create<double>(rowDIm[sb..]);
+                    ((a11 * mr) + (a21 * dr)).CopyTo(rowMRe[sb..]);
+                    ((a12 * mr) + (a22 * dr)).CopyTo(rowDRe[sb..]);
+                    ((a11 * mi) + (a21 * di)).CopyTo(rowMIm[sb..]);
+                    ((a12 * mi) + (a22 * di)).CopyTo(rowDIm[sb..]);
+                }
+
+                MixRow(mRe[i], mIm[i], dRe[i], dIm[i], first + sb, last, h);
+            }
+
+            return;
+        }
+
+        if (!Vector256.IsHardwareAccelerated && Vector128.IsHardwareAccelerated && count >= 2)
+        {
+            for (int i = start; i < end; i++)
+            {
+                h = h.Add(step);
+                var a11 = Vector128.Create(h.M11);
+                var a12 = Vector128.Create(h.M12);
+                var a21 = Vector128.Create(h.M21);
+                var a22 = Vector128.Create(h.M22);
+                var rowMRe = mRe[i].AsSpan(first, count);
+                var rowMIm = mIm[i].AsSpan(first, count);
+                var rowDRe = dRe[i].AsSpan(first, count);
+                var rowDIm = dIm[i].AsSpan(first, count);
+                int sb = 0;
+                for (; sb + 2 <= count; sb += 2)
+                {
+                    var mr = Vector128.Create<double>(rowMRe[sb..]);
+                    var mi = Vector128.Create<double>(rowMIm[sb..]);
+                    var dr = Vector128.Create<double>(rowDRe[sb..]);
+                    var di = Vector128.Create<double>(rowDIm[sb..]);
+                    ((a11 * mr) + (a21 * dr)).CopyTo(rowMRe[sb..]);
+                    ((a12 * mr) + (a22 * dr)).CopyTo(rowDRe[sb..]);
+                    ((a11 * mi) + (a21 * di)).CopyTo(rowMIm[sb..]);
+                    ((a12 * mi) + (a22 * di)).CopyTo(rowDIm[sb..]);
+                }
+
+                MixRow(mRe[i], mIm[i], dRe[i], dIm[i], first + sb, last, h);
+            }
+
+            return;
+        }
+#endif
+
+        MixGroupScalar(mRe, mIm, dRe, dIm, start, end, first, last, h, step);
+    }
+
+    /// <summary><see cref="MixGroup"/> one subband at a time (8.6.4.6): the reference for it, and narrow groups.</summary>
+    internal static void MixGroupScalar(double[][] mRe, double[][] mIm, double[][] dRe, double[][] dIm, int start, int end, int first, int last, Matrix h, Matrix step)
+    {
+        for (int i = start; i < end; i++)
+        {
+            h = h.Add(step);
+            MixRow(mRe[i], mIm[i], dRe[i], dIm[i], first, last, h);
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void MixRow(double[] mRe, double[] mIm, double[] dRe, double[] dIm, int first, int last, Matrix h)
+    {
+        for (int sb = first; sb < last; sb++)
+        {
+            (mRe[sb], dRe[sb]) = ((h.M11 * mRe[sb]) + (h.M21 * dRe[sb]), (h.M12 * mRe[sb]) + (h.M22 * dRe[sb]));
+            (mIm[sb], dIm[sb]) = ((h.M11 * mIm[sb]) + (h.M21 * dIm[sb]), (h.M12 * mIm[sb]) + (h.M22 * dIm[sb]));
+        }
+    }
+
+    /// <summary>
+    /// <see cref="MixGroup"/> with the matrix's imaginary parts (IPD and OPD), stepped from <paramref name="g"/> by
+    /// <paramref name="gStep"/>, as <see cref="MixGroupPhasesScalar"/> mixes them, lane by lane in its order
+    /// (<c>PsMixGroup_MatchesScalar</c>).
+    /// </summary>
+    internal static void MixGroupPhases(double[][] mRe, double[][] mIm, double[][] dRe, double[][] dIm, int start, int end, int first, int last, Matrix h, Matrix step, Matrix g, Matrix gStep)
+    {
+        int count = last - first;
+#if NET
+        if (Vector256.IsHardwareAccelerated && count >= 4)
+        {
+            for (int i = start; i < end; i++)
+            {
+                h = h.Add(step);
+                g = g.Add(gStep);
+                var h11 = Vector256.Create(h.M11);
+                var h12 = Vector256.Create(h.M12);
+                var h21 = Vector256.Create(h.M21);
+                var h22 = Vector256.Create(h.M22);
+                var g11 = Vector256.Create(g.M11);
+                var g12 = Vector256.Create(g.M12);
+                var g21 = Vector256.Create(g.M21);
+                var g22 = Vector256.Create(g.M22);
+                var rowMRe = mRe[i].AsSpan(first, count);
+                var rowMIm = mIm[i].AsSpan(first, count);
+                var rowDRe = dRe[i].AsSpan(first, count);
+                var rowDIm = dIm[i].AsSpan(first, count);
+                int sb = 0;
+                for (; sb + 4 <= count; sb += 4)
+                {
+                    var mr = Vector256.Create<double>(rowMRe[sb..]);
+                    var mi = Vector256.Create<double>(rowMIm[sb..]);
+                    var dr = Vector256.Create<double>(rowDRe[sb..]);
+                    var di = Vector256.Create<double>(rowDIm[sb..]);
+                    ((h11 * mr) + (h21 * dr) - (g11 * mi) - (g21 * di)).CopyTo(rowMRe[sb..]);
+                    ((h11 * mi) + (h21 * di) + (g11 * mr) + (g21 * dr)).CopyTo(rowMIm[sb..]);
+                    ((h12 * mr) + (h22 * dr) - (g12 * mi) - (g22 * di)).CopyTo(rowDRe[sb..]);
+                    ((h12 * mi) + (h22 * di) + (g12 * mr) + (g22 * dr)).CopyTo(rowDIm[sb..]);
+                }
+
+                MixRowPhases(mRe[i], mIm[i], dRe[i], dIm[i], first + sb, last, h, g);
+            }
+
+            return;
+        }
+
+        if (!Vector256.IsHardwareAccelerated && Vector128.IsHardwareAccelerated && count >= 2)
+        {
+            for (int i = start; i < end; i++)
+            {
+                h = h.Add(step);
+                g = g.Add(gStep);
+                var h11 = Vector128.Create(h.M11);
+                var h12 = Vector128.Create(h.M12);
+                var h21 = Vector128.Create(h.M21);
+                var h22 = Vector128.Create(h.M22);
+                var g11 = Vector128.Create(g.M11);
+                var g12 = Vector128.Create(g.M12);
+                var g21 = Vector128.Create(g.M21);
+                var g22 = Vector128.Create(g.M22);
+                var rowMRe = mRe[i].AsSpan(first, count);
+                var rowMIm = mIm[i].AsSpan(first, count);
+                var rowDRe = dRe[i].AsSpan(first, count);
+                var rowDIm = dIm[i].AsSpan(first, count);
+                int sb = 0;
+                for (; sb + 2 <= count; sb += 2)
+                {
+                    var mr = Vector128.Create<double>(rowMRe[sb..]);
+                    var mi = Vector128.Create<double>(rowMIm[sb..]);
+                    var dr = Vector128.Create<double>(rowDRe[sb..]);
+                    var di = Vector128.Create<double>(rowDIm[sb..]);
+                    ((h11 * mr) + (h21 * dr) - (g11 * mi) - (g21 * di)).CopyTo(rowMRe[sb..]);
+                    ((h11 * mi) + (h21 * di) + (g11 * mr) + (g21 * dr)).CopyTo(rowMIm[sb..]);
+                    ((h12 * mr) + (h22 * dr) - (g12 * mi) - (g22 * di)).CopyTo(rowDRe[sb..]);
+                    ((h12 * mi) + (h22 * di) + (g12 * mr) + (g22 * dr)).CopyTo(rowDIm[sb..]);
+                }
+
+                MixRowPhases(mRe[i], mIm[i], dRe[i], dIm[i], first + sb, last, h, g);
+            }
+
+            return;
+        }
+#endif
+
+        MixGroupPhasesScalar(mRe, mIm, dRe, dIm, start, end, first, last, h, step, g, gStep);
+    }
+
+    /// <summary><see cref="MixGroupPhases"/> one subband at a time (8.6.4.6): the reference for it, and narrow groups.</summary>
+    internal static void MixGroupPhasesScalar(double[][] mRe, double[][] mIm, double[][] dRe, double[][] dIm, int start, int end, int first, int last, Matrix h, Matrix step, Matrix g, Matrix gStep)
+    {
+        for (int i = start; i < end; i++)
+        {
+            h = h.Add(step);
+            g = g.Add(gStep);
+            MixRowPhases(mRe[i], mIm[i], dRe[i], dIm[i], first, last, h, g);
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void MixRowPhases(double[] mRe, double[] mIm, double[] dRe, double[] dIm, int first, int last, Matrix h, Matrix g)
+    {
+        for (int sb = first; sb < last; sb++)
+        {
+            double mr = mRe[sb];
+            double mi = mIm[sb];
+            double dr = dRe[sb];
+            double di = dIm[sb];
+            mRe[sb] = (h.M11 * mr) + (h.M21 * dr) - (g.M11 * mi) - (g.M21 * di);
+            mIm[sb] = (h.M11 * mi) + (h.M21 * di) + (g.M11 * mr) + (g.M21 * dr);
+            dRe[sb] = (h.M12 * mr) + (h.M22 * dr) - (g.M12 * mi) - (g.M22 * di);
+            dIm[sb] = (h.M12 * mi) + (h.M22 * di) + (g.M12 * mr) + (g.M22 * dr);
+        }
+    }
+
+    /// <summary>A group's mixing matrix for one slot: h11, h12, h21, h22 (or their imaginary parts).</summary>
+    internal readonly record struct Matrix(double M11, double M12, double M21, double M22)
+    {
+        /// <summary>Each element plus <paramref name="step"/>'s, as the scalar steps add them.</summary>
+        public Matrix Add(Matrix step) => new(M11 + step.M11, M12 + step.M12, M21 + step.M21, M22 + step.M22);
     }
 
     private static (double[] Re, double[] Im) SmoothPhases()

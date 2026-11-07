@@ -32,7 +32,7 @@ internal sealed partial class PictureDecoder<TPixel>
     private AffPairs _affPairs = new(-1, false, -1, false, -1, false, -1, false, -1, false);
     private int _affPairsSlice = -1;
 
-    // The current macroblock's left and above neighbours for CABAC's contexts (AffEdgesOf), and what they were found for.
+    // The current macroblock's left and above neighbours (AffEdgesOf), and what they were found for.
     internal const int AffEdgeLeftChroma = 4;
     internal const int AffEdgeAbove = 8;
     internal const int AffEdgeCount = 10;
@@ -206,17 +206,22 @@ internal sealed partial class PictureDecoder<TPixel>
     }
 
     /// <summary>
-    /// The neighbouring location CABAC's context selection asks for: <see cref="Neighbor"/>, with a luma
-    /// (<paramref name="chroma"/> false) or chroma block's size. In MBAFF frames and field pictures the left
-    /// neighbours at rows 0, 4, 8 and 12 and the one above come from a table found once a macroblock
-    /// (<see cref="AffEdgesOf"/>), without a call; X and Y are only meaningful when Mb is not -1.
+    /// A neighbouring location at the macroblock's edge (CABAC's context selection, intra mode prediction):
+    /// <see cref="Neighbor"/>, with a luma (<paramref name="chroma"/> false) or chroma block's size. In MBAFF frames
+    /// and field pictures the left neighbours at rows 0, 4, 8 and 12 and the one above come from a table found once a
+    /// macroblock (<see cref="AffEdgesOf"/>), without a call; X and Y are only meaningful when Mb is not -1.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private (int Mb, int X, int Y) CabacNeighbor(int mbAddr, int xN, int yN, bool chroma = false)
+    private (int Mb, int X, int Y) EdgeNeighbor(int mbAddr, int xN, int yN, bool chroma = false)
     {
         int maxW = chroma ? 8 : 16;
         int maxH = chroma ? _mbHeightC : 16;
-        if (_pairSlots && ((xN == -1 && (uint)yN < (uint)maxH && (yN & 3) == 0) || (yN == -1 && (uint)xN < (uint)maxW)))
+        if (!_pairSlots)
+        {
+            return Neighbor(mbAddr, xN, yN, maxW, maxH);
+        }
+
+        if ((xN == -1 && (uint)yN < (uint)maxH && (yN & 3) == 0) || (yN == -1 && (uint)xN < (uint)maxW))
         {
             int i = yN < 0 ? AffEdgeAbove + (chroma ? 1 : 0) : (chroma ? AffEdgeLeftChroma : 0) + (yN >> 2);
             var edges = AffEdgesOf(mbAddr);
@@ -226,10 +231,10 @@ internal sealed partial class PictureDecoder<TPixel>
         return Neighbor(mbAddr, xN, yN, maxW, maxH);
     }
 
-    /// <summary>The macroblock of <see cref="CabacNeighbor"/>, in frames <see cref="NeighborMb"/>.</summary>
+    /// <summary>The macroblock of <see cref="EdgeNeighbor"/>, in frames <see cref="NeighborMb"/>.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private int CabacNeighborMb(int mbAddr, int xN, int yN) =>
-        _pairSlots ? CabacNeighbor(mbAddr, xN, yN).Mb : NeighborMb(mbAddr, xN, yN);
+    private int EdgeNeighborMb(int mbAddr, int xN, int yN) =>
+        _pairSlots ? EdgeNeighbor(mbAddr, xN, yN).Mb : NeighborMb(mbAddr, xN, yN);
 
     /// <summary>
     /// The current macroblock's table of <see cref="FindAffEdges"/>: found again under the same rule as
@@ -706,10 +711,14 @@ internal sealed partial class PictureDecoder<TPixel>
             bool leftField = _fieldMb[leftTop];
             bool frame = !_fieldMb[mbAddr];
             bool isTop = (mbAddr & 1) == 0;
+
+            // The rows come from the pair's two macroblocks: their places found once, not once a row.
+            var topPlace = luma ? LumaPlace(leftTop) : ChromaPlace(leftTop);
+            var bottomPlace = luma ? LumaPlace(leftTop + 1) : ChromaPlace(leftTop + 1);
             for (int yN = 0; yN < maxH; yN++)
             {
                 var (n, y) = AffLeft(leftTop, leftField, frame, isTop, yN, maxH);
-                var (origin, stride) = luma ? LumaPlace(n) : ChromaPlace(n);
+                var (origin, stride) = n == leftTop ? topPlace : bottomPlace;
                 scratch[(yN + 1) * scratchStride] = plane[origin + (y * stride) + maxW - 1];
             }
         }

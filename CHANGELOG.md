@@ -48,6 +48,9 @@ run time.
 - H.264: spatial direct prediction finds a macroblock's neighbours A, B and C once for both its reference indices and
   its motion vectors, in MBAFF frames and field pictures in one call: about 2.2% fewer instructions in MBAFF frames
   with B pictures and 1.2% in field pictures.
+- H.264: intra prediction in MBAFF frames and field pictures gathers a left pair's samples with each macroblock's
+  place found once rather than once a row, and its mode prediction reads the left and above neighbours from the
+  per-macroblock table: about 3.2% fewer instructions in intra MBAFF frames and 0.9% in mixed ones.
 - MJPEG: the Huffman decoder keeps its bit buffer in registers, and a short code with long magnitude bits takes one
   table lookup instead of two: about 6 to 7% off a frame.
 - ManagedCodecs.Unity on Mono: motion compensation filters whole rows of a block instead of every sample by the

@@ -141,7 +141,7 @@ public class MbaffNeighborTests
                     }
                 }
 
-                // CABAC's table of the left neighbours at rows 0, 4, 8 and 12 and the one above, luma and chroma.
+                // The edge table: the left neighbours at rows 0, 4, 8 and 12 and the one above, luma and chroma.
                 foreach (int heightC in new[] { 8, 16 })
                 {
                     var edges = new int[2 * PictureDecoder<byte>.AffEdgeCount];

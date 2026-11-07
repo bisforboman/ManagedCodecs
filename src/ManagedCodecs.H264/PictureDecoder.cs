@@ -736,8 +736,8 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
     /// <summary>Intra4x4PredMode prediction (8.3.1.1).</summary>
     private int PredictIntra4x4Mode(SliceState slice, int mbAddr, int x, int y)
     {
-        var (a, xA, yA) = Neighbor(mbAddr, (x * 4) - 1, y * 4);
-        var (b, xB, yB) = Neighbor(mbAddr, x * 4, (y * 4) - 1);
+        var (a, xA, yA) = EdgeNeighbor(mbAddr, (x * 4) - 1, y * 4);
+        var (b, xB, yB) = EdgeNeighbor(mbAddr, x * 4, (y * 4) - 1);
         bool constrained = slice.Pps.ConstrainedIntraPred;
         if (a < 0 || b < 0 || (constrained && (IsInter(a) || IsInter(b))))
         {
@@ -761,7 +761,7 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
     private (bool A, bool B, bool C, bool D) IntraMbNeighbors(SliceState slice, int mbAddr)
     {
         bool Usable(int n) => n >= 0 && !(slice.Pps.ConstrainedIntraPred && IsInter(n));
-        return (Usable(NeighborMb(mbAddr, -1, 0)), Usable(NeighborMb(mbAddr, 0, -1)), Usable(NeighborMb(mbAddr, 16, -1)), Usable(NeighborMb(mbAddr, -1, -1)));
+        return (Usable(EdgeNeighborMb(mbAddr, -1, 0)), Usable(EdgeNeighborMb(mbAddr, 0, -1)), Usable(NeighborMb(mbAddr, 16, -1)), Usable(NeighborMb(mbAddr, -1, -1)));
     }
 
     // ---- Residual (7.3.5.3) ----

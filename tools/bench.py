@@ -29,25 +29,15 @@ import sys
 
 # README's table: sample, loops, what it is.
 SAMPLES = [
-    ("testsrc-420.avi", 100, "320x240 MJPEG 4:2:0"),
-    ("testsrc-444.avi", 100, "MJPEG 4:4:4"),
-    ("noise-q1.avi", 100, "MJPEG, noise at the highest quality"),
-    ("h264-p-refs.mp4", 40, "320x240 H.264, P frames"),
-    ("h264-bench-720p.mp4", 10, "1280x720 H.264"),
-    ("h264-main-p-refs.mp4", 40, "320x240 H.264 Main, CABAC"),
-    ("h264-b-pyramid.mp4", 20, "320x240 H.264 Main, CABAC, B frames"),
-    ("h264-wp-default.mp4", 20, "320x240 H.264, libx264's Main defaults: B frames, weighted prediction"),
-    ("h264-high-default.mp4", 20, "320x240 H.264, libx264's High defaults: also the 8x8 transform"),
-    ("h264-high-b.mp4", 40, "320x240 H.264 High, B frames, all partitions"),
-    ("h264-10bit-b.mp4", 40, "the same at 10 bits, High 10"),
-    ("h264-high-motion.mp4", 20, "320x240 H.264 High, fast motion and noise, QP 22"),
-    ("h264-10bit-motion.mp4", 20, "the same at 10 bits, QP 34"),
-    ("h264-mbaff-default.mp4", 40, "320x240 H.264 MBAFF, libx264's interlaced defaults"),
-    ("jm/jm-paff-b.mp4", 200, "320x256 H.264 field pictures from JM, CABAC, B pictures"),
-    ("aac-stereo-48k.mp4", 100, "AAC, stereo"),
-    ("aac-5.1.mp4", 100, "AAC, 5.1"),
-    ("heaac/heaac-5.1.mp4", 100, "HE-AAC, 5.1"),
-    ("heaac/heaacv2-stereo.mp4", 100, "HE-AAC v2: parametric stereo"),
+    ("h264-high-default.mp4", 1, "320x240 CABAC"),
+    ("h264-high-default.mp4", 20, "320x240 CABAC"),
+    ("h264-high-default.mp4", 100, "320x240 CABAC"),
+    ("h264-p-refs.mp4", 1, "320x240 CAVLC"),
+    ("h264-p-refs.mp4", 20, "320x240 CAVLC"),
+    ("h264-p-refs.mp4", 100, "320x240 CAVLC"),
+    ("h264-bench-720p.mp4", 1, "720p CAVLC"),
+    ("h264-bench-720p.mp4", 20, "720p CAVLC"),
+    ("h264-bench-720p.mp4", 100, "720p CAVLC"),
 ]
 
 THREADS_SAMPLE = ("h264-bench-720p.mp4", 10)

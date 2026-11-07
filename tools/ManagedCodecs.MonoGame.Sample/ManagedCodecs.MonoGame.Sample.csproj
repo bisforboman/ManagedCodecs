@@ -3,7 +3,7 @@
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <AssemblyName>mcplay</AssemblyName>
-    <RootNamespace>ManagedCodecs.MonoGame</RootNamespace>
+    <RootNamespace>ManagedCodecs.MonoGameSample</RootNamespace>
     <IsPackable>false</IsPackable>
   </PropertyGroup>
 
@@ -12,7 +12,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\ManagedCodecs.Playback\ManagedCodecs.Playback.csproj" />
+    <ProjectReference Include="..\..\src\ManagedCodecs.MonoGame\ManagedCodecs.MonoGame.csproj" />
   </ItemGroup>
 
 </Project>

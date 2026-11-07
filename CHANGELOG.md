@@ -1,7 +1,7 @@
 # Changelog
 
 Versions are git tags (`vX.Y.Z`); each one publishes every package (ManagedCodecs.Core, .Containers, .Mjpeg, .H264,
-.Aac, .Thumbnails, .Playback, .Unity and the ManagedCodecs meta-package) to nuget.org at that version, and a GitHub release with this file's section
+.Aac, .Thumbnails, .Playback, .MonoGame, .Unity and the ManagedCodecs meta-package) to nuget.org at that version, and a GitHub release with this file's section
 as its notes. `release.yml` releases on the push to main that brings a version heading not yet tagged, so a release
 is a pull request that turns "Unreleased" into "## X.Y.Z – date" and runs `tools/ship-public-api.py`. From 0.1.0 on, the
 public API changes only in a new minor version (0.2.0, 0.3.0, ...), with a "Breaking changes" entry; a patch version
@@ -20,6 +20,9 @@ run time.
   (`AudioChunk`), and gives the game loop the frame due by its clock (`TakeFrame`), dropping late ones; with
   `PlaybackOptions` (decoder threads, matrix and range, loop) and `PlaybackStatistics`. `ManagedCodecs.Unity` holds it
   too. The MonoGame, Godot and Unity samples now use it.
+- New package `ManagedCodecs.MonoGame`: `VideoTexture` plays a file into a `Texture2D` and a
+  `DynamicSoundEffectInstance` with the game's clock (`Update`, `Play`, `Pause`, `Volume`) and draws it letterboxed, at
+  its sample aspect ratio and turned upright (`Draw`). Any MonoGame 3.8 platform package, on .NET 10.
 
 ### Changed
 
@@ -45,6 +48,9 @@ run time.
 - H.264: spatial direct prediction finds a macroblock's neighbours A, B and C once for both its reference indices and
   its motion vectors, in MBAFF frames and field pictures in one call: about 2.2% fewer instructions in MBAFF frames
   with B pictures and 1.2% in field pictures.
+- H.264: intra prediction in MBAFF frames and field pictures gathers a left pair's samples with each macroblock's
+  place found once rather than once a row, and its mode prediction reads the left and above neighbours from the
+  per-macroblock table: about 3.2% fewer instructions in intra MBAFF frames and 0.9% in mixed ones.
 - MJPEG: the Huffman decoder keeps its bit buffer in registers, and a short code with long magnitude bits takes one
   table lookup instead of two: about 6 to 7% off a frame.
 - ManagedCodecs.Unity on Mono: motion compensation filters whole rows of a block instead of every sample by the
@@ -52,6 +58,8 @@ run time.
   6.12, 720p H.264 about twice as fast (79 to 38 ms a frame), 320x240 H.264 1.3 to 1.5 times, MJPEG 1.45 times.
   The other packages' code is unchanged where it runs (docs/decisions/2026-10-31-unity-netstandard.md, Mono's
   profile).
+- ManagedCodecs.Unity on Mono: HE-AAC's QMF banks run their scalar FFT and windows by reference rather than through
+  slices: on Mono 6.12, 5.1 HE-AAC 1.39 times as fast, HE-AAC v2 1.30 times. The output is unchanged.
 - MJPEG: a flat block's rows are written as one 8-byte store each instead of a call each: about 7 to 10% off a frame of
   a test pattern, nothing on noise.
 - HE-AAC: SBR's gains smoothed over time (a header with bs_smoothing_mode 0) and parametric stereo's mixing run in

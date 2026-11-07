@@ -904,7 +904,11 @@ H.264 samples, medians of 7 interleaved runs, every one of the ten lower. Agains
 0.962 to 0.985 and 0.983 to 0.996 (an EPYC 7763), all ten lower again. The whole process went to 0.99 to 1.05: the JIT
 compiles the larger methods at startup. The ARM64 runner's instruction samples (`profile.yml`, `event: instructions`) put it at
 -2.5% of `h264-high-default.mp4`'s frame against PGO's -12.6%. So inlining is about a fifth of PGO's gain, and the
-rest is how PGO compiles the large methods (#346).
+rest is how PGO compiles the large methods (#346). Under Native AOT (`x86-64-v3`, the merge c4faedd against its first
+parent), callgrind counted 247.25 to 233.40 M instructions a steady loop of `h264-high-default.mp4` (-5.6%) and 2006.6
+to 1945.3 M of `h264-bench-720p.mp4` (-3.1%). The first loop fell by as much (256.1 to 242.3 M and 2004 to 1943 M):
+there is no JIT at startup to pay for the larger methods. The binary grew by 81 KB. The cloud VM's wall clock
+(`tools/bench.py --base`, nine interleaved runs) spread from 0.955 to 1.051 over five samples, within its noise.
 
 Deeper samples' kernels next (#337, 2026-11-07). Above 8 bits the bi-predicted average, the explicit and implicit
 weights and the 4x4, 8x8 and DC-only inverse transform adds were the by-the-definition loops over spans. They now run

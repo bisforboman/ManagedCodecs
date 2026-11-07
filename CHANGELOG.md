@@ -27,8 +27,8 @@ run time.
 ### Changed
 
 - HE-AAC decodes faster: the QMF banks' transforms (their FFTs, DCT-IVs and rotations, between windows still in double)
-  run in single precision, four values a vector: 9 to 10% off a 5.1 HE-AAC frame and 7% off HE-AAC v2, on ARM64 and
-  x64. The output moves against FFmpeg's (single precision too) in the third or fourth digit of its differences.
+  run in single precision, four values a vector: 8 to 10% off a 5.1 HE-AAC frame and 5 to 7% off HE-AAC v2, on ARM64
+  and x64. The output moves against FFmpeg's (single precision too) in the third or fourth digit of its differences.
 - H.264: the direct motion compensation path for frame macroblocks also takes samples above 8 bits and 4:2:2: about 2%
   fewer instructions in 10-bit and 4:2:2 streams.
 - AAC: the IMDCT's FFT does its bit reversal and first stage in one vector pass, and its post-twiddle runs in

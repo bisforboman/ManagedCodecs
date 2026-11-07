@@ -1040,7 +1040,8 @@ hosted ARM64 runner the transforms took about 30% of `heaac-5.1.mp4`'s frame in 
 packing and output 7.8%, the analysis output 2.9%, the rotations and the rest 1.7%). The FFT alone in float, converting at its
 edges, gave only 3%; with the data kept in float from the first rotation to the last output, `compare.yml` (steady
 frame against the double banks) gave 0.90 on `heaac-5.1.mp4` and 0.93 on `heaacv2-stereo.mp4` on ARM64, 0.91 and 0.93
-on x64 (AAC LC, which the banks don't touch, 1.01 and 0.99).
+on x64 (AAC LC, which the banks don't touch, 1.01 and 0.99); the final code, against main with #363's gains in vectors,
+0.91 and 0.94 on ARM64, 0.92 and 0.95 on x64 (AAC LC 1.01 and 1.00).
 
 The QMF transforms across time slots, one slot a vector lane, tried for speed and dropped (2026-11-07, #338). By perf
 the transforms take about 24% of `heaac-5.1.mp4`'s frame: the FFTs' vector stages 8.3%, their bit-reversal and first

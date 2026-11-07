@@ -62,6 +62,11 @@ tables, gray, noise) at 14 places each, with and without an EOI after the cut: 3
 - After an interlaced packet it refuses for a cut first field, FFmpeg pairs fields across packets, so its next frame
   is not that packet's two fields; the decoder's is.
 
+The Huffman decoder's table lookups (a whole coefficient, or a code and its length, in one lookup of 10 bits; MAXCODE
+from 11 bits on) are checked against T.81's Figure F.16 read bit by bit (`HuffmanTable.Decode`) by
+`HuffmanTableTests`, on the Annex K tables and on random ones, complete or not, with invalid DC sizes; the samples
+mostly reach the whole-coefficient entries. Its speed: docs/notes/mjpeg-entropy-2026-11.md.
+
 ## Real films
 
 Every sample above is a test pattern encoded to isolate a feature. `tools/realworld.py` (nightly, `realworld.yml`, a job

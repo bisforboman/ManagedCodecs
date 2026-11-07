@@ -956,7 +956,7 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
     /// Adds the residual of 8x8 block <paramref name="b8"/>, if coded, to the prediction of a
     /// component (luma, or Cb or Cr in 4:4:4); <paramref name="qp"/> is its QP'.
     /// </summary>
-    private void AddLuma8x8Residual(SliceState slice, int mbAddr, MbTarget target, int cbpLuma, int b8, int qp, int component)
+    private void AddLuma8x8Residual(SliceState slice, int mbAddr, in MbTarget target, int cbpLuma, int b8, int qp, int component)
     {
         if ((cbpLuma & (1 << b8)) == 0 || !Has8x8Coefficients(mbAddr, b8, component))
         {
@@ -994,7 +994,7 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
     };
 
     /// <summary>The plane, first sample and row stride of a component of a target.</summary>
-    private static (TPixel[] Plane, int Origin, int Stride) ComponentOf(MbTarget target, int component) => component switch
+    private static (TPixel[] Plane, int Origin, int Stride) ComponentOf(in MbTarget target, int component) => component switch
     {
         0 => (target.Y, target.YOrigin, target.YStride),
         1 => (target.Cb, target.COrigin, target.CStride),
@@ -1011,7 +1011,7 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
     /// Intra prediction and residual of luma, or in 4:4:4 of Cb or Cr (<paramref name="component"/>
     /// 1 or 2), which take luma's prediction modes (8.3.4.5) and their own levels, QP and scaling lists.
     /// </summary>
-    private void ReconstructIntraLuma(SliceState slice, int mbAddr, MbTarget target, bool is16x16, int predMode16x16, int cbpLuma, (bool A, bool B, bool C, bool D) mbs, int component)
+    private void ReconstructIntraLuma(SliceState slice, int mbAddr, in MbTarget target, bool is16x16, int predMode16x16, int cbpLuma, (bool A, bool B, bool C, bool D) mbs, int component)
     {
         var (plane, origin, stride) = ComponentOf(target, component);
         var residual = _residuals[component];
@@ -1160,7 +1160,7 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
     /// Chroma prediction (intra only; inter prediction is done before) and residual for both
     /// components. <paramref name="intraMode"/> is -1 for inter macroblocks.
     /// </summary>
-    private void ReconstructChroma(SliceState slice, int mbAddr, MbTarget target, Residual residual, int cbpChroma, int intraMode, (bool A, bool B, bool C, bool D) mbs)
+    private void ReconstructChroma(SliceState slice, int mbAddr, in MbTarget target, Residual residual, int cbpChroma, int intraMode, (bool A, bool B, bool C, bool D) mbs)
     {
         int origin = target.COrigin;
         int stride = target.CStride;

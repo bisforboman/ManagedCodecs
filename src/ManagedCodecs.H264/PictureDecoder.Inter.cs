@@ -393,7 +393,7 @@ internal sealed partial class PictureDecoder<TPixel>
     }
 
     /// <summary>The residual of an inter macroblock's luma, or in 4:4:4 of its Cb or Cr, added to the prediction.</summary>
-    private void AddInterResidual(SliceState slice, int mbAddr, MbTarget target, int cbpLuma, int component)
+    private void AddInterResidual(SliceState slice, int mbAddr, in MbTarget target, int cbpLuma, int component)
     {
         int qp = QpPrime(slice, mbAddr, component);
         if (_transform8x8[mbAddr])

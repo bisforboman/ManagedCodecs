@@ -737,7 +737,7 @@ internal sealed partial class PictureDecoder<TPixel>
     }
 
     /// <summary>Copies a macroblock reconstructed in the scratch blocks to its place in the picture.</summary>
-    private void ScatterMbaff(int mbAddr, MbTarget target)
+    private void ScatterMbaff(int mbAddr, in MbTarget target)
     {
         var (luma, lumaStride) = LumaPlace(mbAddr);
         for (int y = 0; y < 16; y++)

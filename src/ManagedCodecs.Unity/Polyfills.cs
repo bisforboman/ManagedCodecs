@@ -357,7 +357,19 @@ namespace ManagedCodecs
         extension<T>(Span<T> span)
             where T : IEquatable<T>
         {
-            public int IndexOfAnyExcept(T value) => ((ReadOnlySpan<T>)span).IndexOfAnyExcept(value);
+            // A loop of its own, not through ReadOnlySpan's: Mono calls the conversion rather than inlining it.
+            public int IndexOfAnyExcept(T value)
+            {
+                for (int i = 0; i < span.Length; i++)
+                {
+                    if (!span[i].Equals(value))
+                    {
+                        return i;
+                    }
+                }
+
+                return -1;
+            }
         }
 
         extension<T>(ReadOnlySpan<T> span)

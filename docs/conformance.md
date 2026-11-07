@@ -903,7 +903,8 @@ below every run of the base, and the changed kernels' own samples from 0.13 to 0
 
 AAC LC: channel configurations 1 to 7 and program config elements (1 to 8
 channels), all window sequences and shapes, M/S, intensity, PNS, TNS. Both decoders are floating
-point, so the tests compare values: they require 2^-17 (about 7.6e-6) and measure at most 3e-7.
+point, so the tests compare values: they require 2^-17 (about 7.6e-6) and measure at most 4e-7 (4.8e-7 on the real
+films).
 Pulse data, which FFmpeg's encoder never writes, comes from a stream written by its syntax (`aac-pulse`,
 `tools/make-aac-pulse.py`: one to four pulses a frame, some on zero quantized values), decoded by FFmpeg as the
 reference. M/S set in a band both
@@ -926,6 +927,20 @@ those layouts as listed (aac-pce-8ch, aac-adts-pce). The rule was checked agains
 writes with `-aac_pce 1` (up to 16 channels) and on the FDK encoder's PCEs for 1 to 8 channels (configuration 0 forced in a copy of
 its tree; the 7.1 rear-surround and front-centre modes write one anyway); `ProgramConfigTests` holds the shapes,
 and the ones no encoder at hand writes, which keep the listed order.
+
+The IMDCT (`Imdct`: pre-twiddle, complex FFT of 512 or 64, post-twiddle and fold) runs in single precision, four floats
+a vector, its twiddles computed in double and rounded once (#343, 2026-11-07). Against FFmpeg the largest difference
+went from 4.2e-7 to 4.0e-7 on the samples (one sample's largest fell, the others' stayed or rose by up to half; the RMS rose by
+about 30%, to 4.7e-8 at most) and from 3.6e-7 to 4.8e-7 on the five real films with AAC (Sintel's trailer, Elephants
+Dream, Caminandes 2, both Big Buck Bunnies), against a bound of 7.6e-6; HE-AAC's comparisons pass as before. The tests
+keep the definition in double (`InverseReference`): the float IMDCT is within 2e-6 of each block's peak of it, and
+its vector loops give the scalar ones' floats to the bit. In double, two a vector, the IMDCT had taken 41% of
+`aac-5.1.mp4` on the ARM64 runner and 31% on x64 (`profile.yml`, before #339 fused its bit reversal with the first
+stage); a first float version took about 25% of the old time on ARM64. The float FFT fuses them too, and runs its
+second stage in vectors (two groups of four, split and joined by 64-bit zips). `compare.yml`, steady frame against
+#339's double version: 0.85 stereo, 0.87 5.1, 0.98 HE-AAC 5.1 and 0.99 HE-AAC v2 on ARM64; 0.90, 0.95, 0.98 and 1.00
+on x64. The QMF windowing in float (HE-AAC, below) had barely moved its share; here the gain is real on both
+runners, largest on ARM64.
 
 Spectral data is read through packed tables (#341): one lookup a codeword gives its length, its values and how many
 sign bits follow, one read takes all the signs, the values go straight into the quantized spectrum, and the reads go

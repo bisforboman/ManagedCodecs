@@ -122,14 +122,14 @@ jobs:
             echo "By library:"
             echo
             echo '```'
-            "$PERF" report -i perf.data --no-children --sort dso --percent-limit "$THRESHOLD" --stdio 2>/dev/null | grep -v '^#' | grep -v '^$'
+            "$PERF" report -i perf.data -g none --no-children --sort dso --percent-limit "$THRESHOLD" --stdio 2>/dev/null | grep -v '^#' | grep -v '^$'
             echo '```'
             echo
             echo "By function (above $THRESHOLD%):"
             echo
             echo '```'
             # Signatures shortened: the parameter list and the [Optimized] tag go.
-            "$PERF" report -i perf.data --no-children --sort symbol --percent-limit "$THRESHOLD" --stdio 2>/dev/null \
+            "$PERF" report -i perf.data -g none --no-children --sort symbol --percent-limit "$THRESHOLD" --stdio 2>/dev/null \
               | grep -v '^#' | grep -v '^$' | sed -E 's/\(.*\)\[[A-Za-z0-9]+\]//; s/\[\.\] //' | cut -c1-160
             echo '```'
             if [ "$STAGES" = true ]; then

@@ -23,6 +23,8 @@ run time.
 
 ### Changed
 
+- H.264: the direct motion compensation path for frame macroblocks also takes samples above 8 bits and 4:2:2: about 2%
+  fewer instructions in 10-bit and 4:2:2 streams.
 - AAC: the IMDCT's FFT does its bit reversal and first stage in one vector pass, and its post-twiddle runs in
   vectors: 15 to 23% off an AAC LC frame on x64 and ARM64, and 3% off 5.1 HE-AAC. The output is unchanged.
 - AAC: the IMDCT (its FFT, DCT-IV and fold) runs in single precision, four values a vector where it ran two
@@ -51,6 +53,8 @@ run time.
   6.12, 720p H.264 about twice as fast (79 to 38 ms a frame), 320x240 H.264 1.3 to 1.5 times, MJPEG 1.45 times.
   The other packages' code is unchanged where it runs (docs/decisions/2026-10-31-unity-netstandard.md, Mono's
   profile).
+- MJPEG: a flat block's rows are written as one 8-byte store each instead of a call each: about 7 to 10% off a frame of
+  a test pattern, nothing on noise.
 
 ## 0.8.1 – 2026-11-07
 

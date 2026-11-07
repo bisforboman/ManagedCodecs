@@ -979,6 +979,23 @@ loop without branches: the magnitude's power times the gain, the sign bit then s
 product gives the same bits), zero giving +0. `DequantizeTests` compares it with the definition bit for bit. About 7%
 of the decode by perf after; Elephants Dream decodes 29% faster, Sintel's trailer 26% (median of 10 interleaved runs).
 
+**Tried and dropped: a leaner spectral entry and two codewords a refill.** Spectral reading is then a quarter of a
+film's AAC decode (docs/notes/aac-stages-2026-11.md has its instruction and misprediction counts). This change made
+three moves at once:
+- **64-bit table entries:** the bits to consume (codeword and signs), each value as a signed byte, and each value's sign
+  bit as its shift from the codeword's first bit. A sign became a shift, an arithmetic shift and a negation, with no
+  running count of nonzero values, since negating a zero leaves it zero.
+- **One refill check for two codewords:** at most 17 bits used before it leaves 40, two codewords with their signs of
+  20 bits at most each (escapes refill on their own).
+- **No bounds checks:** stores and table reads went through refs, after one check that a band is whole codewords.
+
+It was bit-exact (the films' hashes, `SpectrumHuffmanTests`). On Elephants Dream (10 interleaved runs), branch / main
+was 0.996 with a 10-bit first level and 0.97 to 0.98 with a 9-bit one, which halves book 11's first level to 4 KB. By
+perf (three and four runs of each build, alternating), spectral reading's samples over those of the stages it does
+not touch did not fall: medians 0.824 to 0.841 at 10 bits, 0.816 to 0.829 at 9. Likely (not measured), the pace is
+set by a chain of dependent work rather than by the instruction count: each codeword's table read waits on the
+previous codeword's length.
+
 ## HE-AAC (spectral band replication)
 
 Samples from the Fraunhofer FDK encoder, committed in `samples/heaac/` (`tools/make-heaac-samples.sh`): stereo at

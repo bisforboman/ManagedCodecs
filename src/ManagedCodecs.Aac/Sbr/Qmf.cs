@@ -287,6 +287,18 @@ internal sealed class QmfSynthesis
     }
 
     /// <summary>
+    /// As <see cref="Process(ReadOnlySpan{double}, ReadOnlySpan{double}, Span{double})"/>, the output rounded to single
+    /// precision (<see cref="QmfState.ToSingle"/>).
+    /// </summary>
+    [SkipLocalsInit]
+    public void Process(ReadOnlySpan<double> real, ReadOnlySpan<double> imaginary, Span<float> output)
+    {
+        Span<double> samples = stackalloc double[64];
+        Process(real, imaginary, samples);
+        QmfState.ToSingle(samples[..Bands], output[..Bands]);
+    }
+
+    /// <summary>
     /// The full bank's v(n), n in 0..127, as two DCT-IVs of 64 points (<see cref="QmfDctIV"/>): with n' = 127 - n the
     /// kernel's real part is X_r(k) cos(t) + X_i(k) sin(t), t = pi/64 (k + 0.5)(n' + 0.5). For n' from 64 the cos kernel
     /// turns into -(-1)^k sin and the sin kernel into (-1)^k cos of n' - 64, and a sin kernel at n equals (-1)^k times the
@@ -604,6 +616,43 @@ internal static class QmfState
         for (; n < length; n++)
         {
             output[n] = (re[n] * cos[n]) - (im[n] * sin[n]);
+        }
+    }
+
+    /// <summary>
+    /// output[n] = (float)values[n], several at a time: a vector's narrowing rounds to nearest as the cast does, so the
+    /// same to the bit (<c>QmfToSingle_MatchesCast</c>).
+    /// </summary>
+    public static void ToSingle(ReadOnlySpan<double> values, Span<float> output)
+    {
+        if (output.Length < values.Length)
+        {
+            throw new ArgumentException("The output is shorter than the values.");
+        }
+
+        int n = 0;
+#if NET
+        ref double x = ref MemoryMarshal.GetReference(values);
+        ref float o = ref MemoryMarshal.GetReference(output);
+        if (Vector256.IsHardwareAccelerated)
+        {
+            for (; n <= values.Length - 8; n += 8)
+            {
+                Vector256.Narrow(Vector256.LoadUnsafe(ref x, (nuint)n), Vector256.LoadUnsafe(ref x, (nuint)(n + 4))).StoreUnsafe(ref o, (nuint)n);
+            }
+        }
+        else if (Vector128.IsHardwareAccelerated)
+        {
+            for (; n <= values.Length - 4; n += 4)
+            {
+                Vector128.Narrow(Vector128.LoadUnsafe(ref x, (nuint)n), Vector128.LoadUnsafe(ref x, (nuint)(n + 2))).StoreUnsafe(ref o, (nuint)n);
+            }
+        }
+#endif
+
+        for (; n < values.Length; n++)
+        {
+            output[n] = (float)values[n];
         }
     }
 

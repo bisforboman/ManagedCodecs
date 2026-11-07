@@ -184,6 +184,54 @@ public class QmfTests
     }
 
     /// <summary>
+    /// The vector narrowing to single precision is the cast, to the bit, for every length (whole vectors and a tail), on
+    /// values over many decades: halfway cases, a negative zero, values that round to a float subnormal or overflow to
+    /// infinity, and NaN.
+    /// </summary>
+    [Theory]
+    [InlineData(64)]
+    [InlineData(32)]
+    [InlineData(13)]
+    [InlineData(3)]
+    [InlineData(0)]
+    public void QmfToSingle_MatchesCast(int length)
+    {
+        var random = new Random(length);
+        double[] special = [-0.0, 1e-40, -1e-45, 3.5e38, -1e300, double.NaN, double.PositiveInfinity, 1.0 + Math.Pow(2, -24), 1.0 + (3 * Math.Pow(2, -24))];
+        var values = Enumerable.Range(0, length).Select(i => i < special.Length && random.Next(2) == 0
+            ? special[i]
+            : (random.NextDouble() - 0.5) * Math.Pow(10, random.Next(-40, 40))).ToArray();
+        var output = new float[length];
+        QmfState.ToSingle(values, output);
+        Assert.Equal(values.Select(v => BitConverter.SingleToInt32Bits((float)v)), output.Select(BitConverter.SingleToInt32Bits));
+    }
+
+    /// <summary>The synthesis banks' single-precision output is their double output cast, full and downsampled.</summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void SynthesisToSingle_MatchesCast(bool downsampled)
+    {
+        var random = new Random(downsampled ? 21 : 20);
+        var (synthesis, single) = (new QmfSynthesis(downsampled, 1.0 / 32768), new QmfSynthesis(downsampled, 1.0 / 32768));
+        int bands = synthesis.Bands;
+        var (real, imaginary) = (new double[64], new double[64]);
+        var (output, singles) = (new double[64], new float[64]);
+        for (int slot = 0; slot < 30; slot++)
+        {
+            for (int k = 0; k < bands; k++)
+            {
+                real[k] = (random.NextDouble() - 0.5) * 65536;
+                imaginary[k] = (random.NextDouble() - 0.5) * 65536;
+            }
+
+            synthesis.Process(real, imaginary, output);
+            single.Process(real, imaginary, singles);
+            Assert.Equal(output[..bands].Select(v => BitConverter.SingleToInt32Bits((float)v)), singles[..bands].Select(BitConverter.SingleToInt32Bits));
+        }
+    }
+
+    /// <summary>
     /// SBR's banks with its 2^15 folded into their windows (the analysis bank's input times 32768, from single
     /// precision; the synthesis banks' output over 32768) give exactly the unscaled banks' values on the scaled samples,
     /// slot after slot.

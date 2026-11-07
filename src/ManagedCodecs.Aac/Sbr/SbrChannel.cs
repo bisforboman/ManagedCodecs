@@ -688,12 +688,10 @@ internal sealed class SbrChannel(bool downsampled = false)
     {
         Span<double> real = stackalloc double[64];
         Span<double> imaginary = stackalloc double[64];
-        Span<double> samples = stackalloc double[64];
         for (int l = 0; l < Slots; l++)
         {
             SynthesisInput(l, real, imaginary);
-            _synthesis.Process(real, imaginary, samples);
-            Output(samples, output[(_synthesis.Bands * l)..], _synthesis.Bands);
+            _synthesis.Process(real, imaginary, output[(_synthesis.Bands * l)..]);
         }
     }
 
@@ -705,14 +703,6 @@ internal sealed class SbrChannel(bool downsampled = false)
         _lowImaginary[l + HfAdjust].AsSpan(0, kx).CopyTo(imaginary);
         _highReal[l].AsSpan(kx).CopyTo(real[kx..]);
         _highImaginary[l].AsSpan(kx).CopyTo(imaginary[kx..]);
-    }
-
-    private static void Output(ReadOnlySpan<double> samples, Span<float> output, int count)
-    {
-        for (int n = 0; n < count; n++)
-        {
-            output[n] = (float)samples[n];
-        }
     }
 
     // Parametric stereo: the frame's synthesis input (and the hybrid filters' 6 slots of the five lowest bands after it,
@@ -739,14 +729,11 @@ internal sealed class SbrChannel(bool downsampled = false)
         int top = element is { HasFrame: true, Frequencies: { } frequencies } ? frequencies.Kx + frequencies.M : 32;
         _ps.Apply(element?.Ps ?? NoPs, element is { HasPs: true }, _stereoRe, _stereoIm, _rightRe, _rightIm, top, statistics);
 
-        Span<double> samples = stackalloc double[64];
         for (int l = 0; l < Slots; l++)
         {
             int bands = _synthesis.Bands;
-            _synthesis.Process(_stereoRe[l], _stereoIm[l], samples);
-            Output(samples, left[(bands * l)..], bands);
-            _rightSynthesis.Process(_rightRe[l], _rightIm[l], samples);
-            Output(samples, right[(bands * l)..], bands);
+            _synthesis.Process(_stereoRe[l], _stereoIm[l], left[(bands * l)..]);
+            _rightSynthesis.Process(_rightRe[l], _rightIm[l], right[(bands * l)..]);
         }
     }
 

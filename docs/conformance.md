@@ -920,6 +920,31 @@ grew by 74 KB, its output the same on all 396 samples. Callgrind (x86-64-v3, loo
 0.89 to 1.04 of the plain build's, a second at 0.94 to 1.07, and an A/A round (the plain build against a copy) at 0.96 to
 1.01, so no gain it can resolve. ILC's use of the profile does not come near the JIT's 8 to 12% on GitHub's ARM64
 runner; it was not timed there (`compare.yml` builds only the JIT mcdec).
+PGO's lead by stage (2026-11-07, #346, 63b8611): `profile.yml` with `stages` (call chains, `DOTNET_ReadyToRun=0`,
+`tools/h264-stages.py`), 500 loops of `h264-high-default.mp4`, from 8 s, on the ARM64 runner; each stage's share times
+the last loop's time a frame, one run a setting:
+
+| Stage | tiering off, µs a frame | dynamic PGO | Difference |
+| --- | ---: | ---: | ---: |
+| Intra prediction | 49.7 | 43.0 | -6.7 |
+| Per-picture setup and clears | 8.6 | 2.7 | -5.9 |
+| Inter prediction, transform and residual add | 122.8 | 119.3 | -3.5 |
+| Deblocking (bS and edge filters) | 78.9 | 75.9 | -3.0 |
+| Header syntax and MV prediction | 104.2 | 107.0 | +2.8 |
+| Residual parsing | 77.4 | 76.8 | -0.6 |
+| Output copy, NAL unescaping, other | 36.4 | 32.0 | -4.4 |
+| Total | 477.8 | 457.3 | -20.5 |
+
+Header syntax and MV prediction are taken together because PGO inlines `DecodeMotion` and `StoreMotion` into
+`DecodeInterMacroblock`, so their time counts as a header's (perf sees no inlined frames). No stage holds the lead:
+it is spread over every stage but residual parsing, the per-picture clears falling the most for their size (to a
+third). The lead itself has shrunk since the runs above (78314df: -11.7% on this stream, -8.0% on
+`h264-bench-720p.mp4`): without `stages` (ReadyToRun on, as those runs), 485.7 against 458.6 µs (-5.6%) and 3901.2
+against 3744.8 µs (-4.0%), one run each. Inlining (#372), the struct copies (#380) and the static-base checks (#365)
+came in between. With `stages`, the 720p stream showed no lead at all (3938.9 against 3938.0 µs), likely because
+with ReadyToRun off every CoreLib method queues for tier 1 too, and its PGO code had not all arrived by the last loop
+(the warm-up notes, docs/notes/jit-warmup-2026-11.md); so its stage table is left out. x64's jobs ran on three
+different CPUs (EPYC 7763, 9V45 and 9V74), so their times do not compare.
 PGO's warm-up, as against its steady gain (2026-11-07, #347): each hot method is compiled three times, and the tier-1
 compiles queue on one background thread, busy until about frame 1,000; the per-picture methods wait late in that
 queue. `AggressiveOptimization` on the slice and picture drivers was tried and dropped (4 to 6% faster on one

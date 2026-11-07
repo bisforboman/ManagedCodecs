@@ -11,7 +11,12 @@ share internals, so each depends on the others at exactly its own version (`[X]`
 then reports a mix of versions (NU1107, or NU1608 for a newer one referenced directly) rather than letting it fail at
 run time.
 
-## Unreleased
+## 0.9.0 – 2026-11-07
+
+Playback for game engines: the new packages `ManagedCodecs.Playback` (`MediaPlayer`, also in ManagedCodecs.Unity) and
+`ManagedCodecs.MonoGame` (`VideoTexture`). H.264 decodes faster in 10-bit, 4:2:2, MBAFF and field streams, AAC LC and
+HE-AAC much faster, MJPEG a little, and the Unity build on Mono faster still. New public API, hence a minor version;
+code built against 0.8 keeps working.
 
 ### Added
 

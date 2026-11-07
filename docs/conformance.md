@@ -727,6 +727,13 @@ the calls' place); filled from the pairs directly (`AffLeft` for each row, the B
 loops) counts 442.7 to 435.8 M instructions a loop of `h264-mbaff-default` (-1.6%), 79.50 to 78.14 M of `jm-paff-b`
 (-1.7%) and no change in `h264-bench-720p.mp4` (-0.04%). Under the JIT (perf, 150 loops, six runs each, the order
 alternating, normalized as above) `h264-mbaff-default`'s frame took a median 1.7% less (five runs of six faster).
+Spatial direct next (2026-11-07): it read A, B and C (or D) of the macroblock as a 16x16 partition for each list's
+reference index, then again inside `PredictMv` for its motion vector. `SpatialDirectNeighbors` finds them once a
+list for both, in MBAFF frames and field pictures with `AffMotionNeighbors` (so `CheckMotionNeighbors` checks them
+too). Callgrind (AOT, steady loops): 435.8 to 426.4 M instructions a loop of `h264-mbaff-default` (-2.2%), 78.14 to
+77.17 M of `jm-paff-b` (-1.2%); frames gain nothing (`h264-b-motion.mp4` -0.01%: their lookups inline). Under the JIT
+(perf, 150 loops, six runs each, alternating, normalized as above) `h264-mbaff-default` took a median 2.2% less, all
+six runs faster.
 
 A profile of a
 720p libx264 default stream (2026-10-22) is flat: CABAC residual decoding takes 14%, deblocking 21%
@@ -903,6 +910,15 @@ those layouts as listed (aac-pce-8ch, aac-adts-pce). The rule was checked agains
 writes with `-aac_pce 1` (up to 16 channels) and on the FDK encoder's PCEs for 1 to 8 channels (configuration 0 forced in a copy of
 its tree; the 7.1 rear-surround and front-centre modes write one anyway); `ProgramConfigTests` holds the shapes,
 and the ones no encoder at hand writes, which keep the listed order.
+
+Spectral data is read through packed tables (#341): one lookup a codeword gives its length, its values and how many
+sign bits follow, one read takes all the signs, the values go straight into the quantized spectrum, and the reads go
+through a 64-bit cache (`AacBitReader.Cursor`, as H.264's CAVLC one) that reads past the end as zeros, the unit's end
+checked when it is committed. `SpectrumHuffmanTests` compares it with the reader by the definition (kept as
+`Huffman.ReadSpectrumByDefinition`) on random bits for every codebook, truncated units and long escapes among them.
+The benchmark samples (low-bitrate tones) barely reach this code; on real films' AAC it was the largest stage:
+Elephants Dream's 192 kbit/s stereo spent 31% of its decode there by perf, 16% after, and decodes 21% faster (median
+of 10 interleaved runs each, 1177 to 925 ms for its 11 minutes once warm; Sintel's trailer, 127 kbit/s, 14% faster).
 
 ## HE-AAC (spectral band replication)
 

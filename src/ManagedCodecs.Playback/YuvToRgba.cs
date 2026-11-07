@@ -3,10 +3,10 @@ using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics;
 #endif
 
-namespace ManagedCodecs.MonoGame;
+namespace ManagedCodecs.Playback;
 
 /// <summary>
-/// Converts a decoded frame to 8-bit RGBA (MonoGame's <c>SurfaceFormat.Color</c>: R, G, B, A in memory), any of the
+/// Converts a decoded frame to 8-bit RGBA (R, G, B, A in memory: MonoGame's <c>SurfaceFormat.Color</c>, Godot's <c>Rgba8</c>, Unity's <c>RGBA32</c>), any of the
 /// library's layouts (4:0:0, 4:2:0, 4:2:2, 4:4:4) at any bit depth, nearest-neighbour chroma. Fixed point, 16
 /// fractional bits. <see cref="For"/> picks the matrix and range a frame says (<see cref="VideoFrame.ColorMatrix"/>,
 /// <see cref="VideoFrame.ColorRange"/>), and where it says nothing what a player usually assumes: BT.601 below 720
@@ -67,9 +67,11 @@ internal sealed class YuvToRgba
     /// (non-constant luminance; constant luminance converted as if it were) and SMPTE 240M; any other matrix, or none
     /// said, by the frame's height. Limited range unless the frame says full.
     /// </summary>
-    public static YuvToRgba For(VideoFrame frame)
+    /// <param name="matrix">The matrix to use in place of the frame's, as <see cref="PlaybackOptions.Matrix"/> gives it.</param>
+    /// <param name="range">The range to use in place of the frame's.</param>
+    public static YuvToRgba For(VideoFrame frame, ColorMatrix? matrix = null, ColorRange? range = null)
     {
-        var (kr, kb) = frame.ColorMatrix switch
+        var (kr, kb) = (matrix ?? frame.ColorMatrix) switch
         {
             ColorMatrix.Bt709 => (0.2126, 0.0722),
             ColorMatrix.Bt470BG or ColorMatrix.Smpte170M => (0.299, 0.114),
@@ -78,7 +80,7 @@ internal sealed class YuvToRgba
             ColorMatrix.Fcc => (0.30, 0.11),
             _ => frame.Height >= 720 ? (0.2126, 0.0722) : (0.299, 0.114),
         };
-        bool full = frame.ColorRange == ColorRange.Full;
+        bool full = (range ?? frame.ColorRange) == ColorRange.Full;
         lock (Converters)
         {
             if (!Converters.TryGetValue((kr, kb, full), out var converter))

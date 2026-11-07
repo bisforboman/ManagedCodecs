@@ -95,6 +95,106 @@ is the cost, not the missing vectors. In absolute terms the record's conclusion 
 in real time and HE-AAC 2 to 7%, MJPEG and 320x240 H.264 play (1 to 22 ms a frame), and 720p H.264 runs at 12.5 frames
 a second on one thread (1080p would be a few). Unity's own Mono fork and IL2CPP (through C++) are not measured.
 
+## Mono's profile (issue #345)
+
+Where Mono 6.12 spends the Unity build's time, and what of it Mono compiles worse than CoreCLR. Measured on GitHub's
+x64 runner (Mono 6.12.0.200 from mono-project.com, as ci.yml's `unity` job installs it) by a scratch workflow, not
+committed: `perf record -e cpu-clock -F 2000 mono --jitmap mcdec.dll <sample> --loops N` (`--jitmap` writes Mono's perf
+map, so the JIT's code has names) and `perf report --sort symbol`, and a console of micro-benchmarks of the patterns
+below, built for netstandard2.1 and run under `mono` and `dotnet`. The cloud sandbox cannot run Mono 6.12 (above).
+
+**Before** (main on 2026-11-07), the top of each profile, as shares of the run:
+
+- h264-bench-720p (CAVLC, P frames): motion compensation by the definition, about 70%. The per-sample reference
+  interpolation (`PredictLumaReference`, `PredictChromaReference`), whose local function `S` (a clamped read) alone was
+  38% for luma and 14% for chroma: Mono compiles local functions as calls taking their closure by reference and inlines
+  none of them, where CoreCLR's share of the same code was 58%. Then deblocking's `FilterSamples` 5.6% and
+  `get_Tc0` 2.1%.
+- h264-b-pyramid (CABAC, B frames): motion compensation about 45%; CABAC's `ResidualBlock` 4.8%, the table properties
+  `get_RangeTabLps` 3.7%, `get_MpsNext` 2.5%, `get_LpsNext` 1.3%, and the `BitOperations.LeadingZeroCount` polyfill
+  3.3% (a loop a bit, at every renormalization).
+- testsrc-420.avi (MJPEG): the scalar IDCT (`Row`, `Column`, `PutScalar`, `PutDcOnly`) about 30%, and
+  `Span<short>`'s conversion to `ReadOnlySpan<short>` 8 to 10% by itself.
+- heaac-5.1: the QMF banks' FFT (`QmfFft.Transform`) 26%, their windows (`Vectors.SumOfProducts`) 24%,
+  `QmfSynthesis.FullTransform` 11%.
+- aac-stereo-48k: the IMDCT's FFT 30% and the rest of the IMDCT 15%; Mono's runtime (`mono-sgen`) 14 to 17%.
+
+**The patterns**, each a loop over 4096 values (the console's best of 5, ns a value, one run). The console is crude
+(each loop is a lambda over static arrays): the same row moved by up to 2 times between two runs, so only the large
+ratios mean anything, and the two columns only compare within themselves.
+
+| Pattern | Mono 6.12 | CoreCLR (.NET 10) |
+| --- | ---: | ---: |
+| short add by array index / `Span` index / `Unsafe.Add` | 1.91 / 1.93 / 3.22 | 2.66 / 2.41 / 2.09 |
+| `Vector<short>` add | 9.39 | 0.99 |
+| `typeof(T) == typeof(byte)` in a generic method / `Unsafe.As<T, byte>` there / plain byte code | 2.40 / 0.63 / 2.11 | 1.81 / 1.73 / 1.81 |
+| a 32-byte struct to an AggressiveInlining callee by value / by `in` | 1.25 / 0.94 | 2.36 / 2.32 |
+| a small AggressiveInlining call / the same written inline | 1.26 / 1.26 | 2.30 / 2.91 |
+| a static `ReadOnlySpan<byte>` table property indexed in the loop | 8.46 | 0.32 |
+| the same with an AggressiveInlining getter | 7.19 | 2.90 |
+| the same property hoisted into a local span / a `static readonly byte[]` | 1.25 / 1.25 | 2.03 / 1.89 |
+| a call taking `ReadOnlySpan`, passed a `Span` / passed a `ReadOnlySpan` | 10.9 / 2.19 | 1.57 / 3.14 |
+| `span.Slice(i, 4)[0]` | 10.0 | 0.63 |
+| the `LeadingZeroCount` polyfill: a loop a bit / a binary search | 13.3 / 4.88 | 4.25 / 4.36 |
+
+So Mono does well what the issue suspected it might not: `typeof(TPixel)` branches fold per instantiation,
+`Unsafe.As` and `Unsafe.Add` (from the System.Runtime.CompilerServices.Unsafe package) compile to plain loads, struct
+copies cost nothing extra, and AggressiveInlining is honoured. What it does badly is calls CoreCLR inlines: local
+functions, `Span<T>`'s conversion to `ReadOnlySpan<T>`, `Slice`, `Fill`, and the getter of a `ReadOnlySpan<byte>`
+property over constant data (the form CoreCLR wants for tables, since it folds it to the data's address: hoisting it
+into a local costs CoreCLR about 6 times, so the shared code can't simply change).
+
+**`System.Numerics.Vector<T>`** is not accelerated on Mono 6.12's JIT: `Vector.IsHardwareAccelerated` is false and
+`Vector<short>` (16 bytes there) adds about 5 times slower than scalar code (software emulation). It is no vector path
+for the Unity build on Mono. IL2CPP is not measured: it needs a Unity license (GameCI can run it in CI with one). The
+console above, built into a Unity player, would answer both questions for IL2CPP and for Unity's own Mono.
+
+**Fixed** (pull request for #345), each bit-exact (the whole test suite against the Unity build, and
+`tools/unity-check.sh` on every sample):
+
+- Motion compensation in the Unity build (`InterPrediction.Scalar.cs`, compiled only there): the block's reference
+  samples are read once into a window, clamped, and the 6-tap and bilinear filters run over its rows and columns, as
+  the vector paths do, in scalar code; spans are passed as `Span`, not `ReadOnlySpan`. InterPredictionTests compares
+  it with the per-sample reference on random blocks, as it does the vector paths.
+- The `LeadingZeroCount` and `TrailingZeroCount` polyfills: a binary search instead of a loop a bit (PolyfillTests
+  compares them with .NET's on every power of two and 20,000 random values).
+- MJPEG's scalar IDCT (`SimpleIdct.PutScalar`, the Unity build's only IDCT and CoreCLR's reference): rows and
+  columns by offset rather than slices and a conversion each, the zero tests as ORs; `PutDcOnly` stores a row as one
+  8-byte write in the Unity build. The `Span<T>.IndexOfAnyExcept` polyfill loops itself instead of converting.
+
+Mono 6.12, the last loop's time a frame, medians of five interleaved runs of each build (each row's two on one runner;
+the H.264 rows on the runner of README's table, the MJPEG row on another):
+
+| Sample | Before (ms) | After (ms) | Before / after |
+| --- | ---: | ---: | ---: |
+| h264-bench-720p | 79.1 | 38.3 | 2.07 |
+| h264-high-motion | 21.3 | 16.4 | 1.30 |
+| h264-b-pyramid | 6.56 | 4.29 | 1.53 |
+| h264-10bit-b | 7.10 | 4.82 | 1.47 |
+| testsrc-420.avi (MJPEG) | 1.18 | 0.81 | 1.45 |
+
+ci.yml's table of the Unity build on Mono against the net10.0 build, after this change (`tools/bench.py --runtime
+mono`, on a faster runner, an AMD EPYC 9V45, so not comparable with the table above by time): Mono takes 3.1 to 3.4
+times the net10.0 build's time on MJPEG, 3.1 to 8.7 on H.264 (720p 21.9 ms a frame), 4.7 to 4.8 on AAC and 7.2 to 9.1
+on HE-AAC; src/ManagedCodecs.Unity/PACKAGE.md has it.
+
+The net10.0 build is unchanged where it runs: ManagedCodecs.H264.dll for net10.0 is the same file byte for byte
+(built without debug information, whose id hashes the sources), and the MJPEG change reaches CoreCLR only without
+SSSE3 or AVX2 (`PutScalar`), with `PutDcOnly`'s CoreCLR path as it was; `tools/bench.py --base` on the cloud VM (7
+interleaved runs) found no change beyond its noise.
+
+**Left** (not fixed here):
+
+- AAC: the QMF FFT's scalar path by reference instead of a slice a group, and `SumOfProducts` four sums at a time
+  (the same chains, bit-exact), took heaac-5.1 from 2.35 to 1.76 ms a frame on Mono in the scratch run; they change
+  `Sbr/Qmf.cs` and `Filterbank.cs`, which open pull requests (#353, #354) change, so they follow those.
+- The table properties (`CabacTables.RangeTabLps`, `Cabac.MpsNext` and `LpsNext`, deblocking's `Tc0`,
+  `SignificantCatOffset`, `ScanPositionInc`, MJPEG's `ZigZag`): about 9% of a CABAC frame and 3.4% of the 720p CAVLC one
+  on Mono after this change. A Unity-only spelling (a `static readonly` array read where the net10.0 build keeps the
+  property) would remove most of it without touching CoreCLR's code.
+- The remaining `Span`-to-`ReadOnlySpan` conversions and slices in hot code (about 1 to 3% of each profile).
+- Unity's own Mono and IL2CPP (above).
+
 ## The design
 
 - **One linked assembly**: a new project, `src/ManagedCodecs.Unity`, compiles the sources of Core, Containers, Mjpeg,

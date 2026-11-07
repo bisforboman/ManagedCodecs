@@ -1,7 +1,7 @@
 # Changelog
 
 Versions are git tags (`vX.Y.Z`); each one publishes every package (ManagedCodecs.Core, .Containers, .Mjpeg, .H264,
-.Aac, .Thumbnails, .Unity and the ManagedCodecs meta-package) to nuget.org at that version, and a GitHub release with this file's section
+.Aac, .Thumbnails, .Playback, .Unity and the ManagedCodecs meta-package) to nuget.org at that version, and a GitHub release with this file's section
 as its notes. `release.yml` releases on the push to main that brings a version heading not yet tagged, so a release
 is a pull request that turns "Unreleased" into "## X.Y.Z – date" and runs `tools/ship-public-api.py`. From 0.1.0 on, the
 public API changes only in a new minor version (0.2.0, 0.3.0, ...), with a "Breaking changes" entry; a patch version
@@ -13,17 +13,35 @@ run time.
 
 ## Unreleased
 
+### Added
+
+- New package `ManagedCodecs.Playback`: `MediaPlayer` plays a video file (H.264 or MJPEG with AAC; MP4, Matroska, WebM
+  or AVI) for a game engine, decoding on a thread of its own into RGBA frames (`RgbaFrame`) and float stereo
+  (`AudioChunk`), and gives the game loop the frame due by its clock (`TakeFrame`), dropping late ones; with
+  `PlaybackOptions` (decoder threads, matrix and range, loop) and `PlaybackStatistics`. `ManagedCodecs.Unity` holds it
+  too. The MonoGame, Godot and Unity samples now use it.
+
 ### Changed
 
 - AAC: the IMDCT's FFT does its bit reversal and first stage in one vector pass, and its post-twiddle runs in
-  vectors: 12 to 15% off an AAC LC frame on x64 and 3% off 5.1 HE-AAC. The output is unchanged.
+  vectors: 15 to 23% off an AAC LC frame on x64 and ARM64, and 3% off 5.1 HE-AAC. The output is unchanged.
 - H.264: in MBAFF frames and field pictures, motion vector prediction finds its neighbours A, B and C in one call:
   about 1.8% fewer instructions in MBAFF frames, 1.6% in field pictures and 1.1% in progressive CAVLC frames.
 - H.264: in MBAFF frames and field pictures, CABAC's context selection reads a macroblock's left and above neighbours
   from a table found once a macroblock instead of a call each: about 1.6% fewer instructions in CABAC MBAFF frames
   and 1.7% in field pictures.
+- AAC: spectral data is read through packed Huffman tables, all of a codeword's sign bits at once: AAC LC at film
+  bitrates decodes 14 to 21% faster (Elephants Dream's 192 kbit/s stereo, Sintel's trailer).
+- H.264: spatial direct prediction finds a macroblock's neighbours A, B and C once for both its reference indices and
+  its motion vectors, in MBAFF frames and field pictures in one call: about 2.2% fewer instructions in MBAFF frames
+  with B pictures and 1.2% in field pictures.
 - MJPEG: the Huffman decoder keeps its bit buffer in registers, and a short code with long magnitude bits takes one
   table lookup instead of two: about 6 to 7% off a frame.
+- ManagedCodecs.Unity on Mono: motion compensation filters whole rows of a block instead of every sample by the
+  definition, MJPEG's IDCT indexes rather than slicing, and the bit-count polyfills search rather than loop: on Mono
+  6.12, 720p H.264 about twice as fast (79 to 38 ms a frame), 320x240 H.264 1.3 to 1.5 times, MJPEG 1.45 times.
+  The other packages' code is unchanged where it runs (docs/decisions/2026-10-31-unity-netstandard.md, Mono's
+  profile).
 
 ## 0.8.1 – 2026-11-07
 

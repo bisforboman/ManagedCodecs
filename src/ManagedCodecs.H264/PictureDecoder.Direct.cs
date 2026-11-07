@@ -42,8 +42,11 @@ internal sealed partial class PictureDecoder<TPixel>
     /// </summary>
     private bool SpatialDirect(SliceState slice, int mbAddr, int first, int count)
     {
-        int ref0 = SpatialDirectRefIdx(0, mbAddr);
-        int ref1 = SpatialDirectRefIdx(1, mbAddr);
+        // The neighbours give both the reference indices and the motion vectors: found once for each list.
+        var n0 = SpatialDirectNeighbors(0, mbAddr);
+        var n1 = SpatialDirectNeighbors(1, mbAddr);
+        int ref0 = MinPositive(n0.A.RefIdx, MinPositive(n0.B.RefIdx, n0.C.RefIdx));
+        int ref1 = MinPositive(n1.A.RefIdx, MinPositive(n1.B.RefIdx, n1.C.RefIdx));
         (int X, int Y) mv0 = (0, 0);
         (int X, int Y) mv1 = (0, 0);
         bool zero = ref0 < 0 && ref1 < 0;
@@ -56,12 +59,12 @@ internal sealed partial class PictureDecoder<TPixel>
         {
             if (ref0 >= 0)
             {
-                mv0 = PredictMv(0, mbAddr, 0, 0, 16, 16, ref0, PartitionShape.Other);
+                mv0 = PredictMv(0, 0, ref0, PartitionShape.Other, n0.A, n0.B, n0.C);
             }
 
             if (ref1 >= 0)
             {
-                mv1 = PredictMv(1, mbAddr, 0, 0, 16, 16, ref1, PartitionShape.Other);
+                mv1 = PredictMv(0, 0, ref1, PartitionShape.Other, n1.A, n1.B, n1.C);
             }
         }
 
@@ -115,9 +118,18 @@ internal sealed partial class PictureDecoder<TPixel>
         }
     }
 
-    /// <summary>refIdxLX of spatial direct prediction: MinPositive over the neighbours A, B and C (or D).</summary>
-    private int SpatialDirectRefIdx(int list, int mbAddr)
+    /// <summary>
+    /// The neighbours A, B and C (D where C is not available) of the macroblock as a 16x16 partition in list
+    /// <paramref name="list"/>, for both its reference index (MinPositive over them) and its motion vector (8.4.1.2.2):
+    /// in MBAFF frames and field pictures in one call (<see cref="AffMotionNeighbors"/>).
+    /// </summary>
+    private (Motion A, Motion B, Motion C) SpatialDirectNeighbors(int list, int mbAddr)
     {
+        if (_pairSlots)
+        {
+            return AffMotionNeighbors(list, mbAddr, 0, 0, 16, 0);
+        }
+
         var a = MotionNeighbor(list, mbAddr, -1, 0, 0);
         var b = MotionNeighbor(list, mbAddr, 0, -1, 0);
         var c = MotionNeighbor(list, mbAddr, 16, -1, 0);
@@ -126,7 +138,7 @@ internal sealed partial class PictureDecoder<TPixel>
             c = MotionNeighbor(list, mbAddr, -1, -1, 0);
         }
 
-        return MinPositive(a.RefIdx, MinPositive(b.RefIdx, c.RefIdx));
+        return (a, b, c);
     }
 
     private static int MinPositive(int x, int y) => x >= 0 && y >= 0 ? Math.Min(x, y) : Math.Max(x, y);

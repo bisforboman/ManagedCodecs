@@ -79,4 +79,11 @@ both builds twice, alternating, and measured the IMDCT's samples against spectra
 leaves alone. The IMDCT's time fell by 36% in 5.1 (1.38 to 0.88 times spectral decoding) and by 32% in stereo (2.33
 to 1.58), which accounts for the wall clock's gain. HE-AAC gains less because the QMF banks dominate its frame.
 
-Not measured: ARM64. `compare.yml` on the branch times it on the hosted runners.
+On the hosted runners (`compare.yml` run 42374598337, medians of 7 interleaved runs), steady time, branch / main:
+
+| Runner | `aac-stereo-48k` | `aac-5.1` | `heaac/heaac-5.1` | `heaac/heaacv2-stereo` |
+| --- | ---: | ---: | ---: | ---: |
+| x64 (EPYC 7763) | 0.768 | 0.809 | 0.971 | 0.983 |
+| ARM64 | 0.831 | 0.846 | 0.970 | 0.990 |
+
+The runners gain more than the cloud VM: 19 to 23% off AAC LC on x64 and 15 to 17% on ARM64.

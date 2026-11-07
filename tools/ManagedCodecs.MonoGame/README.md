@@ -6,9 +6,10 @@ player: no seeking, no pause, Escape quits.
 
     dotnet run -c Release --project tools/ManagedCodecs.MonoGame -- <file.mp4>
 
-- A thread of its own demuxes and decodes ahead (H.264 with frame threading, up to 4 threads) and converts each frame
-  to RGBA on the CPU (`YuvToRgba`); the game loop shows the newest frame due by a clock started at the first frame and
-  drops late ones, through one `Texture2D` (`SetData` each frame). A frame's pixels go back to `MediaSource.Return`
+- `ManagedCodecs.Playback`'s `MediaPlayer` demuxes and decodes ahead on a thread of its own (H.264 with frame
+  threading, up to 4 threads) and converts each frame to RGBA on the CPU (`YuvToRgba`, inside the package); the game
+  loop shows the newest frame due by a clock started at the first frame (`TakeFrame` drops late ones), through one
+  `Texture2D` (`SetData` each frame). A frame's pixels go back to `MediaPlayer.Return`
   once uploaded or dropped and the next frame is converted into them: a new 3.6 MB array per 720p frame meant a gen 2
   collection every 8 frames or so (31 in 240 frames of a 720p clip, 2 with the arrays reused).
 - Audio goes to a `DynamicSoundEffectInstance` as 16-bit stereo (more channels downmixed to the first two). Without
@@ -45,7 +46,7 @@ conversion by tables on one thread (as it was then):
 1080p30 keeps up, the noisy one with little to spare: decoding and conversion share the decoding thread, 28 of a
 frame's 33 ms there. That conversion was by tables on one thread. It is now by 128-bit vectors where chroma has half
 the width (4:2:0, 4:2:2), shared out over threads from about 512x512 (`YuvToRgba.Convert(VideoFrame, byte[])`), and
-checked byte for byte against the formula (YuvToRgbaTests):
+checked byte for byte against the formula (tests/ManagedCodecs.Tests/Playback/YuvToRgbaTests.cs):
 
 | Caminandes' frames (1080p, 4:2:0) | ms a frame |
 |---|---:|

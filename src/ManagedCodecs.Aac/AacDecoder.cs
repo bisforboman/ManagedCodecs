@@ -806,7 +806,7 @@ public sealed class AacDecoder : IAudioDecoder
         var info = stream.Info;
         var quantized = stream.Quantized;
         Array.Clear(quantized);
-        Span<int> values = stackalloc int[4];
+        var cursor = r.Begin();
         int windowBase = 0;
 
         for (int g = 0; g < info.WindowGroups; g++)
@@ -822,23 +822,17 @@ public sealed class AacDecoder : IAudioDecoder
 
                 int start = info.SwbOffset[sfb];
                 int end = info.SwbOffset[sfb + 1];
-                int step = book <= 4 ? 4 : 2;
                 for (int w = 0; w < groupLength; w++)
                 {
                     int window = (windowBase + w) * 128;
-                    for (int k = start; k < end; k += step)
-                    {
-                        Huffman.ReadSpectrum(r, book, values);
-                        for (int j = 0; j < step; j++)
-                        {
-                            quantized[window + k + j] = values[j];
-                        }
-                    }
+                    Huffman.ReadSpectrum(r, ref cursor, book, quantized, window + start, window + end);
                 }
             }
 
             windowBase += groupLength;
         }
+
+        r.Commit(cursor);
     }
 
     // ---- Reconstruction ----

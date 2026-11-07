@@ -32,6 +32,15 @@ internal sealed partial class PictureDecoder<TPixel>
     private AffPairs _affPairs = new(-1, false, -1, false, -1, false, -1, false, -1, false);
     private int _affPairsSlice = -1;
 
+    // The current macroblock's left and above neighbours for CABAC's contexts (AffEdgesOf), and what they were found for.
+    internal const int AffEdgeLeftChroma = 4;
+    internal const int AffEdgeAbove = 8;
+    internal const int AffEdgeCount = 10;
+    private readonly int[] _affEdges = new int[2 * AffEdgeCount];
+    private int _affEdgesMb = -1;
+    private bool _affEdgesField;
+    private int _affEdgesSlice = -1;
+
     // Intra prediction in MBAFF frames reconstructs into these, with the neighbouring samples
     // gathered around the macroblock (row 0 and column 0), then copies the result out.
     private const int ScratchLumaStride = 32;
@@ -194,6 +203,106 @@ internal sealed partial class PictureDecoder<TPixel>
         }
 
         return ref _affPairs;
+    }
+
+    /// <summary>
+    /// The neighbouring location CABAC's context selection asks for: <see cref="Neighbor"/>, with a luma
+    /// (<paramref name="chroma"/> false) or chroma block's size. In MBAFF frames and field pictures the left
+    /// neighbours at rows 0, 4, 8 and 12 and the one above come from a table found once a macroblock
+    /// (<see cref="AffEdgesOf"/>), without a call; X and Y are only meaningful when Mb is not -1.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private (int Mb, int X, int Y) CabacNeighbor(int mbAddr, int xN, int yN, bool chroma = false)
+    {
+        int maxW = chroma ? 8 : 16;
+        int maxH = chroma ? _mbHeightC : 16;
+        if (_pairSlots && ((xN == -1 && (uint)yN < (uint)maxH && (yN & 3) == 0) || (yN == -1 && (uint)xN < (uint)maxW)))
+        {
+            int i = yN < 0 ? AffEdgeAbove + (chroma ? 1 : 0) : (chroma ? AffEdgeLeftChroma : 0) + (yN >> 2);
+            var edges = AffEdgesOf(mbAddr);
+            return (edges[2 * i], yN < 0 ? xN : maxW - 1, edges[(2 * i) + 1]);
+        }
+
+        return Neighbor(mbAddr, xN, yN, maxW, maxH);
+    }
+
+    /// <summary>The macroblock of <see cref="CabacNeighbor"/>, in frames <see cref="NeighborMb"/>.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private int CabacNeighborMb(int mbAddr, int xN, int yN) =>
+        _pairSlots ? CabacNeighbor(mbAddr, xN, yN).Mb : NeighborMb(mbAddr, xN, yN);
+
+    /// <summary>
+    /// The current macroblock's table of <see cref="FindAffEdges"/>: found again under the same rule as
+    /// <see cref="AffPairsOf"/>, and forgotten by <see cref="Begin"/>.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private ReadOnlySpan<int> AffEdgesOf(int mbAddr)
+    {
+        if (_affEdgesMb != mbAddr || _affEdgesField != _fieldMb[mbAddr] || _affEdgesSlice != _sliceOfMb[mbAddr])
+        {
+            FillAffEdges(mbAddr);
+        }
+
+        return _affEdges;
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void FillAffEdges(int mbAddr)
+    {
+        FindAffEdges(in AffPairsOf(mbAddr), _mbHeightC, _affEdges);
+        _affEdgesMb = mbAddr;
+        _affEdgesField = _fieldMb[mbAddr];
+        _affEdgesSlice = _sliceOfMb[mbAddr];
+    }
+
+    /// <summary>
+    /// Table 6-4's left neighbours at rows 0, 4, 8 and 12 and the one above (any column), of luma and of a chroma
+    /// block <paramref name="mbHeightC"/> rows high (8 wide), as (Mb, Y) pairs in <paramref name="edges"/>
+    /// (<see cref="AffEdgeCount"/> of them: luma left, chroma left from <see cref="AffEdgeLeftChroma"/>, then luma and
+    /// chroma above at <see cref="AffEdgeAbove"/>). Chroma rows below <paramref name="mbHeightC"/> are left -1. A test
+    /// compares them with <see cref="AffNeighbor(in AffPairs, int, int, int, int)"/>.
+    /// </summary>
+    internal static void FindAffEdges(in AffPairs pairs, int mbHeightC, Span<int> edges)
+    {
+        int heightC = mbHeightC == 0 ? 8 : mbHeightC; // monochrome: never read
+        bool isTop = (pairs.Mb & 1) == 0;
+        bool frame = !pairs.Field;
+
+        // A: the left pair row by row (AffLeft), as Table 6-4's xN < 0 case.
+        for (int r = 0; r < 4; r++)
+        {
+            int c = AffEdgeLeftChroma + r;
+            if (pairs.Left < 0)
+            {
+                (edges[2 * r], edges[(2 * r) + 1], edges[2 * c], edges[(2 * c) + 1]) = (-1, 0, -1, 0);
+                continue;
+            }
+
+            var (mb, y) = AffLeft(pairs.Left, pairs.LeftField, frame, isTop, 4 * r, 16);
+            (edges[2 * r], edges[(2 * r) + 1]) = (mb, y & 15);
+            (mb, y) = 4 * r < heightC ? AffLeft(pairs.Left, pairs.LeftField, frame, isTop, 4 * r, heightC) : (-1, 0);
+            (edges[2 * c], edges[(2 * c) + 1]) = (mb, y & (heightC - 1));
+        }
+
+        // B: a frame macroblock's bottom half looks into its top one; otherwise the pair above.
+        int above;
+        int row; // yM for yN -1, before the mask
+        if (frame && !isTop)
+        {
+            (above, row) = (pairs.Mb - 1, -1);
+        }
+        else if (pairs.Above < 0)
+        {
+            (above, row) = (-1, 0);
+        }
+        else
+        {
+            (above, row) = frame || !isTop ? (pairs.Above + 1, -1) : pairs.AboveField ? (pairs.Above, -1) : (pairs.Above + 1, -2);
+        }
+
+        int a = AffEdgeAbove;
+        (edges[2 * a], edges[(2 * a) + 1]) = above < 0 ? (-1, 0) : (above, row & 15);
+        (edges[2 * (a + 1)], edges[(2 * (a + 1)) + 1]) = above < 0 ? (-1, 0) : (above, row & (heightC - 1));
     }
 
     /// <summary>

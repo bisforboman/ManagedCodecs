@@ -194,6 +194,7 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
         Picture = picture;
         DecodedMbCount = 0;
         _affPairs = _affPairs with { Mb = -1 };
+        _affEdgesMb = -1;
         _decodedPrefix = Math.Max(fieldParity, 0);
         _deblockedRows = 0;
         _reportedRows = 0;

@@ -54,6 +54,9 @@ run time.
   profile).
 - MJPEG: a flat block's rows are written as one 8-byte store each instead of a call each: about 7 to 10% off a frame of
   a test pattern, nothing on noise.
+- HE-AAC: SBR's gains smoothed over time (a header with bs_smoothing_mode 0) and parametric stereo's mixing run in
+  vectors, to the same bits: SBR's envelope adjuster takes about half its share of such a frame, about 8% of it, and
+  the mixing about a fifth less of an HE-AAC v2 frame's 5 to 8%.
 
 ## 0.8.1 – 2026-11-07
 

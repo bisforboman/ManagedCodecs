@@ -291,4 +291,49 @@ public class PsTests
             }
         }
     }
+
+    /// <summary>
+    /// The mixing's vector groups, real matrix and complex, do each subband's arithmetic, and step the matrices, in the
+    /// scalar order: the same left and right channels to the bit over several slots, for groups of every width up to a
+    /// whole vector and a tail, at an offset.
+    /// </summary>
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(4)]
+    [InlineData(7)]
+    [InlineData(29)]
+    public void PsMixGroup_MatchesScalar(int count)
+    {
+        var random = new Random(count);
+        double Next() => (random.NextDouble() - 0.5) * Math.Pow(10, random.Next(-3, 4));
+        PsProcessor.Matrix NextMatrix() => new(Next(), Next(), Next(), Next());
+        double[][] Rows() => [.. Enumerable.Range(0, 8).Select(_ => Enumerable.Range(0, 64).Select(_ => Next()).ToArray())];
+        static double[][] Copy(double[][] rows) => [.. rows.Select(r => (double[])r.Clone())];
+        static IEnumerable<long> Bits(double[][] rows) => rows.SelectMany(r => r).Select(BitConverter.DoubleToInt64Bits);
+        for (int trial = 0; trial < 10; trial++)
+        {
+            int first = random.Next(64 - count);
+            (var h, var step, var g, var gStep) = (NextMatrix(), NextMatrix(), NextMatrix(), NextMatrix());
+            double[][][] rows = [Rows(), Rows(), Rows(), Rows()];
+            var expected = rows.Select(Copy).ToArray();
+            var actual = rows.Select(Copy).ToArray();
+            PsProcessor.MixGroupScalar(expected[0], expected[1], expected[2], expected[3], 1, 7, first, first + count, h, step);
+            PsProcessor.MixGroup(actual[0], actual[1], actual[2], actual[3], 1, 7, first, first + count, h, step);
+            for (int r = 0; r < 4; r++)
+            {
+                Assert.Equal(Bits(expected[r]), Bits(actual[r]));
+            }
+
+            expected = rows.Select(Copy).ToArray();
+            actual = rows.Select(Copy).ToArray();
+            PsProcessor.MixGroupPhasesScalar(expected[0], expected[1], expected[2], expected[3], 1, 7, first, first + count, h, step, g, gStep);
+            PsProcessor.MixGroupPhases(actual[0], actual[1], actual[2], actual[3], 1, 7, first, first + count, h, step, g, gStep);
+            for (int r = 0; r < 4; r++)
+            {
+                Assert.Equal(Bits(expected[r]), Bits(actual[r]));
+            }
+        }
+    }
 }

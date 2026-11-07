@@ -122,5 +122,5 @@ output was the same to the bit (`VectorImdct_MatchesScalarExactly`, and the hash
 The wall clock could not see it. Over 15 interleaved runs, steady time branch / main was 1.020 for `aac-stereo-48k`,
 0.992 for `aac-5.1` and 0.984 for `heaac/heaac-5.1`. By perf (three runs of each build, alternating), `InverseVector`'s
 samples over those of functions it does not touch fell by 4% in 5.1 (medians 0.277 and 0.265) and by about 7% in
-stereo, where the runs overlap. That is about 0.6% of a frame, below what this method resolves. The memory traffic
-it saved is small next to the FFT's passes, all of which stay in the L1 cache.
+stereo, where the runs overlap. That is about 0.6% of a frame, below what this method resolves. Likely because the
+buffers it removed (5 KB of a long block) stay in the L1 cache, where a store and a reload cost little (not measured).

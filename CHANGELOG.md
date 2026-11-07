@@ -15,11 +15,15 @@ run time.
 
 ### Changed
 
+- AAC: the IMDCT's FFT does its bit reversal and first stage in one vector pass, and its post-twiddle runs in
+  vectors: 12 to 15% off an AAC LC frame on x64 and 3% off 5.1 HE-AAC. The output is unchanged.
 - H.264: in MBAFF frames and field pictures, motion vector prediction finds its neighbours A, B and C in one call:
   about 1.8% fewer instructions in MBAFF frames, 1.6% in field pictures and 1.1% in progressive CAVLC frames.
 - H.264: in MBAFF frames and field pictures, CABAC's context selection reads a macroblock's left and above neighbours
   from a table found once a macroblock instead of a call each: about 1.6% fewer instructions in CABAC MBAFF frames
   and 1.7% in field pictures.
+- MJPEG: the Huffman decoder keeps its bit buffer in registers, and a short code with long magnitude bits takes one
+  table lookup instead of two: about 6 to 7% off a frame.
 - ManagedCodecs.Unity on Mono: motion compensation filters whole rows of a block instead of every sample by the
   definition, MJPEG's IDCT indexes rather than slicing, and the bit-count polyfills search rather than loop: on Mono
   6.12, 720p H.264 about twice as fast (79 to 38 ms a frame), 320x240 H.264 1.3 to 1.5 times, MJPEG 1.45 times.

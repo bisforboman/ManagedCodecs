@@ -55,7 +55,11 @@ public class ImdctTests
         }
     }
 
-    /// <summary>The vector FFT does each butterfly's arithmetic in the scalar order: the same doubles, to the bit.</summary>
+    /// <summary>
+    /// The FFT (its bit reversal fused with the first stage, the later stages in vectors) does each butterfly's arithmetic
+    /// in the reference's order: the same doubles, to the bit apart from the sign of a zero (the reference multiplies
+    /// by the first stage's twiddle, 1 - 0i). Every other trial has zeros, as silent bands give.
+    /// </summary>
     [Theory]
     [InlineData(512)]
     [InlineData(64)]
@@ -64,18 +68,21 @@ public class ImdctTests
         var random = new Random(length);
         var re = new double[length];
         var im = new double[length];
-        for (int trial = 0; trial < 20; trial++)
+        for (int trial = 0; trial < 40; trial++)
         {
             for (int k = 0; k < length; k++)
             {
-                re[k] = (random.NextDouble() - 0.5) * Math.Pow(10, random.Next(0, 6));
-                im[k] = (random.NextDouble() - 0.5) * Math.Pow(10, random.Next(0, 6));
+                bool zero = trial % 2 == 1 && random.Next(3) == 0;
+                re[k] = zero ? 0 : (random.NextDouble() - 0.5) * Math.Pow(10, random.Next(0, 6));
+                im[k] = zero ? 0 : (random.NextDouble() - 0.5) * Math.Pow(10, random.Next(0, 6));
             }
 
             var expectedRe = (double[])re.Clone();
             var expectedIm = (double[])im.Clone();
             Imdct.Fft(expectedRe, expectedIm, scalar: true);
             Imdct.Fft(re, im, scalar: false);
+
+            // Equal doubles have equal bits, but for 0 and -0.
             Assert.Equal(expectedRe, re);
             Assert.Equal(expectedIm, im);
         }

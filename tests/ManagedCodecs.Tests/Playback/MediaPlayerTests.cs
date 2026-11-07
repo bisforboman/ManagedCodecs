@@ -51,6 +51,36 @@ public class MediaPlayerTests
         Assert.Equal((frames.Count, frames.Count, 0L), (statistics.DecodedFrames, statistics.ConvertedFrames, statistics.DroppedFrames));
     }
 
+    // A game ticking at the video's own rate (Godot's Movie Maker mode, 60 fps video at 60 Hz) sums its frame times in
+    // doubles, which falls a rounding error short of some frames' times. Each tick still shows its frame: none is shown
+    // late and then dropped as it was when a frame was due only at its exact time (1 in 5 of a 24 fps film's).
+    [Theory]
+    [MemberData(nameof(Samples))]
+    public void ClockAtTheFrameRate_ShowsEveryFrame(string name)
+    {
+        var (frames, _) = Expected(name, null);
+        double interval = (frames[1].Time - frames[0].Time).TotalSeconds;
+        using var player = new MediaPlayer(TestSamples.PathOf(name));
+        player.Start();
+        double clock = 0;
+        int short_ = 0;
+        for (int k = 0; k < frames.Count; k++, clock += interval)
+        {
+            var position = TimeSpan.FromSeconds(clock);
+            short_ += position < frames[k].Time ? 1 : 0;
+
+            // Decoded ahead (or the file finished), as a player keeping up would be, then one tick.
+            Wait(player, () => player.IsFinished || player.Statistics.ConvertedFrames > Math.Min(k + 1, frames.Count - 1) ? player : null, []);
+            var frame = player.TakeFrame(position);
+            Assert.True(frame is not null, $"Tick {k} at {position} showed nothing.");
+            Assert.Equal(frames[k].Time, frame.Time);
+            player.Return(frame);
+        }
+
+        Assert.True(short_ > 0, "The clock never fell short of a frame's time: the test shows nothing.");
+        Assert.Equal(0, player.Statistics.DroppedFrames);
+    }
+
     [Fact]
     public void FramesAlreadyLate_AreDropped()
     {

@@ -9,6 +9,9 @@
     <AssemblyName>ManagedCodecs.Godot</AssemblyName>
     <RootNamespace>ManagedCodecs.GodotAddon</RootNamespace>
     <IsPackable>false</IsPackable>
+    <!-- Here, not only in Directory.Build.props: Godot reads the .csproj alone, and opening the folder in the editor would
+         add its own default (net8.0), which the net10.0 packages don't build against. -->
+    <TargetFramework>net10.0</TargetFramework>
   </PropertyGroup>
 
   <ItemGroup>

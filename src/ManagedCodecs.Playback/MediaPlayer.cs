@@ -170,7 +170,10 @@ public sealed class MediaPlayer : IDisposable
     /// <summary>
     /// The newest frame due at <paramref name="position"/> (from the first frame, which is due at zero), or null when
     /// no frame is due that wasn't taken already, or none is decoded yet. Frames due before it are skipped, as a player
-    /// does when it can't keep up, and counted in <see cref="PlaybackStatistics.DroppedFrames"/>.
+    /// does when it can't keep up, and counted in <see cref="PlaybackStatistics.DroppedFrames"/>. A frame is due from
+    /// half the interval before its <see cref="RgbaFrame.Time"/> on, so each call shows the frame nearest the clock: a
+    /// game ticking at the video's own rate shows every frame, though its clock, a sum of frame times, falls a rounding
+    /// error short of some of them, or vsync's jitter makes a tick a little early.
     /// </summary>
     /// <param name="position">The playback clock: the time played since the first frame was shown.</param>
     public RgbaFrame? TakeFrame(TimeSpan position)
@@ -183,7 +186,7 @@ public sealed class MediaPlayer : IDisposable
                 break;
             }
 
-            if (_next.Time > position)
+            if (_next.Time - _next.Lead > position)
             {
                 break;
             }
@@ -339,7 +342,7 @@ public sealed class MediaPlayer : IDisposable
             _last = time;
             var pixels = Rent(frame.Width * frame.Height * 4);
             YuvToRgba.For(frame, _options.Matrix, _options.Range).Convert(frame, pixels);
-            var rgba = new RgbaFrame(time, frame.Width, frame.Height, pixels, frame.SampleAspectRatio);
+            var rgba = new RgbaFrame(time, frame.Width, frame.Height, pixels, frame.SampleAspectRatio) { Lead = _frameDuration / 2 };
             frame.Dispose();
             Interlocked.Add(ref _convertTicks, Stopwatch.GetTimestamp() - start);
             Interlocked.Increment(ref _converted);

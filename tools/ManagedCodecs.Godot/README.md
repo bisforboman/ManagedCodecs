@@ -4,9 +4,10 @@ For issue #254 (docs/decisions/2026-10-31-game-engines.md): an addon, `addons/ma
 `ManagedCodecsVideo` is a `TextureRect` node that plays a video (H.264 or MJPEG, AAC audio; MP4, Matroska or AVI) into
 an `ImageTexture` with the ManagedCodecs packages, on Godot 4.7's .NET build. Not a media player: no seeking, no pause.
 
-**Not run in Godot.** CI builds it with the Godot .NET SDK (`Godot.NET.Sdk` and `GodotSharp` 4.7.2, from nuget.org), so
-it compiles against Godot's real C# API. Whether Godot runs it as intended needs the Godot editor, which nobody has
-tried with it yet. Please report back: [Testing it in Godot](#testing-it-in-godot) says what to try and what to record.
+**Run in Godot 4.7.2 on Linux, not yet on a desktop with a GPU and sound card.** CI builds it with the Godot .NET SDK
+(`Godot.NET.Sdk` and `GodotSharp` 4.7.2, from nuget.org). It has also run in Godot itself (2026-11-07), on a cloud VM
+under Xvfb with Mesa's software OpenGL and no sound card: [Testing it in Godot](#testing-it-in-godot) has the results
+and what is left to try. Please report back from a desktop.
 
 ## Using it
 
@@ -28,21 +29,23 @@ tried with it yet. Please report back: [Testing it in Godot](#testing-it-in-godo
   `MediaPlayer.TakeFrame` drops late ones), through one `ImageTexture` (`Image.SetData` and `ImageTexture.Update` each
   frame), handing each frame's pixels back to `MediaPlayer.Return`. Godot's images start at the top row, as the frames do. The rectangle keeps the
   aspect ratio as shown (the frame's width stretched by its sample aspect ratio).
-- Audio: an `AudioStreamPlayer` child with an `AudioStreamGenerator` at the decoded rate, made once the first audio
-  comes, filled each frame with as many stereo frames as it takes (`PushBuffer`).
+- Audio: an `AudioStreamPlayer` child with an `AudioStreamGenerator` at the decoded rate, made once the first frame
+  is shown (so that the sound starts with the picture's clock; the audio decoded before it is held), filled each frame
+  with as many stereo frames as it takes (`PushBuffer`).
 - `Loop` (exported) plays the file again from its start, for a menu's backdrop.
 - Rotation (a phone video's) isn't applied: turn the node by `MediaPlayer.Video.Rotation` if you need it.
 - Web exports: Godot's C# can't export to the web yet.
 
 ## Testing it in Godot
 
-What nobody has checked yet, and how. Report in a new issue, one line a run (issue #254, now closed, has the history and the MonoGame measurements).
+What has been checked, and how to check the rest. Report in a new issue, one line a run (issue #254, now closed, has
+the history and the MonoGame measurements).
 
 1. **Set-up.** Godot 4.7 (.NET), the .NET 10 SDK, this folder opened in the editor.
 2. **Videos**, each copied in as `video.mp4` (or the `File Path` set to it):
    - `BigBuckBunny_640x360.m4v` (H.264 and AAC, from
      [download.blender.org](https://download.blender.org/peach/bigbuckbunny_movies/BigBuckBunny_640x360.m4v.zip));
-   - `tears_of_steel_720p.mov` (720p H.264 and AAC,
+   - `tears_of_steel_720p.mov` (1280x534 H.264 and MP3, which plays without sound: AAC is the only audio decoded;
      [download.blender.org](https://download.blender.org/demo/movies/ToS/tears_of_steel_720p.mov));
    - `testsrc-420.avi` (MJPEG, no audio; `tools/make-samples.sh` makes it).
 3. **Runs.** Each in the editor (F5), then in an exported desktop build (the export templates for .NET).
@@ -51,3 +54,25 @@ What nobody has checked yet, and how. Report in a new issue, one line a run (iss
    2.0`. A steadily growing dropped count means playback doesn't keep up; the two times say which part is short.
    Also whether the picture is upright and its colours right (compare with VLC), whether the sound plays without gaps
    and in sync, and the first error in the output panel, if any.
+
+**Run so far** (2026-11-07, issue #352): Godot 4.7.2 .NET on Linux (a 4-core cloud VM, an Intel Xeon at 2.1 GHz),
+under Xvfb with Mesa's llvmpipe (`--rendering-driver opengl3`) and no sound card, in the editor's runner, not an
+exported build. Movie Maker mode (`--write-movie out.avi --fixed-fps N`) recorded what the game shows and plays, which
+was compared with FFmpeg's decoding of the same file:
+
+| Video | Run | Last line | Picture | Sound |
+| --- | --- | --- | --- | --- |
+| `BigBuckBunny_640x360.m4v` | Movie Maker, 24 fps, 20 s | 640x359, 467 frames shown, 0 dropped, decode 0.8, RGBA conversion 3.7 | upright; a frame 29.5 dB from FFmpeg's (after Movie Maker's MJPEG and scaling), mean colour within 0.5 of 255 | no gap; starts 6 ms after the picture |
+| `BigBuckBunny_640x360.m4v` | Movie Maker, 60 fps, 20 s | 640x359, 473 frames shown, 0 dropped | | |
+| `tears_of_steel_720p.mov` | Movie Maker, 24 fps, 20 s | 1280x534, 471 frames shown, 0 dropped, decode 2.5, RGBA conversion 6.6 | | none (MP3) |
+| `tears_of_steel_720p.mov` | live, 16 s | 1280x534, 384 frames shown, 0 dropped, decode 2.0, RGBA conversion 6.3 | | none (MP3) |
+| `testsrc-420.avi` | Movie Maker, 25 fps, 12 s | 320x240, 50 frames shown, 0 dropped | upright, pillarboxed at 4:3; 29.6 dB, mean colour within 0.2 | (none in the file) |
+
+That run found three faults, fixed since: a game ticking at the video's own rate dropped about 1 frame in 5
+(`MediaPlayer.TakeFrame` took a frame as due only from its exact time, which the summed clock falls a rounding error
+short of; it now shows the frame nearest the clock), the sound started about 280 ms before the picture (it now waits
+for the first frame), and opening the folder in the editor wrote `net8.0` into the `.csproj` (it now names
+`net10.0` itself).
+
+Still to try: a desktop with a GPU and a sound card (does the sound play live without gaps), an exported build, and
+Windows and macOS.

@@ -343,6 +343,86 @@ public class QmfTests
         Assert.Equal(scalar, vector);
     }
 
+    /// <summary>
+    /// The analysis bank's slots a frame at a time, their transforms one slot a vector lane, give the bits of the slots
+    /// one at a time (the reference), over frames of random samples, with a count the lanes leave a remainder of.
+    /// </summary>
+    [Theory]
+    [InlineData(32)]
+    [InlineData(19)]
+    public void AnalysisLanes_MatchSlotBySlotExactly(int count)
+    {
+        var random = new Random(11);
+        var lanes = new QmfAnalysis();
+        var reference = new QmfAnalysis();
+        for (int frame = 0; frame < 12; frame++)
+        {
+            var input = Enumerable.Range(0, 32 * count).Select(_ => (random.NextDouble() - 0.5) * 65536).ToArray();
+            if (frame == 3)
+            {
+                Array.Clear(input, 64, 100); // zeros, whose signs a different route could flip
+            }
+
+            var (re, im) = (Rows(count + 3, 32), Rows(count + 3, 32));
+            lanes.Process(input, re, im, 3, count, lanes: true);
+            for (int s = 0; s < count; s++)
+            {
+                var (expectedRe, expectedIm) = (new double[32], new double[32]);
+                reference.Process(input.AsSpan(32 * s, 32), expectedRe, expectedIm);
+                AssertSameBits(expectedRe, re[3 + s]);
+                AssertSameBits(expectedIm, im[3 + s]);
+            }
+        }
+    }
+
+    /// <summary>
+    /// The full synthesis bank's slots a frame at a time, their DCT-IVs one slot a vector lane, give the bits of the
+    /// slots one at a time, over enough frames to move its history to the buffer's end several times; the downsampled
+    /// bank (slot by slot either way) too.
+    /// </summary>
+    [Theory]
+    [InlineData(32, false)]
+    [InlineData(21, false)]
+    [InlineData(32, true)]
+    public void SynthesisLanes_MatchSlotBySlotExactly(int count, bool downsampled)
+    {
+        var random = new Random(12);
+        var lanes = new QmfSynthesis(downsampled);
+        var reference = new QmfSynthesis(downsampled);
+        int bands = lanes.Bands;
+        for (int frame = 0; frame < 12; frame++)
+        {
+            var (re, im) = (Rows(count, 64), Rows(count, 64));
+            foreach (var row in re.Concat(im))
+            {
+                for (int k = 0; k < 64; k++)
+                {
+                    row[k] = (random.NextDouble() - 0.5) * 1e5;
+                }
+            }
+
+            if (frame == 3)
+            {
+                Array.Clear(re[2], 20, 44); // an empty high band
+                Array.Clear(im[2], 20, 44);
+            }
+
+            var output = new double[bands * count];
+            lanes.Process(re, im, 0, count, output, lanes: true);
+            for (int s = 0; s < count; s++)
+            {
+                var expected = new double[bands];
+                reference.Process(re[s], im[s], expected);
+                AssertSameBits(expected, output.AsSpan(bands * s, bands).ToArray());
+            }
+        }
+    }
+
+    private static double[][] Rows(int count, int length) => [.. Enumerable.Range(0, count).Select(_ => new double[length])];
+
+    private static void AssertSameBits(double[] expected, double[] actual) =>
+        Assert.Equal(expected.Select(BitConverter.DoubleToInt64Bits), actual.Select(BitConverter.DoubleToInt64Bits));
+
     /// <summary>The analysis bank's output turn in vectors gives the scalar loop's bits.</summary>
     [Fact]
     public void VectorAnalysisOutput_MatchesScalarExactly()

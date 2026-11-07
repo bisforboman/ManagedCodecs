@@ -20,7 +20,7 @@ namespace ManagedCodecs.Aac.Sbr;
 /// <remarks>
 /// The spec's sum X(k) = the sum over n in 0..63 of u(n) 2 exp(i pi/64 (k + 0.5)(2n - 0.5)) is a 64-point DFT: the
 /// exponent splits into 2 pi k n / 64 + pi n / 64 - pi (2k + 1) / 256, so X(k) = 2 exp(-i pi (2k + 1) / 256) times the
-/// DFT of u(n) exp(i pi n / 64) at k. u is real, so that DFT takes a complex FFT of 32 (<see cref="Process"/>): with
+/// DFT of u(n) exp(i pi n / 64) at k. u is real, so that DFT takes a complex FFT of 32 (<see cref="Process(ReadOnlySpan{double}, Span{double}, Span{double})"/>): with
 /// z(m) = (u(2m) + i u(2m + 1)) exp(i pi m / 32) and Z its FFT, the even samples' DFT (turned) is E(k) = (Z(k) +
 /// conj Z(31 - k)) / 2, the odd ones' O(k) = -i (Z(k) - conj Z(31 - k)) / 2, and the DFT at k is E(k) + exp(i pi (2k + 1)
 /// / 64) O(k). With the output turn, X(k) = exp(-i pi (2k + 1) / 256) P(k) + exp(i pi (6k - 125) / 256) M(k), where P
@@ -56,6 +56,125 @@ internal sealed class QmfAnalysis
     [SkipLocalsInit]
     public void Process(ReadOnlySpan<double> input, Span<double> real, Span<double> imaginary)
     {
+        Span<double> uEven = stackalloc double[32];
+        Span<double> uOdd = stackalloc double[32];
+        Window(input, uEven, uOdd);
+
+        Span<double> re = stackalloc double[32];
+        Span<double> im = stackalloc double[32];
+        QmfState.Rotate(uEven, uOdd, InCos, InSin, re, im);
+        Fft.Transform(re, im);
+        Output(re, im, real, imaginary);
+    }
+
+    /// <summary>
+    /// <paramref name="count"/> slots: 32 samples each from <paramref name="input"/> in, slot s's subband samples out to
+    /// <paramref name="real"/>[first + s] and <paramref name="imaginary"/>[first + s]; <see cref="QmfLanes.Count"/> slots'
+    /// transforms at a time where <see cref="QmfLanes.Enabled"/> (or <paramref name="lanes"/>), with the bits of
+    /// <see cref="Process(ReadOnlySpan{double}, Span{double}, Span{double})"/> slot by slot.
+    /// </summary>
+    public void Process(ReadOnlySpan<double> input, double[][] real, double[][] imaginary, int first, int count, bool? lanes = null)
+    {
+        if (input.Length < 32 * count)
+        {
+            throw new ArgumentException("A slot takes 32 samples.");
+        }
+
+        int s = 0;
+        if (lanes ?? QmfLanes.Enabled)
+        {
+            _lanes ??= new double[8 * 32 * QmfLanes.Count];
+            for (; s + QmfLanes.Count <= count; s += QmfLanes.Count)
+            {
+                ProcessLanes(input.Slice(32 * s, 32 * QmfLanes.Count), real, imaginary, first + s);
+            }
+        }
+
+        for (; s < count; s++)
+        {
+            Process(input.Slice(32 * s, 32), real[first + s], imaginary[first + s]);
+        }
+    }
+
+    // Scratch for ProcessLanes: u at even and odd n and their turn by slot, Z by row, X by row.
+    private double[]? _lanes;
+
+    private void ProcessLanes(ReadOnlySpan<double> input, double[][] real, double[][] imaginary, int first)
+    {
+        const int L = QmfLanes.Count;
+        const int Size = 32 * L;
+        var scratch = _lanes.AsSpan();
+        var uEven = scratch[..Size];
+        var uOdd = scratch.Slice(Size, Size);
+        var turnedRe = scratch.Slice(2 * Size, Size);
+        var turnedIm = scratch.Slice(3 * Size, Size);
+        var zr = scratch.Slice(4 * Size, Size);
+        var zi = scratch.Slice(5 * Size, Size);
+        var xr = scratch.Slice(6 * Size, Size);
+        var xi = scratch.Slice(7 * Size, Size);
+
+        // Each slot's window and turn, as one slot's (by slot, 32 in a run).
+        for (int l = 0; l < L; l++)
+        {
+            var e = uEven.Slice(32 * l, 32);
+            var o = uOdd.Slice(32 * l, 32);
+            Window(input.Slice(32 * l, 32), e, o);
+            QmfState.Rotate(e, o, InCos, InSin, turnedRe.Slice(32 * l, 32), turnedIm.Slice(32 * l, 32));
+        }
+
+        // By row, each point at its bit-reversed row, for the FFT.
+        ref double tr = ref MemoryMarshal.GetReference(turnedRe);
+        ref double ti = ref MemoryMarshal.GetReference(turnedIm);
+        ref double r = ref MemoryMarshal.GetReference(zr);
+        ref double i = ref MemoryMarshal.GetReference(zi);
+        for (int l = 0; l < L; l += 4)
+        {
+            for (int m = 0; m < 32; m += 4)
+            {
+                int s0 = (32 * l) + m;
+                int d0 = (Fft.Reversed(m) * L) + l;
+                int d1 = (Fft.Reversed(m + 1) * L) + l;
+                int d2 = (Fft.Reversed(m + 2) * L) + l;
+                int d3 = (Fft.Reversed(m + 3) * L) + l;
+                QmfLanes.Transpose4(ref Unsafe.Add(ref tr, s0), ref Unsafe.Add(ref tr, s0 + 32), ref Unsafe.Add(ref tr, s0 + 64), ref Unsafe.Add(ref tr, s0 + 96), ref Unsafe.Add(ref r, d0), ref Unsafe.Add(ref r, d1), ref Unsafe.Add(ref r, d2), ref Unsafe.Add(ref r, d3));
+                QmfLanes.Transpose4(ref Unsafe.Add(ref ti, s0), ref Unsafe.Add(ref ti, s0 + 32), ref Unsafe.Add(ref ti, s0 + 64), ref Unsafe.Add(ref ti, s0 + 96), ref Unsafe.Add(ref i, d0), ref Unsafe.Add(ref i, d1), ref Unsafe.Add(ref i, d2), ref Unsafe.Add(ref i, d3));
+            }
+        }
+
+        Fft.TransformLanes(zr, zi, L);
+
+        ref double outRe = ref MemoryMarshal.GetReference(xr);
+        ref double outIm = ref MemoryMarshal.GetReference(xi);
+        for (int k = 0; k < Bands; k++)
+        {
+            int a = k * L;
+            int b = (31 - k) * L;
+            QmfLanes.AnalysisOutput(ref Unsafe.Add(ref r, a), ref Unsafe.Add(ref i, a), ref Unsafe.Add(ref r, b), ref Unsafe.Add(ref i, b), PlusCos[k], PlusSin[k], MinusCos[k], MinusSin[k], ref Unsafe.Add(ref outRe, a), ref Unsafe.Add(ref outIm, a), L);
+        }
+
+        // Back by slot.
+        for (int l = 0; l < L; l += 4)
+        {
+            ref double re0 = ref MemoryMarshal.GetArrayDataReference(real[first + l]);
+            ref double re1 = ref MemoryMarshal.GetArrayDataReference(real[first + l + 1]);
+            ref double re2 = ref MemoryMarshal.GetArrayDataReference(real[first + l + 2]);
+            ref double re3 = ref MemoryMarshal.GetArrayDataReference(real[first + l + 3]);
+            ref double im0 = ref MemoryMarshal.GetArrayDataReference(imaginary[first + l]);
+            ref double im1 = ref MemoryMarshal.GetArrayDataReference(imaginary[first + l + 1]);
+            ref double im2 = ref MemoryMarshal.GetArrayDataReference(imaginary[first + l + 2]);
+            ref double im3 = ref MemoryMarshal.GetArrayDataReference(imaginary[first + l + 3]);
+            for (int k = 0; k < Bands; k += 4)
+            {
+                int s0 = (k * L) + l;
+                QmfLanes.Transpose4(ref Unsafe.Add(ref outRe, s0), ref Unsafe.Add(ref outRe, s0 + L), ref Unsafe.Add(ref outRe, s0 + (2 * L)), ref Unsafe.Add(ref outRe, s0 + (3 * L)), ref Unsafe.Add(ref re0, k), ref Unsafe.Add(ref re1, k), ref Unsafe.Add(ref re2, k), ref Unsafe.Add(ref re3, k));
+                QmfLanes.Transpose4(ref Unsafe.Add(ref outIm, s0), ref Unsafe.Add(ref outIm, s0 + L), ref Unsafe.Add(ref outIm, s0 + (2 * L)), ref Unsafe.Add(ref outIm, s0 + (3 * L)), ref Unsafe.Add(ref im0, k), ref Unsafe.Add(ref im1, k), ref Unsafe.Add(ref im2, k), ref Unsafe.Add(ref im3, k));
+            }
+        }
+    }
+
+    // The slot's samples into x, and u at even and at odd n.
+    private void Window(ReadOnlySpan<double> input, Span<double> uEven, Span<double> uOdd)
+    {
         if (input.Length < 32)
         {
             throw new ArgumentException("A slot takes 32 samples.");
@@ -74,17 +193,9 @@ internal sealed class QmfAnalysis
         }
 
         // u(n) = the sum of x(n + 64 j) c(2(n + 64 j)) over j in 0..4, at even and at odd n.
-        Span<double> uEven = stackalloc double[32];
-        Span<double> uOdd = stackalloc double[32];
         ReadOnlySpan<int> terms = [0, 32, 64, 96, 128];
         Vectors.SumOfProducts(uEven, even, terms, EvenWindow, terms);
         Vectors.SumOfProducts(uOdd, odd, terms, OddWindow, terms);
-
-        Span<double> re = stackalloc double[32];
-        Span<double> im = stackalloc double[32];
-        QmfState.Rotate(uEven, uOdd, InCos, InSin, re, im);
-        Fft.Transform(re, im);
-        Output(re, im, real, imaginary);
     }
 
     /// <summary>X(k) from Z, the FFT (<paramref name="re"/>, <paramref name="im"/>), at k in 0..31.</summary>
@@ -181,8 +292,8 @@ internal sealed class QmfSynthesis
     public QmfSynthesis(bool downsampled = false)
     {
         _tables = downsampled ? Halved : Full;
-        _v = new double[(20 + 18) * Bands];
-        _start = 18 * Bands;
+        _v = new double[(18 + (2 * QmfLanes.Count)) * Bands];
+        _start = _v.Length - (20 * Bands);
     }
 
     /// <summary>64, or 32 downsampled: the subband samples a slot takes and the output samples it gives.</summary>
@@ -212,8 +323,139 @@ internal sealed class QmfSynthesis
             QmfState.RealOfRotation(re, im, t.OutCos, t.OutSin, v[..(2 * bands)]);
         }
 
-        // g takes, of each 4B values of v, the first and the last B; w(n) = g(n) c(n (64 / B)); each output sample sums
-        // ten of w, in the order of n.
+        Window(v, output);
+    }
+
+    /// <summary>
+    /// <paramref name="count"/> slots: slot s's subband samples from <paramref name="real"/>[first + s] and
+    /// <paramref name="imaginary"/>[first + s] in, <see cref="Bands"/> output samples a slot out; the full bank takes
+    /// <see cref="QmfLanes.Count"/> slots' transforms at a time where <see cref="QmfLanes.Enabled"/> (or
+    /// <paramref name="lanes"/>), with the bits of <see cref="Process(ReadOnlySpan{double}, ReadOnlySpan{double}, Span{double})"/>
+    /// slot by slot.
+    /// </summary>
+    public void Process(double[][] real, double[][] imaginary, int first, int count, Span<double> output, bool? lanes = null)
+    {
+        int bands = Bands;
+        if (output.Length < bands * count)
+        {
+            throw new ArgumentException("A slot gives a band's worth of samples.");
+        }
+
+        int s = 0;
+        if (bands == 64 && (lanes ?? QmfLanes.Enabled))
+        {
+            _lanes ??= new double[(4 * 64 * QmfLanes.Count) + (4 * 32 * QmfLanes.Count)];
+            for (; s + QmfLanes.Count <= count; s += QmfLanes.Count)
+            {
+                ProcessLanes(real, imaginary, first + s, output.Slice(bands * s, bands * QmfLanes.Count));
+            }
+        }
+
+        for (; s < count; s++)
+        {
+            Process(real[first + s], imaginary[first + s], output.Slice(bands * s, bands));
+        }
+    }
+
+    // Scratch for ProcessLanes: X's real and imaginary parts by row, then the FFT's rows (A's lanes, then B's), then v by
+    // row.
+    private double[]? _lanes;
+
+    private void ProcessLanes(double[][] real, double[][] imaginary, int first, Span<double> output)
+    {
+        const int L = QmfLanes.Count;
+        var scratch = _lanes.AsSpan();
+        ref double xr = ref MemoryMarshal.GetReference(scratch);
+        ref double xi = ref Unsafe.Add(ref xr, 64 * L);
+        ref double fr = ref Unsafe.Add(ref xr, 128 * L);
+        ref double fi = ref Unsafe.Add(ref xr, 192 * L);
+        ref double rows = ref Unsafe.Add(ref xr, 256 * L);
+
+        // X by row.
+        for (int l = 0; l < L; l += 4)
+        {
+            ref double re0 = ref MemoryMarshal.GetArrayDataReference(real[first + l]);
+            ref double re1 = ref MemoryMarshal.GetArrayDataReference(real[first + l + 1]);
+            ref double re2 = ref MemoryMarshal.GetArrayDataReference(real[first + l + 2]);
+            ref double re3 = ref MemoryMarshal.GetArrayDataReference(real[first + l + 3]);
+            ref double im0 = ref MemoryMarshal.GetArrayDataReference(imaginary[first + l]);
+            ref double im1 = ref MemoryMarshal.GetArrayDataReference(imaginary[first + l + 1]);
+            ref double im2 = ref MemoryMarshal.GetArrayDataReference(imaginary[first + l + 2]);
+            ref double im3 = ref MemoryMarshal.GetArrayDataReference(imaginary[first + l + 3]);
+            if (real[first + l].Length < 64 || real[first + l + 1].Length < 64 || real[first + l + 2].Length < 64 || real[first + l + 3].Length < 64
+                || imaginary[first + l].Length < 64 || imaginary[first + l + 1].Length < 64 || imaginary[first + l + 2].Length < 64 || imaginary[first + l + 3].Length < 64)
+            {
+                throw new ArgumentException("The full bank takes 64 subband samples a slot.");
+            }
+
+            for (int k = 0; k < 64; k += 4)
+            {
+                int d0 = (k * L) + l;
+                QmfLanes.Transpose4(ref Unsafe.Add(ref re0, k), ref Unsafe.Add(ref re1, k), ref Unsafe.Add(ref re2, k), ref Unsafe.Add(ref re3, k), ref Unsafe.Add(ref xr, d0), ref Unsafe.Add(ref xr, d0 + L), ref Unsafe.Add(ref xr, d0 + (2 * L)), ref Unsafe.Add(ref xr, d0 + (3 * L)));
+                QmfLanes.Transpose4(ref Unsafe.Add(ref im0, k), ref Unsafe.Add(ref im1, k), ref Unsafe.Add(ref im2, k), ref Unsafe.Add(ref im3, k), ref Unsafe.Add(ref xi, d0), ref Unsafe.Add(ref xi, d0 + L), ref Unsafe.Add(ref xi, d0 + (2 * L)), ref Unsafe.Add(ref xi, d0 + (3 * L)));
+            }
+        }
+
+        // The two DCT-IVs' packing and turn (FullTransform's A of X_r, B of (-1)^k X_i), each point at its bit-reversed
+        // row, A in the first L lanes and B in the next.
+        var fft = QmfDctIV.Transform32;
+        for (int m = 0; m < 32; m++)
+        {
+            int even = 2 * m * L;
+            int odd = (63 - (2 * m)) * L;
+            int row = fft.Reversed(m) * 2 * L;
+            double c = QmfDctIV.PreCos[m];
+            double sn = QmfDctIV.PreSin[m];
+            QmfLanes.DctPretransform(ref Unsafe.Add(ref xr, even), ref Unsafe.Add(ref xr, odd), 1, c, sn, ref Unsafe.Add(ref fr, row), ref Unsafe.Add(ref fi, row), L);
+            QmfLanes.DctPretransform(ref Unsafe.Add(ref xi, even), ref Unsafe.Add(ref xi, odd), -1, c, sn, ref Unsafe.Add(ref fr, row + L), ref Unsafe.Add(ref fi, row + L), L);
+        }
+
+        fft.TransformLanes(scratch.Slice(128 * L, 64 * L), scratch.Slice(192 * L, 64 * L), 2 * L);
+
+        // v by row.
+        for (int p = 0; p < 32; p++)
+        {
+            int a = p * 2 * L;
+            int b = a + L;
+            QmfLanes.SynthesisOutput(ref Unsafe.Add(ref fr, a), ref Unsafe.Add(ref fi, a), ref Unsafe.Add(ref fr, b), ref Unsafe.Add(ref fi, b), Dct.PostCos(p), Dct.PostSin(p), ref Unsafe.Add(ref rows, 2 * p * L), ref Unsafe.Add(ref rows, (63 - (2 * p)) * L), ref Unsafe.Add(ref rows, (64 + (2 * p)) * L), ref Unsafe.Add(ref rows, (127 - (2 * p)) * L), L);
+        }
+
+        // Room for the L slots' v without moving the values mid-way (as QmfState.Step, all at once): slot l's v starts
+        // 2B (l + 1) before the current start.
+        const int Step = 128;
+        if (_start < L * Step)
+        {
+            int kept = (20 * 64) - Step;
+            _v.AsSpan(_start, kept).CopyTo(_v.AsSpan(_v.Length - kept));
+            _start = _v.Length - kept;
+        }
+
+        int start = _start;
+        ref double buffer = ref MemoryMarshal.GetArrayDataReference(_v);
+        for (int l = 0; l < L; l += 4)
+        {
+            int v0 = start - (Step * (l + 1));
+            for (int n = 0; n < 128; n += 4)
+            {
+                int s0 = (n * L) + l;
+                QmfLanes.Transpose4(ref Unsafe.Add(ref rows, s0), ref Unsafe.Add(ref rows, s0 + L), ref Unsafe.Add(ref rows, s0 + (2 * L)), ref Unsafe.Add(ref rows, s0 + (3 * L)), ref Unsafe.Add(ref buffer, v0 + n), ref Unsafe.Add(ref buffer, v0 - Step + n), ref Unsafe.Add(ref buffer, v0 - (2 * Step) + n), ref Unsafe.Add(ref buffer, v0 - (3 * Step) + n));
+            }
+        }
+
+        // Each slot's window, in order, once all their v are in.
+        for (int l = 0; l < L; l++)
+        {
+            _start = start - (Step * (l + 1));
+            Window(_v.AsSpan(_start, 20 * 64), output.Slice(64 * l, 64));
+        }
+    }
+
+    // g takes, of each 4B values of v, the first and the last B; w(n) = g(n) c(n (64 / B)); each output sample sums ten
+    // of w, in the order of n.
+    private void Window(ReadOnlySpan<double> v, Span<double> output)
+    {
+        var t = _tables;
+        int bands = t.Bands;
         var window = t.Window.AsSpan();
         output = output[..bands];
         Span<int> vTerms = stackalloc int[10];
@@ -339,12 +581,22 @@ internal sealed class QmfDctIV(double scale = 1)
 {
     private static readonly QmfFft Fft = new(32);
 
-    private static readonly double[] PreCos = [.. Enumerable.Range(0, 32).Select(m => QmfTrig.CosPi256(4 * m))];
-    private static readonly double[] PreSin = [.. Enumerable.Range(0, 32).Select(m => QmfTrig.SinPi256(4 * m))];
+    // exp(i pi m / 64), the input's turn.
+    public static readonly double[] PreCos = [.. Enumerable.Range(0, 32).Select(m => QmfTrig.CosPi256(4 * m))];
+    public static readonly double[] PreSin = [.. Enumerable.Range(0, 32).Select(m => QmfTrig.SinPi256(4 * m))];
 
     // With the scale the outputs take (a power of 2, so the same bits as scaling them after).
     private readonly double[] _postCos = [.. Enumerable.Range(0, 32).Select(p => QmfTrig.CosPi256((4 * p) + 1) * scale)];
     private readonly double[] _postSin = [.. Enumerable.Range(0, 32).Select(p => QmfTrig.SinPi256((4 * p) + 1) * scale)];
+
+    /// <summary>The FFT of 32 the transform takes.</summary>
+    public static QmfFft Transform32 => Fft;
+
+    /// <summary>The output's turn at p, with the scale.</summary>
+    public double PostCos(int p) => _postCos[p];
+
+    /// <summary>The output's turn at p, with the scale.</summary>
+    public double PostSin(int p) => _postSin[p];
 
     /// <summary>The DCT-IV of <paramref name="x"/> (64 values), or of (-1)^k x(k) if <paramref name="alternate"/>, into <paramref name="output"/>, times the scale.</summary>
     [SkipLocalsInit]
@@ -667,6 +919,44 @@ internal sealed class QmfFft
                     im1[j] = im0[j] - ti;
                     re0[j] += tr;
                     im0[j] += ti;
+                }
+            }
+        }
+    }
+
+    /// <summary>The row at which <see cref="TransformLanes"/> takes point <paramref name="n"/>: n's bits reversed.</summary>
+    public int Reversed(int n) => _reversed[n];
+
+    /// <summary>
+    /// <paramref name="lanes"/> transforms at once (<see cref="QmfLanes"/>), in place: row n of (<paramref name="re"/>,
+    /// <paramref name="im"/>) is point n of each, <paramref name="lanes"/> values in a run; the input's point n is at row
+    /// <see cref="Reversed"/>(n), and the output in order. Each lane gives <see cref="Transform"/>'s bits.
+    /// </summary>
+    public void TransformLanes(Span<double> re, Span<double> im, int lanes)
+    {
+        if (re.Length < _length * lanes || im.Length < _length * lanes)
+        {
+            throw new ArgumentException("The transform takes a row of lanes for each point.");
+        }
+
+        ref double r = ref MemoryMarshal.GetReference(re);
+        ref double i = ref MemoryMarshal.GetReference(im);
+        for (int a = 0; a < _length; a += 2)
+        {
+            int x = a * lanes;
+            int y = x + lanes;
+            QmfLanes.SumDifference(ref Unsafe.Add(ref r, x), ref Unsafe.Add(ref i, x), ref Unsafe.Add(ref r, y), ref Unsafe.Add(ref i, y), lanes);
+        }
+
+        for (int half = 2; half < _length; half *= 2)
+        {
+            for (int start = 0; start < _length; start += 2 * half)
+            {
+                for (int j = 0; j < half; j++)
+                {
+                    int x = (start + j) * lanes;
+                    int y = x + (half * lanes);
+                    QmfLanes.Butterfly(ref Unsafe.Add(ref r, x), ref Unsafe.Add(ref i, x), ref Unsafe.Add(ref r, y), ref Unsafe.Add(ref i, y), _cos[half + j], _sin[half + j], lanes);
                 }
             }
         }

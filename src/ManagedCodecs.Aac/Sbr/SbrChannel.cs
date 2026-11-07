@@ -65,6 +65,14 @@ internal sealed class SbrChannel(bool downsampled = false)
     private static readonly PsData NoPs = new();
     private PsProcessor? _ps;
     private QmfSynthesis? _rightSynthesis;
+
+    // The frame's core samples for the analysis, and the synthesis' output samples.
+    private readonly double[] _input = new double[32 * Slots];
+    private readonly double[] _samples = new double[64 * Slots];
+
+    // The frame's synthesis input without parametric stereo.
+    private double[][]? _synthesisRe;
+    private double[][]? _synthesisIm;
     private double[][]? _stereoRe;
     private double[][]? _stereoIm;
     private double[][]? _rightRe;
@@ -110,16 +118,13 @@ internal sealed class SbrChannel(bool downsampled = false)
     /// </summary>
     public void Process(SbrElement? element, int channel, ReadOnlySpan<float> core, Span<float> output, Span<float> right, AacStatistics statistics)
     {
-        Span<double> input = stackalloc double[32];
-        for (int slot = 0; slot < Slots; slot++)
+        var input = _input;
+        for (int n = 0; n < input.Length; n++)
         {
-            for (int n = 0; n < 32; n++)
-            {
-                input[n] = core[(32 * slot) + n] * 32768.0;
-            }
-
-            _analysis.Process(input, _lowReal[Kept + slot], _lowImaginary[Kept + slot]);
+            input[n] = core[n] * 32768.0;
         }
+
+        _analysis.Process(input, _lowReal, _lowImaginary, Kept, Slots);
 
         if (element is { HasFrame: true, Header: { } header, Frequencies: { } frequencies })
         {
@@ -705,15 +710,17 @@ internal sealed class SbrChannel(bool downsampled = false)
     // up.
     private void Synthesize(Span<float> output)
     {
-        Span<double> real = stackalloc double[64];
-        Span<double> imaginary = stackalloc double[64];
-        Span<double> samples = stackalloc double[64];
+        _synthesisRe ??= Buffers(Slots, 64);
+        _synthesisIm ??= Buffers(Slots, 64);
         for (int l = 0; l < Slots; l++)
         {
-            SynthesisInput(l, real, imaginary);
-            _synthesis.Process(real, imaginary, samples);
-            Output(samples, output[(_synthesis.Bands * l)..], _synthesis.Bands);
+            SynthesisInput(l, _synthesisRe[l], _synthesisIm[l]);
         }
+
+        var samples = _samples;
+        int count = _synthesis.Bands * Slots;
+        _synthesis.Process(_synthesisRe, _synthesisIm, 0, Slots, samples);
+        Output(samples, output, count);
     }
 
     // Slot l's synthesis input: the low band below the slot's kx, the adjusted high band from it up.
@@ -758,15 +765,12 @@ internal sealed class SbrChannel(bool downsampled = false)
         int top = element is { HasFrame: true, Frequencies: { } frequencies } ? frequencies.Kx + frequencies.M : 32;
         _ps.Apply(element?.Ps ?? NoPs, element is { HasPs: true }, _stereoRe, _stereoIm, _rightRe, _rightIm, top, statistics);
 
-        Span<double> samples = stackalloc double[64];
-        for (int l = 0; l < Slots; l++)
-        {
-            int bands = _synthesis.Bands;
-            _synthesis.Process(_stereoRe[l], _stereoIm[l], samples);
-            Output(samples, left[(bands * l)..], bands);
-            _rightSynthesis.Process(_rightRe[l], _rightIm[l], samples);
-            Output(samples, right[(bands * l)..], bands);
-        }
+        var samples = _samples;
+        int count = _synthesis.Bands * Slots;
+        _synthesis.Process(_stereoRe, _stereoIm, 0, Slots, samples);
+        Output(samples, left, count);
+        _rightSynthesis.Process(_rightRe, _rightIm, 0, Slots, samples);
+        Output(samples, right, count);
     }
 
     // The buffers move on a frame.

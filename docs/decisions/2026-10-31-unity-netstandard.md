@@ -183,11 +183,16 @@ The net10.0 build is unchanged where it runs: ManagedCodecs.H264.dll for net10.0
 SSSE3 or AVX2 (`PutScalar`), with `PutDcOnly`'s CoreCLR path as it was; `tools/bench.py --base` on the cloud VM (7
 interleaved runs) found no change beyond its noise.
 
+**Fixed after** (the next pull request for #345, once #353 and #354 had changed the same files): HE-AAC's scalar
+paths. `QmfFft.Transform`'s butterflies go by reference instead of a slice a group, and `Vectors.SumOfProducts` (the QMF
+windows) takes four sums at a time with each term's offsets read once; each sum is the same chain as before, so the
+output is bit-exact (VectorFft_MatchesScalarExactly and SumOfProducts_MatchesMultiplyAddATerm compare them with the
+vector paths and the definition; both builds hash the same on all 23 AAC samples on Mono). CoreCLR reaches them only
+without intrinsics. On Mono 6.12, medians of five interleaved runs against main: heaac-5.1 2.38 to 1.71 ms a frame
+(1.39 times), heaacv2-stereo 0.78 to 0.60 (1.30 times), AAC LC unchanged (it has no SBR). PACKAGE.md's table predates it.
+
 **Left** (not fixed here):
 
-- AAC: the QMF FFT's scalar path by reference instead of a slice a group, and `SumOfProducts` four sums at a time
-  (the same chains, bit-exact), took heaac-5.1 from 2.35 to 1.76 ms a frame on Mono in the scratch run; they change
-  `Sbr/Qmf.cs` and `Filterbank.cs`, which open pull requests (#353, #354) change, so they follow those.
 - The table properties (`CabacTables.RangeTabLps`, `Cabac.MpsNext` and `LpsNext`, deblocking's `Tc0`,
   `SignificantCatOffset`, `ScanPositionInc`, MJPEG's `ZigZag`): about 9% of a CABAC frame and 3.4% of the 720p CAVLC one
   on Mono after this change. A Unity-only spelling (a `static readonly` array read where the net10.0 build keeps the

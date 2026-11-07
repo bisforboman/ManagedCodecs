@@ -844,6 +844,22 @@ the JIT intra's share of `h264-high-default.mp4` moved from 6.09 to 6.01% (six a
 the per-sample loops was already close. The JIT build's intra time is spread out: `PredictBlock` 1.3% (the directional
 modes most of what the fast paths left), `Predict8x8`'s neighbour gathering and filtering 1.3%, `PredictChromaDc` 0.9%,
 `ReconstructIntraLuma` 0.9%, `PredictIntra4x4Mode` 0.6% (perf, 320x240).
+Tried and dropped (2026-11-07): the runtime's default dynamic PGO decodes faster in the steady state than mcdec's
+tiering off. Four interleaved rounds, 300 or 50 loops each: `h264-high-default.mp4` 0.76 to 0.89 of mcdec's time a
+frame, a 720p libx264 default stream (CABAC, B) 0.83 to 0.92, `h264-bench-720p.mp4` 0.82 to 0.92 in three rounds out of four.
+Tiered compilation with `TieredPGO=0` gave 0.87 to 1.04. perf of the two builds on the CABAC stream showed about 25
+callees of the hot paths as functions of their own under tiering off and inlined under PGO: `CopyRows` 3.9%,
+`Bilinear` 1.8%, `Cabac.Decision` 1.6%, `CabacMvd` and its `AbsMvd`, `CabacCbp`'s `LumaCond`,
+`ChromaBlock.Predict`, `SpatialDirect`, `ReadResidual`, `StoreAbsMvd`, `CodedBlockFlagInc`, `MotionStrength`, `AddDc`,
+`PrefetchAhead` and others, 0.4 to 1.1% each. `MethodImplOptions.AggressiveInlining` on 23 of them (all but
+`MotionNeighbor`, which PGO inlines only in part) gave mcdec's profile PGO's shape, every one of them gone. But the share of the
+functions it leaves alone (`Cabac.ResidualBlock`, `Cavlc.ReadResidualBlock`, `FilterMacroblock420`, the half-sample
+luma kernels) rose by only 1.0, 1.1 and 2.4% of the frame on the three streams (six alternating pairs each, higher in
+only 3 or 4 of the six). So inlining is about a point of PGO's 10 to 15%. The rest is in code PGO compiles
+differently without inlining it: the profile's total over `Cabac.ResidualBlock`, which PGO leaves as it is, fell from 5.10
+to 4.56. Tier-1 code is compiled after the classes' static constructors have run, so it also drops the
+class-initialization checks and folds `static readonly` values as constants, which mcdec's tiering off cannot (docs/benchmarking.md).
+Where the rest goes is an open question (#346).
 
 ## AAC
 

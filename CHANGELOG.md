@@ -37,6 +37,11 @@ run time.
   with B pictures and 1.2% in field pictures.
 - MJPEG: the Huffman decoder keeps its bit buffer in registers, and a short code with long magnitude bits takes one
   table lookup instead of two: about 6 to 7% off a frame.
+- ManagedCodecs.Unity on Mono: motion compensation filters whole rows of a block instead of every sample by the
+  definition, MJPEG's IDCT indexes rather than slicing, and the bit-count polyfills search rather than loop: on Mono
+  6.12, 720p H.264 about twice as fast (79 to 38 ms a frame), 320x240 H.264 1.3 to 1.5 times, MJPEG 1.45 times.
+  The other packages' code is unchanged where it runs (docs/decisions/2026-10-31-unity-netstandard.md, Mono's
+  profile).
 
 ## 0.8.1 – 2026-11-07
 

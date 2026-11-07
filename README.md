@@ -34,7 +34,7 @@ in between. That comparison is not measured here.
 | `src/ManagedCodecs.H264` | `H264Decoder`: Constrained Baseline, Main, High, High 10, High 4:2:2 and High 4:4:4 Predictive profile H.264 (CAVLC, CABAC, I/P/B, weighted prediction, 8x8 transform, scaling matrices, deblocking, monochrome, 4:2:0, 4:2:2 and 4:4:4, also as separate colour planes, 8 to 14 bits, lossless, progressive and interlaced), bit-exact |
 | `src/ManagedCodecs.Thumbnails` | `VideoProbe`: a video file's duration, displayed size, codecs and rotation as ffprobe reports them, without decoding; `VideoThumbnail`: a frame as a small upright RGBA image, PNG or JPEG; the `ManagedCodecs.Thumbnails` package (see Probing a video, Thumbnails; docs/decisions/2026-10-31-thumbnails.md) |
 | `src/ManagedCodecs.Unity` | The netstandard2.1 build for Unity (Mono, IL2CPP): every decoder's sources (and Thumbnails') in one assembly, without the vector paths, 1 to 3.4 times slower on CoreCLR; the `ManagedCodecs.Unity` package (see Unity) |
-| `src/ManagedCodecs.Aac` | `AacDecoder`: AAC LC (mono to 7.1, M/S, intensity, PNS, TNS), within 3e-7 of FFmpeg's float output; HE-AAC (spectral band replication) |
+| `src/ManagedCodecs.Aac` | `AacDecoder`: AAC LC (mono to 7.1, M/S, intensity, PNS, TNS), within 5e-7 of FFmpeg's float output; HE-AAC (spectral band replication) |
 | `src/Shared` | Source files linked into several codec projects (the VLC decoder) |
 | `tools/ManagedCodecs.Cli` | `mcdec`: decodes a file and times it, to compare with `ffmpeg -benchmark` (`--threads N` for H.264 frame threading and HE-AAC's channels) |
 | `tools/ManagedCodecs.Godot` | A Godot 4 (.NET) node that plays a video into an `ImageTexture` and an `AudioStreamGenerator` (mcplay's decoding and colour conversion, linked); CI builds it with the Godot .NET SDK, Godot has not run it |
@@ -76,7 +76,7 @@ and code that reproduces FFmpeg's reading where it differs from the spec), and n
   (`Threads`), and concealment of damaged slices (`ConcealErrors`, Malformed input).
 - **AAC LC**: mono to 7.1 and program config elements (in MP4 and ADTS, in FFmpeg's channel order), every window
   sequence and shape, M/S and intensity stereo,
-  PNS, TNS; within 2^-17 of FFmpeg's float output (measured: 3e-7). Encoder priming is trimmed by the MP4 edit list,
+  PNS, TNS; within 2^-17 of FFmpeg's float output (measured: 4e-7 on the samples, 4.8e-7 on real films). Encoder priming is trimmed by the MP4 edit list,
   or by an iTunSMPB tag without one.
 - **HE-AAC** (spectral band replication, at twice the core's rate, or downsampled at the core's own): signalled in the
   config or only by its data, mono to 5.1, coupled pairs; within 1e-6 of FFmpeg's float output where its single precision is not the limit (see
@@ -506,7 +506,10 @@ against 11% on x64, likely because ours works on 2 doubles a vector where FFmpeg
 confirmed; fusing two FFT stages a pass gained only 1 to 2% and was dropped). Fusing the bit reversal with the
 first stage and vectorizing the post-twiddle (#339) later took 12 to 15% off AAC LC on a cloud VM: the twiddles had
 cost as much as the FFT itself (docs/notes/aac-stages-2026-11.md, which also finds that 5.1's ratio being above stereo's
-comes from FFmpeg's cost per frame, not from our FFT). H.264's ARM64 profile is as flat as
+comes from FFmpeg's cost per frame, not from our FFT). The IMDCT in single precision, four floats a vector (#343),
+then took 13 to 15% off AAC LC's steady frame on ARM64 and 5 to 10% on x64 (`compare.yml` against #339's double
+version; a first float version, without #339's fusion, against the code before #339: 17 to 19% and 11 to 13%): the 2 doubles a vector were part of ARM64's gap.
+H.264's ARM64 profile is as flat as
 x64's. The QMF banks' real-input transforms (2026-10-28) took 14 to 16% off 5.1 HE-AAC and 8 to 10% off
 HE-AAC v2 on both runners (`compare.yml` against the code before them). The runners' CPUs differ from run to run (an
 EPYC 7763 on 2026-10-25 and in the first run of 2026-10-29, a 9V74 on 2026-10-28, a 9V45 in the second run of

@@ -20,6 +20,8 @@ run time.
 - H.264: in MBAFF frames and field pictures, CABAC's context selection reads a macroblock's left and above neighbours
   from a table found once a macroblock instead of a call each: about 1.6% fewer instructions in CABAC MBAFF frames
   and 1.7% in field pictures.
+- AAC: spectral data is read through packed Huffman tables, all of a codeword's sign bits at once: AAC LC at film
+  bitrates decodes 14 to 21% faster (Elephants Dream's 192 kbit/s stereo, Sintel's trailer).
 
 ## 0.8.1 – 2026-11-07
 

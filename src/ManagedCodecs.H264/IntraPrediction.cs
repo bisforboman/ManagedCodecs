@@ -14,8 +14,69 @@ internal readonly record struct IntraNeighbors(bool Left, bool Top, bool TopRigh
 internal static class IntraPrediction
 {
     /// <summary>Intra_4x4 prediction (8.3.1.2) for the block at <paramref name="offset"/>.</summary>
-    [SkipLocalsInit]
+    /// <remarks>
+    /// Vertical, horizontal and DC, most of the blocks of an intra frame, are written a row at a time straight from the
+    /// plane's neighbours; the other modes, and blocks too near the plane's ends for whole-row access, go to
+    /// <see cref="Predict4x4Reference"/>, which IntraPredictionTests compares this with.
+    /// </remarks>
     public static void Predict4x4<TPixel>(int mode, TPixel[] plane, int offset, int stride, IntraNeighbors n, int bitDepth)
+        where TPixel : unmanaged
+    {
+        if (mode > 2 || !RowsInside(plane, offset, stride, 4, 4))
+        {
+            Predict4x4Reference(mode, plane, offset, stride, n, bitDepth);
+            return;
+        }
+
+        ref TPixel block = ref plane[offset];
+        switch (mode)
+        {
+            case 0: // Vertical
+                Require(n.Top, mode);
+                for (int y = 0; y < 4; y++)
+                {
+                    CopyRow(ref Unsafe.Add(ref block, -stride), ref Unsafe.Add(ref block, y * stride), 4);
+                }
+
+                break;
+
+            case 1: // Horizontal
+                Require(n.Left, mode);
+                for (int y = 0; y < 4; y++)
+                {
+                    FillRow(ref Unsafe.Add(ref block, y * stride), 4, Samples.ToInt(Unsafe.Add(ref block, (y * stride) - 1)));
+                }
+
+                break;
+
+            default: // DC
+                int sumTop = 0;
+                int sumLeft = 0;
+                for (int i = 0; i < 4; i++)
+                {
+                    sumTop += n.Top ? Samples.ToInt(Unsafe.Add(ref block, i - stride)) : 0;
+                    sumLeft += n.Left ? Samples.ToInt(Unsafe.Add(ref block, (i * stride) - 1)) : 0;
+                }
+
+                int dc = (n.Left, n.Top) switch
+                {
+                    (true, true) => (sumTop + sumLeft + 4) >> 3,
+                    (true, false) => (sumLeft + 2) >> 2,
+                    (false, true) => (sumTop + 2) >> 2,
+                    _ => 1 << (bitDepth - 1),
+                };
+                for (int y = 0; y < 4; y++)
+                {
+                    FillRow(ref Unsafe.Add(ref block, y * stride), 4, dc);
+                }
+
+                break;
+        }
+    }
+
+    /// <summary>Intra_4x4 prediction by the equations, sample by sample: the reference for <see cref="Predict4x4"/>.</summary>
+    [SkipLocalsInit]
+    internal static void Predict4x4Reference<TPixel>(int mode, TPixel[] plane, int offset, int stride, IntraNeighbors n, int bitDepth)
         where TPixel : unmanaged
     {
         // The edge layout of PredictBlock: p[-1, y] for y = 3..0 at e[4..7], p[-1, -1] at e[8],
@@ -49,20 +110,50 @@ internal static class IntraPrediction
             e[8] = Samples.ToInt(plane[offset - stride - 1]);
         }
 
-        PredictBlock(4, mode, e, plane, offset, stride, n, bitDepth);
+        PredictBlockReference(4, mode, e, plane, offset, stride, n, bitDepth);
     }
 
     /// <summary>
     /// Intra_8x8 prediction (8.3.2.2) for the block at <paramref name="offset"/>: the neighbouring
     /// samples are low-pass filtered first (8.3.2.2.1), then predicted from as Intra_4x4 does.
+    /// Vertical, horizontal and DC are written a row at a time (<see cref="PredictBlock{TPixel}(int, int, ReadOnlySpan{int}, TPixel[], int, int, IntraNeighbors, int)"/>);
+    /// <see cref="Predict8x8Reference"/> is the reference IntraPredictionTests compares it with.
     /// </summary>
     [SkipLocalsInit]
     public static void Predict8x8<TPixel>(int mode, TPixel[] plane, int offset, int stride, IntraNeighbors n, int bitDepth)
         where TPixel : unmanaged
     {
+        Span<int> e = stackalloc int[25];
+        FilteredEdges8x8(plane, offset, stride, n, e);
+        if (mode > 2 || !RowsInside(plane, offset, stride, 8, 8))
+        {
+            PredictBlockReference(8, mode, e, plane, offset, stride, n, bitDepth);
+            return;
+        }
+
+        PredictBlock(8, mode, e, plane, offset, stride, n, bitDepth);
+    }
+
+    /// <summary>Intra_8x8 prediction by the equations, sample by sample: the reference for <see cref="Predict8x8"/>.</summary>
+    [SkipLocalsInit]
+    internal static void Predict8x8Reference<TPixel>(int mode, TPixel[] plane, int offset, int stride, IntraNeighbors n, int bitDepth)
+        where TPixel : unmanaged
+    {
+        Span<int> e = stackalloc int[25];
+        FilteredEdges8x8(plane, offset, stride, n, e);
+        PredictBlockReference(8, mode, e, plane, offset, stride, n, bitDepth);
+    }
+
+    /// <summary>
+    /// The neighbouring samples of an 8x8 block, filtered (8.3.2.2.1), into <paramref name="e"/> (25 values):
+    /// p'[-1, y] at e[7 - y], p'[x, -1] at e[9 + x].
+    /// </summary>
+    [SkipLocalsInit]
+    private static void FilteredEdges8x8<TPixel>(TPixel[] plane, int offset, int stride, IntraNeighbors n, Span<int> e)
+        where TPixel : unmanaged
+    {
         // p[-1, y] for y = 7..-1 then p[x, -1] for x = 0..15: p[-1, y] is e[7 - y], p[x, -1] is e[9 + x].
         Span<int> p = stackalloc int[25];
-        Span<int> e = stackalloc int[25];
         p.Clear();
         e.Clear();
         if (n.Top)
@@ -125,8 +216,66 @@ internal static class IntraPrediction
 
             e[0] = (p[1] + (3 * p[0]) + 2) >> 2;
         }
+    }
 
-        PredictBlock(8, mode, e, plane, offset, stride, n, bitDepth);
+    /// <summary>
+    /// Vertical, horizontal and DC of an Intra_4x4 or Intra_8x8 block from its (filtered) neighbours <paramref name="e"/>,
+    /// in <see cref="PredictBlockReference"/>'s layout, a row at a time; the caller checked that the block's rows lie
+    /// inside the plane.
+    /// </summary>
+    private static void PredictBlock<TPixel>(int size, int mode, ReadOnlySpan<int> e, TPixel[] plane, int offset, int stride, IntraNeighbors n, int bitDepth)
+        where TPixel : unmanaged
+    {
+        ref TPixel block = ref plane[offset];
+        switch (mode)
+        {
+            case 0: // Vertical: the first row from e, the others copies of it.
+                Require(n.Top, mode);
+                for (int x = 0; x < size; x++)
+                {
+                    Unsafe.Add(ref block, x) = Samples.From<TPixel>(T(e, x));
+                }
+
+                for (int y = 1; y < size; y++)
+                {
+                    CopyRow(ref block, ref Unsafe.Add(ref block, y * stride), size);
+                }
+
+                break;
+
+            case 1: // Horizontal
+                Require(n.Left, mode);
+                for (int y = 0; y < size; y++)
+                {
+                    FillRow(ref Unsafe.Add(ref block, y * stride), size, L(e, y));
+                }
+
+                break;
+
+            default: // DC
+                int sumTop = 0;
+                int sumLeft = 0;
+                for (int i = 0; i < size; i++)
+                {
+                    sumTop += T(e, i);
+                    sumLeft += L(e, i);
+                }
+
+                int log2 = size == 4 ? 2 : 3;
+                int dc = (n.Left, n.Top) switch
+                {
+                    (true, true) => (sumTop + sumLeft + size) >> (log2 + 1),
+                    (true, false) => (sumLeft + (size >> 1)) >> log2,
+                    (false, true) => (sumTop + (size >> 1)) >> log2,
+                    _ => 1 << (bitDepth - 1),
+                };
+                for (int y = 0; y < size; y++)
+                {
+                    FillRow(ref Unsafe.Add(ref block, y * stride), size, dc);
+                }
+
+                break;
+        }
     }
 
     /// <summary>
@@ -135,7 +284,7 @@ internal static class IntraPrediction
     /// either size): p[-1, y] at e[7 - y] for y = -1..size - 1 and p[x, -1] at e[9 + x] for
     /// x = 0..2 * size - 1. The mode is chosen once for the whole block.
     /// </summary>
-    private static void PredictBlock<TPixel>(int size, int mode, ReadOnlySpan<int> e, TPixel[] plane, int offset, int stride, IntraNeighbors n, int bitDepth)
+    private static void PredictBlockReference<TPixel>(int size, int mode, ReadOnlySpan<int> e, TPixel[] plane, int offset, int stride, IntraNeighbors n, int bitDepth)
         where TPixel : unmanaged
     {
         int last = size - 1;
@@ -322,7 +471,16 @@ internal static class IntraPrediction
         // Chroma mode numbers differ from 16x16: 0 DC, 1 Horizontal, 2 Vertical, 3 Plane.
         if (mode == 0)
         {
-            PredictChromaDc(plane, offset, stride, n, leftBlocks < 0 ? (n.Left ? 15 : 0) : leftBlocks, height, bitDepth);
+            int left = leftBlocks < 0 ? (n.Left ? 15 : 0) : leftBlocks;
+            if (RowsInside(plane, offset, stride, 8, height))
+            {
+                PredictChromaDc(plane, offset, stride, n, left, height, bitDepth);
+            }
+            else
+            {
+                PredictChromaDcReference(plane, offset, stride, n, left, height, bitDepth);
+            }
+
             return;
         }
 
@@ -432,8 +590,71 @@ internal static class IntraPrediction
         }
     }
 
-    /// <summary>Chroma DC (8.3.4.1-3): each 4x4 block gets its own average with its own fallbacks.</summary>
+    /// <summary>
+    /// Chroma DC, a row of each 4x4 block at a time, the top sums found once for all rows of blocks: the same values as
+    /// <see cref="PredictChromaDcReference"/>; the caller checked that the block's rows lie inside the plane.
+    /// </summary>
     private static void PredictChromaDc<TPixel>(TPixel[] plane, int offset, int stride, IntraNeighbors n, int leftBlocks, int height, int bitDepth)
+        where TPixel : unmanaged
+    {
+        ref TPixel block = ref plane[offset];
+        int top0 = 0;
+        int top1 = 0;
+        if (n.Top)
+        {
+            for (int i = 0; i < 4; i++)
+            {
+                top0 += Samples.ToInt(Unsafe.Add(ref block, i - stride));
+                top1 += Samples.ToInt(Unsafe.Add(ref block, 4 + i - stride));
+            }
+        }
+
+        int none = 1 << (bitDepth - 1);
+        for (int yO = 0; yO < height; yO += 4)
+        {
+            bool left = ((leftBlocks >> (yO / 4)) & 1) != 0;
+            int sumLeft = 0;
+            if (left)
+            {
+                for (int i = 0; i < 4; i++)
+                {
+                    sumLeft += Samples.ToInt(Unsafe.Add(ref block, ((yO + i) * stride) - 1));
+                }
+            }
+
+            // The left block of each row of blocks: both sums on the first row, the left sum first below it.
+            int value0 = yO == 0
+                ? (left, n.Top) switch
+                {
+                    (true, true) => (top0 + sumLeft + 4) >> 3,
+                    (true, false) => (sumLeft + 2) >> 2,
+                    (false, true) => (top0 + 2) >> 2,
+                    _ => none,
+                }
+                : left ? (sumLeft + 2) >> 2 : n.Top ? (top0 + 2) >> 2 : none;
+
+            // The right block: the top sum first on the first row, both below it.
+            int value1 = yO == 0
+                ? n.Top ? (top1 + 2) >> 2 : left ? (sumLeft + 2) >> 2 : none
+                : (left, n.Top) switch
+                {
+                    (true, true) => (top1 + sumLeft + 4) >> 3,
+                    (true, false) => (sumLeft + 2) >> 2,
+                    (false, true) => (top1 + 2) >> 2,
+                    _ => none,
+                };
+
+            for (int y = 0; y < 4; y++)
+            {
+                ref TPixel row = ref Unsafe.Add(ref block, (yO + y) * stride);
+                FillRow(ref row, 4, value0);
+                FillRow(ref Unsafe.Add(ref row, 4), 4, value1);
+            }
+        }
+    }
+
+    /// <summary>Chroma DC (8.3.4.1-3): each 4x4 block gets its own average with its own fallbacks.</summary>
+    internal static void PredictChromaDcReference<TPixel>(TPixel[] plane, int offset, int stride, IntraNeighbors n, int leftBlocks, int height, int bitDepth)
         where TPixel : unmanaged
     {
         for (int yO = 0; yO < height; yO += 4)
@@ -474,6 +695,64 @@ internal static class IntraPrediction
                     plane.AsSpan(offset + ((yO + y) * stride) + xO, 4).Fill(Samples.From<TPixel>(value));
                 }
             }
+        }
+    }
+
+    /// <summary>
+    /// Whether a <paramref name="width"/> x <paramref name="height"/> block at <paramref name="offset"/>, its row above
+    /// and its column to the left (the top-left sample, and 2 * width samples above for Intra_4x4's top right) lie
+    /// inside <paramref name="plane"/>, so that the row-at-a-time paths may skip the array's bounds checks.
+    /// </summary>
+    private static bool RowsInside<TPixel>(TPixel[] plane, int offset, int stride, int width, int height) =>
+        stride >= 2 * width && offset - stride - 1 >= 0 && offset + ((height - 1) * stride) + (2 * width) <= plane.Length;
+
+    /// <summary>Copies <paramref name="count"/> (4 or 8) samples from <paramref name="source"/> to <paramref name="destination"/>.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void CopyRow<TPixel>(ref TPixel source, ref TPixel destination, int count)
+        where TPixel : unmanaged
+    {
+        ref byte from = ref Unsafe.As<TPixel, byte>(ref source);
+        ref byte to = ref Unsafe.As<TPixel, byte>(ref destination);
+        int bytes = count * Unsafe.SizeOf<TPixel>();
+        if (bytes == 4)
+        {
+            Unsafe.WriteUnaligned(ref to, Unsafe.ReadUnaligned<uint>(ref from));
+        }
+        else
+        {
+            Unsafe.WriteUnaligned(ref to, Unsafe.ReadUnaligned<ulong>(ref from));
+            if (bytes == 16)
+            {
+                Unsafe.WriteUnaligned(ref Unsafe.Add(ref to, 8), Unsafe.ReadUnaligned<ulong>(ref Unsafe.Add(ref from, 8)));
+            }
+        }
+    }
+
+    /// <summary>Sets <paramref name="count"/> (4 or 8) samples from <paramref name="row"/> on to <paramref name="value"/>.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void FillRow<TPixel>(ref TPixel row, int count, int value)
+        where TPixel : unmanaged
+    {
+        ref byte to = ref Unsafe.As<TPixel, byte>(ref row);
+        if (typeof(TPixel) == typeof(byte))
+        {
+            if (count == 4)
+            {
+                Unsafe.WriteUnaligned(ref to, (uint)(byte)value * 0x01010101u);
+            }
+            else
+            {
+                Unsafe.WriteUnaligned(ref to, (ulong)(byte)value * 0x0101010101010101UL);
+            }
+
+            return;
+        }
+
+        ulong four = (ulong)(ushort)value * 0x0001000100010001UL;
+        Unsafe.WriteUnaligned(ref to, four);
+        if (count == 8)
+        {
+            Unsafe.WriteUnaligned(ref Unsafe.Add(ref to, 8), four);
         }
     }
 

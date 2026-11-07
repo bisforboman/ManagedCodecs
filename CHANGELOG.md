@@ -26,6 +26,9 @@ run time.
 
 ### Changed
 
+- H.264: intra prediction's vertical, horizontal and DC modes (4x4, 8x8, chroma DC) write a row at a time: 10% fewer
+  instructions in an 8-bit intra-only stream under Native AOT, about 1% of its time under the JIT. The output is
+  unchanged.
 - HE-AAC decodes faster: the QMF banks' transforms (their FFTs, DCT-IVs and rotations, between windows still in double)
   run in single precision, four values a vector: 7 to 10% off a 5.1 HE-AAC frame and 4 to 7% off HE-AAC v2, on ARM64
   and x64. The output moves against FFmpeg's (single precision too) in the third or fourth digit of its differences.

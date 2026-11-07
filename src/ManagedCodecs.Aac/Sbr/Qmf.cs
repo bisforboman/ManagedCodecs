@@ -763,6 +763,7 @@ internal sealed class QmfFft
         Transform(re, im, scalar);
     }
 
+#if NET
     /// <summary>
     /// The bit-reversal permutation and the first stage (whose twiddle factor is 1) in one pass, from the source into
     /// the output, with the scalar path's sums (a + b and a - b; addition commutes to the bit), so the result is the same. The
@@ -778,7 +779,6 @@ internal sealed class QmfFft
         ref int reversed = ref MemoryMarshal.GetArrayDataReference(_reversed);
         int half = _length / 2;
         int m = 0;
-#if NET
         if (Avx.IsSupported)
         {
             for (; m <= half - Vector256<double>.Count; m += Vector256<double>.Count)
@@ -801,10 +801,8 @@ internal sealed class QmfFft
             Store2(ref r, ref reversed, m, xr + yr, xr - yr);
             Store2(ref i, ref reversed, m, xi + yi, xi - yi);
         }
-#endif
     }
 
-#if NET
     // (sum(j), difference(j)) at the reversal of m + j, for j = 0 and 1.
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void Store2(ref double target, ref int reversed, int m, Vector128<double> sum, Vector128<double> difference)

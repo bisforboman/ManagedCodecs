@@ -1045,6 +1045,14 @@ went, and the 4x4 transposes in and out cost more than that. The banks' neighbou
 windowing and the HF generator read by slot), so the transposes stay; built from 128-bit halves loaded from memory, one
 unpack a row, they are as cheap as they get. Sixteen slots at a time was slower still (its scratch outgrows L1). The
 code is on the branch `heaac-qmf-lanes-experiment`.
+What did go (#338, after it): the one-slot FFT's reorder and first stage in vectors. The first stage pairs points m and
+m + N/2, two runs of the input, so their sums and differences take vectors and each pair is stored zipped at its
+bit-reversed place, where a scalar gather through the permutation table was; the DCT-IV's packing and the analysis's
+turn write a scratch the FFT reads from (`QmfFft.Transform` from a source), so its copy of the input goes. Each value is
+the same sum as before (`VectorFft_MatchesScalarExactly`, now at 32 points and from a source too). By perf
+(`heaac-5.1.mp4`, six runs each, the order alternating, normalized as above) `ReorderFirstStage` fell from 0.29 to 0.17
+of the untouched functions' samples and the QMF banks with it, about 2% of the frame; the wall clock agreed (steady 0.973,
+`heaacv2-stereo.mp4` 0.980, ten interleaved runs).
 
 Downsampled SBR (the config gives SBR the core's own rate, 44.1 kHz in the sample's sync extension) runs as for twice
 that rate, its frequency tables too (the sample's band runs from QMF band 9 to 23 of the 88.2 kHz grid), and

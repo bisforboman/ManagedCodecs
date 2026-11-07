@@ -965,6 +965,12 @@ internal sealed partial class PictureDecoder<TPixel>
             InterPrediction.WeightOne(MemoryMarshal.Cast<TPixel, byte>(prediction), stride, width, height, MemoryMarshal.Cast<TPixel, byte>(output), outputStride, w, o, logWd);
             return;
         }
+
+        if (typeof(TPixel) == typeof(ushort))
+        {
+            InterPrediction.WeightOne16(MemoryMarshal.Cast<TPixel, ushort>(prediction), stride, width, height, MemoryMarshal.Cast<TPixel, ushort>(output), outputStride, w, o, logWd, Samples.Max<TPixel>(_bitDepth));
+            return;
+        }
 #endif
 
         InterPrediction.WeightOneReference(prediction, stride, width, height, output, outputStride, w, o, logWd, Samples.Max<TPixel>(_bitDepth));
@@ -981,6 +987,12 @@ internal sealed partial class PictureDecoder<TPixel>
         if (typeof(TPixel) == typeof(byte))
         {
             InterPrediction.WeightBoth(MemoryMarshal.Cast<TPixel, byte>(prediction0), MemoryMarshal.Cast<TPixel, byte>(prediction1), stride, width, height, MemoryMarshal.Cast<TPixel, byte>(output), outputStride, w0, w1, offset, logWd);
+            return;
+        }
+
+        if (typeof(TPixel) == typeof(ushort))
+        {
+            InterPrediction.WeightBoth16(MemoryMarshal.Cast<TPixel, ushort>(prediction0), MemoryMarshal.Cast<TPixel, ushort>(prediction1), stride, width, height, MemoryMarshal.Cast<TPixel, ushort>(output), outputStride, w0, w1, offset, logWd, Samples.Max<TPixel>(_bitDepth));
             return;
         }
 #endif

@@ -29,16 +29,25 @@ run time.
   doubles: on top of the line above, 13 to 15% off an AAC LC frame on ARM64 and 5 to 10% on x64 (2% off 5.1 HE-AAC).
   Output moves by about 1e-8 on average; the largest difference from FFmpeg's on real films goes from 3.6e-7 to
   4.8e-7 (the bound is 2^-17, 7.6e-6).
+- H.264: above 8 bits, the bi-predicted average, weighted prediction and the inverse transform adds run in vectors
+  instead of a loop per sample: about 9 to 13% fewer instructions in 10-bit streams (3% of the frame under the JIT).
 - H.264: in MBAFF frames and field pictures, motion vector prediction finds its neighbours A, B and C in one call:
   about 1.8% fewer instructions in MBAFF frames, 1.6% in field pictures and 1.1% in progressive CAVLC frames.
 - H.264: in MBAFF frames and field pictures, CABAC's context selection reads a macroblock's left and above neighbours
   from a table found once a macroblock instead of a call each: about 1.6% fewer instructions in CABAC MBAFF frames
   and 1.7% in field pictures.
+- AAC: spectral data is read through packed Huffman tables, all of a codeword's sign bits at once: AAC LC at film
+  bitrates decodes 14 to 21% faster (Elephants Dream's 192 kbit/s stereo, Sintel's trailer).
 - H.264: spatial direct prediction finds a macroblock's neighbours A, B and C once for both its reference indices and
   its motion vectors, in MBAFF frames and field pictures in one call: about 2.2% fewer instructions in MBAFF frames
   with B pictures and 1.2% in field pictures.
 - MJPEG: the Huffman decoder keeps its bit buffer in registers, and a short code with long magnitude bits takes one
   table lookup instead of two: about 6 to 7% off a frame.
+- ManagedCodecs.Unity on Mono: motion compensation filters whole rows of a block instead of every sample by the
+  definition, MJPEG's IDCT indexes rather than slicing, and the bit-count polyfills search rather than loop: on Mono
+  6.12, 720p H.264 about twice as fast (79 to 38 ms a frame), 320x240 H.264 1.3 to 1.5 times, MJPEG 1.45 times.
+  The other packages' code is unchanged where it runs (docs/decisions/2026-10-31-unity-netstandard.md, Mono's
+  profile).
 
 ## 0.8.1 – 2026-11-07
 

@@ -7,7 +7,7 @@ using System.Runtime.Intrinsics;
 
 namespace ManagedCodecs.H264;
 
-/// <summary>Weighted sample prediction (8.4.2.3.2): by the definition for any sample type, and in vectors for 8-bit samples.</summary>
+/// <summary>Weighted sample prediction (8.4.2.3.2): by the definition for any sample type, and in vectors.</summary>
 internal static partial class InterPrediction
 {
     /// <summary>
@@ -110,6 +110,75 @@ internal static partial class InterPrediction
         return Vector128.Narrow(
             Vector128.Min(Vector128.Max(low, Vector128<short>.Zero), max).AsUInt16(),
             Vector128.Min(Vector128.Max(high, Vector128<short>.Zero), max).AsUInt16());
+    }
+#endif
+
+#if NET
+    /// <summary>
+    /// <see cref="WeightOneReference"/> for samples of more than 8 bits, 8 at a time in 32-bit lanes (a 10-bit sample
+    /// times a weight of up to 128 needs 18 bits). Rows are read as 8 samples, 16 for a block 16 wide.
+    /// </summary>
+    public static void WeightOne16(ReadOnlySpan<ushort> prediction, int stride, int width, int height, Span<ushort> output, int outputStride, int w, int o, int logWd, int max)
+    {
+        CheckWeightBounds16(prediction.Length, stride, height, output.Length, outputStride, width);
+        ref ushort source = ref MemoryMarshal.GetReference(prediction);
+        ref ushort dest = ref MemoryMarshal.GetReference(output);
+        var weight = Vector128.Create(w);
+        var offset = Vector128.Create(o);
+        var round = Vector128.Create(logWd >= 1 ? 1 << (logWd - 1) : 0);
+        var top = Vector128.Create(max);
+        for (int j = 0; j < height; j++)
+        {
+            ref ushort outRow = ref Unsafe.Add(ref dest, j * outputStride);
+            for (int x = 0; x < width; x += 8)
+            {
+                var p = Vector128.LoadUnsafe(ref source, (nuint)((j * stride) + x));
+                var low = (((Vector128.WidenLower(p).AsInt32() * weight) + round) >> logWd) + offset;
+                var high = (((Vector128.WidenUpper(p).AsInt32() * weight) + round) >> logWd) + offset;
+                StoreRow16(ClampNarrow16(low, high, top), ref Unsafe.Add(ref outRow, x), width);
+            }
+        }
+    }
+
+    /// <summary><see cref="WeightBothReference"/> for samples of more than 8 bits, 8 at a time in 32-bit lanes.</summary>
+    public static void WeightBoth16(ReadOnlySpan<ushort> prediction0, ReadOnlySpan<ushort> prediction1, int stride, int width, int height, Span<ushort> output, int outputStride, int w0, int w1, int o, int logWd, int max)
+    {
+        CheckWeightBounds16(Math.Min(prediction0.Length, prediction1.Length), stride, height, output.Length, outputStride, width);
+        ref ushort source0 = ref MemoryMarshal.GetReference(prediction0);
+        ref ushort source1 = ref MemoryMarshal.GetReference(prediction1);
+        ref ushort dest = ref MemoryMarshal.GetReference(output);
+        var weight0 = Vector128.Create(w0);
+        var weight1 = Vector128.Create(w1);
+        var offset = Vector128.Create(o);
+        var round = Vector128.Create(1 << logWd);
+        var top = Vector128.Create(max);
+        int shift = logWd + 1;
+        for (int j = 0; j < height; j++)
+        {
+            ref ushort outRow = ref Unsafe.Add(ref dest, j * outputStride);
+            for (int x = 0; x < width; x += 8)
+            {
+                var p0 = Vector128.LoadUnsafe(ref source0, (nuint)((j * stride) + x));
+                var p1 = Vector128.LoadUnsafe(ref source1, (nuint)((j * stride) + x));
+                var low = (((Vector128.WidenLower(p0).AsInt32() * weight0) + (Vector128.WidenLower(p1).AsInt32() * weight1) + round) >> shift) + offset;
+                var high = (((Vector128.WidenUpper(p0).AsInt32() * weight0) + (Vector128.WidenUpper(p1).AsInt32() * weight1) + round) >> shift) + offset;
+                StoreRow16(ClampNarrow16(low, high, top), ref Unsafe.Add(ref outRow, x), width);
+            }
+        }
+    }
+
+    // Clip1 of eight 32-bit values to 0 .. max, as ushorts.
+    private static Vector128<ushort> ClampNarrow16(Vector128<int> low, Vector128<int> high, Vector128<int> max) =>
+        Vector128.Narrow(
+            Vector128.Min(Vector128.Max(low, Vector128<int>.Zero), max).AsUInt32(),
+            Vector128.Min(Vector128.Max(high, Vector128<int>.Zero), max).AsUInt32());
+
+    private static void CheckWeightBounds16(int predictionLength, int stride, int height, int outputLength, int outputStride, int width)
+    {
+        if (height < 1 || ((height - 1) * stride) + Math.Max(width, 8) > predictionLength || ((height - 1) * outputStride) + width > outputLength || width is not (2 or 4 or 8 or 16))
+        {
+            throw new ArgumentOutOfRangeException(nameof(height));
+        }
     }
 #endif
 

@@ -424,5 +424,55 @@ internal static partial class InterPrediction
             MemoryMarshal.Write(MemoryMarshal.AsBytes(destination[..2]), narrow.AsUInt32().ToScalar());
         }
     }
+
+    /// <summary>
+    /// <see cref="AverageBlock{TPixel}"/> for samples of more than 8 bits: (a + b + 1) >> 1 in 16-bit lanes without
+    /// widening, exact for any 16-bit value. Rows are read 8 samples at a time (each buffer needs 8 readable samples
+    /// from every row start, 16 for a block 16 wide).
+    /// </summary>
+    public static void AverageBlock16(ReadOnlySpan<ushort> a, ReadOnlySpan<ushort> b, int stride, int width, int height, Span<ushort> output, int outputStride)
+    {
+        int reach = ((height - 1) * stride) + Math.Max(width, 8);
+        if (height < 1 || reach > a.Length || reach > b.Length || ((height - 1) * outputStride) + width > output.Length || width is not (2 or 4 or 8 or 16))
+        {
+            throw new ArgumentOutOfRangeException(nameof(height));
+        }
+
+        ref ushort sourceA = ref MemoryMarshal.GetReference(a);
+        ref ushort sourceB = ref MemoryMarshal.GetReference(b);
+        ref ushort dest = ref MemoryMarshal.GetReference(output);
+        for (int j = 0; j < height; j++)
+        {
+            int row = j * stride;
+            ref ushort outRow = ref Unsafe.Add(ref dest, j * outputStride);
+            var low = RoundingAverage16(Vector128.LoadUnsafe(ref sourceA, (nuint)row), Vector128.LoadUnsafe(ref sourceB, (nuint)row));
+            StoreRow16(low, ref outRow, width);
+            if (width == 16)
+            {
+                RoundingAverage16(Vector128.LoadUnsafe(ref sourceA, (nuint)(row + 8)), Vector128.LoadUnsafe(ref sourceB, (nuint)(row + 8))).StoreUnsafe(ref outRow, 8);
+            }
+        }
+    }
+
+    /// <summary>(a + b + 1) >> 1 per 16-bit lane, without widening.</summary>
+    private static Vector128<ushort> RoundingAverage16(Vector128<ushort> a, Vector128<ushort> b) => (a | b) - ((a ^ b) >> 1);
+
+    /// <summary>Writes the first min(<paramref name="width"/>, 8) lanes (2, 4 or 8).</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void StoreRow16(Vector128<ushort> value, ref ushort destination, int width)
+    {
+        if (width >= 8)
+        {
+            value.StoreUnsafe(ref destination);
+        }
+        else if (width == 4)
+        {
+            Unsafe.WriteUnaligned(ref Unsafe.As<ushort, byte>(ref destination), value.AsUInt64().ToScalar());
+        }
+        else
+        {
+            Unsafe.WriteUnaligned(ref Unsafe.As<ushort, byte>(ref destination), value.AsUInt32().ToScalar());
+        }
+    }
 }
 #endif

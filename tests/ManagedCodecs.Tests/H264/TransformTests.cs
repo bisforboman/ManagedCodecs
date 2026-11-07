@@ -136,4 +136,55 @@ public class TransformTests
             Assert.True(expected.AsSpan().SequenceEqual(actual), $"Block {n} differs.");
         }
     }
+
+    /// <summary>
+    /// The 16-bit vector adds (4x4, 8x8 and DC only, in 32-bit lanes) against the scalar transforms at every bit depth
+    /// above 8, on random coefficients small and large and samples near both ends of the range.
+    /// </summary>
+    [Fact]
+    public void InverseTransformAdd16_MatchesScalar()
+    {
+        const int Stride = 13;
+        var random = new Random(31);
+        for (int n = 0; n < 20_000; n++)
+        {
+            int bitDepth = 9 + random.Next(6);
+            int max = (1 << bitDepth) - 1;
+            int range = random.Next(4) switch { 0 => 64, 1 => 2047, 2 => 1 << 14, _ => 1 << 20 };
+            int size = random.Next(2) == 0 ? 4 : 8;
+            var coefficients = new int[size * size];
+            for (int i = 0; i < coefficients.Length; i++)
+            {
+                coefficients[i] = random.Next(3) == 0 ? 0 : random.Next(-range, range + 1);
+            }
+
+            var prediction = new ushort[((size - 1) * Stride) + size];
+            for (int i = 0; i < prediction.Length; i++)
+            {
+                prediction[i] = random.Next(4) == 0 ? (ushort)(random.Next(2) * max) : (ushort)random.Next(max + 1);
+            }
+
+            var expected = (ushort[])prediction.Clone();
+            var actual = (ushort[])prediction.Clone();
+            if (size == 4)
+            {
+                Transform.InverseTransformAddScalar((int[])coefficients.Clone(), expected.AsSpan(), Stride, bitDepth);
+                Transform.InverseTransformAdd((int[])coefficients.Clone(), actual.AsSpan(), Stride, bitDepth);
+            }
+            else
+            {
+                Transform.InverseTransform8x8AddScalar((int[])coefficients.Clone(), expected.AsSpan(), Stride, bitDepth);
+                Transform.InverseTransform8x8Add((int[])coefficients.Clone(), actual.AsSpan(), Stride, bitDepth);
+            }
+
+            Assert.True(expected.AsSpan().SequenceEqual(actual), $"Block {n} ({size}x{size}, {bitDepth} bits) differs.");
+
+            int dc = random.Next(-300_000, 300_001);
+            expected = (ushort[])prediction.Clone();
+            Transform.AddDcScalar(dc, expected.AsSpan(), Stride, bitDepth);
+            actual = (ushort[])prediction.Clone();
+            Transform.AddDc(dc, actual.AsSpan(), Stride, bitDepth);
+            Assert.True(expected.AsSpan().SequenceEqual(actual), $"DC {dc} at {bitDepth} bits differs.");
+        }
+    }
 }

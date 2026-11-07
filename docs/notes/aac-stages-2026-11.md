@@ -124,3 +124,43 @@ The wall clock could not see it. Over 15 interleaved runs, steady time branch / 
 samples over those of functions it does not touch fell by 4% in 5.1 (medians 0.277 and 0.265) and by about 7% in
 stereo, where the runs overlap. That is about 0.6% of a frame, below what this method resolves. Likely because the
 buffers it removed (5 KB of a long block) stay in the L1 cache, where a store and a reload cost little (not measured).
+
+## Spectral reading after #355 and #376: where its time goes
+
+On Elephants Dream's AAC (192 kbit/s stereo, `tools/realworld.py`'s film, the audio remuxed alone), with #376's
+dequantization, `ReadSpectralData` (with `Huffman.ReadSpectrum` inlined) is 23% of all samples. That is 30% of the
+decoder's code, ahead of `Imdct.InverseVector` (13%) and `Dequantize` (9%).
+
+Callgrind with `--branch-sim=yes` on a Native AOT build (60 s of the film) puts it at:
+- 22% of the decode's instructions;
+- 41% of its mispredicted conditional branches, about 0.3 a codeword.
+
+Mapping the addresses with `--dump-instr=yes` and `objdump` (`nm mcdec.dbg` gives the function's offset) shows:
+- **The cursor's refill check** (`_used > 25`) is the most mispredicted branch, wrong 27% of the time.
+- **Each band's loop exit** comes second.
+- **The cursor's fields** stay on the stack rather than in registers. `Cursor.Position` in the cold error paths and
+  `Commit(in Cursor)` take its address, and the one large method that inlines all four loops runs out of registers.
+
+There are about 270 codewords a channel-frame, at about 80 instructions each, so instructions, not mispredicts, are
+most of the cost. Refill mispredicts can account for at most about 2 cycles of the roughly 40 a codeword takes.
+
+**Tried and dropped: each band's loop as its own method, its cursor a local copy.**
+- The cold paths took the cursor by value.
+- The JIT then kept `_start` and `_used` in registers.
+- The film's steady time over 8 interleaved runs was 17.9 µs a frame against 18.1, which is noise.
+- By perf (three runs each, alternating), spectral reading's samples over those of the stages it does not touch moved
+  from 0.564 to 0.548 (medians), 3% of the stage. That is well under a point of the frame.
+- Store forwarding makes the cursor's memory round trips cheap; they were not the cost.
+
+Taking the cursor's address out of the cold paths alone was slower: 20.0 µs against 18.2. Passing the 24-byte struct
+by value goes through a stack copy, and it did not free registers in the large method.
+
+What is left is the work per codeword, about 80 instructions:
+- the second-level test;
+- two bounds-checked table and array accesses;
+- each value's sign extracted with shifts and masks;
+- the refill.
+
+A gain there needs a leaner entry layout. For example, entries could carry each value's sign-bit position, and two
+codewords could be read per refill (57 bits cover two of any book's, escapes aside). By the counts that is perhaps a
+quarter of the stage, about 5 to 7% of a film's AAC frame. That is not tried here.

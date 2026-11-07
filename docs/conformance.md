@@ -909,6 +909,17 @@ parent), callgrind counted 247.25 to 233.40 M instructions a steady loop of `h26
 to 1945.3 M of `h264-bench-720p.mp4` (-3.1%). The first loop fell by as much (256.1 to 242.3 M and 2004 to 1943 M):
 there is no JIT at startup to pay for the larger methods. The binary grew by 81 KB. The cloud VM's wall clock
 (`tools/bench.py --base`, nine interleaved runs) spread from 0.955 to 1.051 over five samples, within its noise.
+A static PGO profile for Native AOT, tried and not kept (2026-11-07, #346): a trace of the JIT build under dynamic PGO
+(`DOTNET_TieredCompilation=1 DOTNET_TieredPGO=1 DOTNET_ReadyToRun=0`, `dotnet-trace` with
+`Microsoft-Windows-DotNETRuntime:0x1F000080018:5`) over every MP4 sample but the two measured, two loops each, made a
+133 KB `.mibc` with `dotnet-pgo create-mibc` (10.0.14, from .NET's `dotnet10-transport` feed: it is not on nuget.org),
+with edge counts for the H.264 methods. ILC took it (`-p:McdecMibc=<file>`, mcdec's `MibcFile` item) and the binary
+grew by 74 KB, its output the same on all 396 samples. Callgrind (x86-64-v3, loops N minus 1) counted 233.53 to
+231.46 M instructions a steady loop of `h264-high-default.mp4` (-0.9%) and 1948.0 to 1956.9 M of `h264-bench-720p.mp4`
+(+0.46%). The cloud VM's wall clock on eight H.264 samples, nine interleaved runs: a first round put the steady frame at
+0.89 to 1.04 of the plain build's, a second at 0.94 to 1.07, and an A/A round (the plain build against a copy) at 0.96 to
+1.01, so no gain it can resolve. ILC's use of the profile does not come near the JIT's 8 to 12% on GitHub's ARM64
+runner; it was not timed there (`compare.yml` builds only the JIT mcdec).
 PGO's warm-up, as against its steady gain (2026-11-07, #347): each hot method is compiled three times, and the tier-1
 compiles queue on one background thread, busy until about frame 1,000; the per-picture methods wait late in that
 queue. `AggressiveOptimization` on the slice and picture drivers was tried and dropped (4 to 6% faster on one

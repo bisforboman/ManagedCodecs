@@ -1049,12 +1049,19 @@ of 578 output samples, and no fractional delay (unit tests; reading samples in t
 or a kernel offset by one breaks them). The kernels' cos and sin are computed without Math.Cos and Math.Sin, whose
 last bits differ between .NET and WebAssembly's runtime, which the HF generator's prediction can magnify.
 The vector paths (the QMF transforms, the HF generator's covariances and patch filter, the gains, noise and
-sinusoids added to the high band and their smoothing over time, the parametric stereo all-pass links and mixing) do each lane's arithmetic in the scalar loop's
+sinusoids added to the high band and their smoothing over time, the parametric stereo hybrid filters, all-pass links (QMF bands and hybrid sub-subbands), transient detector's smoothing and mixing) do each lane's arithmetic in the scalar loop's
 order, without fused multiply-adds, and add noise under a mask rather than as zero, so a negative zero stays: each is
 compared bit for bit with its scalar loop on random input (`Fft_MatchesTheDftAndScalarExactly`,
 `VectorTransforms_MatchScalarExactly`, `SbrCovariances_MatchScalar`, `SbrFilterPatch_MatchesFormula`,
-`SbrApplyGains_MatchesScalar`, `SbrSmoothGains_MatchesScalar`, `PsAllPassRow_MatchesScalar`, `PsMixGroup_MatchesScalar`), and each speed change left every sample's output the same
-to the bit, but the transforms' single precision (below), which moved it by design.
+`SbrApplyGains_MatchesScalar`, `SbrSmoothGains_MatchesScalar`, `PsAllPassRow_MatchesScalar`, `PsAllPassRow_Hybrid_MatchesScalar`, `PsHybridFilter_MatchesScalar`,
+`PsSmoothPeaks_MatchesScalar`, `PsMixGroup_MatchesScalar`), and each speed change left every sample's output the same
+to the bit, but the transforms' single precision (below), which moved it by design. Parametric stereo's (#383): the hybrid filters run four sub-subbands a lane each (their
+tables laid out by tap), the detector's smoothing four parameter bands, and the hybrid sub-subbands go through the
+all-pass row the QMF bands take (20 bands' unused 4 and 5 with them, zero in and zero out); its band powers stay
+scalar, each a sum in subband order. By perf (six runs each, the order alternating, normalized by
+the IMDCT, Huffman decoding, the covariances, the gains, dequantization and the QMF banks) parametric stereo fell 19%
+on `heaacv2-stereo.mp4` (about 6% of the frame) and 27% on `heaacv2-34.mp4` (about 11%); the wall clock agreed (steady
+0.934 on `heaacv2-stereo.mp4`, 5.1 HE-AAC, without parametric stereo, 0.999; ten interleaved runs).
 
 Decoded output (`SbrConformanceTests`) against FFmpeg's (name.sbr.f32: at the SBR rate; MP4 without the 2048 samples of
 encoder delay its iTunSMPB tag gives, which the demuxer reads as FFmpeg's does when there is no edit list; mono in

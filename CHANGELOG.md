@@ -31,7 +31,8 @@ run time.
   and x64. The output moves against FFmpeg's (single precision too) in the third or fourth digit of its differences.
 - H.264: about 24 small functions on the hot paths are inlined, as the runtime's dynamic PGO does (#346): 1.5 to 3.8%
   less time a frame in the steady state on ARM64 and 0.4 to 2.6% on x64 with tiering off (as mcdec runs) or
-  `TieredPGO=false`, and up to 5% more JIT time at startup for short files. Native AOT builds are not timed yet.
+  `TieredPGO=false`, and up to 5% more JIT time at startup for short files. Native AOT builds (no JIT at startup)
+  execute 3.1 to 5.6% fewer instructions a frame.
 - H.264: the direct motion compensation path for frame macroblocks also takes samples above 8 bits and 4:2:2: about 2%
   fewer instructions in 10-bit and 4:2:2 streams.
 - H.264: MBAFF frames and field pictures take the direct motion compensation path too: about 2.2% fewer instructions

@@ -7,7 +7,11 @@ name: Profile
 # --ref <branch> -f sample=<name>`). `tiering: pgo` profiles the runtime's defaults instead (tiered compilation and
 # dynamic PGO), from `delay` ms on so that the warm-up is left out; `event: instructions` samples by retired
 # instructions where the runner has hardware counters (the ARM64 one; the x64 one falls back to the clock). Both
-# report `perf stat`'s instruction and cycle totals where counters exist (issue #346).
+# report `perf stat`'s instruction and cycle totals where counters exist (issue #346). `stages` adds H.264's shares by
+# stage (tools/h264-stages.py). `readytorun: false` jits CoreLib too (DOTNET_ReadyToRun=0): with tiering off its
+# ReadyToRun code is never replaced, which costs a CABAC frame about 3% on ARM64 (#346). `ab_env` skips the profile
+# and instead times mcdec without and with one variable (NAME=VALUE), interleaved in one job, alternating which goes
+# first: the way to compare two settings on a hosted runner, whose machines differ from run to run.
 on:
   workflow_dispatch:
     inputs:
@@ -34,15 +38,15 @@ on:
         options: [cpu-clock, instructions]
         default: cpu-clock
       stages:
-        description: Also record call graphs and report H.264 shares by stage (tools/h264-stages.py; implies no ReadyToRun)
+        description: Also H.264's shares by stage (tools/h264-stages.py; records call chains, ReadyToRun off)
         type: boolean
         default: false
       readytorun:
-        description: Use the framework's ReadyToRun code (off is DOTNET_ReadyToRun=0, everything jitted)
+        description: Use CoreLib's ReadyToRun code (false is DOTNET_ReadyToRun=0, everything jitted)
         type: boolean
         default: true
       ab_env:
-        description: Instead of profiling, time mcdec with and without this variable (NAME=VALUE), interleaved
+        description: Instead of profiling, time mcdec without and with this variable (NAME=VALUE), interleaved
         default: ''
       ab_pairs:
         description: Interleaved pairs a sample, for ab_env
@@ -108,11 +112,11 @@ jobs:
           # -D only for a real delay: the runner's perf (Ubuntu's generic 6.8) rejects -D 0, which is the default.
           delay=()
           if [ "$DELAY" -gt 0 ] 2>/dev/null; then delay=(-D "$DELAY"); fi
-          # Stages need call chains, and CoreLib's helpers by name (no ReadyToRun code), as tools/h264-stages.py says.
-          graph=()
-          if [ "$STAGES" = true ]; then graph=(-g); export DOTNET_ReadyToRun=0; fi
+          # By stage: call chains, and CoreLib jitted so that its helpers (Memmove) have names (tools/h264-stages.py).
+          chains=()
+          if [ "$STAGES" = true ]; then chains=(-g); export DOTNET_ReadyToRun=0; fi
           if [ "$READYTORUN" = false ]; then export DOTNET_ReadyToRun=0; fi
-          "$PERF" record -q "${sampling[@]}" "${delay[@]}" "${graph[@]}" -o perf.data dotnet "$mcdec" "samples/$SAMPLE" --loops "$LOOPS" | tee mcdec.txt
+          "$PERF" record -q "${sampling[@]}" "${delay[@]}" "${chains[@]}" -o perf.data dotnet "$mcdec" "samples/$SAMPLE" --loops "$LOOPS" | tee mcdec.txt
           if ! "$PERF" report -i perf.data --stdio 2>/dev/null | grep -q '%'; then
             echo "::error::perf recorded no samples: the delay ($DELAY ms) outlasted the decode; raise loops or lower the delay."
             exit 1
@@ -148,9 +152,11 @@ jobs:
             echo '```'
             if [ "$STAGES" = true ]; then
               echo
-              echo "By stage (tools/h264-stages.py; a callee inlined into its caller counts in its caller's stage):"
+              # Code inlined into a caller counts as the caller's stage (perf sees no inlined frames), so compare
+              # tiering off and pgo on groups of stages as well as on single ones.
+              echo "By stage (tools/h264-stages.py, $EVENT samples):"
               echo
-              python3 tools/h264-stages.py --ours perf.data --perf "$PERF" --list-other
+              tools/h264-stages.py --perf "$PERF" --ours perf.data
             fi
           } > report.md
           # In the log too, where the API reads it (a run summary has no API).
@@ -160,6 +166,8 @@ jobs:
       - name: A/B
         if: inputs.ab_env != ''
         env:
+          SAMPLE: ${{ inputs.sample }}
+          LOOPS: ${{ inputs.loops }}
           VARIABLE: ${{ inputs.ab_env }}
           PAIRS: ${{ inputs.ab_pairs }}
         run: |
@@ -168,12 +176,10 @@ jobs:
             if [ "$1" = b ]; then env "$VARIABLE" dotnet "$mcdec" "samples/$2" --loops "$3"; else dotnet "$mcdec" "samples/$2" --loops "$3"; fi \
               | sed -nE 's/.* ([0-9.]+) us per frame/\1/p'
           }
-          for s in h264-high-default.mp4:300 h264-bench-720p.mp4:40; do
-            n=${s%%:*}; l=${s##*:}
-            for i in $(seq 1 "$PAIRS"); do
-              if [ $((i % 2)) = 1 ]; then order="a b"; else order="b a"; fi
-              for x in $order; do echo "$n $x $i $(one "$x" "$n" "$l")"; done
-            done
+          # A is mcdec as it is, B with the variable; the order alternates, since the one run first tends to differ.
+          for i in $(seq 1 "$PAIRS"); do
+            if [ $((i % 2)) = 1 ]; then order="a b"; else order="b a"; fi
+            for x in $order; do echo "$SAMPLE $x $i $(one "$x" "$SAMPLE" "$LOOPS")"; done
           done | tee ab.txt
           python3 - <<'PY' | tee -a "$GITHUB_STEP_SUMMARY"
           import collections, statistics as st
@@ -182,6 +188,7 @@ jobs:
               n, x, i, t = line.split()
               d[n].setdefault(x, {})[i] = float(t)
           for n, v in d.items():
+              # The per-pair ratio, so that a drift across the job cancels.
               r = [v["b"][i] / v["a"][i] for i in v["a"]]
               print(f"{n}: A median {st.median(v['a'].values()):.1f} us, B median {st.median(v['b'].values()):.1f} us, "
                     f"B/A median {st.median(r):.3f} (range {min(r):.3f} to {max(r):.3f}, B faster in {sum(x < 1 for x in r)}/{len(r)})")

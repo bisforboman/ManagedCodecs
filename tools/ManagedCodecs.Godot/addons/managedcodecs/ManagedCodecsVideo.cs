@@ -1,4 +1,7 @@
+using System.Diagnostics;
+using System.Reflection;
 using Godot;
+using ManagedCodecs.H264;
 using ManagedCodecs.Playback;
 
 namespace ManagedCodecs.GodotAddon;
@@ -54,6 +57,7 @@ public partial class ManagedCodecsVideo : TextureRect
             return;
         }
 
+        WarnIfUnoptimized();
         StretchMode = StretchModeEnum.KeepAspectCentered;
         ExpandMode = ExpandModeEnum.IgnoreSize;
         _player.Start();
@@ -116,8 +120,20 @@ public partial class ManagedCodecsVideo : TextureRect
         _player = null;
     }
 
-    // Whether playback keeps up: frames dropped steadily mean decoding or the RGBA conversion (each timed per frame)
-    // is slower than real time.
+    // A project reference to the decoders built in Godot's configuration (Debug, ExportDebug or ExportRelease: the .NET
+    // SDK optimises only one named Release) decodes about 4 times slower at 1080p (issue #402). The package from
+    // nuget.org is always optimised; this catches a copy of the addon built against the repository's sources.
+    private static void WarnIfUnoptimized()
+    {
+        if (typeof(H264Decoder).Assembly.GetCustomAttribute<DebuggableAttribute>() is { IsJITOptimizerDisabled: true })
+        {
+            GD.PushWarning("ManagedCodecsVideo: the decoders were built without optimisation (a Debug build of a project reference), so they decode several times slower and the times this node prints aren't representative. Reference them with SetConfiguration=\"Configuration=Release\", or use the NuGet package.");
+        }
+    }
+
+    // Whether playback keeps up: frames dropped steadily mean it doesn't. The decode time is the decoding thread's
+    // wait for the decoder's threads, near zero while they keep ahead (PlaybackStatistics.DecodeMilliseconds), so it
+    // grows faster than the frame size once they don't; the RGBA conversion's is its cost a frame.
     private void Report()
     {
         var statistics = _player!.Statistics;

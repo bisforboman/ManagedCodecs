@@ -1,9 +1,9 @@
 <Project Sdk="Godot.NET.Sdk/4.7.2">
 
   <!-- A Godot 4 (.NET) sample for issue #254: ManagedCodecsVideo.cs, a TextureRect that plays a video file into an
-       ImageTexture, its audio through an AudioStreamGenerator. Its decoding (MediaSource.cs) and colour conversion
-       (YuvToRgba.cs) are mcplay's (tools/ManagedCodecs.MonoGame), linked. CI builds it with the Godot .NET SDK from
-       nuget.org; Godot itself (the editor, which runs it) is not installed there, so it has not been run (README.md). -->
+       ImageTexture, its audio through an AudioStreamGenerator, decoded by the ManagedCodecs.Playback package. CI
+       builds it with the Godot .NET SDK from nuget.org; Godot itself (the editor, which runs it) is not installed
+       there, so it has not been run (README.md). -->
   <PropertyGroup>
     <AssemblyName>ManagedCodecs.Godot</AssemblyName>
     <RootNamespace>ManagedCodecs.GodotSample</RootNamespace>
@@ -11,12 +11,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Compile Include="..\ManagedCodecs.MonoGame\MediaSource.cs" Link="MediaSource.cs" />
-    <Compile Include="..\ManagedCodecs.MonoGame\YuvToRgba.cs" Link="YuvToRgba.cs" />
-    <ProjectReference Include="..\..\src\ManagedCodecs.Containers\ManagedCodecs.Containers.csproj" />
-    <ProjectReference Include="..\..\src\ManagedCodecs.Mjpeg\ManagedCodecs.Mjpeg.csproj" />
-    <ProjectReference Include="..\..\src\ManagedCodecs.H264\ManagedCodecs.H264.csproj" />
-    <ProjectReference Include="..\..\src\ManagedCodecs.Aac\ManagedCodecs.Aac.csproj" />
+    <ProjectReference Include="..\..\src\ManagedCodecs.Playback\ManagedCodecs.Playback.csproj" />
   </ItemGroup>
 
 </Project>

@@ -1,13 +1,13 @@
 using System.Collections.Concurrent;
-using ManagedCodecs.MonoGame;
+using ManagedCodecs.Playback;
 using UnityEngine;
 
 namespace ManagedCodecs.UnitySample;
 
 /// <summary>
 /// Plays an MP4 or AVI file (H.264 or MJPEG, AAC audio) from StreamingAssets onto this object's renderer, decoded by
-/// ManagedCodecs.Unity: a thread of its own decodes ahead (<see cref="MediaSource"/>, mcplay's), <see cref="Update"/>
-/// shows the newest frame due by a clock started at the first frame and drops late ones, and the audio streams
+/// ManagedCodecs.Unity: a thread of its own decodes ahead (<see cref="MediaPlayer"/>), <see cref="Update"/> shows the
+/// newest frame due by a clock started at the first frame (late ones are dropped), and the audio streams
 /// through an <see cref="AudioClip"/> whose callback, on Unity's audio thread, takes the decoded samples. Not for
 /// WebGL, which has no threads. Not a media player: no seeking, no pause.
 /// </summary>
@@ -18,14 +18,12 @@ public sealed class ManagedCodecsVideo : MonoBehaviour
     public string fileName = "video.mp4";
 
     private readonly ConcurrentQueue<float> _samples = new();
-    private MediaSource? _source;
+    private MediaPlayer? _player;
     private Renderer? _renderer;
     private Texture2D? _texture;
-    private RgbaFrame? _next;
     private float _start = -1;
     private int _audioRate;
     private int _shown;
-    private int _dropped;
     private float _lastReport;
 
     private void Start()
@@ -35,7 +33,7 @@ public sealed class ManagedCodecsVideo : MonoBehaviour
         string path = System.IO.Path.Combine(Application.streamingAssetsPath, fileName);
         try
         {
-            _source = new MediaSource(path);
+            _player = new MediaPlayer(path);
         }
         catch (System.Exception e) when (e is System.NotSupportedException or System.IO.InvalidDataException or System.IO.IOException)
         {
@@ -45,51 +43,29 @@ public sealed class ManagedCodecsVideo : MonoBehaviour
         }
 
         _renderer = GetComponent<Renderer>();
-        _source.Start();
+        _player.Start();
     }
 
     private void Update()
     {
-        if (_source is null || _renderer is null)
+        if (_player is null || _renderer is null)
         {
             return;
         }
 
         StartAudio();
 
-        // The newest frame due: frames come in display order, so take them while the next one's time has come.
-        while (_next is null && _source.Frames.TryTake(out var frame))
-        {
-            _next = frame;
-        }
-
-        if (_next is null)
-        {
-            return;
-        }
-
-        if (_start < 0)
-        {
-            _start = Time.time - (float)_next.Time;
-        }
-
-        RgbaFrame? due = null;
-        while (_next is not null && _next.Time <= Time.time - _start)
-        {
-            if (due is not null)
-            {
-                _dropped++;
-                _source.Return(due);
-            }
-
-            due = _next;
-            _next = _source.Frames.TryTake(out var frame) ? frame : null;
-        }
-
+        // The clock starts with the first frame shown (due at zero).
+        var due = _player.TakeFrame(System.TimeSpan.FromSeconds(_start < 0 ? 0 : Time.time - _start));
         if (due is not null)
         {
+            if (_start < 0)
+            {
+                _start = Time.time;
+            }
+
             Show(due);
-            _source.Return(due);
+            _player.Return(due);
             _shown++;
         }
 
@@ -98,15 +74,25 @@ public sealed class ManagedCodecsVideo : MonoBehaviour
             _lastReport = Time.time;
             Report();
         }
+
+        if (_player.IsFinished)
+        {
+            if (_player.Error is { } error)
+            {
+                Debug.LogError($"ManagedCodecsVideo: {fileName} stopped early: {error.Message}");
+            }
+
+            Report();
+            enabled = false;
+        }
     }
 
     // Whether playback keeps up: a frame is dropped when a later one was due by the time it could be shown, so frames
-    // dropped steadily mean decoding or the RGBA conversion (each timed per frame, MediaSource) is slower than real time.
+    // dropped steadily mean decoding or the RGBA conversion (each timed per frame) is slower than real time.
     private void Report()
     {
-        var (_, decode) = _source!.DecodeStatistics;
-        var (_, convert) = _source.ConvertStatistics;
-        Debug.Log($"ManagedCodecsVideo: {_source.VideoStream.Width}x{_source.VideoStream.Height}, {_shown} frames shown, {_dropped} dropped, ms a frame: decode {decode:F1}, RGBA conversion {convert:F1}");
+        var statistics = _player!.Statistics;
+        Debug.Log($"ManagedCodecsVideo: {_player.Video.Width}x{_player.Video.Height}, {_shown} frames shown, {statistics.DroppedFrames} dropped, ms a frame: decode {statistics.DecodeMilliseconds:F1}, RGBA conversion {statistics.ConvertMilliseconds:F1}");
     }
 
     // A Texture2D of the frame's size, filled with its RGBA rows. Unity's textures start at the bottom row, so the
@@ -130,12 +116,12 @@ public sealed class ManagedCodecsVideo : MonoBehaviour
     // the decoded samples.
     private void StartAudio()
     {
-        while (_source!.Audio.TryTake(out var chunk))
+        while (_player!.TakeAudio() is { } chunk)
         {
             _audioRate = chunk.SampleRate;
-            foreach (short sample in chunk.Samples)
+            foreach (float sample in chunk.Samples)
             {
-                _samples.Enqueue(sample / 32768f);
+                _samples.Enqueue(sample);
             }
         }
 
@@ -161,11 +147,11 @@ public sealed class ManagedCodecsVideo : MonoBehaviour
 
     private void OnDestroy()
     {
-        if (_source is not null && _shown > 0)
+        if (_player is not null && _shown > 0 && enabled)
         {
             Report();
         }
 
-        _source?.Dispose();
+        _player?.Dispose();
     }
 }

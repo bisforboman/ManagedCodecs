@@ -162,6 +162,7 @@ internal static class Imdct
     /// x[n] = 2/N * sum over k of spec[k] * cos(2 pi / N * (n + n0) * (k + 1/2)), n0 = (N/2 + 1) / 2,
     /// for n = 0 .. N - 1, where N = 2 * spec.Length (2048 or 256).
     /// </summary>
+    [SkipLocalsInit]
     public static void Inverse(ReadOnlySpan<double> spec, Span<double> output)
     {
 #if NET
@@ -181,6 +182,10 @@ internal static class Imdct
             throw new ArgumentException("The spectrum and the output are too short for the transform.");
         }
 
+        // Every element of these is written before it is read: the pre-twiddle fills the FFT's input, the FFT's first
+        // pass all of re and im, and the post-twiddle all of u.
+        Span<double> sourceRe = stackalloc double[quarter];
+        Span<double> sourceIm = stackalloc double[quarter];
         Span<double> re = stackalloc double[quarter];
         Span<double> im = stackalloc double[quarter];
 
@@ -188,35 +193,55 @@ internal static class Imdct
         ref double x = ref MemoryMarshal.GetReference(spec);
         ref double preCos = ref MemoryMarshal.GetArrayDataReference(plan.PreCos);
         ref double preSin = ref MemoryMarshal.GetArrayDataReference(plan.PreSin);
-        ref double reRef = ref MemoryMarshal.GetReference(re);
-        ref double imRef = ref MemoryMarshal.GetReference(im);
+        ref double sourceReRef = ref MemoryMarshal.GetReference(sourceRe);
+        ref double sourceImRef = ref MemoryMarshal.GetReference(sourceIm);
         for (int j = 0; j < quarter; j += 2)
         {
             var a = QmfState.Zip(Vector128.LoadUnsafe(ref x, (nuint)(2 * j)), Vector128.LoadUnsafe(ref x, (nuint)((2 * j) + 2))).Low;
             var b = QmfState.Zip(Vector128.LoadUnsafe(ref x, (nuint)(m - 2 - (2 * j))), Vector128.LoadUnsafe(ref x, (nuint)(m - 4 - (2 * j)))).High;
             var c = Vector128.LoadUnsafe(ref preCos, (nuint)j);
             var sn = Vector128.LoadUnsafe(ref preSin, (nuint)j);
-            ((a * c) + (b * sn)).StoreUnsafe(ref reRef, (nuint)j);
-            ((b * c) - (a * sn)).StoreUnsafe(ref imRef, (nuint)j);
+            ((a * c) + (b * sn)).StoreUnsafe(ref sourceReRef, (nuint)j);
+            ((b * c) - (a * sn)).StoreUnsafe(ref sourceImRef, (nuint)j);
         }
 
-        plan.Fft(re, im);
+        plan.Transform(sourceRe, sourceIm, re, im);
 
-        // Post-twiddle by e^(-i pi l / M), giving the DCT-IV u[2l] = Re, u[M-1-2l] = -Im; then
-        // fold out: x[n] = u[n + M/2], -u[3M/2 - 1 - n], -u[n - 3M/2] over the three ranges.
+        // The post-twiddle two l at a time, from both ends at once: l, l + 1 and their mirrors p = quarter - 2 - l,
+        // p + 1. u[2l + 1] is the mirror's -Im, u[M-1-2(quarter-1-l)], so a zip of l's Re with the mirror's -Im
+        // reversed gives u[2l .. 2l + 3] whole. The scalar loop's products and sums, in its order.
         Span<double> u = stackalloc double[m];
-        for (int l = 0; l < quarter; l++)
+        ref double postCos = ref MemoryMarshal.GetArrayDataReference(plan.PostCos);
+        ref double postSin = ref MemoryMarshal.GetArrayDataReference(plan.PostSin);
+        ref double reRef = ref MemoryMarshal.GetReference(re);
+        ref double imRef = ref MemoryMarshal.GetReference(im);
+        ref double uRef = ref MemoryMarshal.GetReference(u);
+        for (int l = 0; l < quarter / 2; l += 2)
         {
-            double c = plan.PostCos[l];
-            double s = plan.PostSin[l];
-            u[2 * l] = (re[l] * c) + (im[l] * s);
-            u[m - 1 - (2 * l)] = -((im[l] * c) - (re[l] * s));
+            int p = quarter - 2 - l;
+            var reL = Vector128.LoadUnsafe(ref reRef, (nuint)l);
+            var imL = Vector128.LoadUnsafe(ref imRef, (nuint)l);
+            var cL = Vector128.LoadUnsafe(ref postCos, (nuint)l);
+            var sL = Vector128.LoadUnsafe(ref postSin, (nuint)l);
+            var reP = Vector128.LoadUnsafe(ref reRef, (nuint)p);
+            var imP = Vector128.LoadUnsafe(ref imRef, (nuint)p);
+            var cP = Vector128.LoadUnsafe(ref postCos, (nuint)p);
+            var sP = Vector128.LoadUnsafe(ref postSin, (nuint)p);
+            var evenL = (reL * cL) + (imL * sL);
+            var oddL = -((imL * cL) - (reL * sL));
+            var evenP = (reP * cP) + (imP * sP);
+            var oddP = -((imP * cP) - (reP * sP));
+            var (low, high) = QmfState.Zip(evenL, QmfState.Reverse(oddP));
+            low.StoreUnsafe(ref uRef, (nuint)(2 * l));
+            high.StoreUnsafe(ref uRef, (nuint)((2 * l) + 2));
+            (low, high) = QmfState.Zip(evenP, QmfState.Reverse(oddL));
+            low.StoreUnsafe(ref uRef, (nuint)(2 * p));
+            high.StoreUnsafe(ref uRef, (nuint)((2 * p) + 2));
         }
 
         // The fold, two samples a vector: the same products as the scalar loops, the reversed range read backwards.
         var scale = Vector128.Create(1.0 / m);
         int half = m / 2;
-        ref double uRef = ref MemoryMarshal.GetReference(u);
         ref double y = ref MemoryMarshal.GetReference(output);
         for (int n = 0; n < half; n += 2)
         {
@@ -243,6 +268,8 @@ internal static class Imdct
         var plan = spec.Length == 1024 ? Long : Short;
         int m = plan.Size;
         int quarter = m / 2;
+        Span<double> sourceRe = stackalloc double[quarter];
+        Span<double> sourceIm = stackalloc double[quarter];
         Span<double> re = stackalloc double[quarter];
         Span<double> im = stackalloc double[quarter];
 
@@ -253,11 +280,11 @@ internal static class Imdct
             double b = spec[m - 1 - (2 * j)];
             double c = plan.PreCos[j];
             double s = plan.PreSin[j];
-            re[j] = (a * c) + (b * s);
-            im[j] = (b * c) - (a * s);
+            sourceRe[j] = (a * c) + (b * s);
+            sourceIm[j] = (b * c) - (a * s);
         }
 
-        plan.Fft(re, im);
+        plan.Transform(sourceRe, sourceIm, re, im);
 
         // Post-twiddle by e^(-i pi l / M), giving the DCT-IV u[2l] = Re, u[M-1-2l] = -Im; then
         // fold out: x[n] = u[n + M/2], -u[3M/2 - 1 - n], -u[n - 3M/2] over the three ranges.
@@ -340,6 +367,9 @@ internal static class Imdct
     private sealed class Plan
     {
         private readonly int[] _bitReverse;
+
+        // The bit reversal of each even index below length / 2 (index j / 2): see ReorderFirstStage.
+        private readonly int[] _evenReversed;
         private readonly double[] _rootCos;
         private readonly double[] _rootSin;
 
@@ -372,6 +402,12 @@ internal static class Imdct
                 }
 
                 _bitReverse[i] = r;
+            }
+
+            _evenReversed = new int[length / 4];
+            for (int j = 0; j < length / 2; j += 2)
+            {
+                _evenReversed[j / 2] = _bitReverse[j];
             }
 
             // e^(-2 pi i t / length) for t < length / 2.
@@ -410,21 +446,38 @@ internal static class Imdct
 
         public double[] PostSin { get; }
 
-        /// <summary>
-        /// Forward FFT, X[l] = sum of x[j] e^(-2 pi i j l / length), in place: <see cref="FftScalar"/> with the butterflies
-        /// of a stage several at a time where the stage is wide enough. Each lane does the scalar arithmetic in the same
-        /// order (no fused multiply-add), so the result is the same to the bit.
-        /// </summary>
+        /// <summary>The forward FFT of <see cref="Transform"/>, in place (for tests).</summary>
         [SkipLocalsInit]
         public void Fft(Span<double> re, Span<double> im)
         {
+            Span<double> sourceRe = stackalloc double[re.Length];
+            Span<double> sourceIm = stackalloc double[re.Length];
+            re.CopyTo(sourceRe);
+            im.CopyTo(sourceIm);
+            Transform(sourceRe, sourceIm, re, im);
+        }
+
+        /// <summary>
+        /// Forward FFT, X[l] = sum of x[j] e^(-2 pi i j l / length), from the source into re and im: <see cref="FftScalar"/>
+        /// with the bit reversal and the first stage in one pass (<see cref="ReorderFirstStage"/>) and the butterflies
+        /// of a later stage several at a time where the stage is wide enough. Each lane does the scalar arithmetic in the
+        /// same order (no fused multiply-add), so the result is the same to the bit, apart from the sign of a zero: the
+        /// first stage's twiddle is 1 - 0i, which the reference multiplies by and this pass leaves out.
+        /// </summary>
+        public void Transform(ReadOnlySpan<double> sourceRe, ReadOnlySpan<double> sourceIm, Span<double> re, Span<double> im)
+        {
             int length = re.Length;
-            BitReverse(re, im);
+            if (sourceRe.Length < length || sourceIm.Length < length || im.Length < length || length != Size / 2)
+            {
+                throw new ArgumentException("The FFT's buffers do not match its length.");
+            }
+
+            ReorderFirstStage(sourceRe, sourceIm, re, im);
             ref double r = ref MemoryMarshal.GetReference(re);
             ref double i = ref MemoryMarshal.GetReference(im);
             ref double cos = ref MemoryMarshal.GetArrayDataReference(_stageCos);
             ref double sin = ref MemoryMarshal.GetArrayDataReference(_stageSin);
-            for (int span = 1; span < length; span *= 2)
+            for (int span = 2; span < length; span *= 2)
             {
                 int k0 = span - 1;
 #if NET
@@ -501,16 +554,53 @@ internal static class Imdct
             }
         }
 
-        private void BitReverse(Span<double> re, Span<double> im)
+        /// <summary>
+        /// The bit reversal and the first stage (half-span 1, twiddle 1) in one pass. For an even j below length / 2, with
+        /// h = length / 2 and a = reverse(j) (even), the reversal puts x[j] at a and x[j + h] at a + 1, and puts x[j + 1]
+        /// and x[j + 1 + h] at a + h and a + h + 1: the stage's sums x[j] + x[j + h] and differences x[j] - x[j + h], two j
+        /// at a time from contiguous source, zipped into place.
+        /// </summary>
+        private void ReorderFirstStage(ReadOnlySpan<double> sourceRe, ReadOnlySpan<double> sourceIm, Span<double> re, Span<double> im)
         {
-            for (int i = 0; i < re.Length; i++)
+            int h = re.Length / 2;
+            ref double xr = ref MemoryMarshal.GetReference(sourceRe);
+            ref double xi = ref MemoryMarshal.GetReference(sourceIm);
+            ref double r = ref MemoryMarshal.GetReference(re);
+            ref double i = ref MemoryMarshal.GetReference(im);
+            ref int reversed = ref MemoryMarshal.GetArrayDataReference(_evenReversed);
+#if NET
+            if (Vector128.IsHardwareAccelerated)
             {
-                int j = _bitReverse[i];
-                if (j > i)
+                for (int j = 0; j < h; j += 2)
                 {
-                    (re[i], re[j]) = (re[j], re[i]);
-                    (im[i], im[j]) = (im[j], im[i]);
+                    nuint a = (nuint)Unsafe.Add(ref reversed, j / 2);
+                    var ar = Vector128.LoadUnsafe(ref xr, (nuint)j);
+                    var br = Vector128.LoadUnsafe(ref xr, (nuint)(j + h));
+                    var ai = Vector128.LoadUnsafe(ref xi, (nuint)j);
+                    var bi = Vector128.LoadUnsafe(ref xi, (nuint)(j + h));
+                    var (low, high) = QmfState.Zip(ar + br, ar - br);
+                    low.StoreUnsafe(ref r, a);
+                    high.StoreUnsafe(ref r, a + (nuint)h);
+                    (low, high) = QmfState.Zip(ai + bi, ai - bi);
+                    low.StoreUnsafe(ref i, a);
+                    high.StoreUnsafe(ref i, a + (nuint)h);
                 }
+
+                return;
+            }
+#endif
+
+            for (int j = 0; j < h; j++)
+            {
+                int a = (j & 1) == 0 ? Unsafe.Add(ref reversed, j / 2) : Unsafe.Add(ref reversed, j / 2) + h;
+                double ar = Unsafe.Add(ref xr, j);
+                double br = Unsafe.Add(ref xr, j + h);
+                double ai = Unsafe.Add(ref xi, j);
+                double bi = Unsafe.Add(ref xi, j + h);
+                Unsafe.Add(ref r, a) = ar + br;
+                Unsafe.Add(ref i, a) = ai + bi;
+                Unsafe.Add(ref r, a + 1) = ar - br;
+                Unsafe.Add(ref i, a + 1) = ai - bi;
             }
         }
 

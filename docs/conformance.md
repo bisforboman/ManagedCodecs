@@ -62,6 +62,11 @@ tables, gray, noise) at 14 places each, with and without an EOI after the cut: 3
 - After an interlaced packet it refuses for a cut first field, FFmpeg pairs fields across packets, so its next frame
   is not that packet's two fields; the decoder's is.
 
+The Huffman decoder's table lookups (a whole coefficient, or a code and its length, in one lookup of 10 bits; MAXCODE
+from 11 bits on) are checked against T.81's Figure F.16 read bit by bit (`HuffmanTable.Decode`) by
+`HuffmanTableTests`, on the Annex K tables and on random ones, complete or not, with invalid DC sizes; the samples
+mostly reach the whole-coefficient entries. Its speed: docs/notes/mjpeg-entropy-2026-11.md.
+
 ## Real films
 
 Every sample above is a test pattern encoded to isolate a feature. `tools/realworld.py` (nightly, `realworld.yml`, a job
@@ -722,6 +727,13 @@ the calls' place); filled from the pairs directly (`AffLeft` for each row, the B
 loops) counts 442.7 to 435.8 M instructions a loop of `h264-mbaff-default` (-1.6%), 79.50 to 78.14 M of `jm-paff-b`
 (-1.7%) and no change in `h264-bench-720p.mp4` (-0.04%). Under the JIT (perf, 150 loops, six runs each, the order
 alternating, normalized as above) `h264-mbaff-default`'s frame took a median 1.7% less (five runs of six faster).
+Spatial direct next (2026-11-07): it read A, B and C (or D) of the macroblock as a 16x16 partition for each list's
+reference index, then again inside `PredictMv` for its motion vector. `SpatialDirectNeighbors` finds them once a
+list for both, in MBAFF frames and field pictures with `AffMotionNeighbors` (so `CheckMotionNeighbors` checks them
+too). Callgrind (AOT, steady loops): 435.8 to 426.4 M instructions a loop of `h264-mbaff-default` (-2.2%), 78.14 to
+77.17 M of `jm-paff-b` (-1.2%); frames gain nothing (`h264-b-motion.mp4` -0.01%: their lookups inline). Under the JIT
+(perf, 150 loops, six runs each, alternating, normalized as above) `h264-mbaff-default` took a median 2.2% less, all
+six runs faster.
 
 A profile of a
 720p libx264 default stream (2026-10-22) is flat: CABAC residual decoding takes 14%, deblocking 21%
@@ -960,6 +972,22 @@ the LFE's included; only `QmfTests`' bounds of 1e-6 against the banks' sums in d
 162). But under the JIT the windowing's share of `heaac-5.1.mp4` fell only from 11.8 to 11.2% (six alternating pairs),
 and the wall clock did not move: twice the lanes did not halve the work. The banks stay in double; the rest of a float
 port (the FFTs, the DCT-IVs, the rotations, about 900 lines laid out for two-lane vectors of doubles) was not tried.
+
+The QMF transforms across time slots, one slot a vector lane, tried for speed and dropped (2026-11-07, #338). By perf
+the transforms take about 24% of `heaac-5.1.mp4`'s frame: the FFTs' vector stages 8.3%, their bit-reversal and first
+stage (scalar, from a copy) 5.0%, the DCT-IVs' packing 3.9%, the full synthesis bank's output stage 3.3%, the
+analysis bank's 2.5%, the rotations 0.8% (the windowing, apart, 9.3%). Eight slots at a time, laid out by point then
+slot, every FFT stage ran in whole vectors with its twiddle broadcast and the bit reversal folded into the transpose
+in (the analysis bank's FFT of 32, and the synthesis bank's two DCT-IVs side by side in 16 lanes), bit-identical to the
+slot-by-slot transforms (on random input, with AVX, with 128-bit vectors only and without intrinsics). It was slower: normalized by functions it
+leaves alone (the IMDCT, Huffman decoding, the covariances, the gains, dequantization; perf, six runs each, the order
+alternating) the frame took a median 5.7% more, and the wall clock agreed (steady +4 and +11% on two sets of ten
+interleaved runs; `heaacv2-stereo.mp4` -1 and -4%). The FFT in lanes took as long as the slot-by-slot vector stages it
+replaced (8.5% each): those are already full-width from a half-span of 4, so only the reorder and first stage (5%)
+went, and the 4x4 transposes in and out cost more than that. The banks' neighbours keep the slots' own layout (the
+windowing and the HF generator read by slot), so the transposes stay; built from 128-bit halves loaded from memory, one
+unpack a row, they are as cheap as they get. Sixteen slots at a time was slower still (its scratch outgrows L1). The
+code is on the branch `heaac-qmf-lanes-experiment`.
 
 Downsampled SBR (the config gives SBR the core's own rate, 44.1 kHz in the sample's sync extension) runs as for twice
 that rate, its frequency tables too (the sample's band runs from QMF band 9 to 23 of the 88.2 kHz grid), and

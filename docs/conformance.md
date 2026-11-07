@@ -909,6 +909,17 @@ parent), callgrind counted 247.25 to 233.40 M instructions a steady loop of `h26
 to 1945.3 M of `h264-bench-720p.mp4` (-3.1%). The first loop fell by as much (256.1 to 242.3 M and 2004 to 1943 M):
 there is no JIT at startup to pay for the larger methods. The binary grew by 81 KB. The cloud VM's wall clock
 (`tools/bench.py --base`, nine interleaved runs) spread from 0.955 to 1.051 over five samples, within its noise.
+A static PGO profile for Native AOT, tried and not kept (2026-11-07, #346): a trace of the JIT build under dynamic PGO
+(`DOTNET_TieredCompilation=1 DOTNET_TieredPGO=1 DOTNET_ReadyToRun=0`, `dotnet-trace` with
+`Microsoft-Windows-DotNETRuntime:0x1F000080018:5`) over every MP4 sample but the two measured, two loops each, made a
+133 KB `.mibc` with `dotnet-pgo create-mibc` (10.0.14, from .NET's `dotnet10-transport` feed: it is not on nuget.org),
+with edge counts for the H.264 methods. ILC took it (`-p:McdecMibc=<file>`, mcdec's `MibcFile` item) and the binary
+grew by 74 KB, its output the same on all 396 samples. Callgrind (x86-64-v3, loops N minus 1) counted 233.53 to
+231.46 M instructions a steady loop of `h264-high-default.mp4` (-0.9%) and 1948.0 to 1956.9 M of `h264-bench-720p.mp4`
+(+0.46%). The cloud VM's wall clock on eight H.264 samples, nine interleaved runs: a first round put the steady frame at
+0.89 to 1.04 of the plain build's, a second at 0.94 to 1.07, and an A/A round (the plain build against a copy) at 0.96 to
+1.01, so no gain it can resolve. ILC's use of the profile does not come near the JIT's 8 to 12% on GitHub's ARM64
+runner; it was not timed there (`compare.yml` builds only the JIT mcdec).
 PGO's warm-up, as against its steady gain (2026-11-07, #347): each hot method is compiled three times, and the tier-1
 compiles queue on one background thread, busy until about frame 1,000; the per-picture methods wait late in that
 queue. `AggressiveOptimization` on the slice and picture drivers was tried and dropped (4 to 6% faster on one
@@ -1049,12 +1060,19 @@ of 578 output samples, and no fractional delay (unit tests; reading samples in t
 or a kernel offset by one breaks them). The kernels' cos and sin are computed without Math.Cos and Math.Sin, whose
 last bits differ between .NET and WebAssembly's runtime, which the HF generator's prediction can magnify.
 The vector paths (the QMF transforms, the HF generator's covariances and patch filter, the gains, noise and
-sinusoids added to the high band and their smoothing over time, the parametric stereo all-pass links and mixing) do each lane's arithmetic in the scalar loop's
+sinusoids added to the high band and their smoothing over time, the parametric stereo hybrid filters, all-pass links (QMF bands and hybrid sub-subbands), transient detector's smoothing and mixing) do each lane's arithmetic in the scalar loop's
 order, without fused multiply-adds, and add noise under a mask rather than as zero, so a negative zero stays: each is
 compared bit for bit with its scalar loop on random input (`Fft_MatchesTheDftAndScalarExactly`,
 `VectorTransforms_MatchScalarExactly`, `SbrCovariances_MatchScalar`, `SbrFilterPatch_MatchesFormula`,
-`SbrApplyGains_MatchesScalar`, `SbrSmoothGains_MatchesScalar`, `PsAllPassRow_MatchesScalar`, `PsMixGroup_MatchesScalar`), and each speed change left every sample's output the same
-to the bit, but the transforms' single precision (below), which moved it by design.
+`SbrApplyGains_MatchesScalar`, `SbrSmoothGains_MatchesScalar`, `PsAllPassRow_MatchesScalar`, `PsAllPassRow_Hybrid_MatchesScalar`, `PsHybridFilter_MatchesScalar`,
+`PsSmoothPeaks_MatchesScalar`, `PsMixGroup_MatchesScalar`), and each speed change left every sample's output the same
+to the bit, but the transforms' single precision (below), which moved it by design. Parametric stereo's (#383): the hybrid filters run four sub-subbands a lane each (their
+tables laid out by tap), the detector's smoothing four parameter bands, and the hybrid sub-subbands go through the
+all-pass row the QMF bands take (20 bands' unused 4 and 5 with them, zero in and zero out); its band powers stay
+scalar, each a sum in subband order. By perf (six runs each, the order alternating, normalized by
+the IMDCT, Huffman decoding, the covariances, the gains, dequantization and the QMF banks) parametric stereo fell 19%
+on `heaacv2-stereo.mp4` (about 6% of the frame) and 27% on `heaacv2-34.mp4` (about 11%); the wall clock agreed (steady
+0.934 on `heaacv2-stereo.mp4`, 5.1 HE-AAC, without parametric stereo, 0.999; ten interleaved runs).
 
 Decoded output (`SbrConformanceTests`) against FFmpeg's (name.sbr.f32: at the SBR rate; MP4 without the 2048 samples of
 encoder delay its iTunSMPB tag gives, which the demuxer reads as FFmpeg's does when there is no edit list; mono in

@@ -50,6 +50,8 @@ code built against 0.8 keeps working.
   4.8e-7 (the bound is 2^-17, 7.6e-6).
 - H.264: above 8 bits, the bi-predicted average, weighted prediction and the inverse transform adds run in vectors
   instead of a loop per sample: about 9 to 13% fewer instructions in 10-bit streams (3% of the frame under the JIT).
+- HE-AAC v2: parametric stereo's hybrid filters, its transient detector's smoothing and the hybrid sub-subbands'
+  all-pass filter run in vectors: about 6% off a 20-band frame and 11% off a 34-band one on x64. The output is unchanged.
 - H.264: in MBAFF frames and field pictures, motion vector prediction finds its neighbours A, B and C in one call:
   about 1.8% fewer instructions in MBAFF frames, 1.6% in field pictures and 1.1% in progressive CAVLC frames.
 - H.264: in MBAFF frames and field pictures, CABAC's context selection reads a macroblock's left and above neighbours

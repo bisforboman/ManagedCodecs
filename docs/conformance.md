@@ -723,7 +723,7 @@ functions): motion prediction and the functions it inlines into fell from 5.1 to
 within that ratio's noise.
 CABAC's context selection next (2026-11-07): mb_skip_flag, mb_type, coded_block_pattern, ref_idx, mvd,
 intra_chroma_pred_mode and coded_block_flag ask only for the left neighbour at a row that is a multiple of 4 or the
-one above, about 11.7 out-of-line lookups a macroblock of `h264-mbaff-default`. `CabacNeighbor` reads them from a
+one above, about 11.7 out-of-line lookups a macroblock of `h264-mbaff-default`. `EdgeNeighbor` reads them from a
 table of ten (luma and chroma left at rows 0, 4, 8 and 12, luma and chroma above), `FindAffEdges`, found once a
 macroblock under `AffPairsOf`'s rule and checked against Table 6-4 in `PairsFoundOnce_MatchTheLookup`; frames keep
 `Neighbor`. Filled with ten general lookups it saved only 0.23% (the fill, about 880 instructions a macroblock, took
@@ -738,6 +738,17 @@ too). Callgrind (AOT, steady loops): 435.8 to 426.4 M instructions a loop of `h2
 77.17 M of `jm-paff-b` (-1.2%); frames gain nothing (`h264-b-motion.mp4` -0.01%: their lookups inline). Under the JIT
 (perf, 150 loops, six runs each, alternating, normalized as above) `h264-mbaff-default` took a median 2.2% less, all
 six runs faster.
+Intra prediction next (2026-11-07): in `h264-mbaff-intra-4x4` its lookups were small (`IntraMbNeighbors` 0.7%,
+`PredictIntra4x4Mode` 0.4% of the instructions); the cost was `GatherPlane`'s left column, which found the place
+(`LumaPlace`, `ChromaPlace`) of the left macroblock once a row, about 3% between them. It now finds the left pair's two
+places once, and the mode prediction and A and B of `IntraMbNeighbors` read the edge table (`EdgeNeighbor`, renamed
+from `CabacNeighbor`). Callgrind (AOT, steady loops): 126.2 to 122.2 M instructions a loop of `h264-mbaff-intra-4x4`
+(-3.2%), the same in `h264-mbaff-intra` and `h264-422-mbaff-intra-4x4`, -0.9% in `h264-mbaff-default`, no change in
+`jm-paff-b` (-0.04%) or `h264-bench-720p.mp4`. Under the JIT (perf, 150 loops, six runs each, alternating)
+`h264-mbaff-intra-4x4` took a median 2.1% less, all six runs faster. Tried and dropped: C and D in the table too
+(`jm-paff-b` +0.14%: every fill paid for them, and every CABAC lookup for the extra test, for about 0.3% of the intra
+sample), and `EdgeNeighbor` testing for MBAFF after the table's cases rather than for frames first (`h264-bench-720p`
++0.03%: the frame path of `PredictIntra4x4Mode` compiled worse).
 
 A profile of a
 720p libx264 default stream (2026-10-22) is flat: CABAC residual decoding takes 14%, deblocking 21%
@@ -886,6 +897,14 @@ differently without inlining it: the profile's total over `Cabac.ResidualBlock`,
 to 4.56. Tier-1 code is compiled after the classes' static constructors have run, so it also drops the
 class-initialization checks and folds `static readonly` values as constants, which mcdec's tiering off cannot (docs/benchmarking.md).
 Where the rest goes is an open question (#346).
+Kept after all (2026-11-07, #372): on GitHub's runners, which resolve what this VM cannot, the same attributes on 24
+callees (the 23 above and `WeightOne`) took the steady
+frame to 0.966 to 0.983 of main's on ARM64 and 0.974 to 0.989 on x64 (a Xeon 8370C). That is `compare.yml`, five
+H.264 samples, medians of 7 interleaved runs, every one of the ten lower. Against main after #358 and #370 it was
+0.962 to 0.985 and 0.983 to 0.996 (an EPYC 7763), all ten lower again. The whole process went to 0.99 to 1.05: the JIT
+compiles the larger methods at startup. The ARM64 runner's instruction samples (`profile.yml`, `event: instructions`) put it at
+-2.5% of `h264-high-default.mp4`'s frame against PGO's -12.6%. So inlining is about a fifth of PGO's gain, and the
+rest is how PGO compiles the large methods (#346).
 
 Deeper samples' kernels next (#337, 2026-11-07). Above 8 bits the bi-predicted average, the explicit and implicit
 weights and the 4x4, 8x8 and DC-only inverse transform adds were the by-the-definition loops over spans. They now run
@@ -967,6 +986,23 @@ by a branch, after a branch on zero that dense spectra mispredict. `AacDecoder.I
 loop without branches: the magnitude's power times the gain, the sign bit then set (negating before or after the
 product gives the same bits), zero giving +0. `DequantizeTests` compares it with the definition bit for bit. About 7%
 of the decode by perf after; Elephants Dream decodes 29% faster, Sintel's trailer 26% (median of 10 interleaved runs).
+
+**Tried and dropped: a leaner spectral entry and two codewords a refill.** Spectral reading is then a quarter of a
+film's AAC decode (docs/notes/aac-stages-2026-11.md has its instruction and misprediction counts). This change made
+three moves at once:
+- **64-bit table entries:** the bits to consume (codeword and signs), each value as a signed byte, and each value's sign
+  bit as its shift from the codeword's first bit. A sign became a shift, an arithmetic shift and a negation, with no
+  running count of nonzero values, since negating a zero leaves it zero.
+- **One refill check for two codewords:** at most 17 bits used before it leaves 40, two codewords with their signs of
+  20 bits at most each (escapes refill on their own).
+- **No bounds checks:** stores and table reads went through refs, after one check that a band is whole codewords.
+
+It was bit-exact (the films' hashes, `SpectrumHuffmanTests`). On Elephants Dream (10 interleaved runs), branch / main
+was 0.996 with a 10-bit first level and 0.97 to 0.98 with a 9-bit one, which halves book 11's first level to 4 KB. By
+perf (three and four runs of each build, alternating), spectral reading's samples over those of the stages it does
+not touch did not fall: medians 0.824 to 0.841 at 10 bits, 0.816 to 0.829 at 9. Likely (not measured), the pace is
+set by a chain of dependent work rather than by the instruction count: each codeword's table read waits on the
+previous codeword's length.
 
 ## HE-AAC (spectral band replication)
 
@@ -1058,6 +1094,15 @@ went, and the 4x4 transposes in and out cost more than that. The banks' neighbou
 windowing and the HF generator read by slot), so the transposes stay; built from 128-bit halves loaded from memory, one
 unpack a row, they are as cheap as they get. Sixteen slots at a time was slower still (its scratch outgrows L1). The
 code is on the branch `heaac-qmf-lanes-experiment`.
+What did go (#338, after it): the one-slot FFT's reorder and first stage in vectors. The first stage pairs points m and
+m + N/2, two runs of the input, so their sums and differences take vectors and each pair is stored zipped at its
+bit-reversed place, where a scalar gather through the permutation table was; the DCT-IV's packing and the analysis's
+turn write a scratch the FFT reads from (`QmfFft.Transform` from a source), so its copy of the input goes. Each value is
+the same sum as before (then `VectorFft_MatchesScalarExactly`, at 32 points and from a source too). By perf
+(`heaac-5.1.mp4`, six runs each, the order alternating, normalized as above) `ReorderFirstStage` fell from 0.29 to 0.17
+of the untouched functions' samples and the QMF banks with it, about 2% of the frame; the wall clock agreed (steady 0.973,
+`heaacv2-stereo.mp4` 0.980, ten interleaved runs). The single-precision FFT (above) keeps it, four points a vector, each pair one 64-bit
+lane (`Fft_MatchesTheDftAndScalarExactly`, from a source too).
 
 Downsampled SBR (the config gives SBR the core's own rate, 44.1 kHz in the sample's sync extension) runs as for twice
 that rate, its frequency tables too (the sample's band runs from QMF band 9 to 23 of the 88.2 kHz grid), and

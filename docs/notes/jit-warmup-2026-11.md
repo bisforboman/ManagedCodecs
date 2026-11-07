@@ -91,3 +91,33 @@ So where PGO pays back depends on picture size: about 1,000 frames at 720p, more
 that sets `<TieredPGO>false</TieredPGO>` itself (README's advice) keeps that choice. Setting it from the packages'
 `buildTransitive` props would make the choice for every app and every other library in it: that waits for the
 owner's decision (#347).
+
+## On GitHub's hosted runners (2026-11-07)
+
+`compare.yml`, medians of 7 interleaved runs, order alternating. It compared two unmerged scratch branches of mcdec,
+one with the runtime's defaults and one with tiering on and `TieredPGO=false`, with `tools/bench.py` limited to these
+rows. Whole-process time, in seconds, and the defaults' time over `TieredPGO=false`'s:
+
+| Stream | Frames | x64: `TieredPGO=0` | x64: defaults | x64 ratio | ARM64: `TieredPGO=0` | ARM64: defaults | ARM64 ratio |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `h264-high-default.mp4` (CABAC, 320x240) | 50 | 0.173 | 0.198 | 1.145 | 0.276 | 0.299 | 1.083 |
+| | 1,000 | 0.782 | 1.126 | 1.440 | 1.008 | 1.298 | 1.288 |
+| | 5,000 | 2.165 | 2.540 | 1.174 | 2.985 | 3.225 | 1.081 |
+| `h264-p-refs.mp4` (CAVLC, 320x240) | 50 | 0.125 | 0.141 | 1.128 | 0.191 | 0.207 | 1.084 |
+| | 1,000 | 0.535 | 0.648 | 1.211 | 0.733 | 0.864 | 1.179 |
+| | 5,000 | 1.225 | 1.385 | 1.129 | 1.795 | 2.015 | 1.123 |
+| `h264-bench-720p.mp4` (CAVLC, 720p) | 50 | 0.452 | 0.612 | 1.354 | 0.626 | 0.708 | 1.131 |
+| | 1,000 | 2.872 | 2.937 | 1.023 | 4.442 | 4.313 | 0.971 |
+| | 5,000 | 12.02 | 11.26 | 0.937 | 20.23 | 19.18 | 0.948 |
+
+The runners agree with the cloud VM:
+
+- **320x240:** the defaults are behind at every length on both machines, by 8 to 44%. The gap is widest at 1,000 frames
+  (1.29 to 1.44 on CABAC), during the queue's backlog.
+- **720p:** the defaults are 13 to 35% behind at 50 frames, about even at 1,000, and 5 to 6% ahead at 5,000.
+- **Steady:** by the last loop of 5,000 frames, the defaults' frame is 0.99 (x64) and 0.91 (ARM64) of
+  `TieredPGO=0`'s on the CABAC stream, 1.02 to 1.04 on the CAVLC one, and 0.91 to 0.95 at 720p. At 320x240 the PGO code
+  is only just as fast when the run ends, so its warm-up is never paid back within 5,000 frames.
+
+So `TieredPGO=false` is the better default up to a few thousand frames at 320x240, and up to about 1,000 at 720p.
+Setting it from the packages' `buildTransitive` props is still the owner's decision (#347).

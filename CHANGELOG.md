@@ -29,6 +29,9 @@ run time.
 - HE-AAC decodes faster: the QMF banks' transforms (their FFTs, DCT-IVs and rotations, between windows still in double)
   run in single precision, four values a vector: 8 to 10% off a 5.1 HE-AAC frame and 5 to 7% off HE-AAC v2, on ARM64
   and x64. The output moves against FFmpeg's (single precision too) in the third or fourth digit of its differences.
+- H.264: about 24 small functions on the hot paths are inlined, as the runtime's dynamic PGO does (#346): 1.5 to 3.8%
+  less time a frame in the steady state on ARM64 and 0.4 to 2.6% on x64 with tiering off (as mcdec runs) or
+  `TieredPGO=false`, and up to 5% more JIT time at startup for short files. Native AOT builds are not timed yet.
 - H.264: the direct motion compensation path for frame macroblocks also takes samples above 8 bits and 4:2:2: about 2%
   fewer instructions in 10-bit and 4:2:2 streams.
 - AAC: the IMDCT's FFT does its bit reversal and first stage in one vector pass, and its post-twiddle runs in
@@ -51,6 +54,9 @@ run time.
 - H.264: spatial direct prediction finds a macroblock's neighbours A, B and C once for both its reference indices and
   its motion vectors, in MBAFF frames and field pictures in one call: about 2.2% fewer instructions in MBAFF frames
   with B pictures and 1.2% in field pictures.
+- H.264: intra prediction in MBAFF frames and field pictures gathers a left pair's samples with each macroblock's
+  place found once rather than once a row, and its mode prediction reads the left and above neighbours from the
+  per-macroblock table: about 3.2% fewer instructions in intra MBAFF frames and 0.9% in mixed ones.
 - MJPEG: the Huffman decoder keeps its bit buffer in registers, and a short code with long magnitude bits takes one
   table lookup instead of two: about 6 to 7% off a frame.
 - ManagedCodecs.Unity on Mono: motion compensation filters whole rows of a block instead of every sample by the
@@ -58,11 +64,18 @@ run time.
   6.12, 720p H.264 about twice as fast (79 to 38 ms a frame), 320x240 H.264 1.3 to 1.5 times, MJPEG 1.45 times.
   The other packages' code is unchanged where it runs (docs/decisions/2026-10-31-unity-netstandard.md, Mono's
   profile).
+- ManagedCodecs.Unity on Mono: HE-AAC's QMF banks run their scalar FFT and windows by reference rather than through
+  slices: on Mono 6.12, 5.1 HE-AAC 1.39 times as fast, HE-AAC v2 1.30 times. The output is unchanged.
+- ManagedCodecs.Unity on Mono: CABAC's and deblocking's tables are plain arrays in this build, which Mono reads
+  directly where it called a property's getter at every use: CABAC streams 1.09 to 1.15 times as fast on Mono 6.12.
+  The output, and the other packages' code, are unchanged.
 - MJPEG: a flat block's rows are written as one 8-byte store each instead of a call each: about 7 to 10% off a frame of
   a test pattern, nothing on noise.
 - HE-AAC: SBR's gains smoothed over time (a header with bs_smoothing_mode 0) and parametric stereo's mixing run in
   vectors, to the same bits: SBR's envelope adjuster takes about half its share of such a frame, about 8% of it, and
   the mixing about a fifth less of an HE-AAC v2 frame's 5 to 8%.
+- MJPEG: the bit reader's refill takes eight bytes inline, a call only at stuffing, markers and the data's end:
+  about 2 to 5% off a frame.
 
 ## 0.8.1 – 2026-11-07
 

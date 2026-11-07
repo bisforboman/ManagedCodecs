@@ -205,6 +205,18 @@ internal sealed class QmfSynthesis
         Vectors.SumOfProducts(output, v, vTerms, window, windowTerms);
     }
 
+    /// <summary>
+    /// As <see cref="Process(ReadOnlySpan{double}, ReadOnlySpan{double}, Span{double})"/>, the output rounded to single
+    /// precision (<see cref="QmfState.ToSingle"/>).
+    /// </summary>
+    [SkipLocalsInit]
+    public void Process(ReadOnlySpan<double> real, ReadOnlySpan<double> imaginary, Span<float> output)
+    {
+        Span<double> samples = stackalloc double[64];
+        Process(real, imaginary, samples);
+        QmfState.ToSingle(samples[..Bands], output[..Bands]);
+    }
+
     // The bank's bands and window.
     private sealed class Tables(int bands)
     {
@@ -216,8 +228,8 @@ internal sealed class QmfSynthesis
 }
 
 /// <summary>
-/// The banks' history buffers, kept in place with a moving start (newest value first), and the 64-bit zips and
-/// reversals other vector loops share.
+/// The banks' history buffers, kept in place with a moving start (newest value first), the 64-bit zips and reversals
+/// other vector loops share, and the narrowing of the synthesis output to single precision.
 /// </summary>
 internal static class QmfState
 {
@@ -249,6 +261,43 @@ internal static class QmfState
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static Vector128<double> Reverse(Vector128<double> v) => Vector128.Shuffle(v, Vector128.Create(1L, 0L));
 #endif
+
+    /// <summary>
+    /// output[n] = (float)values[n], several at a time: a vector's narrowing rounds to nearest as the cast does, so the
+    /// same to the bit (<c>QmfToSingle_MatchesCast</c>).
+    /// </summary>
+    public static void ToSingle(ReadOnlySpan<double> values, Span<float> output)
+    {
+        if (output.Length < values.Length)
+        {
+            throw new ArgumentException("The output is shorter than the values.");
+        }
+
+        int n = 0;
+#if NET
+        ref double x = ref MemoryMarshal.GetReference(values);
+        ref float o = ref MemoryMarshal.GetReference(output);
+        if (Vector256.IsHardwareAccelerated)
+        {
+            for (; n <= values.Length - 8; n += 8)
+            {
+                Vector256.Narrow(Vector256.LoadUnsafe(ref x, (nuint)n), Vector256.LoadUnsafe(ref x, (nuint)(n + 4))).StoreUnsafe(ref o, (nuint)n);
+            }
+        }
+        else if (Vector128.IsHardwareAccelerated)
+        {
+            for (; n <= values.Length - 4; n += 4)
+            {
+                Vector128.Narrow(Vector128.LoadUnsafe(ref x, (nuint)n), Vector128.LoadUnsafe(ref x, (nuint)(n + 2))).StoreUnsafe(ref o, (nuint)n);
+            }
+        }
+#endif
+
+        for (; n < values.Length; n++)
+        {
+            output[n] = (float)values[n];
+        }
+    }
 
     /// <summary>
     /// The start of the next slot's window of <paramref name="window"/> values in <paramref name="buffer"/>, the newest
@@ -312,53 +361,76 @@ internal sealed class QmfFft
         }
     }
 
-    /// <summary>
-    /// In place: the bit reversal and the first stage (whose twiddle factor is 1) in one pass from a copy, then the later
-    /// stages, four butterflies a vector where Vector128 is accelerated (the second stage two groups of four at a time,
-    /// split and joined by 64-bit zips). Each lane does the scalar arithmetic in the same order (no fused multiply-add),
-    /// so the result is the same to the bit (<paramref name="scalar"/> for tests).
-    /// </summary>
+    /// <summary>In place, through a copy: as <see cref="Transform(ReadOnlySpan{float}, ReadOnlySpan{float}, Span{float}, Span{float}, bool)"/>.</summary>
     [SkipLocalsInit]
     public void Transform(Span<float> re, Span<float> im, bool scalar = false)
     {
+        Span<float> copyRe = stackalloc float[_length];
+        Span<float> copyIm = stackalloc float[_length];
+        re[.._length].CopyTo(copyRe);
+        im[.._length].CopyTo(copyIm);
+        Transform(copyRe, copyIm, re, im, scalar);
+    }
+
+    /// <summary>
+    /// From (<paramref name="sourceRe"/>, <paramref name="sourceIm"/>) into (<paramref name="re"/>, <paramref name="im"/>),
+    /// which must not overlap: the bit reversal and the first stage (whose twiddle factor is 1) in one pass, then the
+    /// later stages. Where Vector128 is accelerated the first pass takes four points a vector, the second stage two
+    /// groups of four at a time (split and joined by 64-bit zips) and the rest four butterflies a vector; each lane does
+    /// the scalar arithmetic in the same order (no fused multiply-add), so the result is the same to the bit
+    /// (<paramref name="scalar"/> for tests).
+    /// </summary>
+    public void Transform(ReadOnlySpan<float> sourceRe, ReadOnlySpan<float> sourceIm, Span<float> re, Span<float> im, bool scalar = false)
+    {
         int length = _length;
-        if (re.Length < length || im.Length < length)
+        if (sourceRe.Length < length || sourceIm.Length < length || re.Length < length || im.Length < length)
         {
             throw new ArgumentException("The FFT's buffers are shorter than its length.");
         }
 
-        Span<float> copyRe = stackalloc float[length];
-        Span<float> copyIm = stackalloc float[length];
-        re[..length].CopyTo(copyRe);
-        im[..length].CopyTo(copyIm);
         ref float r = ref MemoryMarshal.GetReference(re);
         ref float i = ref MemoryMarshal.GetReference(im);
-        ref float sr = ref MemoryMarshal.GetReference(copyRe);
-        ref float si = ref MemoryMarshal.GetReference(copyIm);
+        ref float sr = ref MemoryMarshal.GetReference(sourceRe);
+        ref float si = ref MemoryMarshal.GetReference(sourceIm);
         ref int reversed = ref MemoryMarshal.GetArrayDataReference(_reversed);
-        for (int a = 0; a < length; a += 2)
-        {
-            int x = Unsafe.Add(ref reversed, a);
-            int y = Unsafe.Add(ref reversed, a + 1);
-            float xr = Unsafe.Add(ref sr, x);
-            float xi = Unsafe.Add(ref si, x);
-            float yr = Unsafe.Add(ref sr, y);
-            float yi = Unsafe.Add(ref si, y);
-            Unsafe.Add(ref r, a) = xr + yr;
-            Unsafe.Add(ref i, a) = xi + yi;
-            Unsafe.Add(ref r, a + 1) = xr - yr;
-            Unsafe.Add(ref i, a + 1) = xi - yi;
-        }
-
         ref float cos = ref MemoryMarshal.GetArrayDataReference(_cos);
         ref float sin = ref MemoryMarshal.GetArrayDataReference(_sin);
+        int middle = length / 2;
 #if NET
         if (Vector128.IsHardwareAccelerated && !scalar)
         {
+            // The pair at places p and p + 1 is the sum and difference of points m and m + N/2, p = reverse(m) (even, as m
+            // is below N/2); for m a multiple of 4, m + 1, m + 2 and m + 3 land at p + N/2, p + N/4 and p + 3N/4. So four m
+            // at a time from two runs of the source, each pair stored as one 64-bit lane.
+            int quarter = length / 4;
+            for (int m = 0; m < middle; m += 4)
+            {
+                int p = Unsafe.Add(ref reversed, m);
+                var xr = Vector128.LoadUnsafe(ref sr, (nuint)m);
+                var yr = Vector128.LoadUnsafe(ref sr, (nuint)(m + middle));
+                var xi = Vector128.LoadUnsafe(ref si, (nuint)m);
+                var yi = Vector128.LoadUnsafe(ref si, (nuint)(m + middle));
+                StorePairs(ref r, p, middle, quarter, xr + yr, xr - yr);
+                StorePairs(ref i, p, middle, quarter, xi + yi, xi - yi);
+            }
+
             VectorStages(ref r, ref i, ref cos, ref sin, length);
             return;
         }
 #endif
+
+        for (int m = 0; m < middle; m++)
+        {
+            int p = Unsafe.Add(ref reversed, m);
+            float xr = Unsafe.Add(ref sr, m);
+            float xi = Unsafe.Add(ref si, m);
+            float yr = Unsafe.Add(ref sr, m + middle);
+            float yi = Unsafe.Add(ref si, m + middle);
+            Unsafe.Add(ref r, p) = xr + yr;
+            Unsafe.Add(ref i, p) = xi + yi;
+            Unsafe.Add(ref r, p + 1) = xr - yr;
+            Unsafe.Add(ref i, p + 1) = xi - yi;
+        }
 
         for (int half = 2; half < length; half *= 2)
         {
@@ -386,6 +458,18 @@ internal sealed class QmfFft
     }
 
 #if NET
+    // Lane k's sum and difference as the pair at p, p + half, p + quarter and p + half + quarter in turn.
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void StorePairs(ref float target, int p, int half, int quarter, Vector128<float> sum, Vector128<float> difference)
+    {
+        var low = (Sse.IsSupported ? Sse.UnpackLow(sum, difference) : AdvSimd.Arm64.IsSupported ? AdvSimd.Arm64.ZipLow(sum, difference) : Vector128.Create(sum[0], difference[0], sum[1], difference[1])).AsDouble();
+        var high = (Sse.IsSupported ? Sse.UnpackHigh(sum, difference) : AdvSimd.Arm64.IsSupported ? AdvSimd.Arm64.ZipHigh(sum, difference) : Vector128.Create(sum[2], difference[2], sum[3], difference[3])).AsDouble();
+        Unsafe.WriteUnaligned(ref Unsafe.As<float, byte>(ref Unsafe.Add(ref target, p)), low.ToScalar());
+        Unsafe.WriteUnaligned(ref Unsafe.As<float, byte>(ref Unsafe.Add(ref target, p + half)), low.GetElement(1));
+        Unsafe.WriteUnaligned(ref Unsafe.As<float, byte>(ref Unsafe.Add(ref target, p + quarter)), high.ToScalar());
+        Unsafe.WriteUnaligned(ref Unsafe.As<float, byte>(ref Unsafe.Add(ref target, p + half + quarter)), high.GetElement(1));
+    }
+
     // The stages from a half-span of 2, four butterflies a vector.
     private static void VectorStages(ref float r, ref float i, ref float cos, ref float sin, int length)
     {

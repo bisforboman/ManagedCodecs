@@ -151,6 +151,7 @@ internal static partial class InterPrediction
     /// so that the four macroblocks before it cover all of them. (<paramref name="x"/>, <paramref name="y"/>) is this
     /// macroblock's integer reference position; nothing is fetched outside the planes. A hint only: no output depends on it.
     /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static unsafe void PrefetchAhead(Picture reference, int x, int y, int phase)
     {
         if (!Sse.IsSupported)
@@ -255,6 +256,7 @@ internal static partial class InterPrediction
             return _parity >= 0 ? plane[(_parity * reference.ChromaStride)..] : plane;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void Predict(ReadOnlySpan<byte> plane, Span<byte> copy, Span<byte> output, int outputStride)
         {
             int stride = _stride;
@@ -290,6 +292,7 @@ internal static partial class InterPrediction
     /// output row the two rows' sums weighted down, ((8 - yFrac) H0 + yFrac H1 + 32) >> 6. That is the same sum
     /// as the four corner weights' (they multiply out to it); it never exceeds 64 x 255, so 16 bits hold it.
     /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void Bilinear(ReadOnlySpan<byte> window, int ws, int origin, int width, int height, int xFrac, int yFrac, Span<byte> output, int outputStride)
     {
         // Every row, the last one below the block included, is read as 16 bytes from origin + 1.
@@ -357,6 +360,7 @@ internal static partial class InterPrediction
     /// <paramref name="y"/>) to the output if it lies inside the picture (with room for a 16-byte
     /// load from its last row); false, and nothing written, if not.
     /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static bool CopyInside(ReadOnlySpan<byte> plane, int stride, int maxX, int maxY, int x, int y, int width, int height, Span<byte> output, int outputStride)
     {
         if (x < 0 || y < 0 || x + width - 1 > maxX || y + height - 1 > maxY || ((y + height - 1) * stride) + x + 16 > plane.Length)
@@ -582,6 +586,7 @@ internal static partial class InterPrediction
     }
 
     /// <summary>Copies the first <paramref name="width"/> (2, 4, 8 or 16) bytes of each row, unchecked.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void CopyRows(ref byte source, int sourceStride, int width, int height, ref byte output, int outputStride)
     {
         switch (width)
@@ -601,6 +606,7 @@ internal static partial class InterPrediction
         }
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void CopyRows<TWidth>(ref byte source, int sourceStride, int height, ref byte output, int outputStride)
         where TWidth : IRowWidth
     {

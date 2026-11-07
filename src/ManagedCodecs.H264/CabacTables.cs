@@ -551,7 +551,13 @@ internal static class CabacTables
     ];
 
     /// <summary>rangeTabLPS (Table 9-44): entry pStateIdx * 4 + qCodIRangeIdx.</summary>
+#if NET
     public static ReadOnlySpan<byte> RangeTabLps =>
+#else
+    // An array in the Unity build: Mono calls a ReadOnlySpan property's getter at every use, where CoreCLR reads the
+    // constant data in place (docs/decisions/2026-10-31-unity-netstandard.md, Mono's profile).
+    public static readonly byte[] RangeTabLps =
+#endif
     [
         128, 176, 208, 240,
         128, 167, 197, 227,

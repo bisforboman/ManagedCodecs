@@ -29,7 +29,13 @@ internal sealed partial class PictureDecoder<TPixel>
 
     // Table 8-17: tC0 by indexA, for bS = 1, 2, 3, after a 0 for bS 0: four bytes a row, so that a row loads as one
     // vector's first lanes (EdgeParameters.Tc0Row).
+#if NET
     private static ReadOnlySpan<byte> Tc0 =>
+#else
+    // An array in the Unity build: Mono calls a ReadOnlySpan property's getter at every use, where CoreCLR reads the
+    // constant data in place (docs/decisions/2026-10-31-unity-netstandard.md, Mono's profile).
+    private static readonly byte[] Tc0 =
+#endif
     [
         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
@@ -536,6 +542,7 @@ internal sealed partial class PictureDecoder<TPixel>
     /// motion; the blocks are picture-wide 4x4 block indices (macroblock * 16 + raster index). The
     /// reference pictures are compared as pictures, whichever list they came from.
     /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private int MotionStrength(int p, int q, int limitY = 4)
     {
         int partP = ((p >> 4) * 4) + ((p & 15) >> 3 << 1) + ((p & 3) >> 1);

@@ -54,10 +54,12 @@ internal static class QmfSingle
             throw new ArgumentException("The analysis bank takes and gives 32 values.");
         }
 
+        Span<float> zRe = stackalloc float[32];
+        Span<float> zIm = stackalloc float[32];
         Span<float> re = stackalloc float[32];
         Span<float> im = stackalloc float[32];
-        Rotate(uEven, uOdd, InCos, InSin, re, im, 32, scalar);
-        Fft32.Transform(re, im, scalar);
+        Rotate(uEven, uOdd, InCos, InSin, zRe, zIm, 32, scalar);
+        Fft32.Transform(zRe, zIm, re, im, scalar);
 
         ref float r = ref MemoryMarshal.GetReference(re);
         ref float i = ref MemoryMarshal.GetReference(im);
@@ -135,10 +137,12 @@ internal static class QmfSingle
         Span<float> aIm = stackalloc float[32];
         Span<float> bRe = stackalloc float[32];
         Span<float> bIm = stackalloc float[32];
-        Pretransform(real, alternate: false, aRe, aIm, scalar);
-        Pretransform(imaginary, alternate: true, bRe, bIm, scalar);
-        Fft32.Transform(aRe, aIm, scalar);
-        Fft32.Transform(bRe, bIm, scalar);
+        Span<float> packedRe = stackalloc float[32];
+        Span<float> packedIm = stackalloc float[32];
+        Pretransform(real, alternate: false, packedRe, packedIm, scalar);
+        Fft32.Transform(packedRe, packedIm, aRe, aIm, scalar);
+        Pretransform(imaginary, alternate: true, packedRe, packedIm, scalar);
+        Fft32.Transform(packedRe, packedIm, bRe, bIm, scalar);
         ref double w = ref MemoryMarshal.GetReference(v);
 #if NET
         if (Vector128.IsHardwareAccelerated && !scalar)
@@ -190,12 +194,14 @@ internal static class QmfSingle
             throw new ArgumentException("The downsampled bank takes 32 complex values and gives 64 of v.");
         }
 
+        Span<float> zRe = stackalloc float[64];
+        Span<float> zIm = stackalloc float[64];
         Span<float> re = stackalloc float[64];
         Span<float> im = stackalloc float[64];
-        Rotate(real, imaginary, HalvedInCos, HalvedInSin, re, im, 32, scalar);
-        re[32..].Clear();
-        im[32..].Clear();
-        Fft64.Transform(re, im, scalar);
+        Rotate(real, imaginary, HalvedInCos, HalvedInSin, zRe, zIm, 32, scalar);
+        zRe[32..].Clear();
+        zIm[32..].Clear();
+        Fft64.Transform(zRe, zIm, re, im, scalar);
         ref float r = ref MemoryMarshal.GetReference(re);
         ref float i = ref MemoryMarshal.GetReference(im);
         ref float c = ref MemoryMarshal.GetArrayDataReference(HalvedOutCos);

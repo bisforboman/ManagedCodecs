@@ -84,7 +84,7 @@ def mcdec(dll, path, loops, threads=1):
         command += ["--threads", str(threads)]
     output = run(command)
     count = frames(output)
-    steady = last_loop(output) if loops > 1 else None
+    steady = last_loop(output) if loops > 1 else rtime(output) * 1e6 / count  # scratch: 1 loop has no steady loop
     return (rtime(output) * 1e6 / (count * loops), steady), count
 
 

@@ -502,7 +502,10 @@ inlined (#200, about 3%), and SBR's and parametric stereo's last 256-bit-only lo
 4% on HE-AAC); `profile.yml` (perf on both runners) found them. What is left is FFmpeg's: its ARM64 JPEG IDCT is
 NEON assembly (about 16% faster than its C one on the same runner), and AAC's FFT is about 20% of an ARM64 frame
 against 11% on x64, likely because ours works on 2 doubles a vector where FFmpeg's works on 4 floats (not
-confirmed; fusing two FFT stages a pass gained only 1 to 2% and was dropped). H.264's ARM64 profile is as flat as
+confirmed; fusing two FFT stages a pass gained only 1 to 2% and was dropped). Fusing the bit reversal with the
+first stage and vectorizing the post-twiddle (#339) later took 12 to 15% off AAC LC on a cloud VM: the twiddles had
+cost as much as the FFT itself (docs/notes/aac-stages-2026-11.md, which also finds that 5.1's ratio being above stereo's
+comes from FFmpeg's cost per frame, not from our FFT). H.264's ARM64 profile is as flat as
 x64's. The QMF banks' real-input transforms (2026-10-28) took 14 to 16% off 5.1 HE-AAC and 8 to 10% off
 HE-AAC v2 on both runners (`compare.yml` against the code before them). The runners' CPUs differ from run to run (an
 EPYC 7763 on 2026-10-25 and in the first run of 2026-10-29, a 9V74 on 2026-10-28, a 9V45 in the second run of

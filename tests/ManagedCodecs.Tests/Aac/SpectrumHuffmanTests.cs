@@ -17,6 +17,7 @@ public class SpectrumHuffmanTests
     public void PackedReader_MatchesDefinition(int seed)
     {
         var random = new Random(seed);
+        Span<int> values = stackalloc int[4];
         for (int trial = 0; trial < 3000; trial++)
         {
             int book = random.Next(1, 12);
@@ -44,7 +45,6 @@ public class SpectrumHuffmanTests
             string? expectedError = null;
             try
             {
-                Span<int> values = stackalloc int[4];
                 for (int k = 0; k < expected.Length; k += step)
                 {
                     Huffman.ReadSpectrumByDefinition(reference, book, values);

@@ -40,6 +40,11 @@ public class MediaPlayerTests
         }
 
         Wait(player, () => player.IsFinished ? player : null, samples);
+        while (player.TakeAudio() is { } chunk)
+        {
+            samples.AddRange(chunk.Samples);
+        }
+
         Assert.Null(player.Error);
         Assert.Equal(audio, samples);
         var statistics = player.Statistics;
@@ -212,6 +217,9 @@ public class MediaPlayerTests
         var watch = Stopwatch.StartNew();
         while (true)
         {
+            // Read before taking: once finished, every frame and every chunk is queued, so one more pass that finds
+            // nothing means there is nothing left (the decoding thread can finish between a take and this check).
+            bool finished = player.IsFinished;
             while (player.TakeAudio() is { } chunk)
             {
                 samples.AddRange(chunk.Samples);
@@ -223,7 +231,7 @@ public class MediaPlayerTests
             }
 
             Assert.True(watch.Elapsed < Patience, "The player gave nothing in time.");
-            Assert.False(player.IsFinished, "The player finished early.");
+            Assert.False(finished, "The player finished early.");
             Thread.Yield();
         }
     }

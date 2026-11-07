@@ -50,6 +50,8 @@ run time.
   profile).
 - MJPEG: a flat block's rows are written as one 8-byte store each instead of a call each: about 7 to 10% off a frame of
   a test pattern, nothing on noise.
+- MJPEG: the bit reader's refill takes eight bytes inline, a call only at stuffing, markers and the data's end:
+  about 2 to 5% off a frame.
 
 ## 0.8.1 – 2026-11-07
 

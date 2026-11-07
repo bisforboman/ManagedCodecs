@@ -1036,20 +1036,21 @@ tables, and the tables derived from every header a 44.1 kHz stream can send hold
 encoder's headers use bs_freq_scale 2 and 3 (3 in the low-bitrate pair): scale 1, and the linear master table of 0, are
 checked only for consistency.
 The QMF banks (32-band analysis, 64-band synthesis) run on complex FFTs of 32 (the analysis's real input packed two
-values a point; the synthesis as two DCT-IVs), each also compared with the DFT route of 64 and 128 points it replaced,
-and on random input with the spec's sums (kept in the tests as `QmfAnalysisReference` and `QmfSynthesisReference`). Analysis followed by synthesis with
+values a point; the synthesis as two DCT-IVs), in single precision between windows in double, compared on random input
+with the spec's sums in double (kept in the tests as `QmfAnalysisReference` and `QmfSynthesisReference`; within 2e-6
+of the slot's peak, measured 1e-7 to 3e-7), and the FFT with the DFT's. Analysis followed by synthesis with
 the upper 32 bands empty, SBR's output where it adds nothing, gives the core's signal at twice the rate: unit gain
 across the core's band to the window's ripple (about 1e-3; the bank is nearly, not perfectly, reconstructing), a delay
 of 578 output samples, and no fractional delay (unit tests; reading samples in the wrong order, the window's odd taps
 or a kernel offset by one breaks them). The kernels' cos and sin are computed without Math.Cos and Math.Sin, whose
 last bits differ between .NET and WebAssembly's runtime, which the HF generator's prediction can magnify.
-The vector paths (the QMF FFTs and rotations, the HF generator's covariances and patch filter, the gains, noise and
+The vector paths (the QMF transforms, the HF generator's covariances and patch filter, the gains, noise and
 sinusoids added to the high band and their smoothing over time, the parametric stereo all-pass links and mixing) do each lane's arithmetic in the scalar loop's
 order, without fused multiply-adds, and add noise under a mask rather than as zero, so a negative zero stays: each is
-compared bit for bit with its scalar loop on random input (`VectorFft_MatchesScalarExactly`,
-`VectorRotations_MatchScalarExactly`, `SbrCovariances_MatchScalar`, `SbrFilterPatch_MatchesFormula`,
+compared bit for bit with its scalar loop on random input (`Fft_MatchesTheDftAndScalarExactly`,
+`VectorTransforms_MatchScalarExactly`, `SbrCovariances_MatchScalar`, `SbrFilterPatch_MatchesFormula`,
 `SbrApplyGains_MatchesScalar`, `SbrSmoothGains_MatchesScalar`, `PsAllPassRow_MatchesScalar`, `PsMixGroup_MatchesScalar`), and each speed change left every sample's output the same
-to the bit.
+to the bit, but the transforms' single precision (below), which moved it by design.
 
 Decoded output (`SbrConformanceTests`) against FFmpeg's (name.sbr.f32: at the SBR rate; MP4 without the 2048 samples of
 encoder delay its iTunSMPB tag gives, which the demuxer reads as FFmpeg's does when there is no edit list; mono in
@@ -1079,8 +1080,21 @@ Single precision, tried for speed and dropped (2026-11-06): the QMF banks' windo
 and sums of products) in float, each sum widened to double as it is stored. Every comparison with FFmpeg still passed,
 the LFE's included; only `QmfTests`' bounds of 1e-6 against the banks' sums in double failed (3.5e-8 of a value of
 162). But under the JIT the windowing's share of `heaac-5.1.mp4` fell only from 11.8 to 11.2% (six alternating pairs),
-and the wall clock did not move: twice the lanes did not halve the work. The banks stay in double; the rest of a float
-port (the FFTs, the DCT-IVs, the rotations, about 900 lines laid out for two-lane vectors of doubles) was not tried.
+and the wall clock did not move: twice the lanes did not halve the work. The windowing stays in double.
+
+The QMF transforms in single precision (2026-11-07): the analysis bank's rotation, FFT of 32 and output, the full
+synthesis bank's two DCT-IVs (each a packing, an FFT of 32 and a post-twiddle) and the downsampled bank's FFT of 64,
+four floats a vector, the windowed sums narrowed as they are read and v and the subband samples widened as they are
+stored (`QmfSingle`). Against FFmpeg (whose SBR is single precision too) every sample's largest and mean differences
+moved in their third or fourth digit at most (`heaac-stereo-low`'s second channel the most: mean 4.8e-6 to 5.4e-6, of
+a bound of 1e-4); the 5.1 sample's LFE, through the banks alone, from 2.1e-7 to 2.4e-7 (bound 1e-6). By perf on the
+hosted ARM64 runner the transforms took about 30% of `heaac-5.1.mp4`'s frame in double (the FFTs 17%, the DCT-IVs'
+packing and output 7.8%, the analysis output 2.9%, the rotations and the rest 1.7%). The FFT alone in float, converting at its
+edges, gave only 3%; with the data kept in float from the first rotation to the last output, `compare.yml` (steady
+frame against the double banks) gave 0.90 on `heaac-5.1.mp4` and 0.93 on `heaacv2-stereo.mp4` on ARM64, 0.91 and 0.93
+on x64 (AAC LC, which the banks don't touch, 1.01 and 0.99); the final code, against main with #363's gains in vectors,
+0.91 and 0.94 on ARM64, 0.92 and 0.95 on x64 (AAC LC 1.01 and 1.00); and against main with #382's reorder from a
+source (which the float FFT keeps) and #384, 0.91 and 0.94 on ARM64, 0.93 and 0.96 on x64 (AAC LC 1.00 and 1.02).
 
 The QMF transforms across time slots, one slot a vector lane, tried for speed and dropped (2026-11-07, #338). By perf
 the transforms take about 24% of `heaac-5.1.mp4`'s frame: the FFTs' vector stages 8.3%, their bit-reversal and first
@@ -1101,10 +1115,11 @@ What did go (#338, after it): the one-slot FFT's reorder and first stage in vect
 m + N/2, two runs of the input, so their sums and differences take vectors and each pair is stored zipped at its
 bit-reversed place, where a scalar gather through the permutation table was; the DCT-IV's packing and the analysis's
 turn write a scratch the FFT reads from (`QmfFft.Transform` from a source), so its copy of the input goes. Each value is
-the same sum as before (`VectorFft_MatchesScalarExactly`, now at 32 points and from a source too). By perf
+the same sum as before (then `VectorFft_MatchesScalarExactly`, at 32 points and from a source too). By perf
 (`heaac-5.1.mp4`, six runs each, the order alternating, normalized as above) `ReorderFirstStage` fell from 0.29 to 0.17
 of the untouched functions' samples and the QMF banks with it, about 2% of the frame; the wall clock agreed (steady 0.973,
-`heaacv2-stereo.mp4` 0.980, ten interleaved runs).
+`heaacv2-stereo.mp4` 0.980, ten interleaved runs). The single-precision FFT (above) keeps it, four points a vector, each pair one 64-bit
+lane (`Fft_MatchesTheDftAndScalarExactly`, from a source too).
 
 Downsampled SBR (the config gives SBR the core's own rate, 44.1 kHz in the sample's sync extension) runs as for twice
 that rate, its frequency tables too (the sample's band runs from QMF band 9 to 23 of the 88.2 kHz grid), and
@@ -1117,8 +1132,8 @@ the tones (sidebands 43 Hz apart around each, as FDK's own decoder hears them to
 other n, exp(i pi/128 (k + 0.5)(4n - 255)), with every other window coefficient: after the analysis bank it gives the
 signal back with a whole-sample delay of 289 and a gain of 1 within 6e-3 (`QmfTests`, which also check it against its
 sums). Its kernel, a quarter of a sample off the full bank's, is no DCT-IV, so it keeps its DFT of 64 points where
-the full bank now takes two DCT-IVs of 64 (each an FFT of 32; `QmfTests` compare that with the DFT of 128 it replaced,
-to 1e-12 of the peak). Reading the kernel as exp(i pi/64 (k + 0.5)(2n - 127)) instead delays it a quarter of a sample more, and misses
+the full bank now takes two DCT-IVs of 64 (each an FFT of 32; until 2026-11-07, in double, `QmfTests` compared them
+with the DFT of 128 they replaced, to 1e-12 of the peak). Reading the kernel as exp(i pi/64 (k + 0.5)(2n - 127)) instead delays it a quarter of a sample more, and misses
 FFmpeg's output by 2e-2 on average, 14 to 17% of the signal at 3 to 6 kHz, below the high band. The sample agrees with FFmpeg to 3e-4 at most,
 6e-6 on average, with noise under its tones, as FFmpeg's single precision in the HF generator needs: without noise, the
 11 kHz tone that fills much of this narrower band left 7e-5 on average, in the frames where computing the prediction

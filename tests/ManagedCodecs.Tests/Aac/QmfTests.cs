@@ -128,58 +128,89 @@ public class QmfTests
     }
 
     /// <summary>
-    /// The vector FFT does each butterfly's arithmetic in the scalar order: the same doubles, to the bit, in place and
-    /// from a source it leaves as it was.
+    /// The FFT in single precision: its vector stages do each butterfly's arithmetic in the scalar order (the same floats,
+    /// to the bit), in place and from a source it leaves as it was, and it gives the DFT's sums, computed in double, to
+    /// float rounding.
     /// </summary>
     [Theory]
     [InlineData(32)]
     [InlineData(64)]
-    [InlineData(128)]
-    public void VectorFft_MatchesScalarExactly(int length)
+    public void Fft_MatchesTheDftAndScalarExactly(int length)
     {
         var fft = new QmfFft(length);
         var random = new Random(length);
-        var re = new double[length];
-        var im = new double[length];
+        var re = new float[length];
+        var im = new float[length];
         for (int trial = 0; trial < 20; trial++)
         {
             for (int k = 0; k < length; k++)
             {
-                re[k] = (random.NextDouble() - 0.5) * Math.Pow(10, random.Next(0, 6));
-                im[k] = (random.NextDouble() - 0.5) * Math.Pow(10, random.Next(0, 6));
+                re[k] = (float)((random.NextDouble() - 0.5) * Math.Pow(10, random.Next(0, 6)));
+                im[k] = (float)((random.NextDouble() - 0.5) * Math.Pow(10, random.Next(0, 6)));
             }
 
-            var (sourceRe, sourceIm) = ((double[])re.Clone(), (double[])im.Clone());
-            var expectedRe = (double[])re.Clone();
-            var expectedIm = (double[])im.Clone();
-            fft.Transform(expectedRe, expectedIm, scalar: true);
-            var (fromRe, fromIm) = (new double[length], new double[length]);
-            fft.Transform(re, im, fromRe, fromIm);
-            Assert.Equal(sourceRe, re);
-            Assert.Equal(sourceIm, im);
-            Assert.Equal(expectedRe, fromRe);
-            Assert.Equal(expectedIm, fromIm);
+            double peak = 0;
+            var dft = new (double Re, double Im)[length];
+            for (int k = 0; k < length; k++)
+            {
+                for (int n = 0; n < length; n++)
+                {
+                    double angle = 2 * Math.PI * k * n / length;
+                    dft[k].Re += (re[n] * Math.Cos(angle)) - (im[n] * Math.Sin(angle));
+                    dft[k].Im += (re[n] * Math.Sin(angle)) + (im[n] * Math.Cos(angle));
+                }
+
+                peak = Math.Max(peak, Math.Max(Math.Abs(dft[k].Re), Math.Abs(dft[k].Im)));
+            }
+
+            var scalarRe = (float[])re.Clone();
+            var scalarIm = (float[])im.Clone();
+            fft.Transform(scalarRe, scalarIm, scalar: true);
+            var (sourceRe, sourceIm) = ((float[])re.Clone(), (float[])im.Clone());
+            var (fromRe, fromIm) = (new float[length], new float[length]);
+            fft.Transform(sourceRe, sourceIm, fromRe, fromIm);
+            Assert.Equal(re, sourceRe);
+            Assert.Equal(im, sourceIm);
+            Assert.Equal(scalarRe.Select(BitConverter.SingleToInt32Bits), fromRe.Select(BitConverter.SingleToInt32Bits));
+            Assert.Equal(scalarIm.Select(BitConverter.SingleToInt32Bits), fromIm.Select(BitConverter.SingleToInt32Bits));
             fft.Transform(re, im);
-            Assert.Equal(expectedRe, re);
-            Assert.Equal(expectedIm, im);
+            Assert.Equal(scalarRe.Select(BitConverter.SingleToInt32Bits), re.Select(BitConverter.SingleToInt32Bits));
+            Assert.Equal(scalarIm.Select(BitConverter.SingleToInt32Bits), im.Select(BitConverter.SingleToInt32Bits));
+            for (int k = 0; k < length; k++)
+            {
+                Assert.True(Math.Abs(dft[k].Re - re[k]) <= 1e-6 * peak && Math.Abs(dft[k].Im - im[k]) <= 1e-6 * peak, $"k {k}: ({re[k]}, {im[k]}) for {dft[k]}");
+            }
         }
     }
 
-    /// <summary>The vector rotations give the scalar results, tails included.</summary>
+    /// <summary>
+    /// The banks' transforms in vectors (the analysis bank's, the full synthesis bank's two DCT-IVs, the downsampled
+    /// bank's) give the scalar loops' bits, on values over six decades.
+    /// </summary>
     [Fact]
-    public void VectorRotations_MatchScalarExactly()
+    public void VectorTransforms_MatchScalarExactly()
     {
         var random = new Random(9);
-        for (int length = 0; length < 20; length++)
+        static IEnumerable<long> Bits(double[] values) => values.Select(BitConverter.DoubleToInt64Bits);
+        for (int trial = 0; trial < 10; trial++)
         {
-            double[] Values() => [.. Enumerable.Range(0, length).Select(_ => (random.NextDouble() - 0.5) * 1e5)];
-            var (re, im, cos, sin) = (Values(), Values(), Values(), Values());
-            var (outRe, outIm, real) = (new double[length], new double[length], new double[length]);
-            QmfState.Rotate(re, im, cos, sin, outRe, outIm);
-            QmfState.RealOfRotation(re, im, cos, sin, real);
-            Assert.Equal(re.Select((x, k) => (x * cos[k]) - (im[k] * sin[k])), outRe);
-            Assert.Equal(re.Select((x, k) => (x * sin[k]) + (im[k] * cos[k])), outIm);
-            Assert.Equal(re.Select((x, k) => (x * cos[k]) - (im[k] * sin[k])), real);
+            double[] Values() => [.. Enumerable.Range(0, 64).Select(_ => (random.NextDouble() - 0.5) * Math.Pow(10, random.Next(0, 6)))];
+            var (a, b) = (Values(), Values());
+            var (vectorRe, vectorIm, scalarRe, scalarIm) = (new double[32], new double[32], new double[32], new double[32]);
+            QmfSingle.Analysis(a, b, vectorRe, vectorIm);
+            QmfSingle.Analysis(a, b, scalarRe, scalarIm, scalar: true);
+            Assert.Equal(Bits(scalarRe), Bits(vectorRe));
+            Assert.Equal(Bits(scalarIm), Bits(vectorIm));
+
+            var (vector, scalarV) = (new double[128], new double[128]);
+            QmfSingle.FullSynthesis(a, b, vector);
+            QmfSingle.FullSynthesis(a, b, scalarV, scalar: true);
+            Assert.Equal(Bits(scalarV), Bits(vector));
+
+            (vector, scalarV) = (new double[64], new double[64]);
+            QmfSingle.HalvedSynthesis(a, b, vector);
+            QmfSingle.HalvedSynthesis(a, b, scalarV, scalar: true);
+            Assert.Equal(Bits(scalarV), Bits(vector));
         }
     }
 
@@ -274,13 +305,15 @@ public class QmfTests
     }
 
     /// <summary>
-    /// The FFT-based banks give the spec's sums (<see cref="QmfAnalysisReference"/>, <see cref="QmfSynthesisReference"/>)
-    /// on random input, slot after slot: past the point where their history buffers wrap around (after 15 slots of the
-    /// analysis bank, 9 of the synthesis bank).
+    /// The FFT-based banks give the spec's sums in double (<see cref="QmfAnalysisReference"/>,
+    /// <see cref="QmfSynthesisReference"/>) on random input, slot after slot, to their transforms' single precision (2e-6 of
+    /// the slot's peak; they measure a few 1e-7): past the point where their history buffers wrap around (after 15 slots of
+    /// the analysis bank, 9 of the synthesis bank).
     /// </summary>
     [Fact]
     public void FastBanks_MatchTheSums()
     {
+        const double Tolerance = 2e-6;
         var random = new Random(11);
         var (analysis, analysisReference) = (new QmfAnalysis(), new QmfAnalysisReference());
         var (synthesis, synthesisReference) = (new QmfSynthesis(), new QmfSynthesisReference());
@@ -297,10 +330,11 @@ public class QmfTests
 
             analysis.Process(input, real, imaginary);
             analysisReference.Process(input, realReference, imaginaryReference);
+            double peak = Math.Max(realReference[..32].Max(Math.Abs), imaginaryReference[..32].Max(Math.Abs));
             for (int k = 0; k < 32; k++)
             {
-                Assert.Equal(realReference[k], real[k], 1e-6);
-                Assert.Equal(imaginaryReference[k], imaginary[k], 1e-6);
+                Assert.True(Math.Abs(realReference[k] - real[k]) <= Tolerance * peak, $"slot {slot}, k {k}: {real[k]} for {realReference[k]}");
+                Assert.True(Math.Abs(imaginaryReference[k] - imaginary[k]) <= Tolerance * peak, $"slot {slot}, k {k}: {imaginary[k]} for {imaginaryReference[k]}");
             }
 
             for (int k = 0; k < 64; k++)
@@ -311,212 +345,18 @@ public class QmfTests
 
             synthesis.Process(real, imaginary, output);
             synthesisReference.Process(real, imaginary, outputReference);
+            peak = outputReference[..64].Max(Math.Abs);
             for (int n = 0; n < 64; n++)
             {
-                Assert.Equal(outputReference[n], output[n], 1e-6);
+                Assert.True(Math.Abs(outputReference[n] - output[n]) <= Tolerance * peak, $"slot {slot}, n {n}: {output[n]} for {outputReference[n]}");
             }
 
             downsampled.Process(real, imaginary, output);
             downsampledReference.Process(real, imaginary, outputReference);
+            peak = outputReference[..32].Max(Math.Abs);
             for (int n = 0; n < 32; n++)
             {
-                Assert.Equal(outputReference[n], output[n], 1e-6);
-            }
-        }
-    }
-
-    /// <summary>The DCT-IV by a complex FFT of 32 gives its definition's sums to within rounding, plain and alternated.</summary>
-    [Fact]
-    public void DctIV_MatchesTheSums()
-    {
-        var random = new Random(3);
-        var x = new double[64];
-        var output = new double[64];
-        for (int trial = 0; trial < 20; trial++)
-        {
-            for (int k = 0; k < 64; k++)
-            {
-                x[k] = (random.NextDouble() - 0.5) * 65536;
-            }
-
-            foreach (bool alternate in (bool[])[false, true])
-            {
-                new QmfDctIV().Transform(x, alternate, output);
-                for (int n = 0; n < 64; n++)
-                {
-                    double sum = 0;
-                    for (int k = 0; k < 64; k++)
-                    {
-                        sum += (alternate && k % 2 == 1 ? -x[k] : x[k]) * Math.Cos(Math.PI / 64 * (k + 0.5) * (n + 0.5));
-                    }
-
-                    Assert.Equal(sum, output[n], 1e-8);
-                }
-            }
-        }
-    }
-
-    /// <summary>
-    /// The full synthesis bank's v(n) by two DCT-IVs equals the 128-point DFT it replaced (the input turned by
-    /// exp(-i 510 pi k / 256), transformed, the real part of the output turned by exp(i pi (2n - 255) / 256) / 64), to
-    /// within rounding: any slip of an index or a sign would show far above it.
-    /// </summary>
-    [Fact]
-    public void FullSynthesis_MatchesTheDftRoute()
-    {
-        var random = new Random(5);
-        var fft = new QmfFft(128);
-        var real = new double[64];
-        var imaginary = new double[64];
-        var output = new double[64];
-        var reference = new double[64];
-        var synthesis = new QmfSynthesis();
-
-        // The reference bank: the same window over the DFT route's v, newest first.
-        var history = new double[1280];
-        var window = Enumerable.Range(0, 640).Select(n => QmfWindow.Coefficients[n]).ToArray();
-        for (int slot = 0; slot < 30; slot++)
-        {
-            for (int k = 0; k < 64; k++)
-            {
-                real[k] = (random.NextDouble() - 0.5) * 65536;
-                imaginary[k] = (random.NextDouble() - 0.5) * 65536;
-            }
-
-            var re = new double[128];
-            var im = new double[128];
-            for (int k = 0; k < 64; k++)
-            {
-                double c = QmfTrig.CosPi256(-510 * k);
-                double s = QmfTrig.SinPi256(-510 * k);
-                re[k] = (real[k] * c) - (imaginary[k] * s);
-                im[k] = (real[k] * s) + (imaginary[k] * c);
-            }
-
-            fft.Transform(re, im, scalar: true);
-            Array.Copy(history, 0, history, 128, 1152);
-            for (int n = 0; n < 128; n++)
-            {
-                history[n] = ((re[n] * QmfTrig.CosPi256((2 * n) - 255)) - (im[n] * QmfTrig.SinPi256((2 * n) - 255))) / 64;
-            }
-
-            double peak = 0;
-            for (int n = 0; n < 64; n++)
-            {
-                double sum = 0;
-                for (int i = 0; i < 5; i++)
-                {
-                    sum += history[(256 * i) + n] * window[(128 * i) + n];
-                    sum += history[(256 * i) + 192 + n] * window[(128 * i) + 64 + n];
-                }
-
-                reference[n] = sum;
-                peak = Math.Max(peak, Math.Abs(sum));
-            }
-
-            synthesis.Process(real, imaginary, output);
-            for (int n = 0; n < 64; n++)
-            {
-                Assert.True(Math.Abs(reference[n] - output[n]) <= 1e-12 * Math.Max(peak, 1), $"slot {slot}, n {n}: {output[n]} for {reference[n]}");
-            }
-        }
-    }
-
-    /// <summary>The DCT-IVs' twiddles and the full synthesis bank's v in vectors give the scalar loops' bits.</summary>
-    [Fact]
-    public void VectorFullTransform_MatchesScalarExactly()
-    {
-        var random = new Random(8);
-        var real = Enumerable.Range(0, 64).Select(_ => (random.NextDouble() - 0.5) * 1e6).ToArray();
-        var imaginary = Enumerable.Range(0, 64).Select(_ => (random.NextDouble() - 0.5) * 1e6).ToArray();
-        foreach (bool alternate in new[] { false, true })
-        {
-            var (vectorRe, vectorIm, scalarRe, scalarIm) = (new double[32], new double[32], new double[32], new double[32]);
-            QmfDctIV.Pretransform(real, alternate, vectorRe, vectorIm);
-            QmfDctIV.Pretransform(real, alternate, scalarRe, scalarIm, scalar: true);
-            Assert.Equal(scalarRe, vectorRe);
-            Assert.Equal(scalarIm, vectorIm);
-        }
-
-        var (vector, scalar) = (new double[128], new double[128]);
-        QmfSynthesis.FullTransform(real, imaginary, vector);
-        QmfSynthesis.FullTransform(real, imaginary, scalar, scalar: true);
-        Assert.Equal(scalar, vector);
-    }
-
-    /// <summary>The analysis bank's output turn in vectors gives the scalar loop's bits.</summary>
-    [Fact]
-    public void VectorAnalysisOutput_MatchesScalarExactly()
-    {
-        var random = new Random(7);
-        var re = Enumerable.Range(0, 32).Select(_ => (random.NextDouble() - 0.5) * 1e6).ToArray();
-        var im = Enumerable.Range(0, 32).Select(_ => (random.NextDouble() - 0.5) * 1e6).ToArray();
-        var (vectorRe, vectorIm, scalarRe, scalarIm) = (new double[32], new double[32], new double[32], new double[32]);
-        QmfAnalysis.Output(re, im, vectorRe, vectorIm);
-        QmfAnalysis.Output(re, im, scalarRe, scalarIm, scalar: true);
-        Assert.Equal(scalarRe, vectorRe);
-        Assert.Equal(scalarIm, vectorIm);
-    }
-
-    /// <summary>
-    /// The analysis bank, which takes a complex FFT of 32 for its real input, against the DFT of 64 it replaced (rebuilt
-    /// here) over 30 slots, to within rounding.
-    /// </summary>
-    [Fact]
-    public void Analysis_MatchesTheDftRoute()
-    {
-        var random = new Random(6);
-        var fft = new QmfFft(64);
-        var input = new double[32];
-        var real = new double[32];
-        var imaginary = new double[32];
-        var analysis = new QmfAnalysis();
-
-        // The reference bank: x, newest first, under every other window coefficient.
-        var x = new double[320];
-        for (int slot = 0; slot < 30; slot++)
-        {
-            for (int n = 0; n < 32; n++)
-            {
-                input[n] = (random.NextDouble() - 0.5) * 65536;
-            }
-
-            Array.Copy(x, 0, x, 32, 288);
-            for (int n = 0; n < 32; n++)
-            {
-                x[31 - n] = input[n];
-            }
-
-            var re = new double[64];
-            var im = new double[64];
-            for (int n = 0; n < 64; n++)
-            {
-                double u = 0;
-                for (int j = 0; j < 5; j++)
-                {
-                    u += x[n + (64 * j)] * QmfWindow.Coefficients[2 * (n + (64 * j))];
-                }
-
-                re[n] = u * QmfTrig.CosPi256(4 * n);
-                im[n] = u * QmfTrig.SinPi256(4 * n);
-            }
-
-            fft.Transform(re, im, scalar: true);
-            analysis.Process(input, real, imaginary);
-            double peak = 1;
-            var reference = new (double Re, double Im)[32];
-            for (int k = 0; k < 32; k++)
-            {
-                double c = 2 * QmfTrig.CosPi256(-((2 * k) + 1));
-                double s = 2 * QmfTrig.SinPi256(-((2 * k) + 1));
-                reference[k] = ((re[k] * c) - (im[k] * s), (re[k] * s) + (im[k] * c));
-                peak = Math.Max(peak, Math.Max(Math.Abs(reference[k].Re), Math.Abs(reference[k].Im)));
-            }
-
-            for (int k = 0; k < 32; k++)
-            {
-                Assert.True(Math.Abs(reference[k].Re - real[k]) <= 1e-12 * peak, $"slot {slot}, k {k}: {real[k]} for {reference[k].Re}");
-                Assert.True(Math.Abs(reference[k].Im - imaginary[k]) <= 1e-12 * peak, $"slot {slot}, k {k}: {imaginary[k]} for {reference[k].Im}");
+                Assert.True(Math.Abs(outputReference[n] - output[n]) <= Tolerance * peak, $"slot {slot}, n {n}: {output[n]} for {outputReference[n]}");
             }
         }
     }

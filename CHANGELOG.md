@@ -26,6 +26,9 @@ run time.
 
 ### Changed
 
+- HE-AAC decodes faster: the QMF banks' transforms (their FFTs, DCT-IVs and rotations, between windows still in double)
+  run in single precision, four values a vector: 7 to 10% off a 5.1 HE-AAC frame and 4 to 7% off HE-AAC v2, on ARM64
+  and x64. The output moves against FFmpeg's (single precision too) in the third or fourth digit of its differences.
 - H.264: about 24 small functions on the hot paths are inlined, as the runtime's dynamic PGO does (#346): 1.5 to 3.8%
   less time a frame in the steady state on ARM64 and 0.4 to 2.6% on x64 with tiering off (as mcdec runs) or
   `TieredPGO=false`, and up to 5% more JIT time at startup for short files. Native AOT builds are not timed yet.

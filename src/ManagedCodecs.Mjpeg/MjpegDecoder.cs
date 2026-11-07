@@ -560,7 +560,10 @@ public sealed class MjpegDecoder : IVideoDecoder
         var quant = sc.Quantization;
         var zigZag = JpegTables.ZigZag;
 
-        int dc = (sc.Dc.DecodeDc(ref reader) * quant[0]) + predictor;
+        // The reader's buffer and count in locals across the block (registers, where the tables' decoders inline).
+        ulong buffer = reader.Buffer;
+        int count = reader.Count;
+        int dc = (sc.Dc.DecodeDc(ref reader, ref buffer, ref count) * quant[0]) + predictor;
         dc = Math.Clamp(dc, short.MinValue, short.MaxValue);
         predictor = dc;
         block[0] = (short)dc;
@@ -568,7 +571,7 @@ public sealed class MjpegDecoder : IVideoDecoder
         bool hasAc = false;
         for (int k = 1; k < 64; k++)
         {
-            int ac = sc.Ac.DecodeAc(ref reader);
+            int ac = sc.Ac.DecodeAc(ref reader, ref buffer, ref count);
             int run = ac & 0xFF;
             int value = ac >> 8;
 
@@ -592,6 +595,8 @@ public sealed class MjpegDecoder : IVideoDecoder
             block[zigZag[k]] = (short)(value * quant[k]);
             hasAc = true;
         }
+
+        reader.Restore(buffer, count);
 
         // Flat blocks are common and need no transform: every sample has the same value.
         if (hasAc)

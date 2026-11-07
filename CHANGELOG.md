@@ -20,6 +20,8 @@ run time.
 - H.264: in MBAFF frames and field pictures, CABAC's context selection reads a macroblock's left and above neighbours
   from a table found once a macroblock instead of a call each: about 1.6% fewer instructions in CABAC MBAFF frames
   and 1.7% in field pictures.
+- MJPEG: the Huffman decoder keeps its bit buffer in registers, and a short code with long magnitude bits takes one
+  table lookup instead of two: about 6 to 7% off a frame.
 
 ## 0.8.1 – 2026-11-07
 

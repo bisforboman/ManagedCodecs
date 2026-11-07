@@ -484,6 +484,11 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.Mjpeg/JpegBitReader.cs",
          find="                        b = 0;\n                        _dataBits -= 8;\n", replace="",
          tests="DisplayName~mjpeg-cut-stuffed"),
+    # ... in a DC table, a symbol with a run's high bits whose code and bits fit in a combined entry is still an invalid
+    # size (no encoder writes one: HuffmanTableTests' random tables) ...
+    dict(file="src/ManagedCodecs.Mjpeg/HuffmanTable.cs",
+         find="consumed == 0 ? DecodeLong(buffer) : 0xFF;", replace="consumed == 0 ? DecodeLong(buffer) : 0x0B;",
+         tests="FullyQualifiedName~HuffmanTableTests"),
     # ... bytes before the SOI marker are skipped, a missing EOI emulated (mjpeg-junk) ...
     dict(file="src/ManagedCodecs.Mjpeg/JpegMarkerReader.cs",
          find="int soi = data.IndexOf([(byte)0xFF, JpegMarker.Soi]);", replace="int soi = data.StartsWith([(byte)0xFF, JpegMarker.Soi]) ? 0 : -1;",

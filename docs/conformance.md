@@ -731,6 +731,13 @@ the calls' place); filled from the pairs directly (`AffLeft` for each row, the B
 loops) counts 442.7 to 435.8 M instructions a loop of `h264-mbaff-default` (-1.6%), 79.50 to 78.14 M of `jm-paff-b`
 (-1.7%) and no change in `h264-bench-720p.mp4` (-0.04%). Under the JIT (perf, 150 loops, six runs each, the order
 alternating, normalized as above) `h264-mbaff-default`'s frame took a median 1.7% less (five runs of six faster).
+Spatial direct next (2026-11-07): it read A, B and C (or D) of the macroblock as a 16x16 partition for each list's
+reference index, then again inside `PredictMv` for its motion vector. `SpatialDirectNeighbors` finds them once a
+list for both, in MBAFF frames and field pictures with `AffMotionNeighbors` (so `CheckMotionNeighbors` checks them
+too). Callgrind (AOT, steady loops): 435.8 to 426.4 M instructions a loop of `h264-mbaff-default` (-2.2%), 78.14 to
+77.17 M of `jm-paff-b` (-1.2%); frames gain nothing (`h264-b-motion.mp4` -0.01%: their lookups inline). Under the JIT
+(perf, 150 loops, six runs each, alternating, normalized as above) `h264-mbaff-default` took a median 2.2% less, all
+six runs faster.
 
 A profile of a
 720p libx264 default stream (2026-10-22) is flat: CABAC residual decoding takes 14%, deblocking 21%

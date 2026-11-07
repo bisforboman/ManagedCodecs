@@ -14,11 +14,24 @@ inlined into `MjpegDecoder.DecodeBlock` (which also clears and dequantizes the b
 | `HuffmanTable.Decode` (the combined table's misses) | 5.1% | 4.2% |
 | Entropy decoding in all | about 73% | about 44% |
 | `SimpleIdct` (`PutAvx2`, `PutDcOnly`, `CheckDestination`) | 10.7% | 16.1% |
-| Building the Huffman tables (`SpanHelpers.Fill`, `AddCoefficientEntries`) | 0.2% | 7.7% |
+| `SpanHelpers.Fill` (flat blocks' rows, from `PutDcOnly`) | – | 5.6% |
+| Building the Huffman tables (`AddCoefficientEntries`, the constructor) | 0.2% | about 1% |
 
-`noise-q1.avi` (noise at the highest quality) is nearly all coefficients; on `testsrc-420.avi` the transform and the
-tables weigh more. FFmpeg's encoder writes a DHT in every frame, and each one builds its four tables again: about 6
-to 8% of `testsrc-420.avi`'s profile, which a cache of the last tables by their DHT bytes would save (not done here).
+`noise-q1.avi` (noise at the highest quality) is nearly all coefficients; on `testsrc-420.avi` the transform weighs
+more, and so do its flat blocks: `PutDcOnly` fills each of a block's eight rows through `Span.Fill`, a call to
+`SpanHelpers.Fill` each (a call graph, `perf record -g`, attributed them: 3.9% from `PutDcOnly`, 1.7% from it inlined
+into `DecodeScan`).
+
+### Reusing the Huffman tables: tried and dropped (#359)
+
+The first reading of this profile put `SpanHelpers.Fill` (5.6%) with the tables' construction, since FFmpeg's encoder
+writes a DHT in every frame, and #359 proposed reusing the last table of a slot when a DHT repeats it. The call graph
+showed otherwise: building the tables is about 1% of `testsrc-420.avi`'s profile. And FFmpeg's encoder writes optimal
+tables, computed for each frame (its `-huffman optimal` default): of the 200 tables in `testsrc-420.avi`, 39 repeat the
+one before them in their slot (20 of 100 in `noise-q1.avi`, 17 of 100 in `testsrc-444.avi`). A cache would save about
+a fifth of 1%, below anything perf or the wall clock resolves here, so it was not made. Only streams whose tables
+never change (cameras with the Annex K tables, as `testsrc-stdhuff.avi`: one DHT repeated) would gain, and there by
+the same 1% at most.
 
 ## The change
 

@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Playing a video file in a game engine (issue #352; docs/decisions/2026-10-31-game-engines.md): a thread that
+       demuxes, decodes and converts to RGBA ahead of playback, and the game loop's pull of the frame that is due. No
+       engine's API: MonoGame, Godot and Unity (through ManagedCodecs.Unity, which compiles these sources) each copy the
+       frames into their own texture. A package of its own, so a consumer who only decodes takes on none of it. -->
+  <PropertyGroup>
+    <RootNamespace>ManagedCodecs.Playback</RootNamespace>
+    <PackageId>ManagedCodecs.Playback</PackageId>
+    <Description>Video playback for game engines (MonoGame, FNA, Godot .NET, Stride): H.264 or MJPEG with AAC from MP4, Matroska, WebM or AVI, decoded on a thread of its own into RGBA frames for a texture and 32-bit float stereo for a sound, in pure managed C#.</Description>
+    <PackageTags>$(PackageTags);playback;video-player;game;monogame;godot</PackageTags>
+    <IsAotCompatible>true</IsAotCompatible>
+    <!-- No release of this package on nuget.org yet, so package validation has no baseline to compare with (the one in
+         Directory.Build.props is the other packages'); the pull request that sets the baseline after its first release
+         removes this line. -->
+    <PackageValidationBaselineVersion></PackageValidationBaselineVersion>
+  </PropertyGroup>
+
+  <!-- Its own page on nuget.org in place of the shared PACKAGE.md (Directory.Build.props). -->
+  <ItemGroup>
+    <None Remove="$(MSBuildThisFileDirectory)..\..\PACKAGE.md" />
+    <None Include="PACKAGE.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="ManagedCodecs.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ManagedCodecs.Core\ManagedCodecs.Core.csproj" />
+    <ProjectReference Include="..\ManagedCodecs.Containers\ManagedCodecs.Containers.csproj" />
+    <ProjectReference Include="..\ManagedCodecs.Mjpeg\ManagedCodecs.Mjpeg.csproj" />
+    <ProjectReference Include="..\ManagedCodecs.H264\ManagedCodecs.H264.csproj" />
+    <ProjectReference Include="..\ManagedCodecs.Aac\ManagedCodecs.Aac.csproj" />
+  </ItemGroup>
+
+</Project>

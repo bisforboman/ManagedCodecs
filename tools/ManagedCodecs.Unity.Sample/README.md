@@ -13,23 +13,24 @@ build; whether Unity runs it as intended needs a Unity install, which nobody has
 
 1. Add `ManagedCodecs.Unity` (NuGetForUnity, or the DLL and `System.Runtime.CompilerServices.Unsafe` in
    `Assets/Plugins`; its package page says how).
-2. Copy into `Assets/`: `ManagedCodecsVideo.cs`, `IsExternalInit.cs`, and mcplay's `MediaSource.cs` and `YuvToRgba.cs`
-   (`tools/ManagedCodecs.MonoGame`), which this project links. Not `UnityEngineStubs.cs`.
+2. Copy into `Assets/`: `ManagedCodecsVideo.cs` and `IsExternalInit.cs`. Not `UnityEngineStubs.cs`.
 3. Put a video in `Assets/StreamingAssets/`, add `ManagedCodecsVideo` to an object with a renderer (a quad), and set
    its file name.
 
 ## What it does
 
-- A thread of its own demuxes and decodes ahead (`MediaSource`, as mcplay: H.264 with frame threading, up to 4
-  threads) and converts each frame to RGBA on the CPU (`YuvToRgba`, by the frame's own matrix and range).
-- `Update` shows the newest frame due by a clock started at the first frame and drops late ones, through one
-  `Texture2D` (`RGBA32`, `LoadRawTextureData` and `Apply`), handing each frame's pixels back to `MediaSource.Return`
+- The package's `MediaPlayer` (ManagedCodecs.Playback's sources) demuxes and decodes ahead on a thread of its own
+  (H.264 with frame threading, up to 4 threads) and converts each frame to RGBA on the CPU, by the frame's own matrix
+  and range.
+- `Update` shows the newest frame due by a clock started at the first frame (`MediaPlayer.TakeFrame` drops late ones),
+  through one `Texture2D` (`RGBA32`, `LoadRawTextureData` and `Apply`), handing each frame's pixels back to
+  `MediaPlayer.Return`
   once copied or dropped, for a later frame (no new array each frame). Unity's textures start at the bottom row, so the
   material flips the image (`mainTextureScale` y -1) instead of turning every frame over in memory.
 - Audio streams through an `AudioClip` (`AudioClip.Create` with a reader callback, which runs on Unity's audio thread)
-  as 16-bit stereo turned to floats, made once the first audio gives the rate.
+  as the decoder's float stereo, made once the first audio gives the rate.
 - Not for WebGL: it has no threads, and the decoder thread is the sample's design. On Android, StreamingAssets lie in
-  the APK: read the file with `UnityWebRequest` into a `MemoryStream`, which `Demuxer.Open` takes.
+  the APK: read the file with `UnityWebRequest` into a `MemoryStream`, which `MediaPlayer` takes.
 - Speed on Mono: the package's page has the table. Audio, MJPEG and small videos play; 720p H.264 decodes at about
   12.5 frames a second on one thread.
 

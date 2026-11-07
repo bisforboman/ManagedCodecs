@@ -897,6 +897,14 @@ differently without inlining it: the profile's total over `Cabac.ResidualBlock`,
 to 4.56. Tier-1 code is compiled after the classes' static constructors have run, so it also drops the
 class-initialization checks and folds `static readonly` values as constants, which mcdec's tiering off cannot (docs/benchmarking.md).
 Where the rest goes is an open question (#346).
+Kept after all (2026-11-07, #372): on GitHub's runners, which resolve what this VM cannot, the same attributes on 24
+callees (the 23 above and `WeightOne`) took the steady
+frame to 0.966 to 0.983 of main's on ARM64 and 0.974 to 0.989 on x64 (a Xeon 8370C). That is `compare.yml`, five
+H.264 samples, medians of 7 interleaved runs, every one of the ten lower. Against main after #358 and #370 it was
+0.962 to 0.985 and 0.983 to 0.996 (an EPYC 7763), all ten lower again. The whole process went to 0.99 to 1.05: the JIT
+compiles the larger methods at startup. The ARM64 runner's instruction samples (`profile.yml`, `event: instructions`) put it at
+-2.5% of `h264-high-default.mp4`'s frame against PGO's -12.6%. So inlining is about a fifth of PGO's gain, and the
+rest is how PGO compiles the large methods (#346).
 
 Deeper samples' kernels next (#337, 2026-11-07). Above 8 bits the bi-predicted average, the explicit and implicit
 weights and the 4x4, 8x8 and DC-only inverse transform adds were the by-the-definition loops over spans. They now run

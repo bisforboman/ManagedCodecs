@@ -789,6 +789,7 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
     /// One residual block by either entropy coder, into <paramref name="block"/> through
     /// <paramref name="scan"/> (cleared first); returns the number of nonzero levels.
     /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private int ReadBlock(SliceState slice, BitReader r, int mbAddr, BlockCategory category, int x, int y, int component, int maxNumCoeff, Span<int> block, ReadOnlySpan<byte> scan)
     {
         block.Clear();
@@ -820,6 +821,7 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
     // scan position 4 * k + i4 (7.3.5.3), so row i4 here holds those positions' raster indices.
     private static readonly byte[] Cavlc8x8Scan = [.. Enumerable.Range(0, 64).Select(i => Transform.ZigZag8x8[(4 * (i % 16)) + (i / 16)])];
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void ReadResidual(SliceState slice, BitReader r, int mbAddr, Residual residual, bool is16x16, int cbpLuma, int cbpChroma)
     {
         Span<byte> chromaCounts = _totalCoeffChroma.AsSpan(mbAddr * 16, 16);
@@ -869,6 +871,7 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
     /// residual_luma (7.3.5.3) of <paramref name="component"/>: luma, or in 4:4:4 Cb (1) or Cr (2),
     /// whose blocks are luma blocks of ctxBlockCat 6 to 9 and 10 to 13.
     /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void ReadResidualLuma(SliceState slice, BitReader r, int mbAddr, Residual residual, bool is16x16, int cbpLuma, int component)
     {
         Span<byte> counts = _totalCoeff[component].AsSpan(mbAddr * 16, 16);

@@ -67,6 +67,7 @@ internal sealed class Cabac
     }
 
     /// <summary>DecodeDecision (9.3.3.2.1) with context variable <paramref name="ctxIdx"/>.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public int Decision(int ctxIdx)
     {
         int range = _range;

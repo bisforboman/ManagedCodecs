@@ -199,6 +199,7 @@ internal sealed partial class PictureDecoder<TPixel>
     }
 
     // ---- mb_skip_flag, mb_type, sub_mb_type (9.3.3.1.1.1, 9.3.3.1.1.3, 9.3.3.1.2) ----
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private int SkipFlagInc(int mbAddr)
     {
         int a = EdgeNeighborMb(mbAddr, -1, 0);
@@ -355,6 +356,7 @@ internal sealed partial class PictureDecoder<TPixel>
     /// <summary>ref_idx_lX of the partition whose top-left luma sample is (x, y) in the macroblock: unary, ctxIdxOffset 54.</summary>
     private int CabacRefIdx(Cabac c, int list, int mbAddr, int x, int y, int maxRef)
     {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         int RefInc(int nx, int ny)
         {
             var (n, xW, yW) = EdgeNeighbor(mbAddr, nx, ny);
@@ -395,9 +397,11 @@ internal sealed partial class PictureDecoder<TPixel>
     /// One component of mvd_l0 for the partition at (x, y): UEG3 with signedValFlag 1 and uCoff 9,
     /// ctxIdxOffset 40 (horizontal) or 47 (vertical).
     /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private int CabacMvd(Cabac c, int list, int mbAddr, int x, int y, int component)
     {
         byte[] absMvd = _absMvd[list][component];
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         int AbsMvd(int nx, int ny)
         {
             if (nx >= 0 && ny >= 0)
@@ -446,6 +450,7 @@ internal sealed partial class PictureDecoder<TPixel>
     }
 
     /// <summary>Records |mvd| over a partition for the contexts of later partitions.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void StoreAbsMvd(int list, int mbAddr, int x, int y, int w, int h, int mvdX, int mvdY)
     {
         byte absX = (byte)Math.Min(Math.Abs(mvdX), 127);
@@ -562,6 +567,7 @@ internal sealed partial class PictureDecoder<TPixel>
         {
             int x = (b8 & 1) * 8;
             int y = (b8 >> 1) * 8;
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
             int LumaCond(int nx, int ny)
             {
                 if (nx >= 0 && ny >= 0)
@@ -617,6 +623,7 @@ internal sealed partial class PictureDecoder<TPixel>
     /// (<paramref name="x"/>, <paramref name="y"/>) of the macroblock, of component
     /// <paramref name="component"/> (chroma, or in 4:4:4 the luma-shaped blocks of Cb and Cr).
     /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private int CodedBlockFlagInc(int mbAddr, BlockCategory category, int x, int y, int component)
     {
         // A 4x4 luma block's neighbours inside the macroblock: their own counts (the macroblock is not I_PCM).
@@ -679,6 +686,7 @@ internal sealed partial class PictureDecoder<TPixel>
     /// the significance map with contexts of their own. The luma categories of
     /// <paramref name="component"/> 1 and 2 are 4:4:4's Cb and Cr blocks (ctxBlockCat 6 to 13).
     /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static int CabacResidualBlock(Cabac c, BlockCategory category, int component, int codedBlockFlagInc, bool field, int maxNumCoeff, Span<int> block, ReadOnlySpan<byte> scan)
     {
         if (category == BlockCategory.Luma8x8)

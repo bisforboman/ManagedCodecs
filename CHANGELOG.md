@@ -20,6 +20,9 @@ run time.
 - H.264: in MBAFF frames and field pictures, CABAC's context selection reads a macroblock's left and above neighbours
   from a table found once a macroblock instead of a call each: about 1.6% fewer instructions in CABAC MBAFF frames
   and 1.7% in field pictures.
+- HE-AAC: SBR's gains smoothed over time (a header with bs_smoothing_mode 0) and parametric stereo's mixing run in
+  vectors, to the same bits: SBR's envelope adjuster takes about half its share of such a frame, about 8% of it, and
+  the mixing about a fifth less of an HE-AAC v2 frame's 5 to 8%.
 
 ## 0.8.1 – 2026-11-07
 

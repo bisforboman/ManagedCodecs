@@ -504,7 +504,7 @@ inlined (#200, about 3%), and SBR's and parametric stereo's last 256-bit-only lo
 NEON assembly (about 16% faster than its C one on the same runner), and AAC's FFT is about 20% of an ARM64 frame
 against 11% on x64, likely because ours works on 2 doubles a vector where FFmpeg's works on 4 floats (not
 confirmed; fusing two FFT stages a pass gained only 1 to 2% and was dropped). Fusing the bit reversal with the
-first stage and vectorizing the post-twiddle (#339) later took 12 to 15% off AAC LC on a cloud VM: the twiddles had
+first stage and vectorizing the post-twiddle (#339) later took 19 to 23% off AAC LC on x64 and 15 to 17% on ARM64 (hosted runners): the twiddles had
 cost as much as the FFT itself (docs/notes/aac-stages-2026-11.md, which also finds that 5.1's ratio being above stereo's
 comes from FFmpeg's cost per frame, not from our FFT). The IMDCT in single precision, four floats a vector (#343),
 then took 13 to 15% off AAC LC's steady frame on ARM64 and 5 to 10% on x64 (`compare.yml` against #339's double

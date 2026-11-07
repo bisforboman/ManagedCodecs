@@ -1,3 +1,5 @@
+using System.Runtime.CompilerServices;
+
 namespace ManagedCodecs.H264;
 
 /// <summary>Direct prediction of B_Skip, B_Direct_16x16 and B_Direct_8x8 (H.264 clause 8.4.1.2).</summary>
@@ -40,6 +42,7 @@ internal sealed partial class PictureDecoder<TPixel>
     /// 8.4.1.2.2: reference indices and motion vectors predicted from the neighbouring macroblocks
     /// (as for a 16x16 partition), set to zero motion in blocks whose co-located block is still.
     /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private bool SpatialDirect(SliceState slice, int mbAddr, int first, int count)
     {
         int ref0 = SpatialDirectRefIdx(0, mbAddr);
@@ -116,6 +119,7 @@ internal sealed partial class PictureDecoder<TPixel>
     }
 
     /// <summary>refIdxLX of spatial direct prediction: MinPositive over the neighbours A, B and C (or D).</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private int SpatialDirectRefIdx(int list, int mbAddr)
     {
         var a = MotionNeighbor(list, mbAddr, -1, 0, 0);

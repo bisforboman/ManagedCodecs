@@ -790,6 +790,7 @@ internal static class Transform
     /// <see cref="InverseTransformAdd"/> for a block whose only nonzero coefficient is the DC
     /// <paramref name="dc"/> (already scaled): every residual sample is then (dc + 32) &gt;&gt; 6.
     /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static void AddDc<TPixel>(int dc, Span<TPixel> dest, int stride, int bitDepth)
         where TPixel : unmanaged
     {

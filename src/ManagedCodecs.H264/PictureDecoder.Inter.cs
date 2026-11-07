@@ -439,6 +439,7 @@ internal sealed partial class PictureDecoder<TPixel>
         }
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void StartInterMacroblock(SliceState slice, int mbAddr, MbKind kind)
     {
         _sliceOfMb[mbAddr] = slice.Number;
@@ -773,6 +774,7 @@ internal sealed partial class PictureDecoder<TPixel>
         Combine(picture.Cb.AsSpan(chromaOut), chromaStride, w >> 1, h >> 1, 1);
         Combine(picture.Cr.AsSpan(chromaOut), chromaStride, w >> 1, h >> 1, 2);
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         void Combine(Span<byte> output, int outputStride, int width, int height, int component)
         {
             int column = component == 2 ? 8 : 0;
@@ -954,6 +956,7 @@ internal sealed partial class PictureDecoder<TPixel>
     }
 
     /// <summary>Weighted prediction from one list (8-449, 8-450).</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void WeightOne(ReadOnlySpan<TPixel> prediction, int stride, int width, int height, Span<TPixel> output, int outputStride, PartitionWeights weights, int list, int component)
     {
         int logWd = weights.LogWd(component);

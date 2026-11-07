@@ -531,4 +531,10 @@ MUTATIONS = [
          find="_target = (long)Math.Round(seconds * video.TimeBase.Denominator / video.TimeBase.Numerator, MidpointRounding.AwayFromZero);",
          replace="_target = (long)Math.Ceiling(seconds * video.TimeBase.Denominator / video.TimeBase.Numerator);",
          tests="DisplayName~testsrc-420.at610"),
+    # MediaPlayer.TakeFrame takes a frame as due from half the interval before its time: a game ticking at the video's
+    # rate sums a clock that falls a rounding error short of some frames, which a due-at-its-exact-time rule shows late
+    # and then drops (the Godot sample's first run, issue #352).
+    dict(file="src/ManagedCodecs.Playback/MediaPlayer.cs",
+         find="if (_next.Time - _next.Lead > position)", replace="if (_next.Time > position)",
+         tests="DisplayName~ClockAtTheFrameRate"),
 ]

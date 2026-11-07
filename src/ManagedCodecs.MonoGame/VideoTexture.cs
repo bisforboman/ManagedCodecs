@@ -26,6 +26,7 @@ public sealed class VideoTexture : IDisposable
     private bool _noAudio;
     private bool _playing;
     private bool _clockStarted;
+    private readonly Queue<AudioChunk> _early = new();
     private TimeSpan _clock;
     private float _volume = 1;
     private Rational _sampleAspectRatio;
@@ -152,7 +153,6 @@ public sealed class VideoTexture : IDisposable
             _clock += gameTime.ElapsedGameTime;
         }
 
-        SubmitAudio();
         if (Player.TakeFrame(_clock) is { } frame)
         {
             _clockStarted = true;
@@ -167,6 +167,8 @@ public sealed class VideoTexture : IDisposable
             _sampleAspectRatio = frame.SampleAspectRatio;
             Player.Return(frame);
         }
+
+        SubmitAudio();
     }
 
     /// <summary>
@@ -234,11 +236,23 @@ public sealed class VideoTexture : IDisposable
         return bytes;
     }
 
-    // Keeps a few buffers queued; the first audio sets the rate. Without an audio device the audio is taken and dropped,
-    // so that its bounded queue doesn't stop the decoding thread.
+    // Keeps a few buffers queued; the first audio sets the rate. The sound starts with the clock, at the first frame: the
+    // first audio comes out of the decoder before the first frame (frame threading's delay and more), so until then it
+    // is held here, not left in the player's bounded queue, which would stop the decoding before the first frame.
+    // Without an audio device the audio is taken and dropped, so that its bounded queue doesn't stop the decoding thread.
     private void SubmitAudio()
     {
-        while ((_sound is null || _sound.PendingBufferCount < QueuedBuffers) && Player.TakeAudio() is { } chunk)
+        if (!_clockStarted)
+        {
+            while (Player.TakeAudio() is { } early)
+            {
+                _early.Enqueue(early);
+            }
+
+            return;
+        }
+
+        while ((_sound is null || _sound.PendingBufferCount < QueuedBuffers) && (_early.TryDequeue(out var chunk) || (chunk = Player.TakeAudio()) is not null))
         {
             if (_noAudio)
             {

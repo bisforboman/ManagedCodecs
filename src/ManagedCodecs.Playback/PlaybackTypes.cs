@@ -51,6 +51,10 @@ public sealed class RgbaFrame
 
     /// <summary>The width of a pixel over its height: shown this much wider (0/0 or 1/1 for square pixels).</summary>
     public Rational SampleAspectRatio { get; }
+
+    // How long before Time the frame counts as due (MediaPlayer.TakeFrame): half the interval before it, so that a clock
+    // a rounding error short of Time, or a tick early by vsync's jitter, shows it rather than nothing.
+    internal TimeSpan Lead { get; init; }
 }
 
 /// <summary>Decoded audio: interleaved stereo, 32-bit float (-1 to 1), at <see cref="SampleRate"/>.</summary>

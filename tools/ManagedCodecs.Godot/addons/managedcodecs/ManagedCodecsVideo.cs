@@ -1,4 +1,11 @@
+// The usings and the nullable context are this file's own: a user's Godot project turns on neither implicit usings
+// nor nullable annotations, unlike this repository.
+#nullable enable
+
+using System;
+using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
 using System.Reflection;
 using Godot;
 using ManagedCodecs.H264;
@@ -22,6 +29,7 @@ public partial class ManagedCodecsVideo : TextureRect
     private double _clock = -1;
     private AudioStreamGeneratorPlayback? _playback;
     private (float[] Samples, int Used)? _pending;
+    private readonly Queue<AudioChunk> _early = new();
     private int _shown;
     private double _lastReport;
 
@@ -71,8 +79,6 @@ public partial class ManagedCodecsVideo : TextureRect
             return;
         }
 
-        PushAudio();
-
         // The clock starts with the first frame (due at zero) and runs by the frames' delta from then on.
         _clock = _clock < 0 ? 0 : _clock + delta;
         var due = _player.TakeFrame(TimeSpan.FromSeconds(_clock));
@@ -89,6 +95,8 @@ public partial class ManagedCodecsVideo : TextureRect
             _player.Return(due);
             _shown++;
         }
+
+        PushAudio();
 
         if (_clock - _lastReport >= 5)
         {
@@ -160,12 +168,25 @@ public partial class ManagedCodecsVideo : TextureRect
     }
 
     // Decoded float stereo into the generator, as much as its buffer takes; the generator and its player are made once
-    // the first audio gives the rate (HE-AAC's output is twice its core's).
+    // the first frame is shown, so that the sound starts with the picture's clock (the first audio comes out of the
+    // decoder before the first frame, by frame threading's delay and more), at the rate the first audio gives (HE-AAC's
+    // output is twice its core's). Until then the audio is held here rather than in the player's bounded queue, which
+    // would stop the decoding before the first frame.
     private void PushAudio()
     {
         if (_playback is null)
         {
-            if (_pending is null && _player!.TakeAudio() is { } first)
+            while (_player!.TakeAudio() is { } early)
+            {
+                _early.Enqueue(early);
+            }
+
+            if (_shown == 0)
+            {
+                return;
+            }
+
+            if (_pending is null && (_early.TryDequeue(out var first) || (first = _player.TakeAudio()) is not null))
             {
                 var player = new AudioStreamPlayer { Stream = new AudioStreamGenerator { MixRate = first.SampleRate, BufferLength = 0.5f } };
                 AddChild(player);
@@ -185,7 +206,7 @@ public partial class ManagedCodecsVideo : TextureRect
         {
             if (_pending is null)
             {
-                if (_player!.TakeAudio() is not { } chunk)
+                if (!_early.TryDequeue(out var chunk) && (chunk = _player!.TakeAudio()) is null)
                 {
                     return;
                 }

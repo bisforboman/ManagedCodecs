@@ -48,6 +48,9 @@ What nobody has checked yet, and how. Report in a new issue, one line a run (iss
 3. **Runs.** Each in the editor (F5), then in an exported desktop build (the export templates for .NET).
 4. **Record**, for each run: the Godot version, the OS and CPU, and the last line the sample prints (every 5 seconds and
    on quitting): `ManagedCodecsVideo: 1280x720, 1500 frames shown, 3 dropped, ms a frame: decode 9.1, RGBA conversion
-   2.0`. A steadily growing dropped count means playback doesn't keep up; the two times say which part is short.
+   2.0`. A steadily growing dropped count means playback doesn't keep up. The decode time is the decoding thread's wait
+   for the decoder's threads, near zero while they keep ahead, so it can't be compared across resolutions; the RGBA
+   conversion's is its cost a frame. The csproj builds the decoders in Release whatever Godot's configuration (issue
+   #402: Debug ones were about 4 times slower at 1080p).
    Also whether the picture is upright and its colours right (compare with VLC), whether the sound plays without gaps
    and in sync, and the first error in the output panel, if any.

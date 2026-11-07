@@ -4,12 +4,23 @@
        TextureRect that plays a video file into an ImageTexture, its audio through an AudioStreamGenerator, decoded by
        the ManagedCodecs.Playback package. CI
        builds it with the Godot .NET SDK from nuget.org; Godot itself (the editor, which runs it) is not installed
-       there, so it has not been run (README.md). -->
+       there. First runs, on Windows: issue #402 (README.md). -->
   <PropertyGroup>
     <AssemblyName>ManagedCodecs.Godot</AssemblyName>
     <RootNamespace>ManagedCodecs.GodotAddon</RootNamespace>
     <IsPackable>false</IsPackable>
   </PropertyGroup>
+
+  <!-- Always Release: the .NET SDK optimises only a configuration named Release, and Godot builds Debug (F5, the command
+       line), ExportDebug or ExportRelease, which would all reach the decoders unoptimised, about 4 times slower at
+       1080p (issue #402). An item definition, so that it also reaches the references the SDK adds transitively (the
+       decoders), which would otherwise build in Godot's configuration. A game using the package from nuget.org gets
+       its Release build anyway. -->
+  <ItemDefinitionGroup>
+    <ProjectReference>
+      <SetConfiguration>Configuration=Release</SetConfiguration>
+    </ProjectReference>
+  </ItemDefinitionGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\ManagedCodecs.Playback\ManagedCodecs.Playback.csproj" />

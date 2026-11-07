@@ -5,8 +5,8 @@ audio) in Godot 4's .NET build. Godot itself plays only Ogg Theora; this decodes
 [ManagedCodecs](https://github.com/bisforboman/ManagedCodecs) packages, so the same file plays on every desktop platform
 the .NET build exports to. Not for web exports: Godot's C# can't export to the web yet.
 
-**Not yet run in Godot.** It is built against Godot's C# API (GodotSharp 4.7.2) in CI, but nobody has played a video with it
-in Godot yet. A report helps (repository README, "Testing it in Godot").
+**First runs:** Godot 4.7.2 on Windows, 480p and 1080p H.264 (issue #402). Sound, the editor's F5 and an exported build
+are not checked yet. A report helps (repository README, "Testing it in Godot").
 
 ## Installing
 
@@ -29,7 +29,11 @@ in Godot yet. A report helps (repository README, "Testing it in Godot").
 
 The node reads the whole file into memory (right for cutscenes, not for films), keeps the picture's aspect ratio
 (`StretchMode` keep-aspect-centred), streams the sound through an `AudioStreamPlayer` child and prints a line every 5
-seconds: frames shown and dropped, and the decoding's and RGBA conversion's time a frame. A phone video's rotation is
+seconds: frames shown and dropped, the time the decoding thread waited for the decoder a frame (near zero while its
+threads keep ahead) and the RGBA conversion's time a frame. Built against the repository's sources instead of the
+package, reference them in Release (`SetConfiguration="Configuration=Release"`, as this repository's
+`ManagedCodecs.Godot.csproj` does): Godot's own configurations leave them unoptimised, several times slower, and the
+node warns. A phone video's rotation is
 not applied; turn the node.
 
 MIT licensed (LICENSE). H.264 is covered by patents in some countries (the Via LA AVC pool): whether a game that

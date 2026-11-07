@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 #if NET
+using System.Numerics;
 using System.Runtime.Intrinsics;
 #endif
 
@@ -487,14 +488,16 @@ internal sealed class PsProcessor
         // The transient detector: each parameter band's power by slot, against its smoothed peak.
         var ratio = _ratio;
         Span<double> power = stackalloc double[MaxBins];
+        Span<double> qmfEnergy = stackalloc double[64];
         int ducked = 0;
         for (int i = 0; i < Slots; i++)
         {
             power.Clear();
             var hybridRe = _leftRe[i];
             var hybridIm = _leftIm[i];
-            var rowRe = re[i];
-            var rowIm = im[i];
+            int qmfFirst = layout.GroupBorders[layout.SubQmfGroups];
+            int qmfEnd = layout.GroupBorders[layout.Groups];
+            Energies(re[i].AsSpan(qmfFirst, qmfEnd - qmfFirst), im[i].AsSpan(qmfFirst, qmfEnd - qmfFirst), qmfEnergy[qmfFirst..qmfEnd]);
             for (int gr = 0; gr < layout.Groups; gr++)
             {
                 // Each band's sum in subband order, as it was added to power[bin] one by one.
@@ -509,25 +512,14 @@ internal sealed class PsProcessor
                 {
                     for (int sb = layout.GroupBorders[gr]; sb < layout.GroupBorders[gr + 1]; sb++)
                     {
-                        sum += (rowRe[sb] * rowRe[sb]) + (rowIm[sb] * rowIm[sb]);
+                        sum += qmfEnergy[sb];
                     }
                 }
 
                 power[bin] = sum;
             }
 
-            var slotRatio = ratio[i];
-            for (int bin = 0; bin < layout.Bins; bin++)
-            {
-                double p = power[bin];
-                double peak = Math.Max(_peakDecay[bin] * PeakDecay, p);
-                double difference = _peakDifference[bin] + (EnergySmoothing * (peak - p - _peakDifference[bin]));
-                double energy = _energy[bin] + (EnergySmoothing * (p - _energy[bin]));
-                (_peakDecay[bin], _peakDifference[bin], _energy[bin]) = (peak, difference, energy);
-                bool transient = TransientImpact * difference > energy;
-                slotRatio[bin] = transient ? energy / (TransientImpact * difference) : 1;
-                ducked += transient ? 1 : 0;
-            }
+            ducked += TransientRatios(power[..layout.Bins], _peakDecay, _peakDifference, _energy, ratio[i]);
         }
 
         statistics.PsDuckedSlots += ducked;
@@ -1117,6 +1109,139 @@ internal sealed class PsProcessor
         h12 = Math.Sqrt(2) * sinAlpha * cosGamma;
         h21 = -Math.Sqrt(2) * sinAlpha * sinGamma;
         h22 = Math.Sqrt(2) * cosAlpha * sinGamma;
+    }
+
+    /// <summary>
+    /// Each subband's energy, re squared plus im squared (8.6.4.5's transient detector, before the bands' sums), four (two
+    /// with Vector128 alone) at a time, each lane as <see cref="EnergiesScalar"/> does it (<c>PsDetector_MatchesScalar</c>).
+    /// </summary>
+    internal static void Energies(ReadOnlySpan<double> re, ReadOnlySpan<double> im, Span<double> energies)
+    {
+        int count = energies.Length;
+        if (re.Length < count || im.Length < count)
+        {
+            throw new ArgumentException("Each energy takes a sample.");
+        }
+
+        int sb = 0;
+#if NET
+        if (Vector256.IsHardwareAccelerated)
+        {
+            for (; sb + 4 <= count; sb += 4)
+            {
+                var r = Vector256.Create(re.Slice(sb, 4));
+                var m = Vector256.Create(im.Slice(sb, 4));
+                ((r * r) + (m * m)).CopyTo(energies[sb..]);
+            }
+        }
+        else if (Vector128.IsHardwareAccelerated)
+        {
+            for (; sb + 2 <= count; sb += 2)
+            {
+                var r = Vector128.Create(re.Slice(sb, 2));
+                var m = Vector128.Create(im.Slice(sb, 2));
+                ((r * r) + (m * m)).CopyTo(energies[sb..]);
+            }
+        }
+#endif
+
+        EnergiesScalar(re[sb..], im[sb..], energies[sb..]);
+    }
+
+    /// <summary><see cref="Energies"/> one subband at a time: the reference for it, and its tail.</summary>
+    internal static void EnergiesScalar(ReadOnlySpan<double> re, ReadOnlySpan<double> im, Span<double> energies)
+    {
+        for (int sb = 0; sb < energies.Length; sb++)
+        {
+            energies[sb] = (re[sb] * re[sb]) + (im[sb] * im[sb]);
+        }
+    }
+
+    /// <summary>
+    /// The transient detector's slot (8.6.4.5): each bin's <paramref name="power"/> against its decaying peak
+    /// (<paramref name="peakDecay"/>), the smoothed difference from it (<paramref name="peakDifference"/>) and the
+    /// smoothed energy (<paramref name="energy"/>), all three updated, and the ducking ratio into
+    /// <paramref name="ratio"/>: below 1 where 1.5 times the difference exceeds the energy. Returns how many bins
+    /// ducked. Four (two with Vector128 alone) bins at a time, each lane as <see cref="TransientRatiosScalar"/> does it
+    /// (<c>PsDetector_MatchesScalar</c>).
+    /// </summary>
+    internal static int TransientRatios(ReadOnlySpan<double> power, Span<double> peakDecay, Span<double> peakDifference, Span<double> energy, Span<double> ratio)
+    {
+        int count = power.Length;
+        if (peakDecay.Length < count || peakDifference.Length < count || energy.Length < count || ratio.Length < count)
+        {
+            throw new ArgumentException("Each bin takes its peak, difference, energy and ratio.");
+        }
+
+        int bin = 0;
+        int ducked = 0;
+#if NET
+        if (Vector256.IsHardwareAccelerated)
+        {
+            var decay = Vector256.Create(PeakDecay);
+            var smoothing = Vector256.Create(EnergySmoothing);
+            var impact = Vector256.Create(TransientImpact);
+            for (; bin + 4 <= count; bin += 4)
+            {
+                var p = Vector256.Create(power.Slice(bin, 4));
+                var lastDifference = Vector256.Create(peakDifference.Slice(bin, 4));
+                var lastEnergy = Vector256.Create(energy.Slice(bin, 4));
+                var peak = Vector256.Max(Vector256.Create(peakDecay.Slice(bin, 4)) * decay, p);
+                var difference = lastDifference + (smoothing * (peak - p - lastDifference));
+                var smoothed = lastEnergy + (smoothing * (p - lastEnergy));
+                peak.CopyTo(peakDecay[bin..]);
+                difference.CopyTo(peakDifference[bin..]);
+                smoothed.CopyTo(energy[bin..]);
+                var scaled = impact * difference;
+                var transient = Vector256.GreaterThan(scaled, smoothed);
+                Vector256.ConditionalSelect(transient, smoothed / scaled, Vector256<double>.One).CopyTo(ratio[bin..]);
+                ducked += BitOperations.PopCount(transient.ExtractMostSignificantBits());
+            }
+        }
+        else if (Vector128.IsHardwareAccelerated)
+        {
+            var decay = Vector128.Create(PeakDecay);
+            var smoothing = Vector128.Create(EnergySmoothing);
+            var impact = Vector128.Create(TransientImpact);
+            for (; bin + 2 <= count; bin += 2)
+            {
+                var p = Vector128.Create(power.Slice(bin, 2));
+                var lastDifference = Vector128.Create(peakDifference.Slice(bin, 2));
+                var lastEnergy = Vector128.Create(energy.Slice(bin, 2));
+                var peak = Vector128.Max(Vector128.Create(peakDecay.Slice(bin, 2)) * decay, p);
+                var difference = lastDifference + (smoothing * (peak - p - lastDifference));
+                var smoothed = lastEnergy + (smoothing * (p - lastEnergy));
+                peak.CopyTo(peakDecay[bin..]);
+                difference.CopyTo(peakDifference[bin..]);
+                smoothed.CopyTo(energy[bin..]);
+                var scaled = impact * difference;
+                var transient = Vector128.GreaterThan(scaled, smoothed);
+                Vector128.ConditionalSelect(transient, smoothed / scaled, Vector128<double>.One).CopyTo(ratio[bin..]);
+                ducked += BitOperations.PopCount(transient.ExtractMostSignificantBits());
+            }
+        }
+#endif
+
+        return ducked + TransientRatiosScalar(power[bin..], peakDecay[bin..], peakDifference[bin..], energy[bin..], ratio[bin..]);
+    }
+
+    /// <summary><see cref="TransientRatios"/> one bin at a time: the reference for it, and its tail.</summary>
+    internal static int TransientRatiosScalar(ReadOnlySpan<double> power, Span<double> peakDecay, Span<double> peakDifference, Span<double> energy, Span<double> ratio)
+    {
+        int ducked = 0;
+        for (int bin = 0; bin < power.Length; bin++)
+        {
+            double p = power[bin];
+            double peak = Math.Max(peakDecay[bin] * PeakDecay, p);
+            double difference = peakDifference[bin] + (EnergySmoothing * (peak - p - peakDifference[bin]));
+            double smoothed = energy[bin] + (EnergySmoothing * (p - energy[bin]));
+            (peakDecay[bin], peakDifference[bin], energy[bin]) = (peak, difference, smoothed);
+            bool transient = TransientImpact * difference > smoothed;
+            ratio[bin] = transient ? smoothed / (TransientImpact * difference) : 1;
+            ducked += transient ? 1 : 0;
+        }
+
+        return ducked;
     }
 
     /// <summary>

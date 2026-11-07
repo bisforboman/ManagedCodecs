@@ -371,4 +371,51 @@ public class PsTests
             Assert.Equal(expectedIm.Select(BitConverter.DoubleToInt64Bits), actualIm.Select(BitConverter.DoubleToInt64Bits));
         }
     }
+
+    /// <summary>
+    /// The transient detector's vector paths, the subbands' energies and the bins' peak, smoothing and ratio, do each
+    /// lane's arithmetic in the scalar order: the same energies, state, ratios and count of ducked bins to the bit, slot
+    /// after slot, for 20 and 34 bins and a tail, with powers spread over decades so that some bins duck and some don't.
+    /// </summary>
+    [Theory]
+    [InlineData(20)]
+    [InlineData(34)]
+    [InlineData(3)]
+    public void PsDetector_MatchesScalar(int count)
+    {
+        var random = new Random(count);
+        double Next() => random.NextDouble() * Math.Pow(10, random.Next(-4, 5));
+        double[] Values(int n) => [.. Enumerable.Range(0, n).Select(_ => Next())];
+        static IEnumerable<long> Bits(double[] values) => values.Select(BitConverter.DoubleToInt64Bits);
+
+        double[] re = Values(61);
+        double[] im = Values(61);
+        var expectedEnergies = new double[61];
+        var actualEnergies = new double[61];
+        PsProcessor.EnergiesScalar(re, im, expectedEnergies);
+        PsProcessor.Energies(re, im, actualEnergies);
+        Assert.Equal(Bits(expectedEnergies), Bits(actualEnergies));
+
+        double[][] expected = [new double[count], new double[count], new double[count]];
+        double[][] actual = [new double[count], new double[count], new double[count]];
+        int ducked = 0;
+        for (int slot = 0; slot < 40; slot++)
+        {
+            double[] power = Values(count);
+            var expectedRatio = new double[count];
+            var actualRatio = new double[count];
+            int expectedDucked = PsProcessor.TransientRatiosScalar(power, expected[0], expected[1], expected[2], expectedRatio);
+            int actualDucked = PsProcessor.TransientRatios(power, actual[0], actual[1], actual[2], actualRatio);
+            Assert.Equal(expectedDucked, actualDucked);
+            Assert.Equal(Bits(expectedRatio), Bits(actualRatio));
+            for (int k = 0; k < 3; k++)
+            {
+                Assert.Equal(Bits(expected[k]), Bits(actual[k]));
+            }
+
+            ducked += expectedDucked;
+        }
+
+        Assert.InRange(ducked, 1, (40 * count) - 1);
+    }
 }

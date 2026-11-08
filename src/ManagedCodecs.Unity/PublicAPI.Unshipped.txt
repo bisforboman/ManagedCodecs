@@ -1,1 +1,3 @@
 #nullable enable
+const ManagedCodecs.CodecIds.Mp3 = "MP3" -> string!
+ManagedCodecs.Playback.MediaPlayer.SkippedAudioCodec.get -> string?

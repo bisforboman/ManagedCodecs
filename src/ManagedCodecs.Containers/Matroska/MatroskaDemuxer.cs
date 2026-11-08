@@ -924,6 +924,7 @@ public sealed class MatroskaDemuxer : IDemuxer
             "V_MJPEG" => CodecIds.Mjpeg,
             "V_MPEG4/ISO/SP" or "V_MPEG4/ISO/ASP" or "V_MPEG4/ISO/AP" => CodecIds.Mpeg4Visual,
             _ when codecId == "A_AAC" || codecId.StartsWith("A_AAC/", StringComparison.Ordinal) => CodecIds.Aac,
+            "A_MPEG/L3" => CodecIds.Mp3,
             _ => codecId,
         };
 

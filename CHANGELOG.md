@@ -13,12 +13,27 @@ run time.
 
 ## Unreleased
 
+### Added
+
+- Playback: `MediaPlayer.SkippedAudioCodec` names a file's audio when it isn't played (only AAC is decoded), such as
+  MP3, so a video playing silent can say why. The Godot node, the Unity sample and mcplay print a warning with it
+  (#415).
+- `CodecIds.Mp3`: MP3 (MPEG-1 and MPEG-2 audio) in MP4 (object types 0x6B and 0x69, QuickTime's `.mp3` and `ms\0U`
+  entries) and Matroska (`A_MPEG/L3`). Demuxed, not decoded.
+
 ### Changed
 
+- Containers: an MP3 track's `Codec` is now `CodecIds.Mp3` (`"MP3"`), where it was the sample entry's name in MP4
+  (`mp4a`, `.mp3`) and `A_MPEG/L3` in Matroska.
 - H.264: in MBAFF frames and field pictures, a macroblock edge between two macroblocks of one kind, each with one
   motion and no coefficients, takes one bS for its four segments, as in frames, and the top edges are found without an
   allocation per macroblock: about 3.7% fewer instructions in MBAFF and field streams, 1 to 2% of their time under the
   JIT.
+
+### Fixed
+
+- Thumbnails: `VideoProbe`'s duration counted an MP4 audio track from its first packet's start when the edit list
+  starts inside it (MP3's encoder delay, 1105 samples), 25 ms too long; it now starts where the edit does, as ffprobe's.
 
 ## 0.9.1 – 2026-11-08
 

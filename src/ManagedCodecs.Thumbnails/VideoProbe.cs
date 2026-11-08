@@ -73,7 +73,8 @@ public static class VideoProbe
 
     /// <summary>
     /// As ffprobe's <c>format=duration</c> (FFmpeg's update_stream_timings): from the earliest stream start to the
-    /// latest stream end, a stream starting at its first packet shown (packets an edit only decodes left out) and
+    /// latest stream end, a stream starting at its first packet shown (packets an edit only decodes left out; past the
+    /// samples it skips, MP3's encoder delay inside its first packet) and
     /// lasting its container duration (<see cref="VideoStreamInfo.Duration"/>), or to the end of its last packet where
     /// the container gives none. Matroska's: the Segment's Duration, or, in a file without one (a live recording, for
     /// which ffprobe gives none), from the first packet shown to the end of the last.
@@ -100,11 +101,17 @@ public static class VideoProbe
             _ => [],
         };
 
+        // SkipSamples counts decoded samples; the packets' times are in the stream's time base.
+        int sampleRate = demuxer.Audio?.SampleRate ?? 0;
+        int audioIndex = demuxer.Audio?.StreamIndex ?? -1;
         foreach (var packet in packets)
         {
             if (!packet.Discard && streams.TryGetValue(packet.StreamIndex, out var s))
             {
-                streams[packet.StreamIndex] = s with { Start = Math.Min(s.Start, packet.Pts), End = Math.Max(s.End, packet.Pts + packet.Duration) };
+                long skip = packet.SkipSamples > 0 && packet.StreamIndex == audioIndex && sampleRate > 0 && s.TimeBase.Numerator > 0
+                    ? packet.SkipSamples * (long)s.TimeBase.Denominator / ((long)sampleRate * s.TimeBase.Numerator)
+                    : 0;
+                streams[packet.StreamIndex] = s with { Start = Math.Min(s.Start, packet.Pts + skip), End = Math.Max(s.End, packet.Pts + packet.Duration) };
             }
         }
 

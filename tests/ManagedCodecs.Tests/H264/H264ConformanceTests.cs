@@ -80,8 +80,8 @@ public class H264ConformanceTests
 
     /// <summary>
     /// The same with <see cref="H264Decoder.CheckMbaffStrengths"/>: in MBAFF frames and field pictures, the bS of each
-    /// macroblock edge's four segments found at once (what holds for the edge found once) are compared with those found
-    /// segment by segment, for every such edge of every sample.
+    /// macroblock edge's four segments found at once (what holds for the edge found once), and of each line of a left edge
+    /// between pairs of different kinds, are compared with those found segment by segment, for every such edge of every sample.
     /// </summary>
     [Theory]
     [MemberData(nameof(Samples))]

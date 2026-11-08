@@ -772,8 +772,13 @@ intra's 3 and 4 fails 62 of them). Callgrind (AOT, steady loops): 378.9 to 357.3
 `h264-mbaff-default` (-5.7%), -6.8% in `h264-mbaff-p`, -6.2% in `jm-paff-b`, -4.8% in `h264-422-mbaff-default`, -2.5%
 in `h264-mbaff-intra`; `h264-bench-720p.mp4` the same to 0.001% by function (its steady loops +0.04%, layout). Under
 the JIT (perf, 150 loops, six runs each, alternating, normalized by CABAC, motion compensation and the edge filters)
-`h264-mbaff-default` took a median 2.5% less, five runs of six faster. Left: the left edge between pairs of different
-kinds, still a `MbaffStrength` a line (16 an edge, half of them repeats).
+`h264-mbaff-default` took a median 2.5% less, five runs of six faster. The left edge between pairs of different kinds
+then (2026-11-08): each of its 16 lines meets a macroblock of the other kind, so its bS is 4 for intra, else 2 for
+coefficients, else 1, never the motion's; the three macroblocks' intra is found once and the left pair's two
+`LumaPlace`s too, and `CheckMbaffStrengths` compares every line with `MbaffStrength` (bS 3 for coefficients fails 25
+of its tests and 186 MBAFF ones against FFmpeg). Callgrind (AOT, steady loops): -0.5% in `h264-mbaff-p`, -0.15 to
+-0.22% in `h264-mbaff-default`, `h264-mbaff-intra` and `h264-422-mbaff-default`, nothing in field pictures (no mixed
+pairs) or frames: such edges are rare in these samples; too little for the JIT's runs to resolve.
 
 A profile of a
 720p libx264 default stream (2026-10-22) is flat: CABAC residual decoding takes 14%, deblocking 21%

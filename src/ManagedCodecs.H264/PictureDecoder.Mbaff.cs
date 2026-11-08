@@ -844,17 +844,30 @@ internal sealed partial class PictureDecoder<TPixel>
             }
             else if (left)
             {
+                // Pairs of different kinds: every line meets a macroblock of the other kind, so its bS (MbaffStrength)
+                // is 4 for intra, else 2 for coefficients, else 1, never the motion's; intra and the left pair's two
+                // places are found once.
                 bool leftField = _fieldMb[leftTop];
+                bool intraQ = IsIntra(mbAddr);
+                bool intraTop = IsIntra(leftTop);
+                bool intraBottom = IsIntra(leftTop + 1);
+                var topPlace = LumaPlace(leftTop);
+                var bottomPlace = LumaPlace(leftTop + 1);
                 for (int y = 0; y < 16; y++)
                 {
                     var (p, yP) = AffLeft(leftTop, leftField, !field, isTop, y, 16);
                     const int xP = 15;
-                    leftLines[y] = (byte)MbaffStrength(p, ((yP >> 2) * 4) + 3, mbAddr, (y >> 2) * 4, horizontalEdge: false);
-                    if (leftLines[y] != 0)
+                    bool upper = p == leftTop;
+                    int blockP = ((yP >> 2) * 4) + 3;
+                    int blockQ = (y >> 2) * 4;
+                    leftLines[y] = intraQ || (upper ? intraTop : intraBottom) ? (byte)4 : HasCoefficients(p, blockP) || HasCoefficients(mbAddr, blockQ) ? (byte)2 : (byte)1;
+                    if (CheckMbaffStrengths && leftLines[y] != MbaffStrength(p, blockP, mbAddr, blockQ, horizontalEdge: false))
                     {
-                        var (pOrigin, pStride) = LumaPlace(p);
-                        FilterMbaffLumaLine(pOrigin + (yP * pStride) + xP, 1, luma + (y * lumaStride), 1, leftLines[y], _qp[p], qp, slice);
+                        throw new InvalidOperationException($"Macroblocks {p} and {mbAddr}, left line {y}: bS {leftLines[y]} for mixed pairs, {MbaffStrength(p, blockP, mbAddr, blockQ, horizontalEdge: false)} by segment.");
                     }
+
+                    var (pOrigin, pStride) = upper ? topPlace : bottomPlace;
+                    FilterMbaffLumaLine(pOrigin + (yP * pStride) + xP, 1, luma + (y * lumaStride), 1, leftLines[y], _qp[p], qp, slice);
                 }
             }
 

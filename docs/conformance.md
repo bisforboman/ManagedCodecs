@@ -749,6 +749,18 @@ from `CabacNeighbor`). Callgrind (AOT, steady loops): 126.2 to 122.2 M instructi
 (`jm-paff-b` +0.14%: every fill paid for them, and every CABAC lookup for the extra test, for about 0.3% of the intra
 sample), and `EdgeNeighbor` testing for MBAFF after the table's cases rather than for frames first (`h264-bench-720p`
 +0.03%: the frame path of `PredictIntra4x4Mode` compiled worse).
+4:2:2 MBAFF chroma deblocking next (2026-11-08): `DeblockMbaffChroma422` took 23% of `h264-422-mbaff-intra-4x4`'s
+instructions. It filtered the left edge line by line, each line with a general Table 6-4 lookup (`AffNeighbor`, any
+slice) and `ChromaPlace`, and the top edge line by line too, where luma and 4:2:0 chroma filter a plain edge whenever
+they can. Now, as there: the left edge between pairs of one kind is a plain vertical edge of four segments of four
+lines (`FilterEdge`, as `DeblockChroma422` in frames), between pairs of different kinds line by line from `AffLeft`
+with the left pair's two places found once (the 4:2:0 path finds them once too), and the top edge a plain horizontal
+edge where p0 is the line above q0 at q's step. Breaking each of the three paths fails 58 to 96 of the 4:2:2 MBAFF and
+field samples' tests. Callgrind (AOT, steady loops): 168.3 to 137.6 M instructions a loop of
+`h264-422-mbaff-intra-4x4` (-18.2%), -16.7% in `h264-422-mbaff-default` and `h264-422-mbaff-p`, no change in 4:2:0
+(`h264-mbaff-default` -0.03%, `jm-paff-b`, `h264-bench-720p.mp4`). Under the JIT (perf, 150 loops, six runs each,
+alternating, normalized by CABAC residual decoding, intra reconstruction and the inverse transforms, which it leaves
+alone) `h264-422-mbaff-default` took a median 11.4% less, all six runs faster.
 
 A profile of a
 720p libx264 default stream (2026-10-22) is flat: CABAC residual decoding takes 14%, deblocking 21%

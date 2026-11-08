@@ -21,6 +21,11 @@ and `VideoTexture`'s sound starts with the picture. H.264 intra prediction is a 
 - H.264: intra prediction's vertical, horizontal and DC modes (4x4, 8x8, chroma DC) write a row at a time: 10% fewer
   instructions in an 8-bit intra-only stream under Native AOT, about 1% of its time under the JIT. The output is
   unchanged.
+- H.264: 16x16 and chroma intra prediction (vertical, horizontal, DC, plane) also write a row at a time: 1 to 5% fewer
+  instructions in intra-only streams under Native AOT, within noise under the JIT. The output is unchanged.
+- H.264: Intra_8x8 vertical, horizontal and DC filter only the edge they predict from, straight from the picture: about
+  2% faster under the JIT on High profile streams, intra-only or not (2.5 to 3.4% fewer instructions under Native
+  AOT). The output is unchanged.
 
 ### Fixed
 

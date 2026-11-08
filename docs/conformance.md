@@ -976,6 +976,53 @@ the intra functions' samples over those of functions it leaves alone (`Cabac.Res
 the inverse transforms) fell from a median 0.233 to 0.212, every run of the branch below every run of the base, about
 a point of the frame; the whole decoder's over the same set by 0.3%, within the runs' spread. Left: the 8x8 edges'
 filter (`FilteredEdges8x8`, now the largest intra function by count), plane prediction and the diagonal modes.
+Then 16x16 and chroma's other modes a row at a time (#393, 2026-11-08): vertical, horizontal and 16x16 DC as rows
+copied or filled, plane prediction stepped by its gradient along each row (the same integer sums), all read from refs
+anchored at the corner, where each row went through `Span.CopyTo` or `Span.Fill` and each plane sample through its
+equation and a bounds check; `Predict16x16Reference` and `PredictChromaReference` keep the old code, compared in
+`IntraPredictionTests` as above. Callgrind (AOT, x86-64-v3, loops 2 minus 1, against main after #400): -5.2% on
+`h264-intra`, -2.6% on `h264-422-intra`, -2.1% on `h264-high-intra`, -1.1% on `h264-10bit-intra`, -0.52% on
+`h264-bench-720p`, -0.23% on `h264-10bit-b`. Under the JIT it is within noise: by perf (six runs each, the order
+alternating, normalized as above) the intra functions with `Span.Fill` and `Memmove` fell from 0.262 to 0.249 on
+`h264-intra` and 0.210 to 0.196 on `h264-high-intra`, about 0.2% of the frame.
+Tried and dropped (#393, 2026-11-08): the diagonal modes faster on top of that. First as the parallel branch
+`h264-intra-vectors` had them: every directional 4x4 and 8x8 sample is one of the edge's three-tap filters or two-tap
+averages, so those were computed once a block and a table per mode said which each sample takes. Then, for
+Diagonal_Down_Left, Diagonal_Down_Right and Vertical_Left only, whose rows are runs of those filters (row y from
+k = 10 + y, 8 - y, and 9 + y / 2 or 10 + y / 2), each run computed once into a row of samples and copied a row at a
+time, the 4x4 edge gathered in a helper of its own so that the commoner modes don't set up its stack space. Both
+matched the reference on `IntraPredictionTests`' random planes (a single wrong table entry failed 6 of its 11 tests).
+Callgrind (AOT, x86-64-v3) against main after #400, the tables: +0.7% on `h264-intra` (loops 2 minus 1), and (loops
+4 minus 1) +0.35% on `h264-high-intra`, +0.45% on
+`h264-main-intra`, +0.09% on `h264-high-intra-qp4` (noise, where other modes than vertical, horizontal and DC are most
+4x4 blocks) and +0.06% on `h264-bench-720p`; the rows: +0.07, +0.16, -0.25 and 0.00%. The sample-by-sample code
+compiles to little more than a filter a sample, which computing the filters once and copying them barely beats, and
+the extra dispatch costs the common modes about as much: under a quarter of a point on intra-only noise at best.
+(Before #400 the tables together with row writes for the flat modes counted -11.7% on `h264-intra`: the flat modes'
+share.)
+Then `Require` (the check that a mode's neighbours exist, called once a block) and chroma's mode mapping inlined, their
+throws in methods of their own (#393, from #412, 2026-11-08): the JIT inlines no method that throws. By perf (300
+loops, six pairs each, the order alternating, normalized by `Cabac.ResidualBlock`, the deblocking filters and the
+inverse transforms) the intra functions fell by a median 12% on `h264-high-intra` and 9% on `h264-main-intra`, the
+branch below the base in all twelve pairs: about half a point of an intra-only frame. Callgrind (AOT, loops 4 minus
+1): -0.84%, -0.93% and, on `h264-bench-720p`, -0.08%.
+Then Intra_8x8's vertical, horizontal and DC (most 8x8 blocks) without the edge array (#393, 2026-11-08): each
+filters (8.3.2.2.1) only the edge it reads, straight from the plane through refs, into the first row, each row's value
+or the DC sums, where `FilteredEdges8x8` cleared two 25-value arrays and filtered both edges through bounds-checked
+spans every block; the directional modes, and blocks at the plane's first row or column, keep it, the reference
+`IntraPredictionTests` compares the fast modes with (an off-by-one rounding fails 3 of its 19 tests). Callgrind (AOT,
+loops 4 minus 1, against the commit before): -3.4% on `h264-high-intra`, -2.5% on `h264-high-default` (P and B
+frames: their intra 8x8 blocks), -0.13% on `h264-high-intra-qp4` (noise, whose 8x8 blocks are more often
+directional). Under the JIT the gain is larger (perf, 300 loops, six pairs each, the order alternating): the intra
+functions' share fell from a median 6.1 to 3.9% of `h264-high-intra`'s samples and 4.1 to 1.9% of
+`h264-high-default`'s, every run of the branch below every run of the base: about two points of the frame on both.
+Looked for and not taken (2026-11-08): more of #414's kind, by perf of main's JIT build (`DOTNET_ReadyToRun=0`,
+`h264-high-default`, `h264-bench-720p`, `h264-high-intra`). Five hot functions still zero a `stackalloc` a call
+(`ReconstructIntraLuma`, `DecodeSubMacroblocks`, `InternalStrengths`, `TwoListStrengths`, `InverseLumaDc`), but of 16
+to 64 bytes each: a few stores, not #414's two 100-byte clears and both edges filtered. The largest clear is
+`ResetInter`'s `Array.Clear` of the picture's motion arrays (native `memset`, 1.2% of `h264-bench-720p`'s samples,
+less on CABAC); dropping it needs every decoded and concealed macroblock to write its own entries first, since
+pictures are reused and direct prediction reads a reference's co-located motion: left for a point at most.
 The per-partition path (`PredictFromOne`, `PredictFromTwo`: one call to the kernels a component, without
 `PartitionPlace`, `Weighting` for default bi-prediction or `PredictComponent`) then took frame macroblocks of frames
 at any depth and in 4:2:2 too, not only 8-bit 4:2:0; MBAFF frames and field pictures keep `PredictPartitionGeneral`.
@@ -1157,6 +1204,12 @@ frame against the double banks) gave 0.90 on `heaac-5.1.mp4` and 0.93 on `heaacv
 on x64 (AAC LC, which the banks don't touch, 1.01 and 0.99); the final code, against main with #363's gains in vectors,
 0.91 and 0.94 on ARM64, 0.92 and 0.95 on x64 (AAC LC 1.01 and 1.00); and against main with #382's reorder from a
 source (which the float FFT keeps) and #384, 0.91 and 0.94 on ARM64, 0.93 and 0.96 on x64 (AAC LC 1.00 and 1.02).
+The profile after those (2026-11-08, perf of the JIT build, `heaac-5.1.mp4`, 1000 loops, `DOTNET_ReadyToRun=0`):
+the windowing's `SumOfProducts` 11.0% (7.7 points in synthesis, 3.3 in analysis), the FFTs' vector stages 9.5%, the
+full synthesis bank 4.9%, its pretransform 4.6%, the IMDCT 3.9%, the HF generator's covariances 3.6%, the core's
+spectral data 3.5%, and nothing else above 3.3%; `SbrChannel.MoveOn`'s and `GenerateHighBand`'s clears 1.9% together.
+No function holds waste of #414's kind (H.264, above), and the two largest already had their tries (single-precision
+windowing, above; slots across lanes, below): left as it is.
 
 The QMF transforms across time slots, one slot a vector lane, tried for speed and dropped (2026-11-07, #338). By perf
 the transforms take about 24% of `heaac-5.1.mp4`'s frame: the FFTs' vector stages 8.3%, their bit-reversal and first

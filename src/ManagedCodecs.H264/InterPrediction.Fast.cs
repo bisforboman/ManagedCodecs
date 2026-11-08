@@ -390,17 +390,27 @@ internal static partial class InterPrediction
         int left = Math.Clamp(-x, 0, width);
         int right = Math.Clamp(x + width - 1 - maxX, 0, width);
         int inside = width - left - right;
+
+        // Most windows reach past the picture on one side or none: a fill of no samples still costs a call into
+        // CoreLib (about 20 instructions; #346).
         for (int j = 0; j < height; j++)
         {
             var row = window.Slice(j * windowStride, width);
             int sy = Math.Clamp(y + j, 0, maxY) * stride;
-            row[..left].Fill(plane[sy]);
+            if (left > 0)
+            {
+                row[..left].Fill(plane[sy]);
+            }
+
             if (inside > 0)
             {
                 plane.Slice(sy + x + left, inside).CopyTo(row[left..]);
             }
 
-            row[(left + inside)..].Fill(plane[sy + maxX]);
+            if (right > 0)
+            {
+                row[(left + inside)..].Fill(plane[sy + maxX]);
+            }
         }
     }
 

@@ -984,11 +984,22 @@ equation and a bounds check; `Predict16x16Reference` and `PredictChromaReference
 `h264-intra`, -2.6% on `h264-422-intra`, -2.1% on `h264-high-intra`, -1.1% on `h264-10bit-intra`, -0.52% on
 `h264-bench-720p`, -0.23% on `h264-10bit-b`. Under the JIT it is within noise: by perf (six runs each, the order
 alternating, normalized as above) the intra functions with `Span.Fill` and `Memmove` fell from 0.262 to 0.249 on
-`h264-intra` and 0.210 to 0.196 on `h264-high-intra`, about 0.2% of the frame. Tried and dropped: the diagonal modes
-from per-mode tables of the edge's three-tap filters and two-tap averages, each computed once a block (bit-exact).
-Before #400 the tables with the row writes counted -11.7% on `h264-intra`, but on top of #400 they alone counted
-+0.7% (+0.3% on the High and 10-bit samples): building the filters costs more than the per-sample equations it
-replaces, at 1.4% of the frame.
+`h264-intra` and 0.210 to 0.196 on `h264-high-intra`, about 0.2% of the frame.
+Tried and dropped (#393, 2026-11-08): the diagonal modes faster on top of that. First as the parallel branch
+`h264-intra-vectors` had them: every directional 4x4 and 8x8 sample is one of the edge's three-tap filters or two-tap
+averages, so those were computed once a block and a table per mode said which each sample takes. Then, for
+Diagonal_Down_Left, Diagonal_Down_Right and Vertical_Left only, whose rows are runs of those filters (row y from
+k = 10 + y, 8 - y, and 9 + y / 2 or 10 + y / 2), each run computed once into a row of samples and copied a row at a
+time, the 4x4 edge gathered in a helper of its own so that the commoner modes don't set up its stack space. Both
+matched the reference on `IntraPredictionTests`' random planes (a single wrong table entry failed 6 of its 11 tests).
+Callgrind (AOT, x86-64-v3) against main after #400, the tables: +0.7% on `h264-intra` (loops 2 minus 1), and (loops
+4 minus 1) +0.35% on `h264-high-intra`, +0.45% on
+`h264-main-intra`, +0.09% on `h264-high-intra-qp4` (noise, where other modes than vertical, horizontal and DC are most
+4x4 blocks) and +0.06% on `h264-bench-720p`; the rows: +0.07, +0.16, -0.25 and 0.00%. The sample-by-sample code
+compiles to little more than a filter a sample, which computing the filters once and copying them barely beats, and
+the extra dispatch costs the common modes about as much: under a quarter of a point on intra-only noise at best.
+(Before #400 the tables together with row writes for the flat modes counted -11.7% on `h264-intra`: the flat modes'
+share.)
 The per-partition path (`PredictFromOne`, `PredictFromTwo`: one call to the kernels a component, without
 `PartitionPlace`, `Weighting` for default bi-prediction or `PredictComponent`) then took frame macroblocks of frames
 at any depth and in 4:2:2 too, not only 8-bit 4:2:0; MBAFF frames and field pictures keep `PredictPartitionGeneral`.

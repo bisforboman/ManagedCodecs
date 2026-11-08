@@ -14,7 +14,8 @@ run time.
 ## 0.10.0 – 2026-11-08
 
 MP3: the new package `ManagedCodecs.Mp3` decodes MPEG audio Layer III, the containers name MP3 tracks
-(`CodecIds.Mp3`), and `MediaPlayer` plays MP3 sound as it plays AAC (and names the audio it skips). H.264 MBAFF frames
+(`CodecIds.Mp3`) and read raw `.mp3` files gapless (`Mp3Demuxer`), and `MediaPlayer` plays MP3 sound as it plays AAC
+(and names the audio it skips). H.264 MBAFF frames
 decode faster: intra macroblocks in place, and fewer deblocking strength lookups. New public API, hence a minor
 version; code built against 0.9 keeps working.
 

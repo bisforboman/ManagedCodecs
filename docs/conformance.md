@@ -1000,6 +1000,12 @@ compiles to little more than a filter a sample, which computing the filters once
 the extra dispatch costs the common modes about as much: under a quarter of a point on intra-only noise at best.
 (Before #400 the tables together with row writes for the flat modes counted -11.7% on `h264-intra`: the flat modes'
 share.)
+Then `Require` (the check that a mode's neighbours exist, called once a block) and chroma's mode mapping inlined, their
+throws in methods of their own (#393, from #412, 2026-11-08): the JIT inlines no method that throws. By perf (300
+loops, six pairs each, the order alternating, normalized by `Cabac.ResidualBlock`, the deblocking filters and the
+inverse transforms) the intra functions fell by a median 12% on `h264-high-intra` and 9% on `h264-main-intra`, the
+branch below the base in all twelve pairs: about half a point of an intra-only frame. Callgrind (AOT, loops 4 minus
+1): -0.84%, -0.93% and, on `h264-bench-720p`, -0.08%.
 The per-partition path (`PredictFromOne`, `PredictFromTwo`: one call to the kernels a component, without
 `PartitionPlace`, `Weighting` for default bi-prediction or `PredictComponent`) then took frame macroblocks of frames
 at any depth and in 4:2:2 too, not only 8-bit 4:2:0; MBAFF frames and field pictures keep `PredictPartitionGeneral`.

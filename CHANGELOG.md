@@ -32,7 +32,8 @@ run time.
 - H.264: in MBAFF frames and field pictures, a macroblock edge between two macroblocks of one kind, each with one
   motion and no coefficients, takes one bS for its four segments, as in frames, and the top edges are found without an
   allocation per macroblock: about 3.7% fewer instructions in MBAFF and field streams, 1 to 2% of their time under the
-  JIT.
+  JIT. Motion vector prediction and the deblocking filter's top edge find their neighbours there without the general
+  neighbour lookup: about 1% more.
 
 ### Fixed
 

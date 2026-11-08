@@ -123,8 +123,9 @@ and code that reproduces FFmpeg's reading where it differs from the spec), and n
   does spatial direct prediction its three, once for both its uses (2.2% more), and intra prediction (3.2% off intra
   MBAFF frames, mostly by finding each left macroblock's place once), and 4:2:2 MBAFF chroma deblocking takes
   its left and top edges whole where the pairs allow (17% off 4:2:2 MBAFF streams), and the bS of
-  MBAFF macroblock edges come four segments at a time (6% more), but the other neighbour lookups
-  (intra availability's C and D, the deblocking filter's) are still a call each; their
+  MBAFF macroblock edges come four segments at a time (6% more), and motion vector prediction and the deblocking
+  filter's top edge read their neighbours from the edge table or find them directly (about 1% more), but the other
+  neighbour lookups (intra availability's C and D, motion prediction's D) are still a call each; their
   case analysis on (xN, yN) is not the cost (a table in its place counted no fewer instructions; docs/conformance.md, Performance notes;
   docs/decisions/2026-10-28-h264-neighbour-context.md).
   With 4 threads a 720p P chain takes 0.52 of one thread's time over 50 frames and 0.41 over 250 (one IDR picture

@@ -1155,19 +1155,26 @@ internal sealed partial class PictureDecoder<TPixel>
 
     /// <summary>
     /// A, B and C (D where C is not available) of a partition in an MBAFF frame or field picture: what
-    /// <see cref="MotionNeighbor"/> reads, with the pairs around the macroblock found once for the three or four
-    /// lookups (<see cref="AffPairsOf"/>) rather than once each.
+    /// <see cref="MotionNeighbor"/> reads. A at the left edge (a partition's rows start at 0, 4, 8 or 12), and B and
+    /// C in the row above, come from the macroblock's edge table (<see cref="AffEdgesOf"/>); only C above and to the
+    /// right of the macroblock and D go through Table 6-4, from the pairs found once (<see cref="AffPairsOf"/>).
     /// </summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
     private (Motion A, Motion B, Motion C) AffMotionNeighbors(int list, int mbAddr, int x, int y, int w, int current)
     {
-        ref readonly var pairs = ref AffPairsOf(mbAddr);
-        var a = MotionAt(list, mbAddr, current, x - 1 >= 0 ? (mbAddr, x - 1, y) : AffNeighbor(in pairs, x - 1, y, 16, 16));
-        var b = MotionAt(list, mbAddr, current, y - 1 >= 0 ? (mbAddr, x, y - 1) : AffNeighbor(in pairs, x, y - 1, 16, 16));
-        var c = MotionAt(list, mbAddr, current, y - 1 >= 0 && x + w < 16 ? (mbAddr, x + w, y - 1) : AffNeighbor(in pairs, x + w, y - 1, 16, 16));
+        var edges = AffEdgesOf(mbAddr);
+        int left = 2 * (y >> 2);
+        const int Above = 2 * AffEdgeAbove;
+        var a = MotionAt(list, mbAddr, current, x - 1 >= 0 ? (mbAddr, x - 1, y) : (edges[left], 15, edges[left + 1]));
+        var b = MotionAt(list, mbAddr, current, y - 1 >= 0 ? (mbAddr, x, y - 1) : (edges[Above], x, edges[Above + 1]));
+        var c = MotionAt(
+            list,
+            mbAddr,
+            current,
+            x + w >= 16 ? (y - 1 >= 0 ? (-1, 0, 0) : AffNeighbor(in AffPairsOf(mbAddr), x + w, -1, 16, 16)) : y - 1 >= 0 ? (mbAddr, x + w, y - 1) : (edges[Above], x + w, edges[Above + 1]));
         if (!c.Available)
         {
-            c = MotionAt(list, mbAddr, current, x - 1 >= 0 && y - 1 >= 0 ? (mbAddr, x - 1, y - 1) : AffNeighbor(in pairs, x - 1, y - 1, 16, 16));
+            c = MotionAt(list, mbAddr, current, x - 1 >= 0 && y - 1 >= 0 ? (mbAddr, x - 1, y - 1) : AffNeighbor(in AffPairsOf(mbAddr), x - 1, y - 1, 16, 16));
         }
 
         if (CheckMotionNeighbors)

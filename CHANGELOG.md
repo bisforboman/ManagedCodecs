@@ -28,6 +28,9 @@ run time.
 
 ### Fixed
 
+- MonoGame: `VideoTexture` opened its sound (and OpenAL's device) only at the first frame, which once delayed the
+  sound by 234 ms on a cold start. It now opens it as soon as the first audio is decoded and starts it at the first
+  frame: within about 10 ms of the picture.
 - Thumbnails: `VideoProbe`'s duration counted an MP4 audio track from its first packet's start when the edit list
   starts inside it (MP3's encoder delay, 1105 samples), 25 ms too long; it now starts where the edit does, as ffprobe's.
 

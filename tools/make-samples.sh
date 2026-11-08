@@ -638,15 +638,17 @@ ff -f lavfi -i "$mp3tones:s=44100" -c:a libshine -b:a 128k samples/mp3-shine.mp4
 ff -ss 0.5 -i samples/mp3-joint.mp4 -c copy samples/mp3-cut.mp4
 # Intensity stereo and mixed blocks, which neither encoder writes: LAME's MPEG-1 joint stereo (gated tones and clicks,
 # for short blocks), as raw frames without a tag, rewritten by tools/mp3-rewrite.py, in Matroska. Intensity stereo in
-# every frame (the bands above the right channel's last value, long and short blocks); mixed_block_flag on whole
-# switches to short blocks (start, short and stop blocks, where the short blocks' first scalefactors have no bits).
+# every frame (the bands above the right channel's last value, long and short blocks), with noise in the left channel
+# so that the last band holds values where the band below it is coded (band 21 takes band 20's position in MPEG-1, as
+# FFmpeg's); mixed_block_flag on whole switches to short blocks (start, short and stop blocks, where the short blocks'
+# first scalefactors have no bits: without the noise, which leaves none).
 mp3gated='0.4*sin(2*PI*440*t)*gt(mod(t\,0.3)\,0.15)+0.4*lt(mod(t\,0.25)\,0.002)*(random(0)-0.5)'
 mp3tmp=$(mktemp -d)
-ff -f lavfi -i "aevalsrc=$mp3gated+0.1*sin(2*PI*3000*t)|$mp3gated+0.1*sin(2*PI*3000*t+0.2):s=44100:d=2" -c:a libmp3lame \
-  -b:a 128k -write_xing 0 -id3v2_version 0 -f mp3 "$mp3tmp/joint.mp3"
-for tool in intensity mixed; do
-  python3 -I tools/mp3-rewrite.py "$mp3tmp/joint.mp3" "$mp3tmp/$tool.mp3" "$tool" > /dev/null
-  ff -i "$mp3tmp/$tool.mp3" -c copy "samples/mkv-mp3-$tool.mkv"
+for tool in intensity:'+0.05*(random(1)-0.5)' mixed:; do
+  ff -f lavfi -i "aevalsrc=$mp3gated+0.1*sin(2*PI*3000*t)${tool#*:}|$mp3gated+0.1*sin(2*PI*3000*t+0.2):s=44100:d=2" \
+    -c:a libmp3lame -b:a 128k -write_xing 0 -id3v2_version 0 -f mp3 "$mp3tmp/joint.mp3"
+  python3 -I tools/mp3-rewrite.py "$mp3tmp/joint.mp3" "$mp3tmp/${tool%%:*}.mp3" "${tool%%:*}" > /dev/null
+  ff -i "$mp3tmp/${tool%%:*}.mp3" -c copy "samples/mkv-mp3-${tool%%:*}.mkv"
 done
 rm -r "$mp3tmp"
 # Raw AAC in ADTS frames (the ADTS demuxer): stereo at 44.1 kHz, and 5.1 behind an ID3v2 tag (which the demuxer skips).

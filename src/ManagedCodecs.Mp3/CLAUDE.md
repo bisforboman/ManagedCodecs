@@ -30,7 +30,9 @@ FFmpeg's MP4 muxer refuses MPEG-2.5's rates (8, 11.025, 12 kHz): those samples a
 - FFmpeg's decoder (6.1) misses the ISO reference on the lower rates' intensity stereo (RMS 4e-2 on l3-test45): don't
   take it as the oracle there; the unit tests check the equations.
 - mixed_block_flag counts in start and stop blocks too: their lowest subbands take the normal window. Intensity
-  stereo's last band is the centre after a band the right channel codes a value in. Both missed the ISO streams'
-  reference once, and no LAME stream showed it.
+  stereo's last band at the lower rates is the centre after a band the right channel codes a value in; MPEG-1's copies
+  band 20's position (as FFmpeg's; the centre there was 1.6e-2 off it). Each missed the ISO streams' reference or
+  FFmpeg once. A sample must have values in the top band to show the last band's rule: LAME's lowpass leaves it empty
+  unless the signal has noise up there (mkv-mp3-intensity).
 - A test that stops at its first failing sample reports that sample's difference, not the largest: compare the whole
   output (largest, mean, where) before calling a difference rounding.

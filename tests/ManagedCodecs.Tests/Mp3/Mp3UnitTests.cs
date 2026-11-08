@@ -329,14 +329,15 @@ public class Mp3UnitTests
     }
 
     /// <summary>
-    /// The last band (long 21, short 12) has no scalefactor: after a band the right channel codes a value in it is the
-    /// centre, both channels the same share (MPEG-1's position 3, k = 1: half each; the lower rates' 0: both the left's
-    /// value), not that band's position, as the ISO/IEC 11172-4 streams l3-test45 and l3-test46 need it (they miss their
-    /// reference by 1e-3 otherwise).
+    /// The last band (long 21, short 12) has no scalefactor. At the lower rates, after a band the right channel codes a
+    /// value in, it is the centre (position 0: both channels the left's value), not that band's position, as the
+    /// ISO/IEC 11172-4 streams l3-test45 and l3-test46 need it (they miss their reference by 1e-2 otherwise); MPEG-1
+    /// copies band 20's position either way, as FFmpeg does (mkv-mp3-intensity, which reaches it, compares them).
     /// </summary>
     [Fact]
     public void LastBandIsTheCentreAfterACodedBand()
     {
+        // MPEG-1, long blocks: band 20 coded, band 21 takes its position 1.
         var header = Header(0xFB, 0x90, 0x50); // MPEG-1, 44.1 kHz, joint stereo (intensity only)
         var bands = Mp3Tables.LongBands[0];
         int[] positions = new int[40];
@@ -344,16 +345,27 @@ public class Mp3UnitTests
         var (left, rightSpectrum) = Spectra(6, bands[21]); // nonzero up to band 20's end
         var l0 = (double[])left.Clone();
         Stereo.Process(header, new Granule(), positions, new bool[40], left, rightSpectrum);
+        double k = Math.Tan(Math.PI / 12);
         for (int i = bands[21]; i < 576; i++)
         {
-            Assert.Equal(l0[i] / 2, left[i], 1e-12);
-            Assert.Equal(l0[i] / 2, rightSpectrum[i], 1e-12);
+            Assert.Equal(l0[i] * k / (1 + k), left[i], 1e-12);
+            Assert.Equal(l0[i] / (1 + k), rightSpectrum[i], 1e-12);
         }
 
-        // The lower rates, short blocks: window 1 codes a value in band 11, so its band 12 is the centre (position 0:
-        // both channels the left's value); window 0 doesn't, so its band 12 takes band 11's position (2: the right
-        // scaled by io^1).
+        // The lower rates, long blocks: band 20 coded, band 21 the centre; position 2 would scale the right by io.
         header = Header(0xF3, 0x80, 0x50); // MPEG-2, 22.05 kHz, joint stereo (intensity only)
+        bands = Mp3Tables.LongBands[3];
+        (left, rightSpectrum) = Spectra(7, bands[21]);
+        l0 = (double[])left.Clone();
+        Stereo.Process(header, new Granule { ScalefacCompress = 300 }, positions, new bool[40], left, rightSpectrum);
+        for (int i = bands[21]; i < 576; i++)
+        {
+            Assert.Equal(l0[i], left[i], 1e-12);
+            Assert.Equal(l0[i], rightSpectrum[i], 1e-12);
+        }
+
+        // Short blocks: window 1 codes a value in band 11, so its band 12 is the centre; window 0 doesn't, so its band
+        // 12 takes band 11's position (2: the right scaled by io^1).
         var shortBands = Mp3Tables.ShortBands[3];
         var right = new Granule { BlockType = 2, ScalefacCompress = 300 };
         positions = new int[40];

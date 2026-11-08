@@ -1383,7 +1383,7 @@ for, by the decoder's statistics:
 | mp3-shine | shine | a second encoder; count1 quadruples read past their granule's end |
 | mp3-cut | LAME, cut with `-c copy` | main data reaching back before the stream's start |
 | h264-mp3, h264-mp3-mov, mkv-h264-mp3 | LAME | MP3 beside H.264 in MP4, a MOV sample entry and Matroska |
-| mkv-mp3-intensity | LAME, rewritten | intensity stereo in every frame, long and short blocks |
+| mkv-mp3-intensity | LAME, rewritten | intensity stereo in every frame, long and short blocks, MPEG-1's last band |
 | mkv-mp3-mixed | LAME, rewritten | mixed blocks: short, and the start and stop blocks around them |
 
 `tools/mp3-rewrite.py` writes the last two from LAME's MPEG-1 joint stereo: it sets mode_extension's intensity bit
@@ -1422,10 +1422,12 @@ and a mutation entry each:
 
 - mixed_block_flag counts in start and stop blocks too: their two lowest subbands take the normal window (2.4.2.7).
   l3-si_block missed its reference by up to 3e-3 RMS a granule (and FFmpeg by 9e-3) while they took the block's own.
-- Intensity stereo's last band (long 21, short 12), which has no scalefactor, takes the band below's position only
-  where that band is in intensity stereo too; after a band the right channel codes a value in it is the centre (3 in
-  MPEG-1, 0 at the lower rates), as minimp3 reads it. l3-test45 and l3-test46 missed their reference by 1e-2 RMS in
-  some granules otherwise.
+- Intensity stereo's last band (long 21, short 12), which has no scalefactor, takes the band below's position at the
+  lower rates only where that band is in intensity stereo too; after a band the right channel codes a value in it is
+  the centre (position 0, both channels alike), as minimp3 reads it. l3-test45 and l3-test46 missed their reference by
+  1e-2 RMS in some granules otherwise. MPEG-1 copies band 20's position either way, as FFmpeg does: the centre there
+  was up to 1.6e-2 off FFmpeg on mkv-mp3-intensity (whose left channel has noise up into band 21 for it), and no ISO
+  stream this decoder takes settles it (l3-he_mode switches between mono and stereo, which it refuses).
 - A frame cut short (l3-compl's and l3-sin1k0db's last) decodes as far as its granules' data is there, as FFmpeg
   decodes it, where it was refused.
 

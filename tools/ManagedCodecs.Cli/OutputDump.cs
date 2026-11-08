@@ -4,6 +4,7 @@ using ManagedCodecs.Aac;
 using ManagedCodecs.Containers;
 using ManagedCodecs.H264;
 using ManagedCodecs.Mjpeg;
+using ManagedCodecs.Mp3;
 
 namespace ManagedCodecs.Cli;
 
@@ -28,7 +29,7 @@ public static class OutputDump
             CodecIds.H264 => new H264Decoder(video),
             _ => null,
         };
-        IAudioDecoder? audioDecoder = audio?.Codec == CodecIds.Aac ? new AacDecoder(audio) : null;
+        IAudioDecoder? audioDecoder = audio?.Codec switch { CodecIds.Aac => new AacDecoder(audio), CodecIds.Mp3 => new Mp3Decoder(audio), _ => null };
         using var hashes = videoDecoder is null ? null : new StreamWriter(prefix + ".video.md5");
         using var samples = audioDecoder is null ? null : new BinaryWriter(File.Create(prefix + ".audio.f32"));
         var packed = new MemoryStream();

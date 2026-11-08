@@ -1303,6 +1303,43 @@ complete prefix codes. Time deltas across a change between 10 and 20 bands take 
 resolution as PacketVideo does (no sample changes resolution; the phases the same between 5 and 11 bands, the 11th
 from 0), and to or from 34 bands take band b as it was, as FFmpeg does (the 34-band samples send frequency deltas across
 a change); extensions other than 0 are skipped.
+## MP3
+
+`Mp3Decoder` (MPEG audio Layer III, ISO/IEC 11172-3 and 13818-3, and MPEG-2.5) against FFmpeg's `mp3float`, sample by
+sample: name.mp3.f32 is every packet decoded whole (an MP4 edit list ignored) and name.mp3.trim.f32 FFmpeg's default
+output (the edit list's priming, LAME's 1105 samples, skipped in MP4; the end's DiscardPadding dropped in Matroska),
+within 2^-17 (`Mp3ConformanceTests`). Both work in floating point, FFmpeg in single precision with a fast DCT, this
+decoder in double by the definitions (the IMDCTs' sums, Annex A's synthesis), rounded at the end: measured at most
+1.55e-6 (mp3-24k), 2.4e-7 to 1.1e-6 on the others, means 2e-8 to 2.4e-7. Each sample is checked to use what it is
+for, by the decoder's statistics:
+
+| Sample | Encoder | What |
+| --- | --- | --- |
+| mp3-joint | LAME, VBR | mid/side, the bit reservoir |
+| mp3-320k | LAME, 48 kHz | the big-value tables with the most linbits |
+| mp3-stereo | LAME | left/right stereo, count1 table B |
+| mp3-mono, mp3-32k | LAME | mono; MPEG-1's third rate |
+| mp3-transient | LAME | short, start and stop blocks |
+| mp3-22k-transient, mp3-24k, mp3-16k | LAME | MPEG-2's rates (their scalefactors, one granule a frame), short blocks |
+| mkv-mp3-8k-transient, mkv-mp3-11k, mkv-mp3-12k | LAME, Matroska | MPEG-2.5's rates; short blocks at 8 kHz |
+| mp3-shine | shine | a second encoder; count1 quadruples read past their granule's end |
+| mp3-cut | LAME, cut with `-c copy` | main data reaching back before the stream's start |
+| h264-mp3, h264-mp3-mov, mkv-h264-mp3 | LAME | MP3 beside H.264 in MP4, a MOV sample entry and Matroska |
+
+What the specs leave to the decoder follows FFmpeg, each with a mutation entry and the sample that shows it: a
+granule whose main data lies before what the stream gave is skipped by its part2_3_length and comes out silent
+(mp3-cut); a count1 quadruple that reads past its granule's end is dropped (mp3-shine). Region 1 of a short block's
+big values starts after three short bands, 72 lines at 8 kHz (mkv-mp3-8k-transient: 36 there fails from the first
+short block).
+
+What no encoder at hand writes is covered by `Mp3UnitTests` against the spec's equations: intensity stereo (MPEG-1's
+tan(is_pos pi / 12) ratios, position 7 illegal; the lower rates' io powers, a partition's largest value illegal; the
+last long and short band taking the previous band's position; each short window's own bound), mixed blocks (long
+subbands below line 36, 72 at 8 kHz, aliasing reduced only between the first two), and the CRC (CRC-16/CMS's check
+value). Also there: every Huffman table is a complete prefix code decoding each codeword to its value, the cosines
+(`ExactMath`, the same bits on every runtime) match Math.Cos and Math.Sin, and the IMDCTs and synthesis are their
+definitions. Not decoded: free-format bitrates, Layers I and II.
+
 ## ADTS (raw AAC)
 
 Raw AAC files (ADTS, `AdtsDemuxer`) demux packet by packet as FFmpeg's

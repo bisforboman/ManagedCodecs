@@ -1,8 +1,8 @@
 # ManagedCodecs
 
 Pure managed C# media codecs: no native binaries, Native AOT friendly, and running on WebAssembly too. Decoders for
-MJPEG, H.264 (Constrained Baseline up to High 4:4:4 Predictive), AAC LC and HE-AAC, with AVI, MP4, Matroska/WebM and raw
-AAC (ADTS) demuxing, every one checked against FFmpeg sample by sample: video **bit-exact**, AAC LC within 2^-17 of FFmpeg's float
+MJPEG, H.264 (Constrained Baseline up to High 4:4:4 Predictive), AAC LC and HE-AAC, and MP3, with AVI, MP4, Matroska/WebM and raw
+AAC (ADTS) demuxing, every one checked against FFmpeg sample by sample: video **bit-exact**, AAC LC and MP3 within 2^-17 of FFmpeg's float
 output. H.264 decodes
 on several threads if asked, and every decoder has an async API.
 
@@ -37,7 +37,8 @@ in between. That comparison is not measured here.
 | `src/ManagedCodecs.MonoGame` | `VideoTexture`: `MediaPlayer` for MonoGame, into a `Texture2D` and a `DynamicSoundEffectInstance`, drawn letterboxed and upright; the `ManagedCodecs.MonoGame` package (see In-game video) |
 | `src/ManagedCodecs.Unity` | The netstandard2.1 build for Unity (Mono, IL2CPP): every decoder's sources (and Thumbnails' and Playback's) in one assembly, without the vector paths, 1 to 3.4 times slower on CoreCLR; the `ManagedCodecs.Unity` package (see Unity) |
 | `src/ManagedCodecs.Aac` | `AacDecoder`: AAC LC (mono to 7.1, M/S, intensity, PNS, TNS), within 5e-7 of FFmpeg's float output; HE-AAC (spectral band replication) |
-| `src/Shared` | Source files linked into several codec projects (the VLC decoder) |
+| `src/ManagedCodecs.Mp3` | `Mp3Decoder`: MPEG audio Layer III at every MPEG-1, MPEG-2 and MPEG-2.5 rate (mono to joint stereo, the bit reservoir), within 2e-6 of FFmpeg's float output |
+| `src/Shared` | Source files linked into several codec projects (the VLC decoder, powers and cosines with the same bits on every runtime) |
 | `tools/ManagedCodecs.Cli` | `mcdec`: decodes a file and times it, to compare with `ffmpeg -benchmark` (`--threads N` for H.264 frame threading and HE-AAC's channels) |
 | `tools/ManagedCodecs.Godot` | A Godot 4 (.NET) node that plays a video into an `ImageTexture` and an `AudioStreamGenerator` with `ManagedCodecs.Playback`, as an addon (`addons/managedcodecs/`, a global class) to copy into a game; CI builds it with the Godot .NET SDK, Godot has not run it |
 | `tools/ManagedCodecs.MonoGame.Sample` | `mcplay`: a MonoGame `Game` around `VideoTexture` (`ManagedCodecs.MonoGame`) (its README has the 1080p measurements; issue #254) |
@@ -85,10 +86,17 @@ and code that reproduces FFmpeg's reading where it differs from the spec), and n
   docs/conformance.md). Parametric stereo (HE-AAC v2): 10, 20 and 34 bands, mixing procedures Ra and Rb,
   the phase parameters (IPD and OPD), a mono stream decoded to stereo; within 5e-4 of FFmpeg's output, 7e-6 on average. A frame's channels
   through SBR on several threads (`Threads`).
+- **MP3** (MPEG audio Layer III): MPEG-1 (32, 44.1, 48 kHz), MPEG-2 (16, 22.05, 24) and MPEG-2.5 (8, 11.025, 12), mono,
+  stereo, dual channel and joint stereo (mid/side; intensity stereo by the spec's equations, which no encoder at hand
+  writes), long, short and mixed blocks, the bit reservoir (a frame reaching back before a cut stream's start comes
+  out silent, as FFmpeg's), CRCs checked; from MP4 and Matroska, within 2^-17 of FFmpeg's float output (measured:
+  under 2e-6, LAME and shine streams). The MP4 edit list trims the priming (LAME's 1105 samples), Matroska's
+  DiscardPadding the end. Not yet: free-format bitrates, Layers I and II, raw `.mp3` files, AVI audio, playback
+  (docs/decisions/2026-11-08-mp3-decoder.md).
 - **Containers**: AVI (video), MP4 (video and audio tracks, fragmented files too, edit lists of several edits),
   Matroska and WebM (video and audio tracks, every kind of lacing, BlockGroups, live files of unknown size, header
   stripping and zlib, the display rotation, DiscardPadding; VP9, AV1, Opus and other codecs this library doesn't decode
-  by their Codec IDs, MP3 as `CodecIds.Mp3` in MP4 and Matroska) and raw AAC (ADTS), with
+  by their Codec IDs; MP3 as `CodecIds.Mp3` in MP4 and Matroska) and raw AAC (ADTS), with
   packets and timestamps as FFmpeg's demuxers give them.
 - **Throughout**: an async API, malformed input that ends in `InvalidDataException` or `NotSupportedException`
   (fuzzed), and the same output on x64, ARM64 and WebAssembly, and under Native AOT (CI checks all of them).
@@ -690,6 +698,12 @@ too. The QMF banks' 640-tap window is libxaac's (in the spec's order), whose eve
 own analysis table to the digits it gives; so is the HF adjustment's noise table, whose real parts equal PacketVideo's
 digit for digit. AAC's noise substitution uses the Numerical Recipes random generator
 with the seed FFmpeg uses (the spec leaves the generator open), so noise bands match FFmpeg too.
+The MP3 tables of ISO/IEC 11172-3 Annex B (the Huffman code tables, the synthesis window, as integers over 65536, and
+the scalefactor band edges) were enumerated from PDMP3's decoding trees (public domain) and checked against minimp3's
+(CC0), codeword for codeword and value for value. The decoding process is written from 11172-3 and 13818-3; where
+their text was out of the sandbox's reach (the lower rates' scalefactor partitions and intensity positions, the
+regions of window-switching blocks), minimp3 was read for it, and FFmpeg's output settled what the specs leave open
+(a granule whose data a cut stream lacks, a count1 quadruple read past its granule's end); no code was copied.
 For MBAFF (the neighbour table 6-4, the field scans, the field CABAC context maps, the order of the
 deblocking filter's field edges and the co-located field or frame of direct prediction) the ITU's reference decoder, JM (royalty-free, from the ITU), stood
 in for the specification's text where that was out of reach; no code was copied.

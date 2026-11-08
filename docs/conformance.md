@@ -815,6 +815,20 @@ CABAC residual decoding, the edge filters and the motion compensation kernels) t
 frame by a median -2.0% and -0.6%, the second within the noise. What is left of the lookups out of line is intra
 availability's C and D (`IntraMbNeighbors`, once an intra macroblock), D of motion prediction, and `GatherPlane`'s
 places, each under half a percent of the profile.
+MBAFF intra in place (2026-11-08): the next profile put intra MBAFF's scratch path (reconstruction into a scratch
+block with the neighbouring samples gathered through Table 6-4, `GatherPlane` 5.2%, then `ScatterMbaff` 3.8% and
+memmoves) at about 13% of `h264-mbaff-intra`. It is not needed: an MBAFF frame keeps a field macroblock's rows
+interleaved, and every neighbouring sample Table 6-4 gives intra prediction is the one beside it in the picture at the
+macroblock's own row stride (column -1 the left pair's line at the same picture row, whatever the two pairs' kinds;
+row -1 the line one stride above, B, C and D alike), so intra macroblocks are reconstructed in place as in frames.
+The evidence beyond the case analysis: 36 of the 39 MBAFF samples have intra macroblocks beside a pair of the other
+kind (11 to 192 each, counted), and all decode as FFmpeg's. The scratch path stays as the reference
+(`H264Decoder.MbaffIntraScratchOnly`, tests only, `MatchesFfmpegWithMbaffIntraScratchOnly`; reading its left column one
+sample off fails 36 of them). Callgrind (AOT, steady loops): 103.7 to 89.3 M instructions a loop of `h264-mbaff-intra`
+(-13.9%), -13.8% in `h264-mbaff-intra-4x4`, -14.8% in `h264-422-mbaff-intra-4x4`, -4.2% in `h264-mbaff-default`, -2.6%
+in `h264-mbaff-p`; field pictures (already in place) and frames unchanged. Under the JIT `h264-mbaff-intra` took a median
+6.1% less by perf (normalized by CABAC and the edge filters, all six runs faster) and 4.1% by the wall clock of 300
+loops, eight runs each alternating.
 
 A profile of a
 720p libx264 default stream (2026-10-22) is flat: CABAC residual decoding takes 14%, deblocking 21%

@@ -159,6 +159,9 @@ public sealed class H264Decoder : IVideoDecoder
     /// <summary>For tests: MBAFF frames and field pictures find each macroblock edge's bS both ways, for the four segments at once (or, across pairs of different kinds, a line at a time from what holds for the edge) and segment by segment, and throw where they differ.</summary>
     internal bool CheckMbaffStrengths { get; init; }
 
+    /// <summary>For tests: MBAFF frames reconstruct every intra macroblock in the scratch blocks (the reference), none in place.</summary>
+    internal bool MbaffIntraScratchOnly { get; init; }
+
     /// <summary>
     /// Conceal damaged slice data instead of failing the picture's <see cref="Decode(Packet)"/>: the macroblocks a slice
     /// decoded before the damage stay, the picture's other slices are decoded, and every macroblock left missing is a
@@ -857,8 +860,8 @@ public sealed class H264Decoder : IVideoDecoder
             {
                 // The statistics are shared, counted without locks: exact with one thread (which tests use).
                 IPictureDecoder Plane(int plane) => sps.BitDepthLuma > 8
-                    ? new PictureDecoder<ushort>(sps, plane) { Statistics = MbaffStatistics, FieldStatistics = FieldStatistics, RowDelay = RowDelay, CheckMotionNeighbors = CheckMotionNeighbors, CheckMbaffStrengths = CheckMbaffStrengths }
-                    : new PictureDecoder<byte>(sps, plane) { Statistics = MbaffStatistics, FieldStatistics = FieldStatistics, RowDelay = RowDelay, CheckMotionNeighbors = CheckMotionNeighbors, CheckMbaffStrengths = CheckMbaffStrengths };
+                    ? new PictureDecoder<ushort>(sps, plane) { Statistics = MbaffStatistics, FieldStatistics = FieldStatistics, RowDelay = RowDelay, CheckMotionNeighbors = CheckMotionNeighbors, CheckMbaffStrengths = CheckMbaffStrengths, MbaffIntraScratchOnly = MbaffIntraScratchOnly }
+                    : new PictureDecoder<byte>(sps, plane) { Statistics = MbaffStatistics, FieldStatistics = FieldStatistics, RowDelay = RowDelay, CheckMotionNeighbors = CheckMotionNeighbors, CheckMbaffStrengths = CheckMbaffStrengths, MbaffIntraScratchOnly = MbaffIntraScratchOnly };
                 var decoder = sps.SeparateColourPlanes ? new SeparatePlanesDecoder([Plane(0), Plane(1), Plane(2)]) : Plane(0);
                 _decoders.Add(decoder);
                 return decoder;

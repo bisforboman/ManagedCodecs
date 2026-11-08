@@ -192,6 +192,9 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
     /// <summary><see cref="H264Decoder.CheckMbaffStrengths"/>.</summary>
     public bool CheckMbaffStrengths { get; init; }
 
+    /// <summary><see cref="H264Decoder.MbaffIntraScratchOnly"/>.</summary>
+    public bool MbaffIntraScratchOnly { get; init; }
+
     /// <summary>
     /// Starts decoding into <paramref name="picture"/>, forgetting the previous picture's state: a
     /// frame, or the field of parity <paramref name="fieldParity"/>. The second field of a frame
@@ -630,7 +633,16 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
 
         var neighbors = IntraMbNeighbors(slice, mbAddr);
         SetLeftRows(slice, mbAddr, neighbors.A);
-        var target = _mbaff ? GatherMbaffNeighbors(mbAddr) : PictureTarget(mbAddr);
+
+        // In place in MBAFF frames too: an MBAFF frame keeps a field macroblock's rows interleaved in the frame, and every
+        // neighbouring sample Table 6-4 gives intra prediction is the one beside it in the picture at the macroblock's own
+        // row stride. Column -1 is the left pair's line at the same picture row (a frame macroblock beside a field pair
+        // reads field row y / 2 of parity y % 2, a field one beside a frame pair frame row 2y plus its parity); row -1
+        // (B, C and D) the line one stride above (a frame macroblock's top half the last frame line of the pair above,
+        // its bottom half its top half's last row, a field macroblock its parity's last line above). The scratch blocks,
+        // which gather those samples through Table 6-4, are the reference (MbaffIntraScratchOnly, tests).
+        bool scratch = _mbaff && MbaffIntraScratchOnly;
+        var target = scratch ? GatherMbaffNeighbors(mbAddr) : PictureTarget(mbAddr);
         ReconstructIntraLuma(slice, mbAddr, target, is16x16, predMode16x16, cbpLuma, neighbors, 0);
         if (_chroma444)
         {
@@ -642,7 +654,7 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
             ReconstructChroma(slice, mbAddr, target, residual, cbpChroma, intraMode: chromaPredMode, neighbors);
         }
 
-        if (_mbaff)
+        if (scratch)
         {
             ScatterMbaff(mbAddr, target);
         }

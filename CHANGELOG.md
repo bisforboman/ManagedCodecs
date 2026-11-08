@@ -36,6 +36,9 @@ run time.
   allocation per macroblock: about 3.7% fewer instructions in MBAFF and field streams, 1 to 2% of their time under the
   JIT. Motion vector prediction and the deblocking filter's top edge find their neighbours there without the general
   neighbour lookup: about 1% more.
+- H.264: MBAFF frames reconstruct intra macroblocks in place, as frames do, instead of in a scratch block with their
+  neighbouring samples gathered and the result copied back: 14 to 15% fewer instructions in intra MBAFF streams
+  (4 to 6% of their time under the JIT), 3 to 4% in mixed ones.
 
 ### Fixed
 

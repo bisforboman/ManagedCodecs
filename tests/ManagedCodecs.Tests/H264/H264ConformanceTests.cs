@@ -88,7 +88,17 @@ public class H264ConformanceTests
     public Task MatchesFfmpegWithMbaffStrengthsChecked(string sampleName) =>
         CompareWithFfmpeg(sampleName, borrowFrames: false, dispose: true, checkMbaffStrengths: true);
 
-    private static async Task CompareWithFfmpeg(string sampleName, bool borrowFrames, bool dispose, int threads = 1, int rowDelay = 0, bool asynchronous = false, bool checkMotionNeighbors = false, bool checkMbaffStrengths = false)
+    /// <summary>
+    /// The same with <see cref="H264Decoder.MbaffIntraScratchOnly"/>: every intra macroblock of an MBAFF frame is
+    /// reconstructed in the scratch blocks with its neighbouring samples gathered by Table 6-4 (the reference for those
+    /// reconstructed in place).
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(Samples))]
+    public Task MatchesFfmpegWithMbaffIntraScratchOnly(string sampleName) =>
+        CompareWithFfmpeg(sampleName, borrowFrames: false, dispose: true, mbaffIntraScratchOnly: true);
+
+    private static async Task CompareWithFfmpeg(string sampleName, bool borrowFrames, bool dispose, int threads = 1, int rowDelay = 0, bool asynchronous = false, bool checkMotionNeighbors = false, bool checkMbaffStrengths = false, bool mbaffIntraScratchOnly = false)
     {
         var lines = File.ReadAllLines(TestSamples.ReferenceOf(sampleName, ".framemd5"));
         var expected = FrameMd5.Parse(lines).Where(e => e.StreamIndex == 0).ToList(); // FFmpeg lists video first
@@ -102,7 +112,7 @@ public class H264ConformanceTests
 
         using var demuxer = Demuxer.Open(TestSamples.PathOf(sampleName));
         var video = demuxer.Video!;
-        var decoder = new H264Decoder(video) { BorrowFrames = borrowFrames, Threads = threads, RowDelay = rowDelay, CheckMotionNeighbors = checkMotionNeighbors, CheckMbaffStrengths = checkMbaffStrengths };
+        var decoder = new H264Decoder(video) { BorrowFrames = borrowFrames, Threads = threads, RowDelay = rowDelay, CheckMotionNeighbors = checkMotionNeighbors, CheckMbaffStrengths = checkMbaffStrengths, MbaffIntraScratchOnly = mbaffIntraScratchOnly };
 
         int index = 0;
         long firstPts = 0;

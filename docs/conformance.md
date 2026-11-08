@@ -998,6 +998,13 @@ Callgrind (AOT, x86-64-v3) against main after #400, the tables: +0.7% on `h264-i
 4x4 blocks) and +0.06% on `h264-bench-720p`; the rows: +0.07, +0.16, -0.25 and 0.00%. The sample-by-sample code
 compiles to little more than a filter a sample, which computing the filters once and copying them barely beats, and
 the extra dispatch costs the common modes about as much: under a quarter of a point on intra-only noise at best.
+Then `Require`, the check once a block that a mode's neighbours exist, and the chroma mode's mapping inlined, their
+throws moved to methods of their own (#393, 2026-11-08): the JIT inlines no method that throws, so each was a call, and
+`Require` alone was 1.14% of `h264-high-intra`'s samples (`LumaStyleMode` 0.20%); both are gone from the profile.
+Callgrind (AOT, as above, loops 3 minus 1): -0.83% on `h264-high-intra`, -0.92% on `h264-main-intra`, -0.08% on
+`h264-bench-720p`. By perf (300 loops, eight runs each, the order alternating, normalized as above) the intra functions
+fell by a median 10% on `h264-high-intra` and 8% on `h264-main-intra`, the runs' ranges overlapping: about a point of
+an intra-only frame, by the removed calls' own share.
 (Before #400 the tables together with row writes for the flat modes counted -11.7% on `h264-intra`: the flat modes'
 share.)
 The per-partition path (`PredictFromOne`, `PredictFromTwo`: one call to the kernels a component, without

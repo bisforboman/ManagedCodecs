@@ -25,6 +25,10 @@ run time.
 
 - Containers: an MP3 track's `Codec` is now `CodecIds.Mp3` (`"MP3"`), where it was the sample entry's name in MP4
   (`mp4a`, `.mp3`) and `A_MPEG/L3` in Matroska.
+- H.264: in MBAFF frames and field pictures, a macroblock edge between two macroblocks of one kind, each with one
+  motion and no coefficients, takes one bS for its four segments, as in frames, and the top edges are found without an
+  allocation per macroblock: about 3.7% fewer instructions in MBAFF and field streams, 1 to 2% of their time under the
+  JIT.
 
 ### Fixed
 

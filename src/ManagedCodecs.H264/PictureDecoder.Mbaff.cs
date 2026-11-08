@@ -783,8 +783,18 @@ internal sealed partial class PictureDecoder<TPixel>
         // A field picture filters its own macroblocks only (the other field is another picture).
         int first = Math.Max(_fieldParity, 0);
         int step = _fieldParity >= 0 ? 2 : 1;
+        if (_uniformMb is null || _uniformMb.Length < _fieldMb.Length)
+        {
+            _uniformMb = new bool[_fieldMb.Length];
+        }
+
         for (int mbAddr = (firstRow * 2 * _widthInMbs) + first; mbAddr < endRow * 2 * _widthInMbs; mbAddr += step)
         {
+            // Kept for every macroblock, filtered or not, before its right and lower neighbours read it (MbaffEdgeStrengths).
+            bool intra = IsIntra(mbAddr);
+            bool uniform = !intra && HasUniformMotionWithoutCoefficients(mbAddr);
+            _uniformMb[mbAddr] = uniform;
+
             var slice = _slices[_sliceOfMb[mbAddr]];
             if (slice.DisableDeblockingFilterIdc == 1)
             {
@@ -813,12 +823,12 @@ internal sealed partial class PictureDecoder<TPixel>
             bool transform8x8 = _transform8x8[mbAddr];
 
             // Internal edges as in frames, with field macroblocks' vertical motion in field units.
-            if (IsIntra(mbAddr))
+            if (intra)
             {
                 vertical.Fill(3);
                 horizontal.Fill(3);
             }
-            else if (HasUniformMotionWithoutCoefficients(mbAddr))
+            else if (uniform)
             {
                 vertical.Clear();
                 horizontal.Clear();
@@ -879,7 +889,7 @@ internal sealed partial class PictureDecoder<TPixel>
                 }
             }
 
-            var topEdges = top ? TopEdges(mbAddr, 16) : [];
+            var topEdges = top ? TopEdges(mbAddr, 16) : default;
             for (int edge = 0; edge < topEdges.Length; edge++)
             {
                 var (p, pRow, pStep, qOffset, qStep) = topEdges[edge];
@@ -951,8 +961,11 @@ internal sealed partial class PictureDecoder<TPixel>
 
             FilterChromaEdge(PlaneCb, PlaneCr, chroma + 4, 1, chromaStride, vertical.Slice(8, 4), qpCb, qpCb, qpCr, qpCr, slice.AlphaOffset, slice.BetaOffset, bitDepth: _bitDepth);
 
-            foreach (var (p, pRow, pStep, qOffset, qStep) in top ? TopEdges(mbAddr, 8) : [])
+            var chromaTopEdges = top ? TopEdges(mbAddr, 8) : default;
+            for (int chromaEdge = 0; chromaEdge < chromaTopEdges.Length; chromaEdge++)
             {
+                var (p, pRow, pStep, qOffset, qStep) = chromaTopEdges[chromaEdge];
+
                 // The luma segments of the same pass (its edge qOffset): chroma pRow is in chroma rows.
                 topSegments = lumaTopSegments.Slice(qOffset * 4, 4);
 
@@ -988,7 +1001,7 @@ internal sealed partial class PictureDecoder<TPixel>
     /// top one, chroma column x the luma segment x / 2. Inside, as in frames: vertical edge 4
     /// along 16 rows, horizontal edges 4, 8 and 12 with the bS of luma edges 1 to 3.
     /// </summary>
-    private void DeblockMbaffChroma422(SliceInfo slice, int mbAddr, int leftTop, ReadOnlySpan<byte> leftLines, ReadOnlySpan<byte> leftSegments, ReadOnlySpan<byte> vertical, ReadOnlySpan<byte> horizontal, (int P, int PRow, int PStep, int QOffset, int QStep)[] topEdges, ReadOnlySpan<byte> lumaTopSegments)
+    private void DeblockMbaffChroma422(SliceInfo slice, int mbAddr, int leftTop, ReadOnlySpan<byte> leftLines, ReadOnlySpan<byte> leftSegments, ReadOnlySpan<byte> vertical, ReadOnlySpan<byte> horizontal, TopEdgeList topEdges, ReadOnlySpan<byte> lumaTopSegments)
     {
         int qp = _qp[mbAddr];
         int qpCb = ChromaQp(qp, slice.CbQpOffset, _qpBdOffset);
@@ -1060,7 +1073,8 @@ internal sealed partial class PictureDecoder<TPixel>
     /// bS of the four segments of a macroblock edge of an MBAFF frame or field picture: segment k between block
     /// <paramref name="firstP"/> + k * <paramref name="step"/> of <paramref name="mbP"/> and block
     /// <paramref name="firstQ"/> + k * step of <paramref name="mbQ"/> (raster indices). <see cref="MbaffStrength"/> a
-    /// segment, with what holds for the whole edge (intra, frame and field macroblocks meeting) found once; with
+    /// segment, with what holds for the whole edge (intra, frame and field macroblocks meeting) found once (one motion bS for
+    /// the edge where both are of one kind with uniform motion and no coefficients, as in frames); with
     /// <see cref="CheckMbaffStrengths"/> (tests) it is compared with MbaffStrength.
     /// </summary>
     private void MbaffEdgeStrengths(Span<byte> strengths, int mbP, int firstP, int mbQ, int firstQ, int step, bool horizontalEdge)
@@ -1070,6 +1084,11 @@ internal sealed partial class PictureDecoder<TPixel>
         if (IsIntra(mbP) || IsIntra(mbQ))
         {
             SetStrengths(strengths, horizontalEdge && (fieldP || fieldQ) ? 3 : 4);
+        }
+        else if (fieldP == fieldQ && _uniformMb![mbP] && _uniformMb[mbQ])
+        {
+            // Both of one kind, each one block of motion without coefficients: every segment's bS is the motion's.
+            SetStrengths(strengths, MotionStrength((mbP * 16) + firstP, (mbQ * 16) + firstQ, fieldQ ? 2 : 4));
         }
         else
         {
@@ -1126,7 +1145,7 @@ internal sealed partial class PictureDecoder<TPixel>
     /// macroblock at the top of its pair under a field pair is filtered twice, as two field edges:
     /// its even rows against the top field macroblock above, its odd rows against the bottom one.
     /// </summary>
-    private (int P, int PRow, int PStep, int QOffset, int QStep)[] TopEdges(int mbAddr, int size)
+    private TopEdgeList TopEdges(int mbAddr, int size)
     {
         bool field = _fieldMb[mbAddr];
         bool isTop = (mbAddr & 1) == 0;
@@ -1136,13 +1155,21 @@ internal sealed partial class PictureDecoder<TPixel>
             int above = (pair - _widthInMbs) * 2;
             if (_fieldMb[above])
             {
-                return [(above, size - 1, 2, 0, 2), (above + 1, size - 1, 2, 1, 2)];
+                return new TopEdgeList(2, (above, size - 1, 2, 0, 2), (above + 1, size - 1, 2, 1, 2));
             }
         }
 
         var (p, _, pRow) = AffNeighbor(mbAddr, 0, -1, size, size, anySlice: true);
         bool fieldEdge = field || _fieldMb[p];
-        return [(p, pRow, fieldEdge ? 2 : 1, 0, field ? 2 : 1)];
+        return new TopEdgeList(1, (p, pRow, fieldEdge ? 2 : 1, 0, field ? 2 : 1), default);
+    }
+
+    /// <summary>The one or two top edges of <see cref="TopEdges"/>, without an array a macroblock.</summary>
+    private readonly struct TopEdgeList(int length, (int P, int PRow, int PStep, int QOffset, int QStep) first, (int P, int PRow, int PStep, int QOffset, int QStep) second)
+    {
+        public int Length => length;
+
+        public (int P, int PRow, int PStep, int QOffset, int QStep) this[int index] => index == 0 ? first : second;
     }
 
     /// <summary>One luma line across an MBAFF macroblock edge, with the QPs of its two macroblocks.</summary>

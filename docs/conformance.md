@@ -976,6 +976,19 @@ the intra functions' samples over those of functions it leaves alone (`Cabac.Res
 the inverse transforms) fell from a median 0.233 to 0.212, every run of the branch below every run of the base, about
 a point of the frame; the whole decoder's over the same set by 0.3%, within the runs' spread. Left: the 8x8 edges'
 filter (`FilteredEdges8x8`, now the largest intra function by count), plane prediction and the diagonal modes.
+Then 16x16 and chroma's other modes a row at a time (#393, 2026-11-08): vertical, horizontal and 16x16 DC as rows
+copied or filled, plane prediction stepped by its gradient along each row (the same integer sums), all read from refs
+anchored at the corner, where each row went through `Span.CopyTo` or `Span.Fill` and each plane sample through its
+equation and a bounds check; `Predict16x16Reference` and `PredictChromaReference` keep the old code, compared in
+`IntraPredictionTests` as above. Callgrind (AOT, x86-64-v3, loops 2 minus 1, against main after #400): -5.2% on
+`h264-intra`, -2.6% on `h264-422-intra`, -2.1% on `h264-high-intra`, -1.1% on `h264-10bit-intra`, -0.52% on
+`h264-bench-720p`, -0.23% on `h264-10bit-b`. Under the JIT it is within noise: by perf (six runs each, the order
+alternating, normalized as above) the intra functions with `Span.Fill` and `Memmove` fell from 0.262 to 0.249 on
+`h264-intra` and 0.210 to 0.196 on `h264-high-intra`, about 0.2% of the frame. Tried and dropped: the diagonal modes
+from per-mode tables of the edge's three-tap filters and two-tap averages, each computed once a block (bit-exact).
+Before #400 the tables with the row writes counted -11.7% on `h264-intra`, but on top of #400 they alone counted
++0.7% (+0.3% on the High and 10-bit samples): building the filters costs more than the per-sample equations it
+replaces, at 1.4% of the frame.
 The per-partition path (`PredictFromOne`, `PredictFromTwo`: one call to the kernels a component, without
 `PartitionPlace`, `Weighting` for default bi-prediction or `PredictComponent`) then took frame macroblocks of frames
 at any depth and in 4:2:2 too, not only 8-bit 4:2:0; MBAFF frames and field pictures keep `PredictPartitionGeneral`.

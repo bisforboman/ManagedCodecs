@@ -18,6 +18,8 @@ run time.
 - H.264: intra prediction's vertical, horizontal and DC modes (4x4, 8x8, chroma DC) write a row at a time: 10% fewer
   instructions in an 8-bit intra-only stream under Native AOT, about 1% of its time under the JIT. The output is
   unchanged.
+- H.264: 16x16 and chroma intra prediction (vertical, horizontal, DC, plane) also write a row at a time: 1 to 5% fewer
+  instructions in intra-only streams under Native AOT, within noise under the JIT. The output is unchanged.
 
 ### Fixed
 

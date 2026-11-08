@@ -3,8 +3,8 @@ using ManagedCodecs.H264;
 namespace ManagedCodecs.Tests.H264;
 
 /// <summary>
-/// The row-at-a-time intra prediction (vertical, horizontal and DC of 4x4, 8x8 and 16x16, chroma's vertical, horizontal
-/// and DC) against the sample by sample references, on random planes, for every mode, every combination of available neighbours and the sample
+/// The row-at-a-time intra prediction (vertical, horizontal and DC of 4x4 and 8x8, every 16x16 and chroma mode) against the sample by
+/// sample references, on random planes, for every mode, every combination of available neighbours and the sample
 /// types and depths the decoder uses: the whole plane must come out the same, so nothing outside the block is written
 /// either, and a mode that needs a missing neighbour must fail the same way.
 /// </summary>
@@ -30,7 +30,7 @@ public class IntraPredictionTests
     public void Fast16x16_MatchesReference(int bitDepth) =>
         Compare(bitDepth, 4, 16, 16, IntraPrediction.Predict16x16, IntraPrediction.Predict16x16Reference, IntraPrediction.Predict16x16, IntraPrediction.Predict16x16Reference);
 
-    /// <summary>Every chroma mode in 4:2:0 (8x8) and 4:2:2 (8x16), the left neighbours available or not as a whole.</summary>
+    /// <summary>Chroma's horizontal, vertical and plane modes (1 to 3) in 4:2:0 (8x8) and 4:2:2 (8x16).</summary>
     [Theory]
     [InlineData(8, 8)]
     [InlineData(8, 16)]
@@ -40,13 +40,13 @@ public class IntraPredictionTests
     public void FastChroma_MatchesReference(int bitDepth, int height) =>
         Compare(
             bitDepth,
-            4,
+            3,
             8,
             height,
-            (mode, plane, offset, stride, n, depth) => IntraPrediction.PredictChroma(mode, plane, offset, stride, n, depth, height: height),
-            (mode, plane, offset, stride, n, depth) => IntraPrediction.PredictChromaReference(mode, plane, offset, stride, n, depth, n.Left ? 15 : 0, height),
-            (mode, plane, offset, stride, n, depth) => IntraPrediction.PredictChroma(mode, plane, offset, stride, n, depth, height: height),
-            (mode, plane, offset, stride, n, depth) => IntraPrediction.PredictChromaReference(mode, plane, offset, stride, n, depth, n.Left ? 15 : 0, height));
+            (mode, plane, offset, stride, n, depth) => IntraPrediction.PredictChroma(mode + 1, plane, offset, stride, n, depth, height: height),
+            (mode, plane, offset, stride, n, depth) => IntraPrediction.PredictChromaReference(mode + 1, plane, offset, stride, n, depth, height),
+            (mode, plane, offset, stride, n, depth) => IntraPrediction.PredictChroma(mode + 1, plane, offset, stride, n, depth, height: height),
+            (mode, plane, offset, stride, n, depth) => IntraPrediction.PredictChromaReference(mode + 1, plane, offset, stride, n, depth, height));
 
     /// <summary>Chroma DC in 4:2:0 (8x8) and 4:2:2 (8x16), with the per-row-of-blocks left availability MBAFF uses.</summary>
     [Theory]
@@ -88,7 +88,7 @@ public class IntraPredictionTests
 
     private static void Compare(int bitDepth, int modes, int width, int height, Predict<byte> fast8, Predict<byte> reference8, Predict<ushort> fast16, Predict<ushort> reference16)
     {
-        var random = new Random((bitDepth * 10) + width + height);
+        var random = new Random((bitDepth * 10) + width);
         for (int mode = 0; mode < modes; mode++)
         {
             for (int available = 0; available < 16; available++)

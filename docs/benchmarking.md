@@ -59,6 +59,18 @@ instructions` samples by retired instructions on the ARM64 runner, which has har
 `perf stat`'s instruction and cycle totals there. That compares the two settings function by function without a
 cloud VM's noise (#346).
 
+Comparing tiering off with `tiering: pgo` measures more than PGO. With tiering off, CoreLib's ReadyToRun code
+(`SpanHelpers.Memmove`, `Fill` and the like) runs as it was precompiled, for the whole process. Tiered compilation
+re-jits it at tier 1, with or without PGO. On the ARM64 runner that was 3.4 of the 8.6 points between tiering off and
+dynamic PGO on `h264-high-default.mp4`, and 0.8 of 4.5 on `h264-bench-720p.mp4`; on x64 about a point (#346). To
+measure PGO alone, compare `DOTNET_TieredCompilation=1` with and without `DOTNET_TieredPGO=0`. `readytorun: false`
+profiles with CoreLib jitted too.
+
+Timing two settings on the hosted runners: separate runs land on different machines, and single runs there have
+differed by 5% or more. `profile.yml`'s `ab_env` (NAME=VALUE) skips the profile. It times mcdec as it is and with
+that variable, `ab_pairs` times each, interleaved in one job and alternating which goes first, and reports the median
+of the per-pair ratios.
+
 Hardware counters (`perf stat -e cycles,instructions`): GitHub's ARM64 runner has them, the x64 runner and the cloud VM
 do not (`<not supported>`), and the x64 runner's 4 vCPUs are 2 cores with SMT. `perf record -e context-switches -g`
 works everywhere and shows where threads block.

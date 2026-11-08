@@ -15,9 +15,20 @@ run time.
 
 ### Changed
 
-- H.264: intra prediction's vertical, horizontal and DC modes (4x4, 8x8, 16x16 and chroma) write a row at a time: about
-  13% fewer instructions in an 8-bit intra-only stream under Native AOT, about 2% of its time under the JIT. The
-  output is unchanged.
+- H.264: intra prediction's vertical, horizontal and DC modes (4x4, 8x8, chroma DC) write a row at a time: 10% fewer
+  instructions in an 8-bit intra-only stream under Native AOT, about 1% of its time under the JIT. The output is
+  unchanged.
+- H.264: 16x16 and chroma intra prediction (vertical, horizontal, DC, plane) also write a row at a time: 1 to 5% fewer
+  instructions in intra-only streams under Native AOT, within noise under the JIT. The output is unchanged.
+
+### Fixed
+
+- Playback: `MediaPlayer.TakeFrame` dropped about 1 frame in 5 when the game ticks at the video's own rate (24 fps
+  video at 24 Hz, 60 at 60 Hz): its clock, a sum of frame times, falls a rounding error short of some frames, which
+  were then shown a tick late and dropped. A frame is now due from half the interval before its time, so each call
+  shows the frame nearest the clock.
+- MonoGame: `VideoTexture` started the sound before the picture (about 280 ms with Big Buck Bunny), since the first
+  audio is decoded ahead of the first frame. The sound now starts with the first frame.
 
 ## 0.9.0 – 2026-11-07
 

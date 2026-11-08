@@ -8,10 +8,6 @@
     <PackageId>ManagedCodecs.MonoGame</PackageId>
     <Description>Video for MonoGame games: VideoTexture plays an MP4, Matroska, WebM or AVI file (H.264 or MJPEG, AAC audio) into a Texture2D and a DynamicSoundEffectInstance, decoded on a thread of its own by ManagedCodecs.Playback, in pure managed C#. Any MonoGame 3.8 platform.</Description>
     <PackageTags>$(PackageTags);playback;video-player;game;monogame;fna</PackageTags>
-    <!-- No release of this package on nuget.org yet, so package validation has no baseline to compare with (the one in
-         Directory.Build.props is the other packages'); the pull request that sets the baseline after its first release
-         removes this line. -->
-    <PackageValidationBaselineVersion></PackageValidationBaselineVersion>
   </PropertyGroup>
 
   <!-- Its own page on nuget.org in place of the shared PACKAGE.md (Directory.Build.props). -->

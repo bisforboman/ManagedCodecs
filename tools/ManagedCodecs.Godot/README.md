@@ -39,6 +39,11 @@ and what is left to try. Please report back from a desktop.
 - Rotation (a phone video's) isn't applied: turn the node by `MediaPlayer.Video.Rotation` if you need it.
 - Web exports: Godot's C# can't export to the web yet.
 
+## The Asset Library
+
+`listing/` (which Godot ignores, `.gdignore`) holds the listing's icon and previews and the text to submit;
+`tools/godot-addon.sh` makes the zip it downloads, which each GitHub release carries.
+
 ## Testing it in Godot
 
 What has been checked, and how to check the rest. Report in a new issue, one line a run (issue #254, now closed, has

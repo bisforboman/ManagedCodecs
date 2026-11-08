@@ -449,6 +449,14 @@ internal sealed partial class PictureDecoder<TPixel>
     }
 
     /// <summary>
+    /// Sets a macroblock edge's four segments to one bS with a single 4-byte store: <see cref="Span{T}.Fill"/> calls
+    /// into CoreLib for it, about 20 instructions, on every macroblock's two edges (#346).
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void SetStrengths(Span<byte> strengths, int bS) =>
+        Unsafe.WriteUnaligned(ref MemoryMarshal.GetReference(strengths[..4]), (uint)bS * 0x01010101u);
+
+    /// <summary>
     /// bS of the four segments of a macroblock edge, 0 where it is not <paramref name="filtered"/>:
     /// segment k between block <paramref name="firstP"/> + k * <paramref name="step"/> of
     /// <paramref name="mbP"/> and block k * step of <paramref name="mbQ"/> (raster indices; a
@@ -458,7 +466,7 @@ internal sealed partial class PictureDecoder<TPixel>
     {
         if (!filtered)
         {
-            strengths[..4].Clear();
+            SetStrengths(strengths, 0);
             return;
         }
 
@@ -466,13 +474,13 @@ internal sealed partial class PictureDecoder<TPixel>
         // every segment's bS is the motion's.
         if (uniformQ && _uniformMb![mbP])
         {
-            strengths[..4].Fill((byte)MotionStrength((mbP * 16) + firstP, mbQ * 16));
+            SetStrengths(strengths, MotionStrength((mbP * 16) + firstP, mbQ * 16));
             return;
         }
 
         if (IsIntra(mbP) || IsIntra(mbQ))
         {
-            strengths[..4].Fill(4);
+            SetStrengths(strengths, 4);
             return;
         }
 

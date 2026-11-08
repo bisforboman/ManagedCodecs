@@ -1,4 +1,3 @@
-using System.Diagnostics.CodeAnalysis;
 using System.Numerics;
 using System.Runtime.CompilerServices;
 
@@ -459,20 +458,27 @@ internal static class IntraPrediction
         };
     }
 
-    /// <summary>Intra_16x16 prediction (8.3.3).</summary>
-    /// <remarks>
-    /// Vertical, horizontal and DC are written a row at a time (<see cref="PredictLarge"/>); plane prediction, and blocks
-    /// too near the plane's ends for whole-row access, go to <see cref="Predict16x16Reference"/>, which
-    /// IntraPredictionTests compares this with.
-    /// </remarks>
+    /// <summary>
+    /// Intra_16x16 prediction (8.3.3), a row at a time (<see cref="PredictMacroblock"/>); blocks too near the plane's ends
+    /// for whole-row access go to <see cref="Predict16x16Reference"/>, which IntraPredictionTests compares this with.
+    /// </summary>
     public static void Predict16x16<TPixel>(int mode, TPixel[] plane, int offset, int stride, IntraNeighbors n, int bitDepth)
-        where TPixel : unmanaged =>
-        PredictLarge(mode, plane, offset, stride, n, width: 16, height: 16, bitDepth);
+        where TPixel : unmanaged
+    {
+        if (RowsInside(plane, offset, stride, 16, 16))
+        {
+            PredictMacroblock(mode, plane, offset, stride, n, width: 16, height: 16, bitDepth);
+        }
+        else
+        {
+            PredictMacroblockReference(mode, plane, offset, stride, n, width: 16, height: 16, bitDepth);
+        }
+    }
 
     /// <summary>Intra_16x16 prediction by the equations, sample by sample: the reference for <see cref="Predict16x16"/>.</summary>
     internal static void Predict16x16Reference<TPixel>(int mode, TPixel[] plane, int offset, int stride, IntraNeighbors n, int bitDepth)
         where TPixel : unmanaged =>
-        PredictLargeReference(mode, plane, offset, stride, n, width: 16, height: 16, bitDepth);
+        PredictMacroblockReference(mode, plane, offset, stride, n, width: 16, height: 16, bitDepth);
 
     /// <summary>Chroma prediction (8.3.4) for one component: 8x8 (4:2:0) or 8x16 (4:2:2, <paramref name="height"/> 16).</summary>
     /// <param name="leftBlocks">
@@ -499,59 +505,44 @@ internal static class IntraPrediction
             return;
         }
 
-        PredictLarge(LumaStyleMode(mode), plane, offset, stride, n, width: 8, height, bitDepth);
+        int lumaStyleMode = LumaStyleMode(mode);
+        if (RowsInside(plane, offset, stride, 8, height))
+        {
+            PredictMacroblock(lumaStyleMode, plane, offset, stride, n, width: 8, height, bitDepth);
+        }
+        else
+        {
+            PredictMacroblockReference(lumaStyleMode, plane, offset, stride, n, width: 8, height, bitDepth);
+        }
     }
+
+    /// <summary>Chroma's horizontal, vertical and plane modes (1 to 3) by the equations: the reference for <see cref="PredictChroma"/>.</summary>
+    internal static void PredictChromaReference<TPixel>(int mode, TPixel[] plane, int offset, int stride, IntraNeighbors n, int bitDepth, int height = 8)
+        where TPixel : unmanaged =>
+        PredictMacroblockReference(LumaStyleMode(mode), plane, offset, stride, n, width: 8, height, bitDepth);
+
+    // Chroma mode numbers differ from 16x16: 1 Horizontal, 2 Vertical, 3 Plane (0, DC, has paths of its own).
+    private static int LumaStyleMode(int mode) => mode switch
+    {
+        1 => 1,
+        2 => 0,
+        3 => 3,
+        _ => throw new InvalidDataException($"Invalid chroma prediction mode {mode}."),
+    };
 
     /// <summary>
-    /// Chroma prediction by the equations, sample by sample: the reference for <see cref="PredictChroma"/> (DC with
-    /// <paramref name="leftBlocks"/> resolved: bit k for each row of 4x4 blocks).
+    /// Vertical (0), Horizontal (1), DC (2, luma only) and Plane (3) for 16x16, 8x8 or 8x16, a row at a time: whole rows
+    /// copied or filled, the plane's samples stepped by its gradient along each row. The same values as
+    /// <see cref="PredictMacroblockReference"/>; the caller checked that the block's rows lie inside the plane.
     /// </summary>
-    internal static void PredictChromaReference<TPixel>(int mode, TPixel[] plane, int offset, int stride, IntraNeighbors n, int bitDepth, int leftBlocks, int height)
+    private static void PredictMacroblock<TPixel>(int mode, TPixel[] plane, int offset, int stride, IntraNeighbors n, int width, int height, int bitDepth)
         where TPixel : unmanaged
     {
-        if (mode == 0)
-        {
-            PredictChromaDcReference(plane, offset, stride, n, leftBlocks, height, bitDepth);
-            return;
-        }
-
-        PredictLargeReference(LumaStyleMode(mode), plane, offset, stride, n, width: 8, height, bitDepth);
-    }
-
-    // Chroma mode numbers differ from 16x16 (0 DC, 1 Horizontal, 2 Vertical, 3 Plane): the 16x16 number for 1 to 3.
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static int LumaStyleMode(int mode)
-    {
-        if ((uint)(mode - 1) > 2)
-        {
-            ThrowInvalidChromaMode(mode);
-        }
-
-        return mode == 2 ? 0 : mode;
-    }
-
-    [DoesNotReturn]
-    private static void ThrowInvalidChromaMode(int mode) => throw new InvalidDataException($"Invalid chroma prediction mode {mode}.");
-
-    /// <summary>
-    /// Vertical (0), Horizontal (1) and DC (2, luma only) for 16x16, 8x8 or 8x16, a row at a time in 4- and 8-byte
-    /// stores, where each row was a <c>Span.Fill</c> or <c>CopyTo</c> call; Plane (3), and blocks too near the plane's
-    /// ends, go to <see cref="PredictLargeReference"/>.
-    /// </summary>
-    private static void PredictLarge<TPixel>(int mode, TPixel[] plane, int offset, int stride, IntraNeighbors n, int width, int height, int bitDepth)
-        where TPixel : unmanaged
-    {
-        // The block, its row above with the top-left sample and its column to the left inside the plane.
-        if (mode > 2 || stride < width || offset - stride - 1 < 0 || offset + ((height - 1) * stride) + width > plane.Length)
-        {
-            PredictLargeReference(mode, plane, offset, stride, n, width, height, bitDepth);
-            return;
-        }
-
-        // From the row above and the column to the left, so that every offset is non-negative (as Predict4x4's).
-        ref TPixel above = ref plane[offset - stride];
+        // From the row above and the column to the left, so that every Unsafe.Add offset is non-negative (as Predict4x4's).
+        ref TPixel corner = ref plane[offset - stride - 1];
+        ref TPixel above = ref Unsafe.Add(ref corner, 1);
+        ref TPixel left = ref Unsafe.Add(ref corner, stride);
         ref TPixel block = ref Unsafe.Add(ref above, stride);
-        ref TPixel left = ref plane[offset - 1];
         switch (mode)
         {
             case 0: // Vertical
@@ -572,33 +563,77 @@ internal static class IntraPrediction
 
                 break;
 
-            default: // DC (16x16 only: chroma's DC is PredictChromaDc)
-                int sumTop = 0;
-                int sumLeft = 0;
-                for (int i = 0; i < 16; i++)
+            case 2: // DC (16x16 only)
                 {
-                    sumTop += n.Top ? Samples.ToInt(Unsafe.Add(ref above, i)) : 0;
-                    sumLeft += n.Left ? Samples.ToInt(Unsafe.Add(ref left, i * stride)) : 0;
+                    int sumTop = 0;
+                    int sumLeft = 0;
+                    for (int i = 0; i < 16; i++)
+                    {
+                        sumTop += n.Top ? Samples.ToInt(Unsafe.Add(ref above, i)) : 0;
+                        sumLeft += n.Left ? Samples.ToInt(Unsafe.Add(ref left, i * stride)) : 0;
+                    }
+
+                    int value = (n.Left, n.Top) switch
+                    {
+                        (true, true) => (sumTop + sumLeft + 16) >> 5,
+                        (true, false) => (sumLeft + 8) >> 4,
+                        (false, true) => (sumTop + 8) >> 4,
+                        _ => 1 << (bitDepth - 1),
+                    };
+
+                    for (int y = 0; y < 16; y++)
+                    {
+                        FillRow(ref Unsafe.Add(ref block, y * stride), 16, value);
+                    }
+
+                    break;
                 }
 
-                int dc = (n.Left, n.Top) switch
+            case 3: // Plane
                 {
-                    (true, true) => (sumTop + sumLeft + 16) >> 5,
-                    (true, false) => (sumLeft + 8) >> 4,
-                    (false, true) => (sumTop + 8) >> 4,
-                    _ => 1 << (bitDepth - 1),
-                };
-                for (int y = 0; y < 16; y++)
-                {
-                    FillRow(ref Unsafe.Add(ref block, y * stride), 16, dc);
+                    Require(n.Top && n.Left && n.TopLeft, mode);
+                    int halfW = width / 2;
+                    int halfH = height / 2;
+
+                    // p[x, -1] at x = -1 is the corner, as p[-1, y] at y = -1: above[x] for x >= -1 is corner[x + 1].
+                    int h = 0;
+                    int v = 0;
+                    for (int i = 0; i < halfW; i++)
+                    {
+                        h += (i + 1) * (Samples.ToInt(Unsafe.Add(ref above, halfW + i)) - Samples.ToInt(Unsafe.Add(ref corner, halfW - 1 - i)));
+                    }
+
+                    for (int i = 0; i < halfH; i++)
+                    {
+                        v += (i + 1) * (Samples.ToInt(Unsafe.Add(ref left, (halfH + i) * stride)) - Samples.ToInt(Unsafe.Add(ref corner, (halfH - 1 - i) * stride)));
+                    }
+
+                    int a = 16 * (Samples.ToInt(Unsafe.Add(ref left, (height - 1) * stride)) + Samples.ToInt(Unsafe.Add(ref above, width - 1)));
+                    int b = (((width == 8 ? 34 : 5) * h) + 32) >> 6;
+                    int c = (((height == 8 ? 34 : 5) * v) + 32) >> 6;
+                    int max = Samples.Max<TPixel>(bitDepth);
+
+                    // a + b (x - halfW + 1) + c (y - halfH + 1) + 16, stepped by b along the row: the same sum in integers.
+                    for (int y = 0; y < height; y++)
+                    {
+                        ref TPixel row = ref Unsafe.Add(ref block, y * stride);
+                        int sum = a + (b * (1 - halfW)) + (c * (y - halfH + 1)) + 16;
+                        for (int x = 0; x < width; x++, sum += b)
+                        {
+                            Unsafe.Add(ref row, x) = Samples.From<TPixel>(Math.Clamp(sum >> 5, 0, max));
+                        }
+                    }
+
+                    break;
                 }
 
-                break;
+            default:
+                throw new InvalidDataException($"Invalid Intra16x16 prediction mode {mode}.");
         }
     }
 
-    /// <summary>Vertical (0), Horizontal (1), DC (2, luma only) and Plane (3) for 16x16, 8x8 or 8x16, sample by sample (and Plane's code).</summary>
-    private static void PredictLargeReference<TPixel>(int mode, TPixel[] plane, int offset, int stride, IntraNeighbors n, int width, int height, int bitDepth)
+    /// <summary>Vertical (0), Horizontal (1), DC (2, luma only) and Plane (3) for 16x16, 8x8 or 8x16, by the equations.</summary>
+    private static void PredictMacroblockReference<TPixel>(int mode, TPixel[] plane, int offset, int stride, IntraNeighbors n, int width, int height, int bitDepth)
         where TPixel : unmanaged
     {
         int Top(int x) => Samples.ToInt(plane[offset - stride + x]);
@@ -838,33 +873,35 @@ internal static class IntraPrediction
         where TPixel : unmanaged
     {
         ref byte to = ref Unsafe.As<TPixel, byte>(ref row);
-        ulong pattern = typeof(TPixel) == typeof(byte)
-            ? (ulong)(byte)value * 0x0101010101010101UL
-            : (ulong)(ushort)value * 0x0001000100010001UL;
-        int bytes = count * Unsafe.SizeOf<TPixel>();
-        if (bytes == 4)
+        if (typeof(TPixel) == typeof(byte))
         {
-            Unsafe.WriteUnaligned(ref to, (uint)pattern);
+            if (count == 4)
+            {
+                Unsafe.WriteUnaligned(ref to, (uint)(byte)value * 0x01010101u);
+                return;
+            }
+
+            ulong eight = (ulong)(byte)value * 0x0101010101010101UL;
+            for (int i = 0; i < count; i += 8)
+            {
+                Unsafe.WriteUnaligned(ref Unsafe.Add(ref to, i), eight);
+            }
+
             return;
         }
 
-        for (int i = 0; i < bytes; i += 8)
+        ulong four = (ulong)(ushort)value * 0x0001000100010001UL;
+        for (int i = 0; i < 2 * count; i += 8)
         {
-            Unsafe.WriteUnaligned(ref Unsafe.Add(ref to, i), pattern);
+            Unsafe.WriteUnaligned(ref Unsafe.Add(ref to, i), four);
         }
     }
 
-    // Inlined, the throw in a method of its own: called once a block, Require was 1% of an intra-only frame under the JIT,
-    // which inlines no method that throws.
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void Require(bool available, int mode)
     {
         if (!available)
         {
-            ThrowUnavailable(mode);
+            throw new InvalidDataException($"Intra prediction mode {mode} uses unavailable neighbours.");
         }
     }
-
-    [DoesNotReturn]
-    private static void ThrowUnavailable(int mode) => throw new InvalidDataException($"Intra prediction mode {mode} uses unavailable neighbours.");
 }

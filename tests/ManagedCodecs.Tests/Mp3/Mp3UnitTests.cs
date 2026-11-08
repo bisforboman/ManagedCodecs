@@ -1,4 +1,8 @@
 using ManagedCodecs.Mp3;
+#if UNITY_BUILD
+using ExactMath = ManagedCodecs.H264.ExactMath; // one assembly: the shared sources are compiled once, into H.264's namespace
+using Vlc = ManagedCodecs.H264.Vlc;
+#endif
 
 namespace ManagedCodecs.Tests.Mp3;
 

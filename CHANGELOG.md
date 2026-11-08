@@ -14,7 +14,8 @@ run time.
 ## 0.9.1 – 2026-11-08
 
 Fixes to the new playback packages: `MediaPlayer` no longer drops frames when a game ticks at the video's own rate,
-and `VideoTexture`'s sound starts with the picture. H.264 intra prediction is a little faster. No public API changes.
+and `VideoTexture`'s sound starts with the picture. H.264 intra prediction is faster (about 2% of a High profile
+frame under the JIT), with the same output. No public API changes.
 
 ### Changed
 

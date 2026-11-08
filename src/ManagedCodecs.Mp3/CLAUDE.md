@@ -1,7 +1,8 @@
 # MP3: notes for working on the MP3 decoder and its samples
 
 The repository's CLAUDE.md (process, core idea, cross-cutting gotchas) applies too. The plan and what is left:
-docs/decisions/2026-11-08-mp3-decoder.md (steps 2 and 3, the decoder and playback, are done).
+docs/decisions/2026-11-08-mp3-decoder.md (steps 2 and 3, the decoder and playback, are done; of step 4, the
+filterbanks).
 
 ## Samples: which encoder writes what
 
@@ -36,3 +37,6 @@ FFmpeg's MP4 muxer refuses MPEG-2.5's rates (8, 11.025, 12 kHz): those samples a
   unless the signal has noise up there (mkv-mp3-intensity).
 - A test that stops at its first failing sample reports that sample's difference, not the largest: compare the whole
   output (largest, mean, where) before calling a difference rounding.
+- The fast synthesis and long IMDCT must give the definitions' doubles, not only their floats: a sum in another order
+  differs in its last bits, which the rounding to float almost never shows (reversing a vector loop passed a test of
+  the float output). `FastFilterbanksGiveTheDefinitionsBits` compares V and the sums before rounding.

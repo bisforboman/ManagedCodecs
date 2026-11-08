@@ -104,6 +104,7 @@ public sealed class MediaPlayer : IDisposable
 
             Video = video;
             Audio = demuxer.Audio is { Codec: CodecIds.Aac } audio ? audio : null;
+            SkippedAudioCodec = Audio is null ? demuxer.Audio?.Codec : null;
         }
         catch
         {
@@ -122,6 +123,13 @@ public sealed class MediaPlayer : IDisposable
     /// AAC), and plays silent.
     /// </summary>
     public AudioStreamInfo? Audio { get; }
+
+    /// <summary>
+    /// The codec of the file's audio when it isn't played (<see cref="Audio"/> is null): a <see cref="CodecIds"/> value
+    /// such as <see cref="CodecIds.Mp3"/>, or the container's own name for it (<c>A_OPUS</c>). Null when the audio plays
+    /// or there is none. For a warning, so that a video playing silent says why.
+    /// </summary>
+    public string? SkippedAudioCodec { get; }
 
     /// <summary>
     /// The decoding has ended (the file played through, <see cref="Error"/>, or <see cref="Dispose"/>) and every frame

@@ -11,6 +11,20 @@ namespace ManagedCodecs.Tests.Containers;
 /// </summary>
 public class MatroskaDemuxerTests
 {
+    /// <summary>MP3's Codec ID maps to <see cref="CodecIds.Mp3"/>; Layers I and II keep theirs.</summary>
+    [Theory]
+    [InlineData("A_MPEG/L3", CodecIds.Mp3)]
+    [InlineData("A_MPEG/L2", "A_MPEG/L2")]
+    public void NamesMpegAudio(string codecId, string codec)
+    {
+        var file = File(
+            Tracks(Video(1, "V_MPEG4/ISO/AVC", [1, 2, 3], defaultDuration: 40_000_000), Audio(2, codecId, 44100, 2)),
+            Cluster(1000, SimpleBlock(1, 0, keyframe: true, [10, 11])));
+        using var demuxer = new MatroskaDemuxer(new MemoryStream(file));
+
+        Assert.Equal(codec, demuxer.Audio!.Codec);
+    }
+
     [Fact]
     public void ReadsTracksAndBlocks()
     {

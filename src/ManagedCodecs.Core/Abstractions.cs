@@ -37,6 +37,12 @@ public static class CodecIds
 
     /// <summary>MPEG-4 / MPEG-2 AAC.</summary>
     public const string Aac = "AAC";
+
+    /// <summary>
+    /// MPEG-1 or MPEG-2 audio, MP3 (Layer III) as a rule: the MP4 object types 0x6B and 0x69, which don't tell the layers
+    /// apart, its QuickTime sample entries and Matroska's A_MPEG/L3. Demuxed, not decoded.
+    /// </summary>
+    public const string Mp3 = "MP3";
 }
 
 /// <summary>One compressed unit of data pulled out of a container, e.g. one MJPEG frame.</summary>

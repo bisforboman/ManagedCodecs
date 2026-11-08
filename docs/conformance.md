@@ -1463,6 +1463,21 @@ and a mutation entry each:
 FFmpeg's decoder (6.1) misses the reference on the lower rates' intensity stereo (RMS 4e-2 on l3-test45, 3e-2 on
 l3-test46) where this one meets it: it is not the oracle there, and the unit tests check the equations instead.
 
+### Speed
+
+The definitions (2026-11-08) took 342 µs a frame (1152 samples) of Tears of Steel's MP3 (44.1 kHz stereo, its
+12 minutes remuxed to MP4), 6.3 times FFmpeg's 54 µs (its user time, one thread), two thirds of it in the synthesis'
+matrixing (2048 multiply-adds a time slot) and 13.5% in the long IMDCT. Both now give the definitions' bits with fewer
+operations. The synthesis computes only the 32 rows of N the others follow from: row 32 - i is row i negated, row
+96 - i is row i, row 16 is zero, exactly so in `ExactMath.CosPi`, which reduces each angle symmetrically. And both run
+vectors across outputs (Vector128, two doubles each, on every runtime), each lane summing over k in the
+definition's order, multiply then add (no fused multiply-add). The Unity build (netstandard2.1, no
+System.Runtime.Intrinsics) keeps the definitions themselves. `FastFilterbanksGiveTheDefinitionsBits` compares V, the
+synthesis' sums before rounding, and the IMDCT's outputs with the definitions bit for bit on random input of every
+magnitude and silence; reversing the order of either vector loop's sum fails it, where comparing the float output alone
+did not notice. 84 µs a frame now (2.4 s for the film against 9.6, the output's hash unchanged), 1.5 times FFmpeg's;
+what is left is spread (perf: the synthesis 18%, Huffman decoding and requantization together 38%, the IMDCT 11%).
+
 ## ADTS (raw AAC)
 
 Raw AAC files (ADTS, `AdtsDemuxer`) demux packet by packet as FFmpeg's

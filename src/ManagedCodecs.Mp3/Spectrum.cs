@@ -21,6 +21,13 @@ internal static class Spectrum
 
     private static readonly Vlc Count1A = new(HuffmanTables.Count1A);
 
+    // 2^(q / 4) for q from -QuarterOffset up to 63 (ExactMath.QuarterPowerOfTwo's values: Math.ScaleB, a CoreLib call,
+    // took 6% of the time once a band). Requantization's q is global_gain - 210 (-210 to 45) less 8 subblock_gain (up
+    // to 56) and a scalefactor shifted by scalefac_scale + 1 (MPEG-1: at most 15 + 3 of preemphasis, by 4; the lower
+    // rates: at most 31, by 4): within -210 - 56 - 124 = -390 and 45. Outside, it is computed.
+    private const int QuarterOffset = 512;
+    private static readonly double[] QuarterPowers = [.. Enumerable.Range(-QuarterOffset, QuarterOffset + 64).Select(ExactMath.QuarterPowerOfTwo)];
+
     // |x|^(4/3) for every value a big-value table with 13 linbits can code (15 + 8191).
     private static readonly double[] PowFourThirds = [.. Enumerable.Range(0, 15 + 8192).Select(ExactMath.FourThirdsPower)];
 
@@ -224,8 +231,11 @@ internal static class Spectrum
 
             for (int k = 0; k < 4; k++)
             {
+                // 0, or 1 and a sign bit (without a branch on the sign: -1 for sign 1).
                 int magnitude = (quad >> (3 - k)) & 1;
-                lines[i + k] = magnitude != 0 && r.ReadBit() == 1 ? -1 : magnitude;
+                int sign = r.Peek(1) & magnitude;
+                r.Position += magnitude;
+                lines[i + k] = magnitude - (2 * sign);
             }
 
             i += 4;
@@ -241,7 +251,8 @@ internal static class Spectrum
         return count;
     }
 
-    // A big value's magnitude with its linbits (for 15) and sign bit.
+    // A big value's magnitude with its linbits (for 15) and sign bit, which only a nonzero magnitude has. The sign is
+    // taken without a branch on it (random signs would mispredict every other one): -m is (m ^ -1) + 1.
     private static int Value(ref BitReader r, int magnitude, int linbits)
     {
         if (magnitude == 15 && linbits > 0)
@@ -249,7 +260,10 @@ internal static class Spectrum
             magnitude += r.Read(linbits);
         }
 
-        return magnitude != 0 && r.ReadBit() == 1 ? -magnitude : magnitude;
+        int nonzero = (int)((uint)(magnitude | -magnitude) >> 31);
+        int sign = r.Peek(1) & nonzero;
+        r.Position += nonzero;
+        return (magnitude ^ -sign) + sign;
     }
 
     /// <summary>
@@ -259,7 +273,10 @@ internal static class Spectrum
     /// </summary>
     public static void Requantize(Granule g, bool lsf, int rateIndex, int[] lines, int count, int[] scalefactors, double[] spectrum)
     {
-        Array.Clear(spectrum);
+        // The bands cover lines 0 to 575 in order (long, then a mixed or short block's short bands from line 36 or 0), so
+        // the runs below write every line under count: only the rest is cleared (all of it took 6% of the time, in
+        // CoreLib's precompiled clear).
+        spectrum.AsSpan(count).Clear();
         int gain = g.GlobalGain - 210;
         int shift = g.ScalefacScale + 1;
         var longBands = Mp3Tables.LongBands[rateIndex];
@@ -268,7 +285,7 @@ internal static class Spectrum
         for (int band = 0; band < longEnd && line < count; band++)
         {
             int quarters = gain - ((scalefactors[band] + (g.Preflag ? Mp3Tables.Pretab[band] : 0)) << shift);
-            line = RequantizeRun(lines, spectrum, line, Math.Min(longBands[band + 1], count), ExactMath.QuarterPowerOfTwo(quarters));
+            line = RequantizeRun(lines, spectrum, line, Math.Min(longBands[band + 1], count), QuarterPower(quarters));
         }
 
         if (!g.ShortBlocks)
@@ -286,18 +303,25 @@ internal static class Spectrum
             {
                 int sf = scalefactors[longEnd + (3 * (band - shortStart)) + w];
                 int quarters = gain - (g.SubblockGain[w] << 3) - (sf << shift);
-                line = RequantizeRun(lines, spectrum, line, Math.Min(line + width, count), ExactMath.QuarterPowerOfTwo(quarters));
+                line = RequantizeRun(lines, spectrum, line, Math.Min(line + width, count), QuarterPower(quarters));
             }
         }
     }
 
+    internal static double QuarterPower(int quarters) =>
+        (uint)(quarters + QuarterOffset) < (uint)QuarterPowers.Length ? QuarterPowers[quarters + QuarterOffset] : ExactMath.QuarterPowerOfTwo(quarters);
+
     private static int RequantizeRun(int[] lines, double[] spectrum, int start, int end, double scale)
     {
+        // Without a branch on the sign: |x| as (x ^ s) - s and the result's sign bit set from s (s = x >> 31), which is
+        // the negation of the definition's -magnitude bit for bit. (|x| stays far below int.MinValue's.)
+        var powers = PowFourThirds;
         for (int i = start; i < end; i++)
         {
             int x = lines[i];
-            double magnitude = PowFourThirds[Math.Abs(x)] * scale;
-            spectrum[i] = x < 0 ? -magnitude : magnitude;
+            int s = x >> 31;
+            double magnitude = powers[(x ^ s) - s] * scale;
+            spectrum[i] = BitConverter.Int64BitsToDouble(BitConverter.DoubleToInt64Bits(magnitude) ^ ((long)s << 63));
         }
 
         return Math.Max(start, end);

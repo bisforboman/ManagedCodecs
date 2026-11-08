@@ -1,8 +1,7 @@
 # MP3: notes for working on the MP3 decoder and its samples
 
 The repository's CLAUDE.md (process, core idea, cross-cutting gotchas) applies too. The plan and what is left:
-docs/decisions/2026-11-08-mp3-decoder.md (steps 2 and 3, the decoder and playback, are done; of step 4, the
-filterbanks).
+docs/decisions/2026-11-08-mp3-decoder.md (steps 2 to 4, the decoder, playback and its speed, are done).
 
 ## Samples: which encoder writes what
 
@@ -40,3 +39,6 @@ FFmpeg's MP4 muxer refuses MPEG-2.5's rates (8, 11.025, 12 kHz): those samples a
 - The fast synthesis and long IMDCT must give the definitions' doubles, not only their floats: a sum in another order
   differs in its last bits, which the rounding to float almost never shows (reversing a vector loop passed a test of
   the float output). `FastFilterbanksGiveTheDefinitionsBits` compares V and the sums before rounding.
+- A CoreLib call in a hot loop shows in perf as a bare CoreLib address under ReadyToRun (mcdec's default), and not at all
+  with `DOTNET_ReadyToRun=0`, which jits it into its caller: `Math.ScaleB` for 2^(q / 4) was 6% of the time and 10% of
+  `RequantizeRun`'s, until a table took its place.

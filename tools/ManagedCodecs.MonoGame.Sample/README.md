@@ -69,9 +69,11 @@ re-encoded so that its picture and sound start together:
 |---|---|
 | 0.9.0 | 49 and 87 ms early |
 | 0.9.1 (`VideoTexture` starts the sound with the first frame) | 17 and 27 ms late |
+| since (the sound opened with the first audio, before the first frame) | 9 ms late, 11 early, 5 late (the first after dropping the file cache) |
 
 A cut by stream copy (its video from an earlier keyframe, hidden by an edit list) gave 21 and 23 ms late with 0.9.1,
 `MediaPlayer`'s audio the same as FFmpeg's sample for sample. Late by a frame or less is inside what viewers accept
 (sound late is the lenient side). The very first run after boot had 234 ms of silence between OpenAL opening its
-device (which `VideoTexture` does at the first frame) and the sound, then played without a gap: opening the device
-cold sits on the start path.
+device (which `VideoTexture` then did at the first frame) and the sound, then played without a gap: opening the
+device cold sat on the start path. `VideoTexture` now makes the sound as soon as the first audio is decoded, with its
+first buffers queued while stopped, and starts it at the first frame.

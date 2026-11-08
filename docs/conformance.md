@@ -1016,6 +1016,13 @@ frames: their intra 8x8 blocks), -0.13% on `h264-high-intra-qp4` (noise, whose 8
 directional). Under the JIT the gain is larger (perf, 300 loops, six pairs each, the order alternating): the intra
 functions' share fell from a median 6.1 to 3.9% of `h264-high-intra`'s samples and 4.1 to 1.9% of
 `h264-high-default`'s, every run of the branch below every run of the base: about two points of the frame on both.
+Looked for and not taken (2026-11-08): more of #414's kind, by perf of main's JIT build (`DOTNET_ReadyToRun=0`,
+`h264-high-default`, `h264-bench-720p`, `h264-high-intra`). Five hot functions still zero a `stackalloc` a call
+(`ReconstructIntraLuma`, `DecodeSubMacroblocks`, `InternalStrengths`, `TwoListStrengths`, `InverseLumaDc`), but of 16
+to 64 bytes each: a few stores, not #414's two 100-byte clears and both edges filtered. The largest clear is
+`ResetInter`'s `Array.Clear` of the picture's motion arrays (native `memset`, 1.2% of `h264-bench-720p`'s samples,
+less on CABAC); dropping it needs every decoded and concealed macroblock to write its own entries first, since
+pictures are reused and direct prediction reads a reference's co-located motion: left for a point at most.
 The per-partition path (`PredictFromOne`, `PredictFromTwo`: one call to the kernels a component, without
 `PartitionPlace`, `Weighting` for default bi-prediction or `PredictComponent`) then took frame macroblocks of frames
 at any depth and in 4:2:2 too, not only 8-bit 4:2:0; MBAFF frames and field pictures keep `PredictPartitionGeneral`.
@@ -1197,6 +1204,12 @@ frame against the double banks) gave 0.90 on `heaac-5.1.mp4` and 0.93 on `heaacv
 on x64 (AAC LC, which the banks don't touch, 1.01 and 0.99); the final code, against main with #363's gains in vectors,
 0.91 and 0.94 on ARM64, 0.92 and 0.95 on x64 (AAC LC 1.01 and 1.00); and against main with #382's reorder from a
 source (which the float FFT keeps) and #384, 0.91 and 0.94 on ARM64, 0.93 and 0.96 on x64 (AAC LC 1.00 and 1.02).
+The profile after those (2026-11-08, perf of the JIT build, `heaac-5.1.mp4`, 1000 loops, `DOTNET_ReadyToRun=0`):
+the windowing's `SumOfProducts` 11.0% (7.7 points in synthesis, 3.3 in analysis), the FFTs' vector stages 9.5%, the
+full synthesis bank 4.9%, its pretransform 4.6%, the IMDCT 3.9%, the HF generator's covariances 3.6%, the core's
+spectral data 3.5%, and nothing else above 3.3%; `SbrChannel.MoveOn`'s and `GenerateHighBand`'s clears 1.9% together.
+No function holds waste of #414's kind (H.264, above), and the two largest already had their tries (single-precision
+windowing, above; slots across lanes, below): left as it is.
 
 The QMF transforms across time slots, one slot a vector lane, tried for speed and dropped (2026-11-07, #338). By perf
 the transforms take about 24% of `heaac-5.1.mp4`'s frame: the FFTs' vector stages 8.3%, their bit-reversal and first

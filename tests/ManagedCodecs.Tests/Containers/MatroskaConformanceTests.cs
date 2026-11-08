@@ -162,6 +162,7 @@ public class MatroskaConformanceTests
     [InlineData("webm-vp9-opus.webm", "V_VP9", "A_OPUS")]
     [InlineData("mkv-mjpeg-sar.mkv", CodecIds.Mjpeg, null)]
     [InlineData("mkv-lace-fixed.mkv", CodecIds.H264, "A_PCM/INT/LIT")]
+    [InlineData("mkv-h264-mp3.mkv", CodecIds.H264, CodecIds.Mp3)]
     public void NamesTheCodecs(string sampleName, string video, string? audio)
     {
         if (TestSamples.Directory is null || !File.Exists(TestSamples.PathOf(sampleName)))

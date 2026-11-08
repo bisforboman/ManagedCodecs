@@ -33,6 +33,11 @@ internal sealed class PlayerGame : Game
         _sprites = new SpriteBatch(GraphicsDevice);
         _video = new VideoTexture(GraphicsDevice, _path);
         var video = _video.Player.Video;
+        if (_video.Player.SkippedAudioCodec is { } codec)
+        {
+            Console.Error.WriteLine($"mcplay: the audio is {codec}, which isn't decoded (only AAC is); playing without sound.");
+        }
+
         _graphics.PreferredBackBufferWidth = Math.Min(video.Width, 1280);
         _graphics.PreferredBackBufferHeight = Math.Min(video.Height, 720);
         _graphics.ApplyChanges();

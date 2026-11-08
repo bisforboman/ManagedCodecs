@@ -13,8 +13,18 @@ run time.
 
 ## Unreleased
 
+### Added
+
+- Playback: `MediaPlayer.SkippedAudioCodec` names a file's audio when it isn't played (only AAC is decoded), such as
+  MP3, so a video playing silent can say why. The Godot node, the Unity sample and mcplay print a warning with it
+  (#415).
+- `CodecIds.Mp3`: MP3 (MPEG-1 and MPEG-2 audio) in MP4 (object types 0x6B and 0x69, QuickTime's `.mp3` and `ms\0U`
+  entries) and Matroska (`A_MPEG/L3`). Demuxed, not decoded.
+
 ### Changed
 
+- Containers: an MP3 track's `Codec` is now `CodecIds.Mp3` (`"MP3"`), where it was the sample entry's name in MP4
+  (`mp4a`, `.mp3`) and `A_MPEG/L3` in Matroska.
 - H.264: intra prediction's vertical, horizontal and DC modes (4x4, 8x8, chroma DC) write a row at a time: 10% fewer
   instructions in an 8-bit intra-only stream under Native AOT, about 1% of its time under the JIT. The output is
   unchanged.
@@ -26,6 +36,8 @@ run time.
 
 ### Fixed
 
+- Thumbnails: `VideoProbe`'s duration counted an MP4 audio track from its first packet's start when the edit list
+  starts inside it (MP3's encoder delay, 1105 samples), 25 ms too long; it now starts where the edit does, as ffprobe's.
 - Playback: `MediaPlayer.TakeFrame` dropped about 1 frame in 5 when the game ticks at the video's own rate (24 fps
   video at 24 Hz, 60 at 60 Hz): its clock, a sum of frame times, falls a rounding error short of some frames, which
   were then shown a tick late and dropped. A frame is now due from half the interval before its time, so each call

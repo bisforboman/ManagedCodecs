@@ -51,6 +51,47 @@ public class MediaPlayerTests
         Assert.Equal((frames.Count, frames.Count, 0L), (statistics.DecodedFrames, statistics.ConvertedFrames, statistics.DroppedFrames));
     }
 
+    /// <summary>
+    /// Audio it doesn't decode plays as none and is named, for the engines' warning: MP3 in MP4, in QuickTime's '.mp3'
+    /// entry and in Matroska. AAC and a file without audio name nothing.
+    /// </summary>
+    [Theory]
+    [InlineData("h264-mp3.mp4", CodecIds.Mp3)]
+    [InlineData("h264-mp3-mov.mp4", CodecIds.Mp3)]
+    [InlineData("mkv-h264-mp3.mkv", CodecIds.Mp3)]
+    [InlineData("h264-audio-edits.mp4", null)]
+    [InlineData("testsrc-420.avi", null)]
+    public void NamesTheAudioItSkips(string name, string? skipped)
+    {
+        using var player = new MediaPlayer(TestSamples.PathOf(name));
+
+        Assert.Equal(skipped, player.SkippedAudioCodec);
+        Assert.Equal(skipped is null && name.EndsWith(".mp4", StringComparison.Ordinal), player.Audio is not null);
+        if (skipped is null)
+        {
+            return;
+        }
+
+        player.Start();
+        int shown = 0;
+        var samples = new List<float>();
+        MediaPlayer? TakeAll()
+        {
+            if (player.TakeFrame(TimeSpan.MaxValue) is { } frame)
+            {
+                shown++;
+                player.Return(frame);
+            }
+
+            return player.IsFinished ? player : null;
+        }
+
+        Wait(player, TakeAll, samples);
+        Assert.Null(player.Error);
+        Assert.Empty(samples);
+        Assert.Equal(25, shown + player.Statistics.DroppedFrames);
+    }
+
     // A game ticking at the video's own rate (Godot's Movie Maker mode, 60 fps video at 60 Hz) sums its frame times in
     // doubles, which falls a rounding error short of some frames' times. Each tick still shows its frame: none is shown
     // late and then dropped as it was when a frame was due only at its exact time (1 in 5 of a 24 fps film's).

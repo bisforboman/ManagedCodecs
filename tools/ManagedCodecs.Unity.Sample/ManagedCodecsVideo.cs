@@ -5,7 +5,7 @@ using UnityEngine;
 namespace ManagedCodecs.UnitySample;
 
 /// <summary>
-/// Plays an MP4 or AVI file (H.264 or MJPEG, AAC audio) from StreamingAssets onto this object's renderer, decoded by
+/// Plays an MP4 or AVI file (H.264 or MJPEG, AAC or MP3 audio) from StreamingAssets onto this object's renderer, decoded by
 /// ManagedCodecs.Unity: a thread of its own decodes ahead (<see cref="MediaPlayer"/>), <see cref="Update"/> shows the
 /// newest frame due by a clock started at the first frame (late ones are dropped), and the audio streams
 /// through an <see cref="AudioClip"/> whose callback, on Unity's audio thread, takes the decoded samples. Not for
@@ -44,7 +44,7 @@ public sealed class ManagedCodecsVideo : MonoBehaviour
 
         if (_player.SkippedAudioCodec is { } codec)
         {
-            Debug.LogWarning($"ManagedCodecsVideo: {fileName}'s audio is {codec}, which isn't decoded (only AAC is); playing without sound.");
+            Debug.LogWarning($"ManagedCodecsVideo: {fileName}'s audio is {codec}, which isn't decoded (only AAC and MP3 are); playing without sound.");
         }
 
         _renderer = GetComponent<Renderer>();

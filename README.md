@@ -91,8 +91,8 @@ and code that reproduces FFmpeg's reading where it differs from the spec), and n
   writes), long, short and mixed blocks, the bit reservoir (a frame reaching back before a cut stream's start comes
   out silent, as FFmpeg's), CRCs checked; from MP4 and Matroska, within 2^-17 of FFmpeg's float output (measured:
   under 2e-6, LAME and shine streams). The MP4 edit list trims the priming (LAME's 1105 samples), Matroska's
-  DiscardPadding the end. Not yet: free-format bitrates, Layers I and II, raw `.mp3` files, AVI audio, playback
-  (docs/decisions/2026-11-08-mp3-decoder.md).
+  DiscardPadding the end. `MediaPlayer` plays it (In-game video). Not yet: free-format bitrates, Layers I and II, raw `.mp3`
+  files, AVI audio (docs/decisions/2026-11-08-mp3-decoder.md).
 - **Containers**: AVI (video), MP4 (video and audio tracks, fragmented files too, edit lists of several edits),
   Matroska and WebM (video and audio tracks, every kind of lacing, BlockGroups, live files of unknown size, header
   stripping and zlib, the display rotation, DiscardPadding; VP9, AV1, Opus and other codecs this library doesn't decode
@@ -416,7 +416,7 @@ thumbnail.SavePng(response.Body); // or thumbnail.SaveJpeg(response.Body, qualit
 
 ### In-game video
 
-`ManagedCodecs.Playback`'s `MediaPlayer` plays an MP4, Matroska, WebM or AVI file (H.264 or MJPEG, AAC audio) for a
+`ManagedCodecs.Playback`'s `MediaPlayer` plays an MP4, Matroska, WebM or AVI file (H.264 or MJPEG, AAC or MP3 audio) for a
 game engine, with no engine's API in it: after `Start()`, a thread of its own demuxes and decodes ahead (H.264 with
 frame threading, by default one thread fewer than the processors, up to 4), converts each frame to RGBA and the audio
 to interleaved float stereo, into bounded queues. Each frame of the game, `TakeFrame(clock)` gives the newest frame due
@@ -444,8 +444,9 @@ while (player.TakeAudio() is { } audio) { /* audio.Samples at audio.SampleRate t
   FFmpeg's scaler (tools/ManagedCodecs.MonoGame.Sample/README.md); the fast path is checked against the formula on random
   samples of every 8-bit layout.
 - **Speed:** on 4 vCPUs at 2.1 GHz, 1080p24 and 1080p30 keep up, decoding and conversion included (mcplay's README).
-- **Audio it doesn't decode** (MP3, Opus, ...) plays as none: `Audio` is null and `SkippedAudioCodec` names it
-  (`CodecIds.Mp3`, or the container's Codec ID), for a warning; the Godot, Unity and mcplay samples print one.
+- **Audio it doesn't decode** (Opus, Vorbis, ...; AAC and MP3 play) plays as none: `Audio` is null and
+  `SkippedAudioCodec` names it (the container's Codec ID, such as `A_OPUS`), for a warning; the Godot, Unity and
+  mcplay samples print one.
 - **Not a media player:** no seeking and no clock of its own (pause by stopping the clock you pass); `Loop` plays the
   file again from its start, its frames' times running on.
 - **MonoGame:** `ManagedCodecs.MonoGame`'s `VideoTexture` does all of the above for a `Texture2D` and a

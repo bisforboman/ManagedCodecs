@@ -15,15 +15,17 @@ run time.
 
 ### Added
 
-- Playback: `MediaPlayer.SkippedAudioCodec` names a file's audio when it isn't played (only AAC is decoded), such as
-  MP3, so a video playing silent can say why. The Godot node, the Unity sample and mcplay print a warning with it
+- Playback: `MediaPlayer.SkippedAudioCodec` names a file's audio when it isn't played (only AAC and MP3 are decoded),
+  such as Opus, so a video playing silent can say why. The Godot node, the Unity sample and mcplay print a warning with it
   (#415).
 - `CodecIds.Mp3`: MP3 (MPEG-1 and MPEG-2 audio) in MP4 (object types 0x6B and 0x69, QuickTime's `.mp3` and `ms\0U`
   entries) and Matroska (`A_MPEG/L3`). Demuxed, not decoded.
 - MP3: the new package `ManagedCodecs.Mp3`, `Mp3Decoder` (MPEG audio Layer III at every MPEG-1, MPEG-2 and MPEG-2.5
   sample rate; mono, stereo, dual channel and joint stereo; the bit reservoir), from MP4 and Matroska, within 2^-17 of
   FFmpeg's float output (measured: under 2e-6). Also in `ManagedCodecs.Unity` and the meta-package; `mcdec` decodes
-  it. Playback doesn't play it yet (#415).
+  it (#415).
+- Playback: `MediaPlayer` plays MP3 audio as it plays AAC, and with it `VideoTexture`, the Godot node and the Unity
+  sample: Tears of Steel, one of their test clips, now has sound (#415).
 
 ### Changed
 

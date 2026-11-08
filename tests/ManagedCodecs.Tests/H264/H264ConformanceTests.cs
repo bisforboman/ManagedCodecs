@@ -78,7 +78,17 @@ public class H264ConformanceTests
     public Task MatchesFfmpegWithMotionNeighborsChecked(string sampleName) =>
         CompareWithFfmpeg(sampleName, borrowFrames: false, dispose: true, checkMotionNeighbors: true);
 
-    private static async Task CompareWithFfmpeg(string sampleName, bool borrowFrames, bool dispose, int threads = 1, int rowDelay = 0, bool asynchronous = false, bool checkMotionNeighbors = false)
+    /// <summary>
+    /// The same with <see cref="H264Decoder.CheckMbaffStrengths"/>: in MBAFF frames and field pictures, the bS of each
+    /// macroblock edge's four segments found at once (what holds for the edge found once) are compared with those found
+    /// segment by segment, for every such edge of every sample.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(Samples))]
+    public Task MatchesFfmpegWithMbaffStrengthsChecked(string sampleName) =>
+        CompareWithFfmpeg(sampleName, borrowFrames: false, dispose: true, checkMbaffStrengths: true);
+
+    private static async Task CompareWithFfmpeg(string sampleName, bool borrowFrames, bool dispose, int threads = 1, int rowDelay = 0, bool asynchronous = false, bool checkMotionNeighbors = false, bool checkMbaffStrengths = false)
     {
         var lines = File.ReadAllLines(TestSamples.ReferenceOf(sampleName, ".framemd5"));
         var expected = FrameMd5.Parse(lines).Where(e => e.StreamIndex == 0).ToList(); // FFmpeg lists video first
@@ -92,7 +102,7 @@ public class H264ConformanceTests
 
         using var demuxer = Demuxer.Open(TestSamples.PathOf(sampleName));
         var video = demuxer.Video!;
-        var decoder = new H264Decoder(video) { BorrowFrames = borrowFrames, Threads = threads, RowDelay = rowDelay, CheckMotionNeighbors = checkMotionNeighbors };
+        var decoder = new H264Decoder(video) { BorrowFrames = borrowFrames, Threads = threads, RowDelay = rowDelay, CheckMotionNeighbors = checkMotionNeighbors, CheckMbaffStrengths = checkMbaffStrengths };
 
         int index = 0;
         long firstPts = 0;

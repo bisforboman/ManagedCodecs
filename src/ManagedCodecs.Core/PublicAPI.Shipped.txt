@@ -275,6 +275,7 @@ ManagedCodecs.VideoStreamInfo.Width.init -> void
 const ManagedCodecs.CodecIds.Aac = "AAC" -> string!
 const ManagedCodecs.CodecIds.H264 = "H264" -> string!
 const ManagedCodecs.CodecIds.Mjpeg = "MJPG" -> string!
+const ManagedCodecs.CodecIds.Mp3 = "MP3" -> string!
 const ManagedCodecs.CodecIds.Mpeg4Visual = "MP4V" -> string!
 override ManagedCodecs.AudioStreamInfo.Equals(object? obj) -> bool
 override ManagedCodecs.AudioStreamInfo.GetHashCode() -> int

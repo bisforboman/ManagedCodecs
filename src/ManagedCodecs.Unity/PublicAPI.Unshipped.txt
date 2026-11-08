@@ -1,19 +1,1 @@
 #nullable enable
-const ManagedCodecs.CodecIds.Mp3 = "MP3" -> string!
-ManagedCodecs.Containers.Mp3Demuxer
-ManagedCodecs.Containers.Mp3Demuxer.Audio.get -> ManagedCodecs.AudioStreamInfo!
-ManagedCodecs.Containers.Mp3Demuxer.Dispose() -> void
-ManagedCodecs.Containers.Mp3Demuxer.Mp3Demuxer(System.IO.Stream! stream, bool leaveOpen = false) -> void
-ManagedCodecs.Containers.Mp3Demuxer.ReadPacketInfo() -> System.Collections.Generic.IEnumerable<ManagedCodecs.PacketInfo>!
-ManagedCodecs.Containers.Mp3Demuxer.ReadPackets() -> System.Collections.Generic.IEnumerable<ManagedCodecs.Packet>!
-ManagedCodecs.Containers.Mp3Demuxer.ReadPacketsAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerable<ManagedCodecs.Packet>!
-ManagedCodecs.Containers.Mp3Demuxer.Video.get -> ManagedCodecs.VideoStreamInfo?
-ManagedCodecs.Mp3.Mp3Decoder
-ManagedCodecs.Mp3.Mp3Decoder.Channels.get -> int
-ManagedCodecs.Mp3.Mp3Decoder.Decode(ManagedCodecs.Packet packet) -> ManagedCodecs.AudioFrame!
-ManagedCodecs.Mp3.Mp3Decoder.Decode(System.ReadOnlySpan<byte> packet) -> ManagedCodecs.AudioFrame!
-ManagedCodecs.Mp3.Mp3Decoder.Mp3Decoder() -> void
-ManagedCodecs.Mp3.Mp3Decoder.Mp3Decoder(ManagedCodecs.AudioStreamInfo! stream) -> void
-ManagedCodecs.Mp3.Mp3Decoder.SampleRate.get -> int
-ManagedCodecs.Playback.MediaPlayer.SkippedAudioCodec.get -> string?
-static ManagedCodecs.Containers.Mp3Demuxer.Open(string! path) -> ManagedCodecs.Containers.Mp3Demuxer!

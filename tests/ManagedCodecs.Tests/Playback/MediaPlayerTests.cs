@@ -3,22 +3,24 @@ using ManagedCodecs.Aac;
 using ManagedCodecs.Containers;
 using ManagedCodecs.H264;
 using ManagedCodecs.Mjpeg;
+using ManagedCodecs.Mp3;
 using ManagedCodecs.Playback;
 
 namespace ManagedCodecs.Tests.Playback;
 
 /// <summary>
 /// MediaPlayer against the decoders it runs: its frames are the decoder's, in order, converted as YuvToRgba converts
-/// them and timed from the first; its audio is the AAC decoder's, interleaved; frames already late are dropped, a loop
-/// plays the file again after its last frame, and the options pick the matrix and range. The decoders themselves are
-/// checked against FFmpeg elsewhere.
+/// them and timed from the first; its audio is the AAC or MP3 decoder's, interleaved; frames already late are dropped,
+/// a loop plays the file again after its last frame, and the options pick the matrix and range. The decoders themselves
+/// are checked against FFmpeg elsewhere.
 /// </summary>
 public class MediaPlayerTests
 {
     // Long enough for a loaded CI runner; a frame of these samples decodes in well under a millisecond.
     private static readonly TimeSpan Patience = TimeSpan.FromSeconds(30);
 
-    public static TheoryData<string> Samples() => ["h264-audio-edits.mp4", "testsrc-420.avi"];
+    // MP3 in MP4 (the edit list skips its priming) and in Matroska (its priming plays, as in FFmpeg).
+    public static TheoryData<string> Samples() => ["h264-audio-edits.mp4", "testsrc-420.avi", "h264-mp3.mp4", "mkv-h264-mp3.mkv"];
 
     [Theory]
     [MemberData(nameof(Samples))]
@@ -34,7 +36,7 @@ public class MediaPlayerTests
         {
             var frame = Wait(player, () => player.TakeFrame(expected.Time), samples);
             Assert.Equal(expected.Time, frame.Time);
-            Assert.Equal((320, 240), (frame.Width, frame.Height));
+            Assert.Equal(expected.Pixels.Length, frame.Width * frame.Height * 4);
             Assert.Equal(expected.Pixels, frame.Pixels);
             player.Return(frame);
         }
@@ -52,21 +54,22 @@ public class MediaPlayerTests
     }
 
     /// <summary>
-    /// Audio it doesn't decode plays as none and is named, for the engines' warning: MP3 in MP4, in QuickTime's '.mp3'
-    /// entry and in Matroska. AAC and a file without audio name nothing.
+    /// Audio it doesn't decode plays as none and is named, for the engines' warning: PCM in Matroska, by its Codec ID.
+    /// AAC, MP3 (in MP4, in QuickTime's '.mp3' entry and in Matroska) and a file without audio name nothing.
     /// </summary>
     [Theory]
-    [InlineData("h264-mp3.mp4", CodecIds.Mp3)]
-    [InlineData("h264-mp3-mov.mp4", CodecIds.Mp3)]
-    [InlineData("mkv-h264-mp3.mkv", CodecIds.Mp3)]
-    [InlineData("h264-audio-edits.mp4", null)]
-    [InlineData("testsrc-420.avi", null)]
-    public void NamesTheAudioItSkips(string name, string? skipped)
+    [InlineData("mkv-lace-fixed.mkv", "A_PCM/INT/LIT", false)]
+    [InlineData("h264-mp3.mp4", null, true)]
+    [InlineData("h264-mp3-mov.mp4", null, true)]
+    [InlineData("mkv-h264-mp3.mkv", null, true)]
+    [InlineData("h264-audio-edits.mp4", null, true)]
+    [InlineData("testsrc-420.avi", null, false)]
+    public void NamesTheAudioItSkips(string name, string? skipped, bool plays)
     {
         using var player = new MediaPlayer(TestSamples.PathOf(name));
 
         Assert.Equal(skipped, player.SkippedAudioCodec);
-        Assert.Equal(skipped is null && name.EndsWith(".mp4", StringComparison.Ordinal), player.Audio is not null);
+        Assert.Equal(plays, player.Audio is not null);
         if (skipped is null)
         {
             return;
@@ -308,13 +311,18 @@ public class MediaPlayerTests
     }
 
     // The file decoded here, as the player should: each frame's RGBA by YuvToRgba and its time from the first frame's,
-    // and the AAC decoder's output of the packets not discarded, interleaved as stereo.
+    // and the AAC or MP3 decoder's output of the packets not discarded, interleaved as stereo.
     private static (List<(TimeSpan Time, byte[] Pixels)> Frames, List<float> Audio) Expected(string name, PlaybackOptions? options)
     {
         using var demuxer = Demuxer.Open(TestSamples.PathOf(name));
         var video = demuxer.Video!;
         IVideoDecoder decoder = video.Codec == CodecIds.H264 ? new H264Decoder(video) : new MjpegDecoder(video);
-        var aac = demuxer.Audio is { Codec: CodecIds.Aac } audio ? new AacDecoder(audio) : null;
+        IAudioDecoder? audioDecoder = demuxer.Audio switch
+        {
+            { Codec: CodecIds.Aac } aac => new AacDecoder(aac),
+            { Codec: CodecIds.Mp3 } mp3 => new Mp3Decoder(mp3),
+            _ => null,
+        };
         var frames = new List<(TimeSpan, byte[])>();
         var samples = new List<float>();
         long? first = null;
@@ -336,9 +344,9 @@ public class MediaPlayerTests
             {
                 Add(decoder.Decode(packet));
             }
-            else if (aac is not null && packet.StreamIndex == demuxer.Audio!.StreamIndex && !packet.Discard)
+            else if (audioDecoder is not null && packet.StreamIndex == demuxer.Audio!.StreamIndex && !packet.Discard)
             {
-                var frame = aac.Decode(packet);
+                var frame = audioDecoder.Decode(packet);
                 var right = frame.Channels > 1 ? frame.Samples[1] : frame.Samples[0];
                 for (int i = 0; i < frame.SampleCount; i++)
                 {

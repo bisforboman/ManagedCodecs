@@ -1,5 +1,5 @@
-// mcplay: plays an MP4 or AVI (H.264 or MJPEG, AAC audio) in a MonoGame window, decoded by ManagedCodecs. A sample for
-// in-game video (issue #254, docs/decisions/2026-10-31-game-engines.md), not a media player.
+// mcplay: plays an MP4 or AVI (H.264 or MJPEG, AAC or MP3 audio) in a MonoGame window, decoded by ManagedCodecs. A
+// sample for in-game video (issue #254, docs/decisions/2026-10-31-game-engines.md), not a media player.
 using System.Diagnostics;
 using System.Reflection;
 using ManagedCodecs.H264;

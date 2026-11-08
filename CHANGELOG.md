@@ -23,7 +23,10 @@ run time.
 - MP3: the new package `ManagedCodecs.Mp3`, `Mp3Decoder` (MPEG audio Layer III at every MPEG-1, MPEG-2 and MPEG-2.5
   sample rate; mono, stereo, dual channel and joint stereo; the bit reservoir), from MP4 and Matroska, within 2^-17 of
   FFmpeg's float output (measured: under 2e-6). Also in `ManagedCodecs.Unity` and the meta-package; `mcdec` decodes
-  it. Playback doesn't play it yet (#415).
+  it.
+- Playback: `MediaPlayer` plays MP3 audio as it plays AAC, from MP4 and Matroska, so the MonoGame `VideoTexture`, the
+  Godot node and the Unity sample do too (Tears of Steel now plays with sound, within 5.3e-6 of FFmpeg's decoding over
+  the whole film). `SkippedAudioCodec` names only what is left, such as Opus or PCM (#415).
 
 ### Changed
 

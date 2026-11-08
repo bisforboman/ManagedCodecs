@@ -4,6 +4,7 @@ using ManagedCodecs.Aac;
 using ManagedCodecs.Containers;
 using ManagedCodecs.H264;
 using ManagedCodecs.Mjpeg;
+using ManagedCodecs.Mp3;
 
 namespace ManagedCodecs.Playback;
 
@@ -11,8 +12,9 @@ namespace ManagedCodecs.Playback;
 /// Plays a video file for a game engine: after <see cref="Start"/>, a thread of its own demuxes and decodes ahead of
 /// playback, converts each frame to RGBA and the audio to float stereo, and the game loop takes from it the frame that
 /// is due by its own clock (<see cref="TakeFrame"/>) and the audio its sound has room for (<see cref="TakeAudio"/>).
-/// H.264 (with frame threading) or MJPEG video, AAC audio, from MP4, Matroska, WebM or AVI. Both queues are bounded, so
-/// the decoding waits when playback falls behind: take the audio, or drop it, even without a sound to play it.
+/// H.264 (with frame threading) or MJPEG video, AAC or MP3 audio, from MP4, Matroska, WebM or AVI. Both queues are
+/// bounded, so the decoding waits when playback falls behind: take the audio, or drop it, even without a sound to play
+/// it.
 /// </summary>
 /// <remarks>
 /// Not a media player: no seeking and no clock of its own. <see cref="TakeFrame"/>, <see cref="TakeAudio"/> and
@@ -103,7 +105,7 @@ public sealed class MediaPlayer : IDisposable
             }
 
             Video = video;
-            Audio = demuxer.Audio is { Codec: CodecIds.Aac } audio ? audio : null;
+            Audio = demuxer.Audio is { Codec: CodecIds.Aac or CodecIds.Mp3 } audio ? audio : null;
             SkippedAudioCodec = Audio is null ? demuxer.Audio?.Codec : null;
         }
         catch
@@ -120,14 +122,14 @@ public sealed class MediaPlayer : IDisposable
 
     /// <summary>
     /// The audio stream played, or null for none: the file has no audio, or audio this library doesn't decode (only
-    /// AAC), and plays silent.
+    /// AAC and MP3), and plays silent.
     /// </summary>
     public AudioStreamInfo? Audio { get; }
 
     /// <summary>
-    /// The codec of the file's audio when it isn't played (<see cref="Audio"/> is null): a <see cref="CodecIds"/> value
-    /// such as <see cref="CodecIds.Mp3"/>, or the container's own name for it (<c>A_OPUS</c>). Null when the audio plays
-    /// or there is none. For a warning, so that a video playing silent says why.
+    /// The codec of the file's audio when it isn't played (<see cref="Audio"/> is null): a <see cref="CodecIds"/>
+    /// value, or the container's own name for it (Matroska's <c>A_OPUS</c> or <c>A_PCM/INT/LIT</c>). Null when the
+    /// audio plays or there is none. For a warning, so that a video playing silent says why.
     /// </summary>
     public string? SkippedAudioCodec { get; }
 
@@ -294,7 +296,7 @@ public sealed class MediaPlayer : IDisposable
         IVideoDecoder decoder = video.Codec == CodecIds.H264
             ? new H264Decoder(video) { Threads = _options.DecoderThreads > 0 ? _options.DecoderThreads : Math.Clamp(Environment.ProcessorCount - 1, 1, 4) }
             : new MjpegDecoder(video);
-        var audio = Audio is null ? null : new AacDecoder(Audio);
+        IAudioDecoder? audio = Audio is null ? null : Audio.Codec == CodecIds.Mp3 ? new Mp3Decoder(Audio) : new AacDecoder(Audio);
         long shown = Interlocked.Read(ref _converted);
         foreach (var packet in _demuxer.ReadPackets())
         {

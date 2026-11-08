@@ -6,7 +6,7 @@
   <PropertyGroup>
     <RootNamespace>ManagedCodecs.MonoGame</RootNamespace>
     <PackageId>ManagedCodecs.MonoGame</PackageId>
-    <Description>Video for MonoGame games: VideoTexture plays an MP4, Matroska, WebM or AVI file (H.264 or MJPEG, AAC audio) into a Texture2D and a DynamicSoundEffectInstance, decoded on a thread of its own by ManagedCodecs.Playback, in pure managed C#. Any MonoGame 3.8 platform.</Description>
+    <Description>Video for MonoGame games: VideoTexture plays an MP4, Matroska, WebM or AVI file (H.264 or MJPEG, AAC or MP3 audio) into a Texture2D and a DynamicSoundEffectInstance, decoded on a thread of its own by ManagedCodecs.Playback, in pure managed C#. Any MonoGame 3.8 platform.</Description>
     <PackageTags>$(PackageTags);playback;video-player;game;monogame;fna</PackageTags>
   </PropertyGroup>
 

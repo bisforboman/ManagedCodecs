@@ -776,6 +776,7 @@ internal sealed partial class PictureDecoder<TPixel>
         Span<byte> leftLines = stackalloc byte[16];
         Span<byte> topSegments = stackalloc byte[4];
         Span<byte> leftSegments = stackalloc byte[4];
+        Span<byte> lumaTopSegments = stackalloc byte[8]; // the luma pass's top edges' bS (one or two edges), which chroma reuses
         int lumaRow = Picture.LumaStride;
         int chromaRow = Picture.ChromaStride;
 
@@ -833,10 +834,10 @@ internal sealed partial class PictureDecoder<TPixel>
                 // Both pairs of one kind: line y meets line y of the left pair's macroblock of the same position, a
                 // plain vertical edge of four segments.
                 int p = leftTop + (mbAddr & 1);
+                MbaffEdgeStrengths(leftSegments, p, 3, mbAddr, 0, 4, horizontalEdge: false);
                 for (int k = 0; k < 4; k++)
                 {
-                    leftLines.Slice(k * 4, 4).Fill((byte)MbaffStrength(p, (k * 4) + 3, mbAddr, k * 4, horizontalEdge: false));
-                    leftSegments[k] = leftLines[k * 4];
+                    leftLines.Slice(k * 4, 4).Fill(leftSegments[k]);
                 }
 
                 FilterLumaEdge(luma, 1, lumaStride, leftSegments, _qp[p], qp, slice);
@@ -866,12 +867,11 @@ internal sealed partial class PictureDecoder<TPixel>
             }
 
             var topEdges = top ? TopEdges(mbAddr, 16) : [];
-            foreach (var (p, pRow, pStep, qOffset, qStep) in topEdges)
+            for (int edge = 0; edge < topEdges.Length; edge++)
             {
-                for (int k = 0; k < 4; k++)
-                {
-                    topSegments[k] = (byte)MbaffStrength(p, ((pRow >> 2) * 4) + k, mbAddr, ((qOffset >> 2) * 4) + k, horizontalEdge: true);
-                }
+                var (p, pRow, pStep, qOffset, qStep) = topEdges[edge];
+                topSegments = lumaTopSegments.Slice(edge * 4, 4);
+                MbaffEdgeStrengths(topSegments, p, (pRow >> 2) * 4, mbAddr, (qOffset >> 2) * 4, 1, horizontalEdge: true);
 
                 var (pOrigin, pStride) = LumaPlace(p);
                 int q0 = luma + (qOffset * lumaRow);
@@ -906,7 +906,7 @@ internal sealed partial class PictureDecoder<TPixel>
 
             if (_mbHeightC == 16)
             {
-                DeblockMbaffChroma422(slice, mbAddr, left ? leftTop : -1, leftLines, leftSegments, vertical, horizontal, topEdges);
+                DeblockMbaffChroma422(slice, mbAddr, left ? leftTop : -1, leftLines, leftSegments, vertical, horizontal, topEdges, lumaTopSegments);
                 continue;
             }
 
@@ -940,12 +940,8 @@ internal sealed partial class PictureDecoder<TPixel>
 
             foreach (var (p, pRow, pStep, qOffset, qStep) in top ? TopEdges(mbAddr, 8) : [])
             {
-                for (int k = 0; k < 4; k++)
-                {
-                    // The luma segments of the same pass: chroma pRow is in chroma rows.
-                    var (pLuma, pLumaRow, _, qLumaOffset, _) = topEdges[qOffset];
-                    topSegments[k] = (byte)MbaffStrength(pLuma, ((pLumaRow >> 2) * 4) + k, mbAddr, ((qLumaOffset >> 2) * 4) + k, horizontalEdge: true);
-                }
+                // The luma segments of the same pass (its edge qOffset): chroma pRow is in chroma rows.
+                topSegments = lumaTopSegments.Slice(qOffset * 4, 4);
 
                 var (pOrigin, pStride) = ChromaPlace(p);
                 int q0 = chroma + (qOffset * chromaRow);
@@ -974,11 +970,12 @@ internal sealed partial class PictureDecoder<TPixel>
     /// line meets and takes that line's bS: across the left edge (the pair at <paramref name="leftTop"/>, -1 for
     /// none) <paramref name="leftSegments"/> as a plain edge when both pairs are of one kind, as luma's, else
     /// <paramref name="leftLines"/> line by line,
-    /// the luma pass's <paramref name="topEdges"/> (two of them under a field pair; a plain edge where p0 is the line above q0) across the
+    /// the luma pass's <paramref name="topEdges"/> (two of them under a field pair; a plain edge where p0 is the line above q0), with
+    /// its bS (<paramref name="lumaTopSegments"/>, four an edge), across the
     /// top one, chroma column x the luma segment x / 2. Inside, as in frames: vertical edge 4
     /// along 16 rows, horizontal edges 4, 8 and 12 with the bS of luma edges 1 to 3.
     /// </summary>
-    private void DeblockMbaffChroma422(SliceInfo slice, int mbAddr, int leftTop, ReadOnlySpan<byte> leftLines, ReadOnlySpan<byte> leftSegments, ReadOnlySpan<byte> vertical, ReadOnlySpan<byte> horizontal, (int P, int PRow, int PStep, int QOffset, int QStep)[] topEdges)
+    private void DeblockMbaffChroma422(SliceInfo slice, int mbAddr, int leftTop, ReadOnlySpan<byte> leftLines, ReadOnlySpan<byte> leftSegments, ReadOnlySpan<byte> vertical, ReadOnlySpan<byte> horizontal, (int P, int PRow, int PStep, int QOffset, int QStep)[] topEdges, ReadOnlySpan<byte> lumaTopSegments)
     {
         int qp = _qp[mbAddr];
         int qpCb = ChromaQp(qp, slice.CbQpOffset, _qpBdOffset);
@@ -1017,13 +1014,10 @@ internal sealed partial class PictureDecoder<TPixel>
         FilterEdge(PlaneCb, chroma + 4, 1, chromaStride, 16, strengths, qpCb, qpCb, slice.AlphaOffset, slice.BetaOffset, chroma: true, segmentShift: 2, bitDepth: _bitDepth);
         FilterEdge(PlaneCr, chroma + 4, 1, chromaStride, 16, strengths, qpCr, qpCr, slice.AlphaOffset, slice.BetaOffset, chroma: true, segmentShift: 2, bitDepth: _bitDepth);
 
-        Span<byte> topSegments = stackalloc byte[4];
-        foreach (var (p, pRow, pStep, qOffset, qStep) in topEdges)
+        for (int edge = 0; edge < topEdges.Length; edge++)
         {
-            for (int k = 0; k < 4; k++)
-            {
-                topSegments[k] = (byte)MbaffStrength(p, ((pRow >> 2) * 4) + k, mbAddr, ((qOffset >> 2) * 4) + k, horizontalEdge: true);
-            }
+            var (p, pRow, pStep, qOffset, qStep) = topEdges[edge];
+            var topSegments = lumaTopSegments.Slice(edge * 4, 4); // the luma pass's bS of this edge
 
             var (pOrigin, pStride) = ChromaPlace(p);
             int q0 = chroma + (qOffset * chromaRow);
@@ -1046,6 +1040,46 @@ internal sealed partial class PictureDecoder<TPixel>
         for (int edge = 1; edge < 4; edge++)
         {
             FilterChromaEdge(PlaneCb, PlaneCr, chroma + (edge * 4 * chromaStride), chromaStride, 1, horizontal.Slice(edge * 4, 4), qpCb, qpCb, qpCr, qpCr, slice.AlphaOffset, slice.BetaOffset, bitDepth: _bitDepth);
+        }
+    }
+
+    /// <summary>
+    /// bS of the four segments of a macroblock edge of an MBAFF frame or field picture: segment k between block
+    /// <paramref name="firstP"/> + k * <paramref name="step"/> of <paramref name="mbP"/> and block
+    /// <paramref name="firstQ"/> + k * step of <paramref name="mbQ"/> (raster indices). <see cref="MbaffStrength"/> a
+    /// segment, with what holds for the whole edge (intra, frame and field macroblocks meeting) found once; with
+    /// <see cref="CheckMbaffStrengths"/> (tests) it is compared with MbaffStrength.
+    /// </summary>
+    private void MbaffEdgeStrengths(Span<byte> strengths, int mbP, int firstP, int mbQ, int firstQ, int step, bool horizontalEdge)
+    {
+        bool fieldP = _fieldMb[mbP];
+        bool fieldQ = _fieldMb[mbQ];
+        if (IsIntra(mbP) || IsIntra(mbQ))
+        {
+            SetStrengths(strengths, horizontalEdge && (fieldP || fieldQ) ? 3 : 4);
+        }
+        else
+        {
+            bool mixed = fieldP != fieldQ;
+            int limitY = fieldQ ? 2 : 4;
+            for (int k = 0; k < 4; k++)
+            {
+                int p = firstP + (k * step);
+                int q = firstQ + (k * step);
+                strengths[k] = HasCoefficients(mbP, p) || HasCoefficients(mbQ, q) ? (byte)2 : mixed ? (byte)1 : (byte)MotionStrength((mbP * 16) + p, (mbQ * 16) + q, limitY);
+            }
+        }
+
+        if (CheckMbaffStrengths)
+        {
+            for (int k = 0; k < 4; k++)
+            {
+                int expected = MbaffStrength(mbP, firstP + (k * step), mbQ, firstQ + (k * step), horizontalEdge);
+                if (strengths[k] != expected)
+                {
+                    throw new InvalidOperationException($"Macroblocks {mbP} and {mbQ}, segment {k} ({(horizontalEdge ? "horizontal" : "vertical")}): bS {strengths[k]} found by edge, {expected} by segment.");
+                }
+            }
         }
     }
 

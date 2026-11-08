@@ -189,6 +189,9 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
     /// <summary><see cref="H264Decoder.CheckMotionNeighbors"/>.</summary>
     public bool CheckMotionNeighbors { get; init; }
 
+    /// <summary><see cref="H264Decoder.CheckMbaffStrengths"/>.</summary>
+    public bool CheckMbaffStrengths { get; init; }
+
     /// <summary>
     /// Starts decoding into <paramref name="picture"/>, forgetting the previous picture's state: a
     /// frame, or the field of parity <paramref name="fieldParity"/>. The second field of a frame

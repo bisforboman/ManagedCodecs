@@ -761,6 +761,19 @@ field samples' tests. Callgrind (AOT, steady loops): 168.3 to 137.6 M instructio
 (`h264-mbaff-default` -0.03%, `jm-paff-b`, `h264-bench-720p.mp4`). Under the JIT (perf, 150 loops, six runs each,
 alternating, normalized by CABAC residual decoding, intra reconstruction and the inverse transforms, which it leaves
 alone) `h264-422-mbaff-default` took a median 11.4% less, all six runs faster.
+MBAFF bS next (2026-11-08): a fresh profile of main put `MbaffStrength` (bS of one segment of a macroblock edge) at
+6 to 6.6% of the interlaced samples' instructions on its own and 11 to 12% with what it calls, about 13 calls a
+macroblock at about 200 instructions each: every segment tested both macroblocks for intra and for field and frame
+meeting again, and chroma (4:2:0 and 4:2:2) found the top edges' bS a second time. `MbaffEdgeStrengths` now finds an
+edge's four segments at once (the left edge between pairs of one kind, the top edges), what holds for the whole edge
+found once, and chroma takes the luma pass's top bS. `H264Decoder.CheckMbaffStrengths` (tests only) compares each
+edge with `MbaffStrength` segment by segment on every sample (`MatchesFfmpegWithMbaffStrengthsChecked`; swapping
+intra's 3 and 4 fails 62 of them). Callgrind (AOT, steady loops): 378.9 to 357.3 M instructions a loop of
+`h264-mbaff-default` (-5.7%), -6.8% in `h264-mbaff-p`, -6.2% in `jm-paff-b`, -4.8% in `h264-422-mbaff-default`, -2.5%
+in `h264-mbaff-intra`; `h264-bench-720p.mp4` the same to 0.001% by function (its steady loops +0.04%, layout). Under
+the JIT (perf, 150 loops, six runs each, alternating, normalized by CABAC, motion compensation and the edge filters)
+`h264-mbaff-default` took a median 2.5% less, five runs of six faster. Left: the left edge between pairs of different
+kinds, still a `MbaffStrength` a line (16 an edge, half of them repeats).
 
 A profile of a
 720p libx264 default stream (2026-10-22) is flat: CABAC residual decoding takes 14%, deblocking 21%

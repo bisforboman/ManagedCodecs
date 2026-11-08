@@ -486,6 +486,7 @@ internal sealed partial class PictureDecoder<TPixel>
     }
 
     /// <summary>Reads one mvd pair of list <paramref name="list"/>, adds the prediction and stores the motion.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void DecodeMotion(SliceState slice, BitReader r, int list, int mbAddr, int x, int y, int w, int h, int refIdx, PartitionShape shape)
     {
         int mvdX;
@@ -507,6 +508,7 @@ internal sealed partial class PictureDecoder<TPixel>
     }
 
     /// <summary>Stores one list's motion of a partition, for later neighbours, deblocking and later pictures.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void StoreMotion(SliceState slice, int list, int mbAddr, int x, int y, int w, int h, int refIdx, int mvX, int mvY)
     {
         // A field macroblock's index names a field: of frame refIdx / 2, the same parity as the
@@ -1139,6 +1141,7 @@ internal sealed partial class PictureDecoder<TPixel>
         MotionAt(list, mbAddr, currentBlock, Neighbor(mbAddr, x, y));
 
     /// <summary>Luma motion vector prediction for list <paramref name="list"/> (8.4.1.3).</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private (int X, int Y) PredictMv(int list, int mbAddr, int x, int y, int w, int h, int refIdx, PartitionShape shape)
     {
         int current = BlockIndex(x / 4, y / 4);

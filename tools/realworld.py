@@ -50,7 +50,7 @@ FILMS = {
     "tears_of_steel_720p.mov": (
         "https://download.blender.org/demo/movies/ToS/tears_of_steel_720p.mov",
         "efa9062d9cdb7a338e40ad530dfdf234806743f29ae6a1a136b97ece4e588e8f",
-        "Tears of Steel, the whole film: 1280x534 H.264 Main in a MOV, 12 minutes, live action (its MP3 audio is not decoded)"),
+        "Tears of Steel, the whole film: 1280x534 H.264 Main in a MOV, 12 minutes, live action, MP3 audio (LAME, 192 kbit/s joint stereo)"),
     "caminandes_gran_dillama.mp4": (
         "https://download.blender.org/demo/movies/caminandes_gran_dillama.mp4.zip",
         "468e6743c674689a728726bbe4bb4b2a65bd8702a89f021af26a8bb4d450eebd",

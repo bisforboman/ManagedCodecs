@@ -3,6 +3,7 @@ using ManagedCodecs.Aac;
 using ManagedCodecs.Containers;
 using ManagedCodecs.H264;
 using ManagedCodecs.Mjpeg;
+using ManagedCodecs.Mp3;
 using ManagedCodecs.Thumbnails;
 
 namespace ManagedCodecs.Fuzz;
@@ -18,10 +19,11 @@ public static class Targets
     /// file: a container (AVI or MP4) demuxed and every stream decoded. h264: a 2-byte big-endian length, that many
     /// bytes of avcC, then packets of length-prefixed NAL units, each packet behind a 4-byte length. mjpeg: one JPEG
     /// image. aac: a 1-byte length, that many bytes of AudioSpecificConfig, then raw AAC frames, each behind a
-    /// 2-byte big-endian length (several, so SBR's and parametric stereo's state carries from frame to frame).
+    /// 2-byte big-endian length (several, so SBR's and parametric stereo's state carries from frame to frame). mp3:
+    /// packets of MP3 frames, each behind a 2-byte big-endian length (several, so the bit reservoir reaches back).
     /// thumbnail: a container file probed and thumbnailed (ManagedCodecs.Thumbnails).
     /// </summary>
-    public static readonly string[] Names = ["file", "h264", "mjpeg", "aac", "thumbnail"];
+    public static readonly string[] Names = ["file", "h264", "mjpeg", "aac", "mp3", "thumbnail"];
 
     /// <summary>
     /// What <see cref="Run"/> makes of <paramref name="data"/>, as one line: "accepted", "rejected", or the type and
@@ -70,6 +72,9 @@ public static class Targets
                 case "aac":
                     DecodeAac(data);
                     break;
+                case "mp3":
+                    DecodeMp3(data);
+                    break;
                 case "thumbnail":
                     Thumbnail(data.ToArray());
                     break;
@@ -117,7 +122,12 @@ public static class Targets
             CodecIds.Mjpeg => new MjpegDecoder(video),
             _ => null,
         };
-        IAudioDecoder? audioDecoder = audio?.Codec == CodecIds.Aac ? new AacDecoder(audio) : null;
+        IAudioDecoder? audioDecoder = audio?.Codec switch
+        {
+            CodecIds.Aac => new AacDecoder(audio),
+            CodecIds.Mp3 => new Mp3Decoder(audio),
+            _ => null,
+        };
         var infos = new List<PacketInfo>();
         foreach (var packet in demuxer.ReadPackets())
         {
@@ -203,6 +213,17 @@ public static class Targets
             int length = Math.Min(BinaryPrimitives.ReadUInt16BigEndian(rest), rest.Length - 2);
             decoder.Decode(rest.Slice(2, length));
             rest = rest[(2 + length)..];
+        }
+    }
+
+    private static void DecodeMp3(ReadOnlySpan<byte> data)
+    {
+        var decoder = new Mp3Decoder();
+        while (data.Length >= 2)
+        {
+            int length = Math.Min(BinaryPrimitives.ReadUInt16BigEndian(data), data.Length - 2);
+            decoder.Decode(data.Slice(2, length));
+            data = data[(2 + length)..];
         }
     }
 

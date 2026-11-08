@@ -1,3 +1,4 @@
+using ManagedCodecs.Containers;
 using ManagedCodecs.Mp3;
 #if UNITY_BUILD
 using ExactMath = ManagedCodecs.H264.ExactMath; // one assembly: the shared sources are compiled once, into H.264's namespace
@@ -158,7 +159,8 @@ public class Mp3UnitTests
     /// <summary>
     /// MPEG-1 intensity stereo in long blocks (2.4.3.4.9.3): above the right channel's last nonzero band the left
     /// channel's values become L = k / (1 + k) and R = 1 / (1 + k) of them, k = tan(is_pos pi / 12); is_pos 7 is illegal
-    /// (mid/side there when on); band 21 takes band 20's position; below the bound, mid/side or nothing.
+    /// (mid/side there when on); band 21 takes band 20's position (band 20 being in intensity stereo here); below the
+    /// bound, mid/side or nothing.
     /// </summary>
     [Theory]
     [InlineData(false)]
@@ -202,7 +204,7 @@ public class Mp3UnitTests
     /// The lower rates' intensity stereo (13818-3 2.4.3.2), in short blocks: each window's bound on its own; is_pos 0
     /// keeps both, an odd one scales the left channel by io^((is_pos + 1) / 2), an even one the right by io^(is_pos / 2),
     /// io 2^(-1/4) for intensity_scale 0 and 2^(-1/2) for 1; a position at its partition's largest value is illegal;
-    /// short band 12 takes band 11's.
+    /// short band 12 takes band 11's (band 11 being in intensity stereo in the windows that reach it here).
     /// </summary>
     [Theory]
     [InlineData(0)]
@@ -324,6 +326,111 @@ public class Mp3UnitTests
                 Assert.Equal(start + (w * width) + i, reordered[(18 * (f / 6)) + (6 * w) + (f % 6)]);
             }
         }
+    }
+
+    /// <summary>
+    /// The last band (long 21, short 12) has no scalefactor. At the lower rates, after a band the right channel codes a
+    /// value in, it is the centre (position 0: both channels the left's value), not that band's position, as the
+    /// ISO/IEC 11172-4 streams l3-test45 and l3-test46 need it (they miss their reference by 1e-2 otherwise); MPEG-1
+    /// copies band 20's position either way, as FFmpeg does (mkv-mp3-intensity, which reaches it, compares them).
+    /// </summary>
+    [Fact]
+    public void LastBandIsTheCentreAfterACodedBand()
+    {
+        // MPEG-1, long blocks: band 20 coded, band 21 takes its position 1.
+        var header = Header(0xFB, 0x90, 0x50); // MPEG-1, 44.1 kHz, joint stereo (intensity only)
+        var bands = Mp3Tables.LongBands[0];
+        int[] positions = new int[40];
+        positions[20] = 1;
+        var (left, rightSpectrum) = Spectra(6, bands[21]); // nonzero up to band 20's end
+        var l0 = (double[])left.Clone();
+        Stereo.Process(header, new Granule(), positions, new bool[40], left, rightSpectrum);
+        double k = Math.Tan(Math.PI / 12);
+        for (int i = bands[21]; i < 576; i++)
+        {
+            Assert.Equal(l0[i] * k / (1 + k), left[i], 1e-12);
+            Assert.Equal(l0[i] / (1 + k), rightSpectrum[i], 1e-12);
+        }
+
+        // The lower rates, long blocks: band 20 coded, band 21 the centre; position 2 would scale the right by io.
+        header = Header(0xF3, 0x80, 0x50); // MPEG-2, 22.05 kHz, joint stereo (intensity only)
+        bands = Mp3Tables.LongBands[3];
+        (left, rightSpectrum) = Spectra(7, bands[21]);
+        l0 = (double[])left.Clone();
+        Stereo.Process(header, new Granule { ScalefacCompress = 300 }, positions, new bool[40], left, rightSpectrum);
+        for (int i = bands[21]; i < 576; i++)
+        {
+            Assert.Equal(l0[i], left[i], 1e-12);
+            Assert.Equal(l0[i], rightSpectrum[i], 1e-12);
+        }
+
+        // Short blocks: window 1 codes a value in band 11, so its band 12 is the centre; window 0 doesn't, so its band
+        // 12 takes band 11's position (2: the right scaled by io^1).
+        var shortBands = Mp3Tables.ShortBands[3];
+        var right = new Granule { BlockType = 2, ScalefacCompress = 300 };
+        positions = new int[40];
+        positions[(3 * 11) + 0] = 2;
+        positions[(3 * 11) + 1] = 2;
+        left = [.. Enumerable.Range(0, 576).Select(i => 1.0)];
+        rightSpectrum = new double[576];
+        int width11 = shortBands[12] - shortBands[11];
+        int width12 = 192 - shortBands[12];
+        rightSpectrum[(3 * shortBands[11]) + width11] = 1; // band 11, window 1
+        Stereo.Process(header, right, positions, new bool[40], left, rightSpectrum);
+        int band12 = 3 * shortBands[12];
+        Assert.Equal(1, left[band12 + width12], 1e-12); // window 1: the centre
+        Assert.Equal(1, rightSpectrum[band12 + width12], 1e-12);
+        Assert.Equal(1, left[band12], 1e-12); // window 0: band 11's position 2
+        Assert.Equal(Math.Pow(2, -0.25), rightSpectrum[band12], 1e-12);
+    }
+
+    /// <summary>
+    /// A frame cut short (a file's last, as in the ISO/IEC 11172-4 streams l3-compl and l3-sin1k0db) decodes as far as
+    /// its granules' data is there, as FFmpeg decodes it: a LAME frame whose granules end before its last byte gives the
+    /// same samples without that byte; one cut inside its granules' data is refused.
+    /// </summary>
+    [Fact]
+    public void FrameCutShortDecodesAsFarAsItsData()
+    {
+        if (TestSamples.Directory is null || !File.Exists(TestSamples.PathOf("mp3-stereo.mp4")))
+        {
+            return;
+        }
+
+        List<byte[]> packets;
+        using (var demuxer = Demuxer.Open(TestSamples.PathOf("mp3-stereo.mp4")))
+        {
+            int stream = demuxer.Audio!.StreamIndex;
+            packets = [.. demuxer.ReadPackets().Where(p => p.StreamIndex == stream).Select(p => p.Data.ToArray())];
+        }
+
+        int matched = 0;
+        for (int cut = 1; cut < Math.Min(packets.Count, 20); cut++)
+        {
+            var whole = new Mp3Decoder();
+            var shortened = new Mp3Decoder();
+            for (int i = 0; i < cut; i++)
+            {
+                whole.Decode(packets[i]);
+                shortened.Decode(packets[i]);
+            }
+
+            var expected = whole.Decode(packets[cut]);
+            try
+            {
+                var actual = shortened.Decode(packets[cut].AsSpan(0, packets[cut].Length - 1));
+                Assert.Equal(expected.Samples, actual.Samples);
+                Assert.Equal(1, shortened.Statistics.TruncatedFrames);
+                matched++;
+            }
+            catch (InvalidDataException)
+            {
+                // Its granules' data reached the last byte.
+            }
+        }
+
+        Assert.True(matched > 0, "No frame whose granules end before its last byte.");
+        Assert.Throws<InvalidDataException>(() => new Mp3Decoder().Decode(packets[1].AsSpan(0, 40)));
     }
 
     private static FrameHeader Header(byte second, byte third, int fourth)

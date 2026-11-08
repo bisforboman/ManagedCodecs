@@ -568,4 +568,25 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.Containers/Mp3/Mp3Demuxer.cs",
          find="- tag.Padding + DecoderDelay;", replace="- tag.Padding;",
          tests="DisplayName~mp3-raw-cbr"),
+    # mixed_block_flag gives a start or stop block's lowest subbands the normal window (l3-si_block; mkv-mp3-mixed).
+    dict(file="src/ManagedCodecs.Mp3/Hybrid.cs",
+         find="LongWindows[g.ShortBlocks || sb < mixedSubbands ? 0 : g.BlockType]", replace="LongWindows[g.ShortBlocks ? 0 : g.BlockType]",
+         tests="DisplayName~mkv-mp3-mixed"),
+    # Intensity stereo's last band at the lower rates is the centre after a band the right channel codes a value in
+    # (l3-test45, l3-test46), long and short; no sample reaches it (FFmpeg misses the ISO reference there).
+    dict(file="src/ManagedCodecs.Mp3/Stereo.cs",
+         find="bool centre = lsf && band == 21 &&", replace="bool centre = false &&",
+         tests="DisplayName~LastBandIsTheCentreAfterACodedBand"),
+    dict(file="src/ManagedCodecs.Mp3/Stereo.cs",
+         find="bool centre = lsf && band == 12 &&", replace="bool centre = false &&",
+         tests="DisplayName~LastBandIsTheCentreAfterACodedBand"),
+    # ... and MPEG-1's copies band 20's position, as FFmpeg's does (mkv-mp3-intensity: the centre there is 1.6e-2 off).
+    dict(file="src/ManagedCodecs.Mp3/Stereo.cs",
+         find="bool centre = lsf && band == 21 &&", replace="bool centre = band == 21 &&",
+         tests="DisplayName~mkv-mp3-intensity"),
+    # A frame cut short decodes as far as its granules' data is there, as FFmpeg's (l3-compl, l3-sin1k0db).
+    dict(file="src/ManagedCodecs.Mp3/Mp3Decoder.cs",
+         find="                length = packet.Length - offset;\n                Statistics.TruncatedFrames++;\n",
+         replace="                throw new InvalidDataException(\"An MP3 frame is cut short.\");\n",
+         tests="DisplayName~FrameCutShortDecodesAsFarAsItsData"),
 ]

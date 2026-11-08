@@ -63,7 +63,7 @@ Fuzzer.OutOfProcess.Run(stream =>
 return 0;
 
 // Seeds: small whole files for "file"; for the codec targets, the first packets of a few samples in the target's
-// framing (avcC and packets, a JPEG, AudioSpecificConfig and frames).
+// framing (avcC and packets, a JPEG, AudioSpecificConfig and frames, MP3 frames).
 static void WriteSeeds(string samples, string output)
 {
     foreach (var name in Targets.Names)
@@ -119,6 +119,11 @@ static void WriteSeeds(string samples, string output)
                         File.WriteAllBytes(Path.Combine(output, "h264", stem + ".bin"), seed.ToArray());
                     }
                 }
+            }
+
+            if (demuxer.Audio is { Codec: CodecIds.Mp3 } mp3 && packets.Where(p => p.StreamIndex == mp3.StreamIndex).Take(8).Select(p => p.Data.ToArray()).ToList() is [{ Length: > 0 }, ..] mp3Frames)
+            {
+                File.WriteAllBytes(Path.Combine(output, "mp3", stem + ".bin"), [.. mp3Frames.SelectMany(f => (byte[])[(byte)(f.Length >> 8), (byte)f.Length, .. f])]);
             }
 
             if (demuxer.Audio is { Codec: CodecIds.Aac } audio && packets.Where(p => p.StreamIndex == audio.StreamIndex).Take(8).Select(p => p.Data.ToArray()).ToList() is [{ Length: > 0 }, ..] frames)

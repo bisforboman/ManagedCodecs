@@ -77,8 +77,9 @@ and the audio as floats (`-f f32le`, within 2^-17). The films, pinned by SHA-256
   name, see AAC).
 - Elephants Dream, the whole film: 480x270 H.264 Main in an Apple MOV, 11 minutes, with negative composition offsets
   and the AAC configuration in a QuickTime `wave` box (see MP4 demuxing).
-- Tears of Steel, the whole film: 1280x534 H.264 Main in a MOV, 12 minutes of live action; its MP3 audio is not
-  decoded, so only the video is compared.
+- Tears of Steel, the whole film: 1280x534 H.264 Main in a MOV, 12 minutes of live action, with MP3 audio (LAME,
+  192 kbit/s joint stereo, QuickTime's `.mp3` entry): within 5.3e-6 of FFmpeg's, 7e-8 on average (by hand,
+  2026-11-08, before the nightly run had it).
 - Caminandes 2: 1920x1080 H.264 High from MainConcept, 2.5 minutes, CABAC with B pictures and explicit weights in P
   slices, four PPS, AAC LC at 48 kHz.
 - Big Buck Bunny, the whole film at 320x180: H.264 Constrained Baseline muxed by FFmpeg in 2008 (Lavf52), 10
@@ -814,6 +815,20 @@ CABAC residual decoding, the edge filters and the motion compensation kernels) t
 frame by a median -2.0% and -0.6%, the second within the noise. What is left of the lookups out of line is intra
 availability's C and D (`IntraMbNeighbors`, once an intra macroblock), D of motion prediction, and `GatherPlane`'s
 places, each under half a percent of the profile.
+MBAFF intra in place (2026-11-08): the next profile put intra MBAFF's scratch path (reconstruction into a scratch
+block with the neighbouring samples gathered through Table 6-4, `GatherPlane` 5.2%, then `ScatterMbaff` 3.8% and
+memmoves) at about 13% of `h264-mbaff-intra`. It is not needed: an MBAFF frame keeps a field macroblock's rows
+interleaved, and every neighbouring sample Table 6-4 gives intra prediction is the one beside it in the picture at the
+macroblock's own row stride (column -1 the left pair's line at the same picture row, whatever the two pairs' kinds;
+row -1 the line one stride above, B, C and D alike), so intra macroblocks are reconstructed in place as in frames.
+The evidence beyond the case analysis: 36 of the 39 MBAFF samples have intra macroblocks beside a pair of the other
+kind (11 to 192 each, counted), and all decode as FFmpeg's. The scratch path stays as the reference
+(`H264Decoder.MbaffIntraScratchOnly`, tests only, `MatchesFfmpegWithMbaffIntraScratchOnly`; reading its left column one
+sample off fails 36 of them). Callgrind (AOT, steady loops): 103.7 to 89.3 M instructions a loop of `h264-mbaff-intra`
+(-13.9%), -13.8% in `h264-mbaff-intra-4x4`, -14.8% in `h264-422-mbaff-intra-4x4`, -4.2% in `h264-mbaff-default`, -2.6%
+in `h264-mbaff-p`; field pictures (already in place) and frames unchanged. Under the JIT `h264-mbaff-intra` took a median
+6.1% less by perf (normalized by CABAC and the edge filters, all six runs faster) and 4.1% by the wall clock of 300
+loops, eight runs each alternating.
 
 A profile of a
 720p libx264 default stream (2026-10-22) is flat: CABAC residual decoding takes 14%, deblocking 21%
@@ -1397,6 +1412,16 @@ for, by the decoder's statistics:
 | mp3-shine | shine | a second encoder; count1 quadruples read past their granule's end |
 | mp3-cut | LAME, cut with `-c copy` | main data reaching back before the stream's start |
 | h264-mp3, h264-mp3-mov, mkv-h264-mp3 | LAME | MP3 beside H.264 in MP4, a MOV sample entry and Matroska |
+| mkv-mp3-intensity | LAME, rewritten | intensity stereo in every frame, long and short blocks, MPEG-1's last band |
+| mkv-mp3-mixed | LAME, rewritten | mixed blocks: short, and the start and stop blocks around them |
+
+`tools/mp3-rewrite.py` writes the last two from LAME's MPEG-1 joint stereo: it sets mode_extension's intensity bit
+(the bands above the right channel's last value become intensity stereo, their positions its scalefactors), or
+mixed_block_flag on whole switches to short blocks whose short blocks' first scalefactors have no bits (a mixed block
+codes one band of them fewer, so the rest parses as coded). At the lower rates neither works: FFmpeg isn't the oracle
+for their intensity stereo (below), and a mixed block there also moves region 1's start. A mixed start block followed by
+a short block that isn't mixed (no encoder writes it, nor do the ISO streams) is left out: FFmpeg's output differs from
+this decoder's in the two lowest subbands there, and it isn't settled which reads the spec right.
 
 What the specs leave to the decoder follows FFmpeg, each with a mutation entry and the sample that shows it: a
 granule whose main data lies before what the stream gave is skipped by its part2_3_length and comes out silent
@@ -1410,7 +1435,33 @@ last long and short band taking the previous band's position; each short window'
 subbands below line 36, 72 at 8 kHz, aliasing reduced only between the first two), and the CRC (CRC-16/CMS's check
 value). Also there: every Huffman table is a complete prefix code decoding each codeword to its value, the cosines
 (`ExactMath`, the same bits on every runtime) match Math.Cos and Math.Sin, and the IMDCTs and synthesis are their
-definitions. Not decoded: free-format bitrates, Layers I and II.
+definitions; a frame cut short gives the same samples as whole where its granules' data ends before the cut.
+Not decoded: free-format bitrates, Layers I and II.
+
+### The ISO/IEC 11172-4 streams
+
+The compliance streams' Layer III ones (l3-compl, l3-he_32khz, l3-he_44khz, l3-he_48khz, l3-hecommon, l3-si,
+l3-si_block, l3-si_huff, l3-sin1k0db, l3-test45, l3-test46, M2L3_bitrate_16_all, M2L3_bitrate_22_all,
+M2L3_bitrate_24_all, M2L3_compl24, M2L3_noise, remuxed into Matroska) and their 16-bit reference output were decoded
+once (2026-11-08; from minimp3's repository, not committed: their licence is not known). The spec's "full accuracy"
+limit is an RMS difference below 2^-15 / sqrt(12) = 8.81e-6, which against a 16-bit reference is its rounding alone:
+every stream meets it, granule by granule, but l3-si_huff and l3-sin1k0db, whose reference files don't line up with
+their streams (FFmpeg and this decoder agree on both within 9e-6). They found three faults, fixed with a test or sample
+and a mutation entry each:
+
+- mixed_block_flag counts in start and stop blocks too: their two lowest subbands take the normal window (2.4.2.7).
+  l3-si_block missed its reference by up to 3e-3 RMS a granule (and FFmpeg by 9e-3) while they took the block's own.
+- Intensity stereo's last band (long 21, short 12), which has no scalefactor, takes the band below's position at the
+  lower rates only where that band is in intensity stereo too; after a band the right channel codes a value in it is
+  the centre (position 0, both channels alike), as minimp3 reads it. l3-test45 and l3-test46 missed their reference by
+  1e-2 RMS in some granules otherwise. MPEG-1 copies band 20's position either way, as FFmpeg does: the centre there
+  was up to 1.6e-2 off FFmpeg on mkv-mp3-intensity (whose left channel has noise up into band 21 for it), and no ISO
+  stream this decoder takes settles it (l3-he_mode switches between mono and stereo, which it refuses).
+- A frame cut short (l3-compl's and l3-sin1k0db's last) decodes as far as its granules' data is there, as FFmpeg
+  decodes it, where it was refused.
+
+FFmpeg's decoder (6.1) misses the reference on the lower rates' intensity stereo (RMS 4e-2 on l3-test45, 3e-2 on
+l3-test46) where this one meets it: it is not the oracle there, and the unit tests check the equations instead.
 
 ## ADTS (raw AAC)
 

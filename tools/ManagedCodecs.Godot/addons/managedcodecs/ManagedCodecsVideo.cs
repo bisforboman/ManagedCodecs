@@ -14,7 +14,7 @@ using ManagedCodecs.Playback;
 namespace ManagedCodecs.GodotAddon;
 
 /// <summary>
-/// Plays a video file (H.264 or MJPEG, AAC audio; MP4, Matroska or AVI) into this rectangle's texture, decoded by
+/// Plays a video file (H.264 or MJPEG, AAC or MP3 audio; MP4, Matroska or AVI) into this rectangle's texture, decoded by
 /// ManagedCodecs.Playback: a thread of its own decodes ahead (<see cref="MediaPlayer"/>), <see cref="_Process"/> shows
 /// the newest frame due by a clock started at the first frame (late ones are dropped), and the audio streams through
 /// an <see cref="AudioStreamGenerator"/>. Not a media player: no seeking, no pause. A global class, so the editor's Add
@@ -68,7 +68,7 @@ public partial class ManagedCodecsVideo : TextureRect
         WarnIfUnoptimized();
         if (_player.SkippedAudioCodec is { } codec)
         {
-            GD.PushWarning($"ManagedCodecsVideo: {FilePath}'s audio is {codec}, which isn't decoded (only AAC is); playing without sound.");
+            GD.PushWarning($"ManagedCodecsVideo: {FilePath}'s audio is {codec}, which isn't decoded (only AAC and MP3 are); playing without sound.");
         }
 
         StretchMode = StretchModeEnum.KeepAspectCentered;

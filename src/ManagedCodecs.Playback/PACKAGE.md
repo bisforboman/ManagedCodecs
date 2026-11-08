@@ -1,6 +1,6 @@
 # ManagedCodecs.Playback
 
-Video in a game, in pure managed C#: an MP4, Matroska, WebM or AVI file (H.264 or MJPEG video, AAC audio) decoded on a
+Video in a game, in pure managed C#: an MP4, Matroska, WebM or AVI file (H.264 or MJPEG video, AAC or MP3 audio) decoded on a
 thread of its own into RGBA frames for a texture and float stereo for a streaming sound. No native binaries and no
 engine's API, so it plays the same in MonoGame, FNA, Godot .NET and Stride, on every platform .NET 10 runs on. For
 Unity, `ManagedCodecs.Unity` holds the same `MediaPlayer`.

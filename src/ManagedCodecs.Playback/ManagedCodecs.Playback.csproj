@@ -7,7 +7,7 @@
   <PropertyGroup>
     <RootNamespace>ManagedCodecs.Playback</RootNamespace>
     <PackageId>ManagedCodecs.Playback</PackageId>
-    <Description>Video playback for game engines (MonoGame, FNA, Godot .NET, Stride): H.264 or MJPEG with AAC from MP4, Matroska, WebM or AVI, decoded on a thread of its own into RGBA frames for a texture and 32-bit float stereo for a sound, in pure managed C#.</Description>
+    <Description>Video playback for game engines (MonoGame, FNA, Godot .NET, Stride): H.264 or MJPEG with AAC or MP3 from MP4, Matroska, WebM or AVI, decoded on a thread of its own into RGBA frames for a texture and 32-bit float stereo for a sound, in pure managed C#.</Description>
     <PackageTags>$(PackageTags);playback;video-player;game;monogame;godot</PackageTags>
     <IsAotCompatible>true</IsAotCompatible>
   </PropertyGroup>
@@ -28,6 +28,7 @@
     <ProjectReference Include="..\ManagedCodecs.Mjpeg\ManagedCodecs.Mjpeg.csproj" />
     <ProjectReference Include="..\ManagedCodecs.H264\ManagedCodecs.H264.csproj" />
     <ProjectReference Include="..\ManagedCodecs.Aac\ManagedCodecs.Aac.csproj" />
+    <ProjectReference Include="..\ManagedCodecs.Mp3\ManagedCodecs.Mp3.csproj" />
   </ItemGroup>
 
 </Project>

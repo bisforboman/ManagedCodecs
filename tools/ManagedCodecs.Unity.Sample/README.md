@@ -1,7 +1,7 @@
 # A Unity sample
 
 For issue #254 (docs/decisions/2026-10-31-game-engines.md): `ManagedCodecsVideo.cs`, a `MonoBehaviour` that plays an
-MP4 or AVI file (H.264 or MJPEG, AAC audio) onto its object's renderer with the `ManagedCodecs.Unity` package. Not a
+MP4 or AVI file (H.264 or MJPEG, AAC or MP3 audio) onto its object's renderer with the `ManagedCodecs.Unity` package. Not a
 media player: no seeking, no pause.
 
 **Not run in Unity.** CI builds it for netstandard2.1 against `UnityEngineStubs.cs`, which declares only the UnityEngine
@@ -45,8 +45,7 @@ What nobody has checked yet, and how. Report in a new issue, one line a run (iss
 2. **Videos.** Three files, each into `Assets/StreamingAssets/`:
    - `BigBuckBunny_640x360.m4v` (H.264 and AAC, from
      [download.blender.org](https://download.blender.org/peach/bigbuckbunny_movies/BigBuckBunny_640x360.m4v.zip));
-   - `tears_of_steel_720p.mov` (1280x534 H.264 and MP3, which plays without sound and warns so: AAC is the only
-     audio decoded; [download.blender.org](https://download.blender.org/demo/movies/ToS/tears_of_steel_720p.mov));
+   - `tears_of_steel_720p.mov` (1280x534 H.264 and MP3; [download.blender.org](https://download.blender.org/demo/movies/ToS/tears_of_steel_720p.mov));
    - `testsrc-420.avi` (MJPEG, no audio; `tools/make-samples.sh` makes it, or any MJPEG AVI).
 3. **Runs.** Each video in the editor's Play mode (Mono), then in a standalone player built with the Mono backend and
    one with IL2CPP (Player settings, Scripting Backend). An Android or iOS build is a bonus (IL2CPP only on iOS; on

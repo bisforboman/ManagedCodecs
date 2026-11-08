@@ -1,7 +1,7 @@
 # MP3: notes for working on the MP3 decoder and its samples
 
 The repository's CLAUDE.md (process, core idea, cross-cutting gotchas) applies too. The plan and what is left:
-docs/decisions/2026-11-08-mp3-decoder.md.
+docs/decisions/2026-11-08-mp3-decoder.md (steps 2 and 3, the decoder and playback, are done).
 
 ## Samples: which encoder writes what
 

@@ -1,7 +1,7 @@
 # ManagedCodecs.MonoGame
 
 Video for MonoGame games, in pure managed C#: `VideoTexture` plays an MP4, Matroska, WebM or AVI file (H.264 or MJPEG
-video, AAC audio) into a `Texture2D` and a `DynamicSoundEffectInstance`. No native binaries and no codec of the
+video, AAC or MP3 audio) into a `Texture2D` and a `DynamicSoundEffectInstance`. No native binaries and no codec of the
 platform's, so it plays the same everywhere. The decoding runs on a thread of its own (`ManagedCodecs.Playback`).
 
 ```csharp

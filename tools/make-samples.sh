@@ -740,6 +740,9 @@ ff -f lavfi -i testsrc2=size=160x120:rate=25 -f lavfi -i sine=frequency=440:samp
 # MP3 (A_MPEG/L3, CodecIds.Mp3), demuxed and not decoded.
 ff -f lavfi -i testsrc2=size=160x120:rate=25 -f lavfi -i sine=frequency=440:sample_rate=44100 -t 1 -c:v libx264 \
   -c:a libmp3lame -b:a 64k samples/mkv-h264-mp3.mkv
+# Opus beside H.264 (A_OPUS): audio the playback doesn't decode, which MediaPlayer.SkippedAudioCodec names.
+ff -f lavfi -i testsrc2=size=160x120:rate=25 -f lavfi -i sine=frequency=440:sample_rate=48000 -t 1 -c:v libx264 \
+  -c:a libopus samples/mkv-h264-opus.mkv
 # MJPEG (V_MJPEG) with a sample aspect ratio of 4:3, written as DisplayWidth and DisplayHeight, and the BT.709 colour
 # description in a Colour element.
 ff -f lavfi -i testsrc2=size=160x120:rate=25,setsar=4/3 -t 0.4 -c:v mjpeg -pix_fmt yuvj420p -q:v 5 -color_primaries bt709 \

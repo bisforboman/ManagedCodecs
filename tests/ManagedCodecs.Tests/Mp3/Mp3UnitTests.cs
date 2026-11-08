@@ -110,6 +110,29 @@ public class Mp3UnitTests
         }
     }
 
+    /// <summary>
+    /// The fast matrixing (Lee's DCT-II read out by the matrix's symmetries) against its definition, on random input:
+    /// equal to double precision's rounding.
+    /// </summary>
+    [Fact]
+    public void FastMatrixingIsTheDefinition()
+    {
+        var random = new Random(9);
+        var fast = new double[64];
+        var definition = new double[64];
+        for (int trial = 0; trial < 200; trial++)
+        {
+            var s = Enumerable.Range(0, 32).Select(_ => (random.NextDouble() - 0.5) * Math.Pow(2, random.Next(-20, 4))).ToArray();
+            Synthesis.Matrix(s, fast);
+            Synthesis.MatrixByDefinition(s, definition);
+            double scale = s.Max(Math.Abs);
+            for (int i = 0; i < 64; i++)
+            {
+                Assert.Equal(definition[i], fast[i], 1e-13 * scale);
+            }
+        }
+    }
+
     /// <summary>The synthesis filterbank against Annex A's flow chart, step by step with Math.Cos, over 40 time slots.</summary>
     [Fact]
     public void SynthesisIsTheFlowChart()

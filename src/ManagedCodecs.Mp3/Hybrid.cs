@@ -6,13 +6,16 @@ namespace ManagedCodecs.Mp3;
 /// giving 18 samples of each of the 32 subbands for the synthesis filterbank.
 /// </summary>
 /// <remarks>
-/// The IMDCTs are their sums by the definition (2.4.3.4.10.2), and every cosine and sine of the tables comes from
-/// <see cref="ExactMath"/>, so that each runtime has the same bits.
+/// The short IMDCT is its sum by the definition (2.4.3.4.10.2), the long one through a fast DCT (<see cref="LongImdct"/>),
+/// and every cosine and sine of the tables comes from <see cref="ExactMath"/>, so that each runtime has the same bits.
 /// </remarks>
 internal static class Hybrid
 {
     // cos(pi / 72 (2i + 1 + 18) (2k + 1)) for i 0..35, k 0..17, at [18 i + k].
     private static readonly double[] LongCosines = BuildCosines(36, 18, 72, 18);
+
+    // 1 / (2 cos((2k + 1) pi / 72)) for k 0..17: the long IMDCT's DCT-IV as a DCT-II.
+    private static readonly double[] ImdctPrescale = [.. Enumerable.Range(0, 18).Select(k => 1 / (2 * ExactMath.CosPi((2 * k) + 1, 72)))];
 
     // cos(pi / 24 (2i + 1 + 6) (2k + 1)) for i 0..11, k 0..5, at [6 i + k].
     private static readonly double[] ShortCosines = BuildCosines(12, 6, 24, 6);
@@ -63,7 +66,12 @@ internal static class Hybrid
         for (int sb = 0; sb < 32; sb++)
         {
             int at = 18 * sb;
-            if (sb < longSubbands)
+            if (spectrum.AsSpan(at, 18).IndexOfAnyExcept(0.0) < 0)
+            {
+                // No lines (the bands above an encoder's lowpass): the IMDCT gives zeros, only the overlap comes out.
+                block.Clear();
+            }
+            else if (sb < longSubbands)
             {
                 LongImdct(spectrum.AsSpan(at, 18), LongWindows[g.ShortBlocks || sb < mixedSubbands ? 0 : g.BlockType], block);
             }
@@ -85,9 +93,47 @@ internal static class Hybrid
 
     /// <summary>
     /// The 36-point IMDCT of 18 lines (2.4.3.4.10.2): x_i = sum over k of X_k cos(pi / 72 (2i + 1 + 18) (2k + 1)),
-    /// windowed.
+    /// windowed. It is the 18-point DCT-IV y_p = sum over k of X_k cos(pi / 72 (2p + 1) (2k + 1)) read out at p = i + 9
+    /// by its symmetries (y of 35 - p negated from p = 18 on, y of p - 36 negated from 36), and the DCT-IV is a DCT-II
+    /// (<see cref="FastDct"/>): with x'_k = X_k / (2 cos((2k + 1) pi / 72)) and D its DCT-II, y_j = D_j + D_(j+1)
+    /// (D_18 = 0), as 2 cos a cos b = cos(a + b) + cos(a - b). About 220 multiplications where the sum takes 648;
+    /// <see cref="LongImdctByDefinition"/> is the reference a test compares it with on random input.
     /// </summary>
     public static void LongImdct(ReadOnlySpan<double> lines, double[] window, Span<double> output)
+    {
+        Span<double> d = stackalloc double[18];
+        Span<double> scratch = stackalloc double[18];
+        for (int k = 0; k < 18; k++)
+        {
+            d[k] = lines[k] * ImdctPrescale[k];
+        }
+
+        FastDct.Dct(d, scratch);
+        Span<double> y = scratch;
+        for (int j = 0; j < 17; j++)
+        {
+            y[j] = d[j] + d[j + 1];
+        }
+
+        y[17] = d[17];
+        for (int i = 0; i < 9; i++)
+        {
+            output[i] = y[i + 9] * window[i];
+        }
+
+        for (int i = 9; i < 27; i++)
+        {
+            output[i] = -y[26 - i] * window[i];
+        }
+
+        for (int i = 27; i < 36; i++)
+        {
+            output[i] = -y[i - 27] * window[i];
+        }
+    }
+
+    /// <summary>The 36-point IMDCT by its sum, windowed: the reference <see cref="LongImdct"/> is tested against.</summary>
+    public static void LongImdctByDefinition(ReadOnlySpan<double> lines, double[] window, Span<double> output)
     {
         for (int i = 0; i < 36; i++)
         {

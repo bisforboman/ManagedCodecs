@@ -48,6 +48,7 @@ SAMPLES = [
     ("aac-5.1.mp4", 100, "AAC, 5.1"),
     ("heaac/heaac-5.1.mp4", 100, "HE-AAC, 5.1"),
     ("heaac/heaacv2-stereo.mp4", 100, "HE-AAC v2: parametric stereo"),
+    ("mp3-joint.mp4", 100, "MP3, joint stereo (mid/side), VBR"),
 ]
 
 THREADS_SAMPLE = ("h264-bench-720p.mp4", 10)

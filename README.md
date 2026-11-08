@@ -544,7 +544,8 @@ The samples: MJPEG `testsrc-420.avi`, `testsrc-444.avi` and `noise-q1.avi`; H.26
 `h264-bench-720p.mp4`, `h264-main-p-refs.mp4` (CABAC), `h264-b-pyramid.mp4`, `h264-wp-default.mp4` and
 `h264-high-default.mp4` (libx264's Main and High defaults), `h264-high-b.mp4`, `h264-10bit-b.mp4`,
 `h264-high-motion.mp4`, `h264-10bit-motion.mp4`, `h264-mbaff-default.mp4` and `jm/jm-paff-b.mp4` (field pictures);
-AAC `aac-stereo-48k.mp4` and `aac-5.1.mp4`, HE-AAC `heaac/heaac-5.1.mp4` and `heaac/heaacv2-stereo.mp4`. On GitHub's
+AAC `aac-stereo-48k.mp4` and `aac-5.1.mp4`, HE-AAC `heaac/heaac-5.1.mp4` and `heaac/heaacv2-stereo.mp4`, MP3
+`mp3-joint.mp4` (added after that run: on a 4-core cloud VM, 2.5 whole process and 2.0 steady). On GitHub's
 4-core runners (the benchmark run of 2026-10-30 at 0.4.0, x64 on a Xeon Platinum 8370C; FFmpeg 6.1.1), each sample
 comes out two ways: mcdec's whole process over FFmpeg's, .NET's startup and JIT included, and its last loop alone
 (steady state, what a long file costs a frame) over FFmpeg's, whose startup is a few percent. The short samples'

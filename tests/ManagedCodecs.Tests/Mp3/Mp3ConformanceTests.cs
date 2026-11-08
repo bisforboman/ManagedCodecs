@@ -122,6 +122,17 @@ public class Mp3ConformanceTests
             Assert.True(stats.DroppedQuadruples > 0, "No count1 quadruple reads past its granule's end in the sample.");
         }
 
+        if (name.Contains("intensity", StringComparison.Ordinal))
+        {
+            Assert.True(stats.IntensityFrames == stats.Frames, "A frame without intensity stereo in the sample.");
+        }
+
+        if (name.Contains("mixed", StringComparison.Ordinal))
+        {
+            Assert.True(stats.MixedGranules > 0, "No mixed short block in the sample.");
+            Assert.True(stats.MixedLongGranules > 0, "No mixed start or stop block in the sample.");
+        }
+
         if (name.Contains("cut", StringComparison.Ordinal))
         {
             Assert.True(stats.MissingReservoir > 0, "No frame's main data starts before the stream's first.");

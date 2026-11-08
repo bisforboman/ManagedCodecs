@@ -345,7 +345,7 @@ ones, and the ones predicted from them until an IDR picture, have `VideoFrame.Is
 Error concealment). Damage that still parses is not detected, as in any decoder; damaged slice headers and parameter
 sets still throw (the picture is then lost, which the next one conceals).
 
-`tools/fuzz.sh <file|h264|mjpeg|aac> <minutes>` checks this with AFL++ through SharpFuzz (`file` demuxes a whole file
+`tools/fuzz.sh <file|h264|mjpeg|aac|mp3> <minutes>` checks this with AFL++ through SharpFuzz (`file` demuxes a whole file
 and decodes every track; the others feed one decoder its configuration and packets), with seeds taken from
 `samples/`. Inputs that once broke the contract are kept in `tests/ManagedCodecs.Tests/Fuzz/Findings/<target>/`, and
 `MalformedInputTests` replays them, along with a fixed-seed sweep of truncations and byte flips over a few samples.

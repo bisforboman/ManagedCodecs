@@ -22,15 +22,17 @@
        MSBuild strips the parent's Configuration from a reference the solution doesn't map (GlobalPropertiesToRemove),
        which strips SetConfiguration's too: the references built in Debug whatever this said. Not unsetting it keeps
        SetConfiguration, here and (passed down as a global property) in Playback, which hands Release on to the
-       decoders it references. -->
-  <PropertyGroup>
+       decoders it references. Only in Godot's own solution build: in the repository's (ManagedCodecs.slnx) the
+       decoders are in the solution, and an extra global property would build them a second time beside it, into
+       the same folders. -->
+  <PropertyGroup Condition="'$(SolutionFileName)' == 'ManagedCodecs.Godot.sln'">
     <ShouldUnsetParentConfigurationAndPlatform>false</ShouldUnsetParentConfigurationAndPlatform>
   </PropertyGroup>
 
   <ItemDefinitionGroup>
     <ProjectReference>
       <SetConfiguration>Configuration=Release</SetConfiguration>
-      <AdditionalProperties>ShouldUnsetParentConfigurationAndPlatform=false</AdditionalProperties>
+      <AdditionalProperties Condition="'$(SolutionFileName)' == 'ManagedCodecs.Godot.sln'">ShouldUnsetParentConfigurationAndPlatform=false</AdditionalProperties>
     </ProjectReference>
   </ItemDefinitionGroup>
 

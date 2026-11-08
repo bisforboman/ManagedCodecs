@@ -193,6 +193,13 @@ ManagedCodecs.Mjpeg.MjpegDecoder.MjpegDecoder() -> void
 ManagedCodecs.Mjpeg.MjpegDecoder.MjpegDecoder(ManagedCodecs.VideoStreamInfo! stream) -> void
 ManagedCodecs.Mjpeg.MjpegDecoder.ZeroCopy.get -> bool
 ManagedCodecs.Mjpeg.MjpegDecoder.ZeroCopy.init -> void
+ManagedCodecs.Mp3.Mp3Decoder
+ManagedCodecs.Mp3.Mp3Decoder.Channels.get -> int
+ManagedCodecs.Mp3.Mp3Decoder.Decode(ManagedCodecs.Packet packet) -> ManagedCodecs.AudioFrame!
+ManagedCodecs.Mp3.Mp3Decoder.Decode(System.ReadOnlySpan<byte> packet) -> ManagedCodecs.AudioFrame!
+ManagedCodecs.Mp3.Mp3Decoder.Mp3Decoder() -> void
+ManagedCodecs.Mp3.Mp3Decoder.Mp3Decoder(ManagedCodecs.AudioStreamInfo! stream) -> void
+ManagedCodecs.Mp3.Mp3Decoder.SampleRate.get -> int
 ManagedCodecs.Packet
 ManagedCodecs.Packet.Data.get -> System.ReadOnlyMemory<byte>
 ManagedCodecs.Packet.Data.init -> void
@@ -289,6 +296,7 @@ ManagedCodecs.Playback.MediaPlayer.MediaPlayer(System.IO.Stream! stream, Managed
 ManagedCodecs.Playback.MediaPlayer.MediaPlayer(string! path) -> void
 ManagedCodecs.Playback.MediaPlayer.MediaPlayer(string! path, ManagedCodecs.Playback.PlaybackOptions? options) -> void
 ManagedCodecs.Playback.MediaPlayer.Return(ManagedCodecs.Playback.RgbaFrame! frame) -> void
+ManagedCodecs.Playback.MediaPlayer.SkippedAudioCodec.get -> string?
 ManagedCodecs.Playback.MediaPlayer.Start() -> void
 ManagedCodecs.Playback.MediaPlayer.Statistics.get -> ManagedCodecs.Playback.PlaybackStatistics
 ManagedCodecs.Playback.MediaPlayer.TakeAudio() -> ManagedCodecs.Playback.AudioChunk?
@@ -466,6 +474,7 @@ ManagedCodecs.VideoStreamInfo.Width.init -> void
 const ManagedCodecs.CodecIds.Aac = "AAC" -> string!
 const ManagedCodecs.CodecIds.H264 = "H264" -> string!
 const ManagedCodecs.CodecIds.Mjpeg = "MJPG" -> string!
+const ManagedCodecs.CodecIds.Mp3 = "MP3" -> string!
 const ManagedCodecs.CodecIds.Mpeg4Visual = "MP4V" -> string!
 override ManagedCodecs.AudioStreamInfo.Equals(object? obj) -> bool
 override ManagedCodecs.AudioStreamInfo.GetHashCode() -> int

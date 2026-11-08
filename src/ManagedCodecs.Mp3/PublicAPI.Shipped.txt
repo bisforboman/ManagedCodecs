@@ -1,1 +1,8 @@
 #nullable enable
+ManagedCodecs.Mp3.Mp3Decoder
+ManagedCodecs.Mp3.Mp3Decoder.Channels.get -> int
+ManagedCodecs.Mp3.Mp3Decoder.Decode(ManagedCodecs.Packet packet) -> ManagedCodecs.AudioFrame!
+ManagedCodecs.Mp3.Mp3Decoder.Decode(System.ReadOnlySpan<byte> packet) -> ManagedCodecs.AudioFrame!
+ManagedCodecs.Mp3.Mp3Decoder.Mp3Decoder() -> void
+ManagedCodecs.Mp3.Mp3Decoder.Mp3Decoder(ManagedCodecs.AudioStreamInfo! stream) -> void
+ManagedCodecs.Mp3.Mp3Decoder.SampleRate.get -> int

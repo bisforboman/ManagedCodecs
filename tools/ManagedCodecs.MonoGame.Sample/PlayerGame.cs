@@ -35,7 +35,7 @@ internal sealed class PlayerGame : Game
         var video = _video.Player.Video;
         if (_video.Player.SkippedAudioCodec is { } codec)
         {
-            Console.Error.WriteLine($"mcplay: the audio is {codec}, which isn't decoded (only AAC is); playing without sound.");
+            Console.Error.WriteLine($"mcplay: the audio is {codec}, which isn't decoded (only AAC and MP3 are); playing without sound.");
         }
 
         _graphics.PreferredBackBufferWidth = Math.Min(video.Width, 1280);

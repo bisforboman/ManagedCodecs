@@ -799,6 +799,21 @@ the wall clock of 300 loops, eight runs each alternating, a median -2.4% on `h26
 The other allocations in the profile, about 3% of `jm-paff-b` zeroed by the allocator, are the decoder's pictures,
 made once a decoder (174 for its 10 frames, 145 for `h264-b-long-gop`'s 75): mcdec starts a decoder a loop, so short
 samples count them, a stream doesn't.
+The last general lookups (2026-11-08): a profile of main put Table 6-4's static case analysis (`AffNeighbor`) at 2.8%
+of `h264-mbaff-default`'s time and 1.7% of `jm-paff-b`'s, most of it from two callers. `AffMotionNeighbors` looked up
+A at the left edge and B and C in the row above through it, though the edge table CABAC reads (`AffEdgesOf`) holds
+them: a partition's rows start at 0, 4, 8 or 12. It now reads them there, and Table 6-4 is left only C to the right of
+the macroblock and D (`CheckMotionNeighbors` compares them all, as before). The deblocking filter's `TopEdges` looked
+up its edge's p macroblock in any slice, finding the pairs around it first; `AffTopNeighbor` works out that one case,
+(0, -1), directly, and `PairsFoundOnce_MatchTheLookup` compares it with the general lookup for both sizes and slot
+parities. Callgrind (AOT, steady loops): 343.6 to 341.8 M instructions a loop of `h264-mbaff-default` (-0.5%), 62.50 to
+61.76 M of `jm-paff-b` (-1.2%); frames take neither path. Under the JIT (perf, six runs each, alternating, normalized by
+CABAC residual decoding, the edge filters and the motion compensation kernels) the changed functions (the two, Table
+6-4's lookups, `DeblockMbaff`, the pair and edge fills) fell from 0.330 to 0.294 of the untouched ones on
+`h264-mbaff-default` and from 0.237 to 0.207 on `jm-paff-b`, lower in every run: about 1.3% of either frame. The whole
+frame by a median -2.0% and -0.6%, the second within the noise. What is left of the lookups out of line is intra
+availability's C and D (`IntraMbNeighbors`, once an intra macroblock), D of motion prediction, and `GatherPlane`'s
+places, each under half a percent of the profile.
 MBAFF intra in place (2026-11-08): the next profile put intra MBAFF's scratch path (reconstruction into a scratch
 block with the neighbouring samples gathered through Table 6-4, `GatherPlane` 5.2%, then `ScatterMbaff` 3.8% and
 memmoves) at about 13% of `h264-mbaff-intra`. It is not needed: an MBAFF frame keeps a field macroblock's rows

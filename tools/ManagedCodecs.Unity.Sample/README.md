@@ -1,7 +1,7 @@
 # A Unity sample
 
 For issue #254 (docs/decisions/2026-10-31-game-engines.md): `ManagedCodecsVideo.cs`, a `MonoBehaviour` that plays an
-MP4 or AVI file (H.264 or MJPEG, AAC audio) onto its object's renderer with the `ManagedCodecs.Unity` package. Not a
+MP4 or AVI file (H.264 or MJPEG, AAC or MP3 audio) onto its object's renderer with the `ManagedCodecs.Unity` package. Not a
 media player: no seeking, no pause.
 
 **Not run in Unity.** CI builds it for netstandard2.1 against `UnityEngineStubs.cs`, which declares only the UnityEngine
@@ -28,7 +28,8 @@ build; whether Unity runs it as intended needs a Unity install, which nobody has
   once copied or dropped, for a later frame (no new array each frame). Unity's textures start at the bottom row, so the
   material flips the image (`mainTextureScale` y -1) instead of turning every frame over in memory.
 - Audio streams through an `AudioClip` (`AudioClip.Create` with a reader callback, which runs on Unity's audio thread)
-  as the decoder's float stereo, made once the first audio gives the rate.
+  as the decoder's float stereo, made and played once the first frame is shown, so that the sound starts with the
+  picture's clock (the audio decoded before then, which comes first, is queued); the first audio gives the rate.
 - Not for WebGL: it has no threads, and the decoder thread is the sample's design. On Android, StreamingAssets lie in
   the APK: read the file with `UnityWebRequest` into a `MemoryStream`, which `MediaPlayer` takes.
 - Speed on Mono: the package's page has the table. Audio, MJPEG and small videos play; 720p H.264 decodes at 26 to
@@ -44,8 +45,7 @@ What nobody has checked yet, and how. Report in a new issue, one line a run (iss
 2. **Videos.** Three files, each into `Assets/StreamingAssets/`:
    - `BigBuckBunny_640x360.m4v` (H.264 and AAC, from
      [download.blender.org](https://download.blender.org/peach/bigbuckbunny_movies/BigBuckBunny_640x360.m4v.zip));
-   - `tears_of_steel_720p.mov` (1280x534 H.264 and MP3, which plays without sound and warns so: AAC is the only
-     audio decoded; [download.blender.org](https://download.blender.org/demo/movies/ToS/tears_of_steel_720p.mov));
+   - `tears_of_steel_720p.mov` (1280x534 H.264 and MP3; [download.blender.org](https://download.blender.org/demo/movies/ToS/tears_of_steel_720p.mov));
    - `testsrc-420.avi` (MJPEG, no audio; `tools/make-samples.sh` makes it, or any MJPEG AVI).
 3. **Runs.** Each video in the editor's Play mode (Mono), then in a standalone player built with the Mono backend and
    one with IL2CPP (Player settings, Scripting Backend). An Android or iOS build is a bonus (IL2CPP only on iOS; on

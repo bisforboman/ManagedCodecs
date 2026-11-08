@@ -5,7 +5,7 @@ using UnityEngine;
 namespace ManagedCodecs.UnitySample;
 
 /// <summary>
-/// Plays an MP4 or AVI file (H.264 or MJPEG, AAC audio) from StreamingAssets onto this object's renderer, decoded by
+/// Plays an MP4 or AVI file (H.264 or MJPEG, AAC or MP3 audio) from StreamingAssets onto this object's renderer, decoded by
 /// ManagedCodecs.Unity: a thread of its own decodes ahead (<see cref="MediaPlayer"/>), <see cref="Update"/> shows the
 /// newest frame due by a clock started at the first frame (late ones are dropped), and the audio streams
 /// through an <see cref="AudioClip"/> whose callback, on Unity's audio thread, takes the decoded samples. Not for
@@ -44,7 +44,7 @@ public sealed class ManagedCodecsVideo : MonoBehaviour
 
         if (_player.SkippedAudioCodec is { } codec)
         {
-            Debug.LogWarning($"ManagedCodecsVideo: {fileName}'s audio is {codec}, which isn't decoded (only AAC is); playing without sound.");
+            Debug.LogWarning($"ManagedCodecsVideo: {fileName}'s audio is {codec}, which isn't decoded (only AAC and MP3 are); playing without sound.");
         }
 
         _renderer = GetComponent<Renderer>();
@@ -57,8 +57,6 @@ public sealed class ManagedCodecsVideo : MonoBehaviour
         {
             return;
         }
-
-        StartAudio();
 
         // The clock starts with the first frame shown (due at zero).
         var due = _player.TakeFrame(System.TimeSpan.FromSeconds(_start < 0 ? 0 : Time.time - _start));
@@ -73,6 +71,8 @@ public sealed class ManagedCodecsVideo : MonoBehaviour
             _player.Return(due);
             _shown++;
         }
+
+        StartAudio();
 
         if (Time.time - _lastReport >= 5)
         {
@@ -117,8 +117,10 @@ public sealed class ManagedCodecsVideo : MonoBehaviour
         _texture.Apply(false);
     }
 
-    // The audio's clip, made once the first samples give the rate (HE-AAC's output is twice its core's), streaming from
-    // the decoded samples.
+    // The audio's clip, streaming from the decoded samples, made and played once the first frame is shown, so that the
+    // sound starts with the picture's clock: the first audio comes out of the decoder before the first frame (frame
+    // threading's delay and more), and is queued here until then. The first samples give the rate (HE-AAC's output is
+    // twice its core's).
     private void StartAudio()
     {
         while (_player!.TakeAudio() is { } chunk)
@@ -130,7 +132,7 @@ public sealed class ManagedCodecsVideo : MonoBehaviour
             }
         }
 
-        if (_audioRate == 0 || GetComponent<AudioSource>() is { clip: not null })
+        if (_audioRate == 0 || _start < 0 || GetComponent<AudioSource>() is { clip: not null })
         {
             return;
         }

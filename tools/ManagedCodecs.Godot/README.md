@@ -1,7 +1,7 @@
 # A Godot sample
 
 For issue #254 (docs/decisions/2026-10-31-game-engines.md): an addon, `addons/managedcodecs/`, whose
-`ManagedCodecsVideo` is a `TextureRect` node that plays a video (H.264 or MJPEG, AAC audio; MP4, Matroska or AVI) into
+`ManagedCodecsVideo` is a `TextureRect` node that plays a video (H.264 or MJPEG, AAC or MP3 audio; MP4, Matroska or AVI) into
 an `ImageTexture` with the ManagedCodecs packages, on Godot 4.7's .NET build. Not a media player: no seeking, no pause.
 
 **Run in Godot 4.7.2 on Windows (issue #402) and Linux, exported too; sound not yet checked on a desktop.** CI builds it with the Godot .NET SDK
@@ -53,8 +53,7 @@ the history and the MonoGame measurements).
 2. **Videos**, each copied in as `video.mp4` (or the `File Path` set to it):
    - `BigBuckBunny_640x360.m4v` (H.264 and AAC, from
      [download.blender.org](https://download.blender.org/peach/bigbuckbunny_movies/BigBuckBunny_640x360.m4v.zip));
-   - `tears_of_steel_720p.mov` (1280x534 H.264 and MP3, which plays without sound and warns so: AAC is the only
-     audio decoded; [download.blender.org](https://download.blender.org/demo/movies/ToS/tears_of_steel_720p.mov));
+   - `tears_of_steel_720p.mov` (1280x534 H.264 and MP3; [download.blender.org](https://download.blender.org/demo/movies/ToS/tears_of_steel_720p.mov));
    - `testsrc-420.avi` (MJPEG, no audio; `tools/make-samples.sh` makes it).
 3. **Runs.** Each in the editor (F5), then in an exported desktop build (the export templates for .NET).
 4. **Record**, for each run: the Godot version, the OS and CPU, and the last line the sample prints (every 5 seconds and

@@ -31,7 +31,7 @@ repository host with that zip as its download URL. After each release: edit the 
 Description:
 
 > Play MP4, Matroska, WebM and AVI video in Godot 4 (.NET) with a node: `ManagedCodecsVideo`, a TextureRect that
-> plays H.264 or MJPEG video with AAC sound. Godot itself plays only Ogg Theora; this decodes in managed C# (the
+> plays H.264 or MJPEG video with AAC or MP3 sound. Godot itself plays only Ogg Theora; this decodes in managed C# (the
 > ManagedCodecs NuGet packages), with no native libraries, so the same file plays on every desktop platform the .NET
 > build exports to.
 >

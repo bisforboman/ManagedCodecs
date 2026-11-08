@@ -15,15 +15,17 @@ run time.
 
 ### Added
 
-- Playback: `MediaPlayer.SkippedAudioCodec` names a file's audio when it isn't played (only AAC is decoded), such as
-  MP3, so a video playing silent can say why. The Godot node, the Unity sample and mcplay print a warning with it
+- Playback: `MediaPlayer.SkippedAudioCodec` names a file's audio when it isn't played (only AAC and MP3 are decoded),
+  such as Opus, so a video playing silent can say why. The Godot node, the Unity sample and mcplay print a warning with it
   (#415).
 - `CodecIds.Mp3`: MP3 (MPEG-1 and MPEG-2 audio) in MP4 (object types 0x6B and 0x69, QuickTime's `.mp3` and `ms\0U`
   entries) and Matroska (`A_MPEG/L3`). Demuxed, not decoded.
 - MP3: the new package `ManagedCodecs.Mp3`, `Mp3Decoder` (MPEG audio Layer III at every MPEG-1, MPEG-2 and MPEG-2.5
   sample rate; mono, stereo, dual channel and joint stereo; the bit reservoir), from MP4 and Matroska, within 2^-17 of
   FFmpeg's float output (measured: under 2e-6). Also in `ManagedCodecs.Unity` and the meta-package; `mcdec` decodes
-  it. Playback doesn't play it yet (#415).
+  it (#415).
+- Playback: `MediaPlayer` plays MP3 audio as it plays AAC, and with it `VideoTexture`, the Godot node and the Unity
+  sample: Tears of Steel, one of their test clips, now has sound (#415).
 
 ### Changed
 
@@ -32,7 +34,8 @@ run time.
 - H.264: in MBAFF frames and field pictures, a macroblock edge between two macroblocks of one kind, each with one
   motion and no coefficients, takes one bS for its four segments, as in frames, and the top edges are found without an
   allocation per macroblock: about 3.7% fewer instructions in MBAFF and field streams, 1 to 2% of their time under the
-  JIT.
+  JIT. Motion vector prediction and the deblocking filter's top edge find their neighbours there without the general
+  neighbour lookup: about 1% more.
 - H.264: MBAFF frames reconstruct intra macroblocks in place, as frames do, instead of in a scratch block with their
   neighbouring samples gathered and the result copied back: 14 to 15% fewer instructions in intra MBAFF streams
   (4 to 6% of their time under the JIT), 3 to 4% in mixed ones.

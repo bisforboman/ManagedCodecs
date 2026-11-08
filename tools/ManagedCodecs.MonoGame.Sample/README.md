@@ -1,7 +1,7 @@
 # mcplay: in-game video with MonoGame
 
 A sample for issue #254 (docs/decisions/2026-10-31-game-engines.md): plays an MP4, Matroska or AVI (H.264 or MJPEG,
-AAC audio) in a MonoGame window with the `ManagedCodecs.MonoGame` package's `VideoTexture`, to show what in-game video
+AAC or MP3 audio) in a MonoGame window with the `ManagedCodecs.MonoGame` package's `VideoTexture`, to show what in-game video
 costs. Not a media player: no seeking; space pauses, Escape quits.
 
     dotnet run -c Release --project tools/ManagedCodecs.MonoGame.Sample -- <file.mp4>

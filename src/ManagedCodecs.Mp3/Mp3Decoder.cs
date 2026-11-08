@@ -109,7 +109,10 @@ public sealed class Mp3Decoder : IAudioDecoder
             int length = header.FrameLength;
             if (length > packet.Length - offset)
             {
-                throw new InvalidDataException("An MP3 frame is cut short.");
+                // A frame cut short (a file's last, as a rule): decoded as far as its granules' data is there, as FFmpeg
+                // decodes it (l3-compl, l3-sin1k0db); a granule whose data runs past the end is refused.
+                length = packet.Length - offset;
+                Statistics.TruncatedFrames++;
             }
 
             if (Channels == 0)

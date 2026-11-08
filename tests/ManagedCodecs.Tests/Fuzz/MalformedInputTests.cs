@@ -87,11 +87,11 @@ public class MalformedInputTests
     }
 
     // One sample per container and codec path: AVI MJPEG, MP4 with H.264 (CAVLC, CABAC with B frames, field
-    // pictures) and AAC, fragmented MP4.
+    // pictures), AAC and MP3, fragmented MP4.
     public static TheoryData<string> SweepSamples() => new(new[]
     {
         "testsrc-420.avi", "h264-with-audio.mp4", "h264-main-p-refs.mp4", "h264-high-b.mp4", "jm-paff-b.mp4",
-        "aac-stereo-48k.mp4", "fmp4-base-moof.mp4",
+        "aac-stereo-48k.mp4", "mp3-joint.mp4", "fmp4-base-moof.mp4",
     }.Where(name => TestSamples.Directory is not null && File.Exists(TestSamples.PathOf(name))));
 
     /// <summary>

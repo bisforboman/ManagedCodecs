@@ -34,8 +34,10 @@ internal static class Hybrid
     public static void Process(Granule g, bool lsf, int rateIndex, double[] spectrum, double[] overlap, double[] output)
     {
         // Subbands with long blocks: all, none, or a mixed block's lowest (2, or 4 at 8 kHz, where its long bands end at
-        // line 72).
-        int longSubbands = !g.ShortBlocks ? 32 : g.Mixed ? Mp3Tables.LongBands[rateIndex][Spectrum.MixedLongBands(lsf)] / 18 : 0;
+        // line 72). mixed_block_flag counts in start and stop blocks too: their lowest subbands take the normal window
+        // (2.4.2.7: "the two lowest subbands are transformed using a normal window"), as in l3-si_block.
+        int mixedSubbands = g.Mixed ? Mp3Tables.LongBands[rateIndex][Spectrum.MixedLongBands(lsf)] / 18 : 0;
+        int longSubbands = !g.ShortBlocks ? 32 : mixedSubbands;
         if (g.ShortBlocks)
         {
             Reorder(spectrum, rateIndex, g.Mixed ? 3 : 0);
@@ -63,7 +65,7 @@ internal static class Hybrid
             int at = 18 * sb;
             if (sb < longSubbands)
             {
-                LongImdct(spectrum.AsSpan(at, 18), LongWindows[g.ShortBlocks ? 0 : g.BlockType], block);
+                LongImdct(spectrum.AsSpan(at, 18), LongWindows[g.ShortBlocks || sb < mixedSubbands ? 0 : g.BlockType], block);
             }
             else
             {

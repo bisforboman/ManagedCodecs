@@ -19,6 +19,9 @@ internal sealed class Mp3Statistics
 
     public int MixedGranules { get; private set; }
 
+    /// <summary>Start and stop blocks with mixed_block_flag: their lowest subbands take the normal window.</summary>
+    public int MixedLongGranules { get; private set; }
+
     /// <summary>Granules whose count1 lines use table B.</summary>
     public int Count1B { get; private set; }
 
@@ -34,6 +37,9 @@ internal sealed class Mp3Statistics
     /// <summary>Count1 quadruples dropped for reading past their granule's end.</summary>
     public int DroppedQuadruples { get; set; }
 
+    /// <summary>Frames shorter than their header says, decoded as far as their data is there.</summary>
+    public int TruncatedFrames { get; set; }
+
     public void Count(FrameHeader header)
     {
         Frames++;
@@ -47,6 +53,7 @@ internal sealed class Mp3Statistics
     {
         BlockTypes[g.BlockType]++;
         MixedGranules += g.ShortBlocks && g.Mixed ? 1 : 0;
+        MixedLongGranules += !g.ShortBlocks && g.Mixed ? 1 : 0;
         Count1B += g.Count1Table;
         LinbitsGranules += g.TableSelect.Any(t => t >= 16) ? 1 : 0;
     }

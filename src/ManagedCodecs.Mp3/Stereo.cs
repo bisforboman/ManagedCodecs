@@ -17,8 +17,11 @@ internal static class Stereo
     /// Applies the frame's joint stereo to a granule's two spectra. The bands follow the right channel's granule
     /// (<paramref name="right"/>); its scalefactors are the intensity positions. MPEG-1's position 7 is illegal, and at
     /// the lower rates one at its partition's largest value (<paramref name="illegal"/>): such a band takes mid/side, if
-    /// on, as the bands below the intensity bound do. The last long band (21) and short band (12) have no scalefactor and
-    /// take the band below's position.
+    /// on, as the bands below the intensity bound do. The last long band (21) and short band (12) have no scalefactor:
+    /// they take the band below's position; at the lower rates only where that band is in intensity stereo too, and
+    /// the centre (position 0: both channels alike) where the right channel codes a value in it, as the ISO/IEC 11172-4
+    /// streams l3-test45 and l3-test46 need it. MPEG-1 copies the position either way, as FFmpeg does (the centre there
+    /// is up to 1.6e-2 off FFmpeg's output; no ISO stream that main's decoder takes settles it).
     /// </summary>
     public static void Process(FrameHeader header, Granule right, int[] positions, bool[] illegal, double[] left, double[] rightSpectrum)
     {
@@ -53,7 +56,11 @@ internal static class Stereo
                 if (!nonzeroShort[w] && IsZero(rightSpectrum, line, width))
                 {
                     int index = longEnd + (3 * (sfBand - shortStart)) + w;
-                    if (Intensity(lsf, positions[index], illegal[index], intensityScale, left, rightSpectrum, line, width))
+                    int below = shortBands[12] - shortBands[11];
+                    bool centre = lsf && band == 12 && !IsZero(rightSpectrum, (3 * shortBands[11]) + (w * below), below);
+                    if (centre
+                        ? Intensity(lsf, CentrePosition, false, intensityScale, left, rightSpectrum, line, width)
+                        : Intensity(lsf, positions[index], illegal[index], intensityScale, left, rightSpectrum, line, width))
                     {
                         continue;
                     }
@@ -78,7 +85,10 @@ internal static class Stereo
             if (!nonzero && IsZero(rightSpectrum, line, width))
             {
                 int index = band == 21 ? 20 : band;
-                if (Intensity(lsf, positions[index], illegal[index], intensityScale, left, rightSpectrum, line, width))
+                bool centre = lsf && band == 21 && !IsZero(rightSpectrum, longBands[20], longBands[21] - longBands[20]);
+                if (centre
+                    ? Intensity(lsf, CentrePosition, false, intensityScale, left, rightSpectrum, line, width)
+                    : Intensity(lsf, positions[index], illegal[index], intensityScale, left, rightSpectrum, line, width))
                 {
                     continue;
                 }
@@ -94,6 +104,9 @@ internal static class Stereo
             }
         }
     }
+
+    // The position that gives both channels the same share at the lower rates (io^0).
+    private const int CentrePosition = 0;
 
     // Intensity stereo over lines [start, start + width) from the left channel's values; false for an illegal position.
     private static bool Intensity(bool lsf, int position, bool illegal, int intensityScale, double[] left, double[] right, int start, int width)

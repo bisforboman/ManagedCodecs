@@ -58,3 +58,20 @@ checked byte for byte against the formula (tests/ManagedCodecs.Tests/Playback/Yu
 Converted alone, 120 decoded frames each three times (two runs of each, alternated). In mcplay, beside the decoder's
 threads and llvmpipe on the same 4 vCPUs, the title's conversion went from 11.0 and 12.7 ms a frame to 8.0 and 7.5
 (30 s of Caminandes, the same order alternated).
+
+**Sound against picture** (2026-11-08, issue #352). Under Xvfb with Mesa's llvmpipe, OpenAL Soft writing its mixed
+output to a file (`ALSOFT_DRIVERS=wave`, the file's creation time when mixing began) while ffmpeg grabbed the screen
+with wall-clock timestamps (`x11grab -use_wallclock_as_timestamps 1`); both matched against FFmpeg's decoding of the
+clip (the frames, and the sound's envelope in 1 ms windows). 15 s of Big Buck Bunny (640x360, 24 fps, AAC),
+re-encoded so that its picture and sound start together:
+
+| Build | Sound against the picture, two runs |
+|---|---|
+| 0.9.0 | 49 and 87 ms early |
+| 0.9.1 (`VideoTexture` starts the sound with the first frame) | 17 and 27 ms late |
+
+A cut by stream copy (its video from an earlier keyframe, hidden by an edit list) gave 21 and 23 ms late with 0.9.1,
+`MediaPlayer`'s audio the same as FFmpeg's sample for sample. Late by a frame or less is inside what viewers accept
+(sound late is the lenient side). The very first run after boot had 234 ms of silence between OpenAL opening its
+device (which `VideoTexture` does at the first frame) and the sound, then played without a gap: opening the device
+cold sits on the start path.

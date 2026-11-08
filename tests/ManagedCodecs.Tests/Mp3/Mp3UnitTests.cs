@@ -110,6 +110,16 @@ public class Mp3UnitTests
         }
     }
 
+    /// <summary>Requantization's table of 2^(q / 4) gives ExactMath's values bit for bit, inside its range and out.</summary>
+    [Fact]
+    public void QuarterPowerTableIsExactMaths()
+    {
+        for (int q = -1200; q <= 400; q++)
+        {
+            Assert.Equal(BitConverter.DoubleToInt64Bits(ExactMath.QuarterPowerOfTwo(q)), BitConverter.DoubleToInt64Bits(Spectrum.QuarterPower(q)));
+        }
+    }
+
     /// <summary>The synthesis filterbank against Annex A's flow chart, step by step with Math.Cos, over 40 time slots.</summary>
     [Fact]
     public void SynthesisIsTheFlowChart()

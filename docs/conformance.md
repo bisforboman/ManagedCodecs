@@ -1477,6 +1477,17 @@ magnitude and silence; reversing the order of either vector loop's sum fails it,
 did not notice. 84 µs a frame now (2.4 s for the film against 9.6, the output's hash unchanged), 1.5 times FFmpeg's;
 what is left is spread (perf: the synthesis 18%, Huffman decoding and requantization together 38%, the IMDCT 11%).
 
+Then the Huffman decoding and requantization (2026-11-08), each the same integers and doubles as before (the output's
+hash unchanged): 82 to 55 µs a frame, FFmpeg's 54 (medians of interleaved runs). Most of it was `Math.ScaleB`, a call
+into CoreLib's precompiled code, once a band and window for 2^(q / 4): `RequantizeRun` and the anonymous CoreLib
+address it called took 16% of the profile, 3% after. Requantization's q lies between -390 and 45, so a table of
+`ExactMath.QuarterPowerOfTwo`'s values from -512 to 63 replaces it, computed outside (`QuarterPowerTableIsExactMaths`
+compares them from -1200 to 400). The rest: the requantized value's sign and each line's sign bit without a branch on
+the sign (random signs mispredicted every other one), the bit reader's peek one big-endian read where four bytes are
+there rather than four bounds-checked ones, and only the lines above the last coded one cleared. Under ReadyToRun off
+(CoreLib jitted, as perf needs for names) `ScaleB` is jitted too and the cost doesn't show: profile with it on to see
+CoreLib's share.
+
 ## ADTS (raw AAC)
 
 Raw AAC files (ADTS, `AdtsDemuxer`) demux packet by packet as FFmpeg's

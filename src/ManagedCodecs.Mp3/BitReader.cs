@@ -1,3 +1,5 @@
+using System.Buffers.Binary;
+
 namespace ManagedCodecs.Mp3;
 
 /// <summary>
@@ -28,7 +30,15 @@ internal struct BitReader
         }
 
         int bytePosition = Position >> 3;
-        uint word = 0;
+        uint word;
+        if ((uint)bytePosition + 4 <= (uint)_byteLength)
+        {
+            // Four whole bytes in the buffer: one big-endian read.
+            word = BinaryPrimitives.ReadUInt32BigEndian(_data.AsSpan(bytePosition, 4));
+            return (int)((word << (Position & 7)) >> (32 - count));
+        }
+
+        word = 0;
         for (int i = 0; i < 4; i++)
         {
             int index = bytePosition + i;

@@ -755,6 +755,36 @@ from `CabacNeighbor`). Callgrind (AOT, steady loops): 126.2 to 122.2 M instructi
 (`jm-paff-b` +0.14%: every fill paid for them, and every CABAC lookup for the extra test, for about 0.3% of the intra
 sample), and `EdgeNeighbor` testing for MBAFF after the table's cases rather than for frames first (`h264-bench-720p`
 +0.03%: the frame path of `PredictIntra4x4Mode` compiled worse).
+4:2:2 MBAFF chroma deblocking next (2026-11-08): `DeblockMbaffChroma422` took 23% of `h264-422-mbaff-intra-4x4`'s
+instructions. It filtered the left edge line by line, each line with a general Table 6-4 lookup (`AffNeighbor`, any
+slice) and `ChromaPlace`, and the top edge line by line too, where luma and 4:2:0 chroma filter a plain edge whenever
+they can. Now, as there: the left edge between pairs of one kind is a plain vertical edge of four segments of four
+lines (`FilterEdge`, as `DeblockChroma422` in frames), between pairs of different kinds line by line from `AffLeft`
+with the left pair's two places found once (the 4:2:0 path finds them once too), and the top edge a plain horizontal
+edge where p0 is the line above q0 at q's step. Breaking each of the three paths fails 58 to 96 of the 4:2:2 MBAFF and
+field samples' tests. Callgrind (AOT, steady loops): 168.3 to 137.6 M instructions a loop of
+`h264-422-mbaff-intra-4x4` (-18.2%), -16.7% in `h264-422-mbaff-default` and `h264-422-mbaff-p`, no change in 4:2:0
+(`h264-mbaff-default` -0.03%, `jm-paff-b`, `h264-bench-720p.mp4`). Under the JIT (perf, 150 loops, six runs each,
+alternating, normalized by CABAC residual decoding, intra reconstruction and the inverse transforms, which it leaves
+alone) `h264-422-mbaff-default` took a median 11.4% less, all six runs faster.
+MBAFF bS next (2026-11-08): a fresh profile of main put `MbaffStrength` (bS of one segment of a macroblock edge) at
+6 to 6.6% of the interlaced samples' instructions on its own and 11 to 12% with what it calls, about 13 calls a
+macroblock at about 200 instructions each: every segment tested both macroblocks for intra and for field and frame
+meeting again, and chroma (4:2:0 and 4:2:2) found the top edges' bS a second time. `MbaffEdgeStrengths` now finds an
+edge's four segments at once (the left edge between pairs of one kind, the top edges), what holds for the whole edge
+found once, and chroma takes the luma pass's top bS. `H264Decoder.CheckMbaffStrengths` (tests only) compares each
+edge with `MbaffStrength` segment by segment on every sample (`MatchesFfmpegWithMbaffStrengthsChecked`; swapping
+intra's 3 and 4 fails 62 of them). Callgrind (AOT, steady loops): 378.9 to 357.3 M instructions a loop of
+`h264-mbaff-default` (-5.7%), -6.8% in `h264-mbaff-p`, -6.2% in `jm-paff-b`, -4.8% in `h264-422-mbaff-default`, -2.5%
+in `h264-mbaff-intra`; `h264-bench-720p.mp4` the same to 0.001% by function (its steady loops +0.04%, layout). Under
+the JIT (perf, 150 loops, six runs each, alternating, normalized by CABAC, motion compensation and the edge filters)
+`h264-mbaff-default` took a median 2.5% less, five runs of six faster. The left edge between pairs of different kinds
+then (2026-11-08): each of its 16 lines meets a macroblock of the other kind, so its bS is 4 for intra, else 2 for
+coefficients, else 1, never the motion's; the three macroblocks' intra is found once and the left pair's two
+`LumaPlace`s too, and `CheckMbaffStrengths` compares every line with `MbaffStrength` (bS 3 for coefficients fails 25
+of its tests and 186 MBAFF ones against FFmpeg). Callgrind (AOT, steady loops): -0.5% in `h264-mbaff-p`, -0.15 to
+-0.22% in `h264-mbaff-default`, `h264-mbaff-intra` and `h264-422-mbaff-default`, nothing in field pictures (no mixed
+pairs) or frames: such edges are rare in these samples; too little for the JIT's runs to resolve.
 
 A profile of a
 720p libx264 default stream (2026-10-22) is flat: CABAC residual decoding takes 14%, deblocking 21%
@@ -1022,6 +1052,13 @@ frames: their intra 8x8 blocks), -0.13% on `h264-high-intra-qp4` (noise, whose 8
 directional). Under the JIT the gain is larger (perf, 300 loops, six pairs each, the order alternating): the intra
 functions' share fell from a median 6.1 to 3.9% of `h264-high-intra`'s samples and 4.1 to 1.9% of
 `h264-high-default`'s, every run of the branch below every run of the base: about two points of the frame on both.
+Looked for and not taken (2026-11-08): more of #414's kind, by perf of main's JIT build (`DOTNET_ReadyToRun=0`,
+`h264-high-default`, `h264-bench-720p`, `h264-high-intra`). Five hot functions still zero a `stackalloc` a call
+(`ReconstructIntraLuma`, `DecodeSubMacroblocks`, `InternalStrengths`, `TwoListStrengths`, `InverseLumaDc`), but of 16
+to 64 bytes each: a few stores, not #414's two 100-byte clears and both edges filtered. The largest clear is
+`ResetInter`'s `Array.Clear` of the picture's motion arrays (native `memset`, 1.2% of `h264-bench-720p`'s samples,
+less on CABAC); dropping it needs every decoded and concealed macroblock to write its own entries first, since
+pictures are reused and direct prediction reads a reference's co-located motion: left for a point at most.
 The per-partition path (`PredictFromOne`, `PredictFromTwo`: one call to the kernels a component, without
 `PartitionPlace`, `Weighting` for default bi-prediction or `PredictComponent`) then took frame macroblocks of frames
 at any depth and in 4:2:2 too, not only 8-bit 4:2:0; MBAFF frames and field pictures keep `PredictPartitionGeneral`.
@@ -1203,6 +1240,12 @@ frame against the double banks) gave 0.90 on `heaac-5.1.mp4` and 0.93 on `heaacv
 on x64 (AAC LC, which the banks don't touch, 1.01 and 0.99); the final code, against main with #363's gains in vectors,
 0.91 and 0.94 on ARM64, 0.92 and 0.95 on x64 (AAC LC 1.01 and 1.00); and against main with #382's reorder from a
 source (which the float FFT keeps) and #384, 0.91 and 0.94 on ARM64, 0.93 and 0.96 on x64 (AAC LC 1.00 and 1.02).
+The profile after those (2026-11-08, perf of the JIT build, `heaac-5.1.mp4`, 1000 loops, `DOTNET_ReadyToRun=0`):
+the windowing's `SumOfProducts` 11.0% (7.7 points in synthesis, 3.3 in analysis), the FFTs' vector stages 9.5%, the
+full synthesis bank 4.9%, its pretransform 4.6%, the IMDCT 3.9%, the HF generator's covariances 3.6%, the core's
+spectral data 3.5%, and nothing else above 3.3%; `SbrChannel.MoveOn`'s and `GenerateHighBand`'s clears 1.9% together.
+No function holds waste of #414's kind (H.264, above), and the two largest already had their tries (single-precision
+windowing, above; slots across lanes, below): left as it is.
 
 The QMF transforms across time slots, one slot a vector lane, tried for speed and dropped (2026-11-07, #338). By perf
 the transforms take about 24% of `heaac-5.1.mp4`'s frame: the FFTs' vector stages 8.3%, their bit-reversal and first

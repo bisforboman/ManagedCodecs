@@ -84,7 +84,9 @@ public sealed class AudioChunk
 /// threads finished), but over many the mean is the throughput the decoding thread sees, the figure that says whether
 /// playback keeps up.
 /// </param>
-/// <param name="ConvertedFrames">Video frames converted to RGBA.</param>
+/// <param name="ConvertedFrames">
+/// Video frames converted to RGBA and queued: <see cref="MediaPlayer.TakeFrame"/> can take each one counted.
+/// </param>
 /// <param name="ConvertMilliseconds">The conversion's time a frame, the mean over the run.</param>
 /// <param name="DroppedFrames">Frames <see cref="MediaPlayer.TakeFrame"/> skipped because a later one was already due.</param>
 public readonly record struct PlaybackStatistics(long DecodedFrames, double DecodeMilliseconds, long ConvertedFrames, double ConvertMilliseconds, long DroppedFrames);

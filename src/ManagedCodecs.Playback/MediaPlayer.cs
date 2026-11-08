@@ -353,8 +353,8 @@ public sealed class MediaPlayer : IDisposable
             var rgba = new RgbaFrame(time, frame.Width, frame.Height, pixels, frame.SampleAspectRatio) { Lead = _frameDuration / 2 };
             frame.Dispose();
             Interlocked.Add(ref _convertTicks, Stopwatch.GetTimestamp() - start);
-            Interlocked.Increment(ref _converted);
             _frames.Add(rgba, token);
+            Interlocked.Increment(ref _converted); // once TakeFrame can take it
         }
     }
 

@@ -29,9 +29,30 @@ run time.
 
 - Containers: an MP3 track's `Codec` is now `CodecIds.Mp3` (`"MP3"`), where it was the sample entry's name in MP4
   (`mp4a`, `.mp3`) and `A_MPEG/L3` in Matroska.
+
+### Fixed
+
+- Thumbnails: `VideoProbe`'s duration counted an MP4 audio track from its first packet's start when the edit list
+  starts inside it (MP3's encoder delay, 1105 samples), 25 ms too long; it now starts where the edit does, as ffprobe's.
+
+## 0.9.1 – 2026-11-08
+
+Fixes to the new playback packages: `MediaPlayer` no longer drops frames when a game ticks at the video's own rate,
+and `VideoTexture`'s sound starts with the picture. H.264 intra prediction is faster (about 2% of a High profile
+frame under the JIT), with the same output. No public API changes.
+
+### Changed
+
 - H.264: intra prediction's vertical, horizontal and DC modes (4x4, 8x8, chroma DC) write a row at a time: 10% fewer
   instructions in an 8-bit intra-only stream under Native AOT, about 1% of its time under the JIT. The output is
   unchanged.
+- H.264: in 4:2:2 MBAFF frames and field pictures, the deblocking filter takes chroma's left edge between pairs of one
+  kind, and the top edge where its rows meet, as plain edges instead of line by line: 17 to 18% fewer instructions
+  in 4:2:2 MBAFF streams, about 11% of their time under the JIT.
+- H.264: in MBAFF frames and field pictures, the deblocking filter finds a macroblock edge's bS for its four segments
+  at once, and chroma reuses luma's for the top edges instead of finding them again: 5 to 7% fewer instructions in
+  MBAFF and field streams, about 2.5% of their time under the JIT. The left edge between a field and a frame pair
+  finds its lines' bS from what holds for the edge too (up to 0.5% more).
 - H.264: 16x16 and chroma intra prediction (vertical, horizontal, DC, plane) also write a row at a time: 1 to 5% fewer
   instructions in intra-only streams under Native AOT, within noise under the JIT. The output is unchanged.
 - H.264: Intra_8x8 vertical, horizontal and DC filter only the edge they predict from, straight from the picture: about
@@ -40,8 +61,6 @@ run time.
 
 ### Fixed
 
-- Thumbnails: `VideoProbe`'s duration counted an MP4 audio track from its first packet's start when the edit list
-  starts inside it (MP3's encoder delay, 1105 samples), 25 ms too long; it now starts where the edit does, as ffprobe's.
 - Playback: `MediaPlayer.TakeFrame` dropped about 1 frame in 5 when the game ticks at the video's own rate (24 fps
   video at 24 Hz, 60 at 60 Hz): its clock, a sum of frame times, falls a rounding error short of some frames, which
   were then shown a tick late and dropped. A frame is now due from half the interval before its time, so each call

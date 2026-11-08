@@ -1,7 +1,7 @@
 # Third-party notices
 
 ManagedCodecs is MIT-licensed (LICENSE). Its decoders are written from the specifications (ITU-T T.81, ITU-T H.264,
-ISO/IEC 14496-3 and -12); no other project's code is included. Some of the specifications' constant tables were
+ISO/IEC 11172-3, 13818-3, 14496-3 and -12); no other project's code is included. Some of the specifications' constant tables were
 transcribed from the open-source projects below, whose notices follow: the values are the specifications', and each
 table was checked against a second source (README, License). These notices go with the source and with every
 package (the file is packed beside the assemblies).
@@ -60,6 +60,14 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 ```
+
+## PDMP3 and minimp3 (public domain)
+
+The MP3 tables of ISO/IEC 11172-3 Annex B: the Huffman code tables (Table B.7), from PDMP3's decoding trees and
+equal to minimp3's codeword for codeword, the synthesis window (Table B.3, as integers over 65536) from PDMP3's, equal
+to minimp3's values, and the scalefactor band edges, equal in both: `src/ManagedCodecs.Mp3/HuffmanTables.cs` and
+`Mp3Tables.cs`. PDMP3 (Krister Lagerström and contributors, https://github.com/technosaurus/PDMP3) is dedicated to the
+public domain under the Unlicense, minimp3 (https://github.com/lieff/minimp3) under CC0 1.0; neither asks for a notice.
 
 ## Consulted only
 

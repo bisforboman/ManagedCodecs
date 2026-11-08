@@ -20,6 +20,10 @@ run time.
   (#415).
 - `CodecIds.Mp3`: MP3 (MPEG-1 and MPEG-2 audio) in MP4 (object types 0x6B and 0x69, QuickTime's `.mp3` and `ms\0U`
   entries) and Matroska (`A_MPEG/L3`). Demuxed, not decoded.
+- MP3: the new package `ManagedCodecs.Mp3`, `Mp3Decoder` (MPEG audio Layer III at every MPEG-1, MPEG-2 and MPEG-2.5
+  sample rate; mono, stereo, dual channel and joint stereo; the bit reservoir), from MP4 and Matroska, within 2^-17 of
+  FFmpeg's float output (measured: under 2e-6). Also in `ManagedCodecs.Unity` and the meta-package; `mcdec` decodes
+  it. Playback doesn't play it yet (#415).
 
 ### Changed
 
@@ -35,6 +39,9 @@ run time.
 
 ### Fixed
 
+- MonoGame: `VideoTexture` opened its sound (and OpenAL's device) only at the first frame, which once delayed the
+  sound by 234 ms on a cold start. It now opens it as soon as the first audio is decoded and starts it at the first
+  frame: within about 10 ms of the picture.
 - Thumbnails: `VideoProbe`'s duration counted an MP4 audio track from its first packet's start when the edit list
   starts inside it (MP3's encoder delay, 1105 samples), 25 ms too long; it now starts where the edit does, as ffprobe's.
 

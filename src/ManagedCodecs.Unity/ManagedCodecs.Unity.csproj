@@ -9,7 +9,7 @@
     <RootNamespace>ManagedCodecs</RootNamespace>
     <AssemblyName>ManagedCodecs.Unity</AssemblyName>
     <PackageId>ManagedCodecs.Unity</PackageId>
-    <Description>The ManagedCodecs decoders (H.264, MJPEG, AAC LC and HE-AAC; AVI, MP4 and ADTS) video probing and thumbnails, and playback into RGBA frames for Unity and other .NET Standard 2.1 runtimes: one assembly, the scalar build, bit-exact with the other packages' output, in pure managed C#.</Description>
+    <Description>The ManagedCodecs decoders (H.264, MJPEG, AAC LC and HE-AAC, MP3; AVI, MP4 and ADTS) video probing and thumbnails, and playback into RGBA frames for Unity and other .NET Standard 2.1 runtimes: one assembly, the scalar build, bit-exact with the other packages' output, in pure managed C#.</Description>
     <PackageTags>$(PackageTags);unity;netstandard</PackageTags>
     <DefineConstants>$(DefineConstants);MANAGEDCODECS_H264</DefineConstants>
     <!-- CS1574: doc comments of the shared sources name vector members and APIs this build leaves out. -->
@@ -17,9 +17,9 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Compile Include="..\ManagedCodecs.Core\**\*.cs;..\ManagedCodecs.Containers\**\*.cs;..\ManagedCodecs.Mjpeg\**\*.cs;..\ManagedCodecs.H264\**\*.cs;..\ManagedCodecs.Aac\**\*.cs;..\ManagedCodecs.Thumbnails\**\*.cs;..\ManagedCodecs.Playback\**\*.cs"
+    <Compile Include="..\ManagedCodecs.Core\**\*.cs;..\ManagedCodecs.Containers\**\*.cs;..\ManagedCodecs.Mjpeg\**\*.cs;..\ManagedCodecs.H264\**\*.cs;..\ManagedCodecs.Aac\**\*.cs;..\ManagedCodecs.Mp3\**\*.cs;..\ManagedCodecs.Thumbnails\**\*.cs;..\ManagedCodecs.Playback\**\*.cs"
              Exclude="..\*\obj\**;..\*\bin\**" LinkBase="Sources" />
-    <!-- Shared\Vlc.cs compiles into each project's namespace there; here once, into H.264's (GlobalUsings.cs aliases it for AAC). -->
+    <!-- Shared\*.cs compiles into each project's namespace there; here once, into H.264's (GlobalUsings.cs aliases it for AAC and MP3). -->
     <Compile Include="..\Shared\*.cs" Link="Shared\%(Filename)%(Extension)" />
   </ItemGroup>
 

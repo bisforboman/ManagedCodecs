@@ -606,6 +606,36 @@ for f in mp4:h264-mp3.mp4 mov:h264-mp3-mov.mp4; do
   ff -f lavfi -i testsrc2=size=160x120:rate=25 -f lavfi -i sine=frequency=440:sample_rate=44100 -t 1 -c:v libx264 \
     -c:a libmp3lame -b:a 64k -f "${f%%:*}" "samples/${f##*:}"
 done
+# MP3 decoded (Mp3Decoder), each sample for a tool, which Mp3ConformanceTests checks it uses (the decoder's statistics).
+# Tones (one sine a channel and a high one), pink noise and clicks (short blocks at each onset); LAME unless named.
+mp3tones="aevalsrc=0.3*sin(2*PI*440*t)+0.2*sin(2*PI*3300*t)|0.3*sin(2*PI*550*t)+0.1*sin(2*PI*7000*t):d=1"
+mp3clicks="aevalsrc=0.6*sin(2*PI*1000*t)*lt(mod(t\,0.25)\,0.004)+0.05*sin(2*PI*300*t)|0.5*sin(2*PI*1500*t)*lt(mod(t+0.1\,0.25)\,0.004)+0.05*sin(2*PI*200*t):d=1"
+mp3noise="anoisesrc=color=pink:amplitude=0.4:duration=1:seed=3"
+# Mid/side stereo (LAME takes it for noise, not for the tones) and the bit reservoir (VBR).
+ff -f lavfi -i "$mp3noise:sample_rate=44100" -ac 2 -c:a libmp3lame -q:a 2 samples/mp3-joint.mp4
+# 320 kbit/s at 48 kHz: the big-value tables with the most linbits.
+ff -f lavfi -i "$mp3noise:sample_rate=48000" -ac 2 -c:a libmp3lame -b:a 320k samples/mp3-320k.mp4
+# Left/right stereo (joint stereo off), and count1 table B.
+ff -f lavfi -i "$mp3tones:s=44100" -c:a libmp3lame -b:a 128k -joint_stereo 0 samples/mp3-stereo.mp4
+# Mono; 32 kHz, MPEG-1's third rate.
+ff -f lavfi -i "$mp3noise:sample_rate=44100" -ac 1 -c:a libmp3lame -b:a 96k samples/mp3-mono.mp4
+ff -f lavfi -i "$mp3tones:s=32000" -c:a libmp3lame -b:a 64k samples/mp3-32k.mp4
+# Short, start and stop blocks.
+ff -f lavfi -i "$mp3clicks:s=44100" -c:a libmp3lame -b:a 128k samples/mp3-transient.mp4
+# MPEG-2's rates (one granule a frame, its own scalefactors), with short blocks at 22.05 kHz.
+ff -f lavfi -i "$mp3clicks:s=22050" -c:a libmp3lame -b:a 64k samples/mp3-22k-transient.mp4
+ff -f lavfi -i "$mp3tones:s=24000" -c:a libmp3lame -b:a 64k samples/mp3-24k.mp4
+ff -f lavfi -i "$mp3tones:s=16000" -c:a libmp3lame -b:a 48k samples/mp3-16k.mp4
+# MPEG-2.5's rates, in Matroska (FFmpeg's MP4 muxer refuses them), with short blocks at 8 kHz, whose big values' region
+# 1 starts at line 72.
+ff -f lavfi -i "$mp3clicks:s=8000" -c:a libmp3lame -b:a 24k samples/mkv-mp3-8k-transient.mkv
+ff -f lavfi -i "$mp3tones:s=11025" -c:a libmp3lame -b:a 32k samples/mkv-mp3-11k.mkv
+ff -f lavfi -i "$mp3tones:s=12000" -c:a libmp3lame -b:a 32k samples/mkv-mp3-12k.mkv
+# A second encoder (shine, fixed point): its count1 quadruples read past the granule's end, which FFmpeg drops.
+ff -f lavfi -i "$mp3tones:s=44100" -c:a libshine -b:a 128k samples/mp3-shine.mp4
+# A stream cut out of a longer one (from 0.5 s, packets copied): its first frames' main data starts before the file
+# does, and their granules come out silent, as FFmpeg's.
+ff -ss 0.5 -i samples/mp3-joint.mp4 -c copy samples/mp3-cut.mp4
 # Raw AAC in ADTS frames (the ADTS demuxer): stereo at 44.1 kHz, and 5.1 behind an ID3v2 tag (which the demuxer skips).
 ff -f lavfi -i "aevalsrc=0.4*sin(2*PI*440*t)|0.3*sin(2*PI*660*t):s=44100:d=1" -c:a aac -b:a 96k -aac_pns 0 -f adts samples/aac-adts.aac
 # Pulse data, which no encoder at hand writes (FFmpeg's never does): a stream written by its syntax, every frame one
@@ -868,6 +898,14 @@ ff -i samples/mkv-aac-padding.mkv -map 0:a:0 -f f32le samples/mkv-aac-padding.tr
 for f in samples/heaac-*.mp4 samples/heaacv2-*.mp4 samples/heaac-*.aac; do ff -i "$f" -f f32le "${f%.*}.sbr.f32"; done
 # A stream naming FAAC: name.delay.f32, decoded audio as FFmpeg gives it, without FAAC's encoder delay.
 for f in samples/*faac*.aac; do ff -i "$f" -f f32le "${f%.*}.delay.f32"; done
+# MP3: name.mp3.f32, every packet decoded whole (MP4: the edit list ignored), and name.mp3.trim.f32, as FFmpeg gives it
+# by default (MP4: the edit list's priming skipped; Matroska: the end's DiscardPadding dropped). Suffixes of their own,
+# since AacConformanceTests decodes every name.f32.
+for f in samples/*.mp4 samples/*.mkv; do
+  [ "$(ffprobe -v error -select_streams a:0 -show_entries stream=codec_name -of csv=p=0 "$f")" = mp3 ] || continue
+  [[ $f == *.mp4 ]] && ff -ignore_editlist 1 -i "$f" -map 0:a:0 -f f32le "${f%.*}.mp3.f32"
+  ff -i "$f" -map 0:a:0 -f f32le "${f%.*}.mp3.trim.f32"
+done
 
 # name.audioframes.csv: the decoded audio frames as ffprobe lists them, by default (the edit list applied): FFmpeg's
 # time base for the stream on the first line, then each frame's pts in it and its sample count; for AudioFrame.Pts. AAC

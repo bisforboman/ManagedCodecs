@@ -5,6 +5,7 @@ using ManagedCodecs.Cli;
 using ManagedCodecs.Containers;
 using ManagedCodecs.H264;
 using ManagedCodecs.Mjpeg;
+using ManagedCodecs.Mp3;
 
 // mcdec: decodes every stream of a file that ManagedCodecs has a decoder for and reports the time it took, in the
 // shape of `ffmpeg -benchmark`, so both can be run on the same file:
@@ -133,7 +134,12 @@ for (int loop = 0; loop < loops; loop++)
         CodecIds.H264 => new H264Decoder(video) { BorrowFrames = borrowFrames, Threads = threads, ConcealErrors = conceal },
         _ => null,
     };
-    IAudioDecoder? audioDecoder = audio?.Codec == CodecIds.Aac ? new AacDecoder(audio) { Threads = threads } : null;
+    IAudioDecoder? audioDecoder = audio?.Codec switch
+    {
+        CodecIds.Aac => new AacDecoder(audio) { Threads = threads },
+        CodecIds.Mp3 => new Mp3Decoder(audio),
+        _ => null,
+    };
 
     if (loop == 0)
     {

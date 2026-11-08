@@ -6,6 +6,8 @@ using System.Runtime.CompilerServices;
 namespace ManagedCodecs.H264;
 #elif MANAGEDCODECS_AAC
 namespace ManagedCodecs.Aac;
+#elif MANAGEDCODECS_MP3
+namespace ManagedCodecs.Mp3;
 #endif
 
 /// <summary>

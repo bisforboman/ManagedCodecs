@@ -542,4 +542,19 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.Playback/MediaPlayer.cs",
          find="if (_next.Time - _next.Lead > position)", replace="if (_next.Time > position)",
          tests="DisplayName~ClockAtTheFrameRate"),
+    # ---- MP3: where the decoder does what FFmpeg's does and the spec leaves open, or what only some streams reach.
+    # A frame whose main data starts before the reservoir does (a stream cut from a longer one): its granules are
+    # skipped, silent, by their lengths until the data is there (mp3-cut).
+    dict(file="src/ManagedCodecs.Mp3/Mp3Decoder.cs",
+         find="while (firstGranule < header.Granules && bits < mainDataBegin * 8)", replace="while (false)",
+         tests="DisplayName~mp3-cut"),
+    # A count1 quadruple that reads past its granule's end is dropped (shine's streams).
+    dict(file="src/ManagedCodecs.Mp3/Spectrum.cs",
+         find="                    i -= 4;\n                    r.Position = lastPosition;\n", replace="",
+         tests="DisplayName~mp3-shine"),
+    # Region 1 of a short block's big values starts after three short bands: line 72 at 8 kHz, not 36.
+    dict(file="src/ManagedCodecs.Mp3/Granule.cs",
+         find="Region1Start = BlockType == 2 ? 3 * Mp3Tables.ShortBands[rateIndex][3] : longBands[8];",
+         replace="Region1Start = BlockType == 2 ? 36 : longBands[8];",
+         tests="DisplayName~mkv-mp3-8k-transient"),
 ]

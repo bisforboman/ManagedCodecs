@@ -589,4 +589,9 @@ MUTATIONS = [
          find="                length = packet.Length - offset;\n                Statistics.TruncatedFrames++;\n",
          replace="                throw new InvalidDataException(\"An MP3 frame is cut short.\");\n",
          tests="DisplayName~FrameCutShortDecodesAsFarAsItsData"),
+    # AVI's CBR MP3 is re-split into frames, skipping bytes that start none, as FFmpeg's parser resynchronizes
+    # (CbrMp3_SkipsBytesThatStartNoFrame puts junk before a chunk's data).
+    dict(file="src/ManagedCodecs.Containers/Avi/AviDemuxer.cs",
+         find="                at++;\n                continue;\n", replace="                break;\n",
+         tests="DisplayName~CbrMp3_SkipsBytesThatStartNoFrame"),
 ]

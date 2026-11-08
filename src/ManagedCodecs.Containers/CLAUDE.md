@@ -30,3 +30,8 @@ The repository's CLAUDE.md (process, core idea, cross-cutting gotchas) applies t
 - Raw MP3: FFmpeg's encoder writes its LAME tag with "Lavc" (not "LAME") as the encoder, and FFmpeg's demuxer takes it as
   LAME's; its info frame counts the frames after it, not itself. `ffprobe -show_packets` shows the gapless trim as
   "Skip Samples" side data (1105 on the first packet, the padding less 529 on the last).
+- AVI: FFmpeg's muxer drops the second video frame (an empty chunk) while interleaving audio, so every FFmpeg AVI with
+  audio has a pts gap (0, 2, 3, ...): tests that tick at the first frames' spacing can't take them. It writes the
+  audio's chunk id ('01wb') in the header's OpenDML 'indx' too: search the 'movi' list for chunks. FFmpeg's muxer
+  never writes the CBR MP3 layout: `tools/avi-mp3-cbr.py` rewrites its files into it, and FFmpeg's packet times there
+  are its parser's interpolation, not the frames' (docs/decisions/2026-11-08-avi-audio.md).

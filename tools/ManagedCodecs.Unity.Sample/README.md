@@ -44,7 +44,7 @@ What nobody has checked yet, and how. Report in a new issue, one line a run (iss
 2. **Videos.** Three files, each into `Assets/StreamingAssets/`:
    - `BigBuckBunny_640x360.m4v` (H.264 and AAC, from
      [download.blender.org](https://download.blender.org/peach/bigbuckbunny_movies/BigBuckBunny_640x360.m4v.zip));
-   - `tears_of_steel_720p.mov` (720p H.264 and AAC,
+   - `tears_of_steel_720p.mov` (1280x534 H.264 and MP3, which plays without sound: AAC is the only audio decoded;
      [download.blender.org](https://download.blender.org/demo/movies/ToS/tears_of_steel_720p.mov));
    - `testsrc-420.avi` (MJPEG, no audio; `tools/make-samples.sh` makes it, or any MJPEG AVI).
 3. **Runs.** Each video in the editor's Play mode (Mono), then in a standalone player built with the Mono backend and

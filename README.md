@@ -91,9 +91,10 @@ and code that reproduces FFmpeg's reading where it differs from the spec), and n
   writes), long, short and mixed blocks, the bit reservoir (a frame reaching back before a cut stream's start comes
   out silent, as FFmpeg's), CRCs checked; from MP4 and Matroska, within 2^-17 of FFmpeg's float output (measured:
   under 2e-6, LAME and shine streams). The MP4 edit list trims the priming (LAME's 1105 samples), Matroska's
-  DiscardPadding the end. `MediaPlayer` plays it (In-game video); raw `.mp3` files gapless by their LAME tag (`Mp3Demuxer`). Not yet:
-  free-format bitrates, Layers I and II, AVI audio (docs/decisions/2026-11-08-mp3-decoder.md).
-- **Containers**: AVI (video), MP4 (video and audio tracks, fragmented files too, edit lists of several edits),
+  DiscardPadding the end. `MediaPlayer` plays it (In-game video); raw `.mp3` files gapless by their LAME tag (`Mp3Demuxer`);
+  AVI's in both its chunk layouts. Not yet: free-format bitrates, Layers I and II (docs/decisions/2026-11-08-mp3-decoder.md).
+- **Containers**: AVI (video, and the first audio stream: MP3 in both its chunk layouts, AAC, others by their format
+  tag such as `0x0001` for PCM; docs/decisions/2026-11-08-avi-audio.md), MP4 (video and audio tracks, fragmented files too, edit lists of several edits),
   Matroska and WebM (video and audio tracks, every kind of lacing, BlockGroups, live files of unknown size, header
   stripping and zlib, the display rotation, DiscardPadding; VP9, AV1, Opus and other codecs this library doesn't decode
   by their Codec IDs; MP3 as `CodecIds.Mp3` in MP4 and Matroska), raw AAC (ADTS) and raw MP3 (gapless by the LAME
@@ -231,7 +232,8 @@ An MP4 file's tracks can be read one at a time: `new Mp4Demuxer(stream, MediaTyp
 (no sample table, no packets, `Audio` null). Every demuxer's `ReadPacketInfo()` lists the packets without their data,
 each one's size, keyframe and discard flags and timestamps: a duration, a packet list or a bitrate graph needs nothing
 more. MP4's comes from the sample tables, and Matroska's and ADTS's from the blocks and frames found on opening, none
-reading the file; AVI's walks the 'movi' list reading each chunk's 8-byte header and skipping its data.
+reading the file; AVI's walks the 'movi' list reading each chunk's 8-byte header and skipping its data (but CBR MP3's,
+whose frames are found in it).
 
 ```csharp
 using var demuxer = new Mp4Demuxer(File.OpenRead("video.mp4"), MediaTypes.Video);
@@ -368,8 +370,7 @@ checks the lists after each.
 wider above 1 and taller below, then turned by the rotation), codec, frame rate, rotation and the audio's codec, rate
 and channels. Each is checked against ffprobe on every sample (VideoProbeTests). The stream must be seekable (an MP4
 file's index can follow its data): buffer an upload first. A codec this library does not decode throws
-`NotSupportedException`, a file without video `InvalidDataException`; AVI's audio is not read, so an AVI lasts as long
-as its video. The duration comes from the streams' `Duration` (`VideoStreamInfo`, `AudioStreamInfo`), which the
+`NotSupportedException`, a file without video `InvalidDataException`. The duration comes from the streams' `Duration` (`VideoStreamInfo`, `AudioStreamInfo`), which the
 demuxers give as FFmpeg's stream duration: MP4's edits' length, capped at the samples they take, else the track's,
 AVI's stream header length; a Matroska file's is its Segment's Duration, from its earliest packet, as FFmpeg's (a live
 recording without one: its packets').
@@ -446,8 +447,8 @@ while (player.TakeAudio() is { } audio) { /* audio.Samples at audio.SampleRate t
   FFmpeg's scaler (tools/ManagedCodecs.MonoGame.Sample/README.md); the fast path is checked against the formula on random
   samples of every 8-bit layout.
 - **Speed:** on 4 vCPUs at 2.1 GHz, 1080p24 and 1080p30 keep up, decoding and conversion included (mcplay's README).
-- **Audio it doesn't decode** (Opus, Vorbis, ...; AAC and MP3 play) plays as none: `Audio` is null and
-  `SkippedAudioCodec` names it (the container's Codec ID, such as `A_OPUS`), for a warning; the Godot, Unity and
+- **Audio it doesn't decode** (Opus, Vorbis, AVI's PCM, ...; AAC and MP3 play) plays as none: `Audio` is null and
+  `SkippedAudioCodec` names it (the container's Codec ID, such as `A_OPUS`, or AVI's format tag, `0x0001`), for a warning; the Godot, Unity and
   mcplay samples print one.
 - **Not a media player:** no seeking and no clock of its own (pause by stopping the clock you pass); `Loop` plays the
   file again from its start, its frames' times running on.

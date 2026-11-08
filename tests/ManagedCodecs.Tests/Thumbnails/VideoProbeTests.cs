@@ -61,11 +61,10 @@ public class VideoProbeTests
         var video = streams.First(s => s.GetProperty("codec_type").GetString() == "video");
         var info = VideoProbe.Read(TestSamples.PathOf(name));
 
-        // AVI's audio is not read, so an AVI file lasts as long as its video stream (ffprobe's format duration also
-        // counts the audio: avi-dropped-frame's MP3 runs half a second past the video).
         // A Matroska file without a Segment Duration (written live) has none in ffprobe: there it is from the first packet
-        // ffprobe lists to the end of the last (name.packets.csv).
-        var durationOf = name.EndsWith(".avi", StringComparison.Ordinal) ? video : root.GetProperty("format");
+        // ffprobe lists to the end of the last (name.packets.csv). AVI's counts its audio (avi-dropped-frame's MP3 runs
+        // half a second past the video).
+        var durationOf = root.GetProperty("format");
         double duration = durationOf.TryGetProperty("duration", out var listed)
             ? double.Parse(listed.GetString()!, CultureInfo.InvariantCulture)
             : PacketSpan(name);
@@ -81,7 +80,7 @@ public class VideoProbeTests
         Assert.Equal((width, height), (info.DisplayWidth, info.DisplayHeight));
 
         var audio = streams.FirstOrDefault(s => s.GetProperty("codec_type").GetString() == "audio");
-        if (name.EndsWith(".avi", StringComparison.Ordinal) || audio.ValueKind == JsonValueKind.Undefined)
+        if (audio.ValueKind == JsonValueKind.Undefined)
         {
             Assert.Null(info.Audio);
         }

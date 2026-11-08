@@ -18,7 +18,13 @@ public class AviDemuxerTests
         Assert.Equal(2, demuxer.Video.FrameCount);
         Assert.Equal(new Rational(1, 25), demuxer.Video.TimeBase);
 
-        var packets = demuxer.ReadPackets().ToList();
+        var all = demuxer.ReadPackets().ToList();
+        var packets = all.Where(p => p.StreamIndex == 0).ToList();
+
+        // The audio chunk between them: a packet of the audio stream (a WAVEFORMATEX of zeros: format tag 0).
+        Assert.Equal(new[] { 0, 1, 0 }, all.Select(p => p.StreamIndex));
+        Assert.Equal("0x0000", demuxer.Audio!.Codec);
+        Assert.Equal(new byte[] { 9, 9 }, all[1].Data.ToArray());
 
         Assert.Equal(2, packets.Count);
         Assert.Equal(new byte[] { 1, 2, 3 }, packets[0].Data.ToArray());          // odd size: padding skipped
@@ -64,7 +70,7 @@ public class AviDemuxerTests
     {
         using var demuxer = new AviDemuxer(new MemoryStream(TinyAvi(dropFrame: true)));
 
-        var packets = demuxer.ReadPackets().ToList();
+        var packets = demuxer.ReadPackets().Where(p => p.StreamIndex == demuxer.Video.StreamIndex).ToList();
 
         Assert.Equal(2, packets.Count);
         Assert.Equal(new long[] { 0, 1 }, packets.Select(p => p.Sequence).ToArray());
@@ -85,7 +91,7 @@ public class AviDemuxerTests
         }
 
         using var demuxer = AviDemuxer.Open(TestSamples.PathOf("avi-dropped-frame.avi"));
-        var pts = demuxer.ReadPackets().Select(p => p.Pts).ToList();
+        var pts = demuxer.ReadPackets().Where(p => p.StreamIndex == demuxer.Video.StreamIndex).Select(p => p.Pts).ToList();
 
         Assert.True(pts.Count < pts[^1] + 1, $"No pts gap in {pts.Count} packets.");
     }
@@ -109,7 +115,12 @@ public class AviDemuxerTests
         stream.Reads.Clear();
         Assert.Equal(expected, demuxer.ReadPacketInfo());
         Assert.NotEmpty(stream.Reads);
-        Assert.All(stream.Reads, count => Assert.Equal(8, count));
+
+        // CBR MP3's frames are found in its data, which is read too.
+        if (demuxer.Audio is not { Codec: CodecIds.Mp3 } audio || audio.TimeBase != new Rational(1, audio.SampleRate))
+        {
+            Assert.All(stream.Reads, count => Assert.Equal(8, count));
+        }
     }
 
     /// <summary>The packets without their data from a hand-built file: an odd-sized chunk, a 'rec ' list and a dropped frame.</summary>
@@ -118,7 +129,48 @@ public class AviDemuxerTests
     {
         using var demuxer = new AviDemuxer(new MemoryStream(TinyAvi(dropFrame: true)));
         Assert.Equal(demuxer.ReadPackets().Select(ReadCountingStream.InfoOf), demuxer.ReadPacketInfo());
-        Assert.Equal(new long[] { 0, 2 }, demuxer.ReadPacketInfo().Select(p => p.Pts));
+        Assert.Equal(new long[] { 0, 2 }, demuxer.ReadPacketInfo().Where(p => p.StreamIndex == demuxer.Video.StreamIndex).Select(p => p.Pts));
+    }
+
+    /// <summary>
+    /// MP3 in the CBR layout is re-split into whole frames, and bytes that start no frame are skipped, as FFmpeg's parser
+    /// resynchronizes: four junk bytes put before the first audio chunk's data leave the frames as they were.
+    /// </summary>
+    [Fact]
+    public void CbrMp3_SkipsBytesThatStartNoFrame()
+    {
+        if (TestSamples.Directory is null || !File.Exists(TestSamples.PathOf("avi-mjpeg-mp3-cbr.avi")))
+        {
+            return;
+        }
+
+        var file = File.ReadAllBytes(TestSamples.PathOf("avi-mjpeg-mp3-cbr.avi"));
+        List<byte[]> Frames(byte[] data)
+        {
+            using var demuxer = new AviDemuxer(new MemoryStream(data));
+            Assert.Equal(new Rational(1, demuxer.Audio!.SampleRate), demuxer.Audio.TimeBase); // the re-split layout
+            return [.. demuxer.ReadPackets().Where(p => p.StreamIndex == demuxer.Audio.StreamIndex).Select(p => p.Data.ToArray())];
+        }
+
+        // The junk goes after the first '01wb' chunk's header in the 'movi' list (the header's 'indx' names the id too);
+        // that chunk, the list and the RIFF grow by 4.
+        int movi = file.AsSpan().IndexOf("movi"u8) - 8;
+        int chunk = file.AsSpan(movi).IndexOf("01wb"u8) + movi;
+        byte[] junk = [0xFF, 0x00, 0x12, 0x34];
+        byte[] patched = [.. file.AsSpan(0, chunk + 8), .. junk, .. file.AsSpan(chunk + 8)];
+        foreach (int sizeAt in new[] { 4, movi + 4, chunk + 4 })
+        {
+            BinaryPrimitives.WriteUInt32LittleEndian(patched.AsSpan(sizeAt), BinaryPrimitives.ReadUInt32LittleEndian(patched.AsSpan(sizeAt)) + 4);
+        }
+
+        var expected = Frames(file);
+        var actual = Frames(patched);
+        Assert.True(expected.Count > 10, "Too few frames to tell.");
+        Assert.Equal(expected.Count, actual.Count);
+        for (int i = 0; i < expected.Count; i++)
+        {
+            Assert.Equal(expected[i], actual[i]);
+        }
     }
 
     [Fact]

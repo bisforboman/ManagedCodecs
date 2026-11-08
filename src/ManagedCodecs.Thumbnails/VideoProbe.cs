@@ -168,7 +168,7 @@ public static class VideoProbe
 /// <param name="FramesPerSecond">The container's frame rate.</param>
 /// <param name="Rotation">How far to turn frames counter-clockwise to show them: 0, 90, 180 or 270 degrees.</param>
 /// <param name="SampleAspectRatio">The pixels' aspect ratio, 1:1 where the container says nothing.</param>
-/// <param name="Audio">The first audio stream, or null without one (AVI's audio is not read).</param>
+/// <param name="Audio">The first audio stream, or null without one.</param>
 public sealed record VideoInfo(
     TimeSpan Duration,
     string Codec,

@@ -40,6 +40,22 @@ ff -f lavfi -i testsrc2=size=320x240:rate=25,noise=alls=60:allf=t -t 1 -c:v mjpe
 # (AviDemuxerTests checks the gap is there). Small, under the 64 KiB a fuzzing seed may have (tools/fuzz.sh).
 ff -f lavfi -i testsrc2=size=64x48:rate=25:duration=1,format=yuvj420p -f lavfi -i sine=duration=1.5 -c:v mjpeg -q:v 5 \
   -c:a libmp3lame -b:a 32k samples/avi-dropped-frame.avi
+# Audio in AVI (AviDemuxer.Audio), each with ffprobe's packets as the reference (name.packets.csv): stereo MP3 as
+# FFmpeg's muxer writes it (a frame a chunk, dwScale 1152), AAC (a frame a chunk, its AudioSpecificConfig in the
+# WAVEFORMATEX), PCM (dwSampleSize set: timed by samples; named "0x0001", not decoded), and MP3 in the "CBR" layout of
+# VirtualDub and older muxers (dwSampleSize 1, chunks cut anywhere in a frame), which tools/avi-mp3-cbr.py rewrites
+# FFmpeg's into: its frames are re-split, so their bytes are FFmpeg's parser's.
+ff -f lavfi -i testsrc2=size=160x120:rate=25 -f lavfi -i "aevalsrc=0.4*sin(2*PI*440*t)|0.3*sin(2*PI*660*t):s=44100:d=2" \
+  -t 2 -c:v mjpeg -q:v 5 -c:a libmp3lame -b:a 96k samples/avi-mjpeg-mp3.avi
+ff -f lavfi -i testsrc2=size=160x120:rate=25 -f lavfi -i "sine=frequency=440:sample_rate=48000" -t 1 -c:v mjpeg -q:v 5 \
+  -c:a aac -b:a 64k samples/avi-mjpeg-aac.avi
+ff -f lavfi -i testsrc2=size=160x120:rate=25 -f lavfi -i "sine=frequency=440:sample_rate=22050" -t 1 -c:v mjpeg -q:v 5 \
+  -c:a pcm_s16le samples/avi-mjpeg-pcm.avi
+avicbr=$(mktemp --suffix=.avi)
+ff -f lavfi -i testsrc2=size=160x120:rate=25 -f lavfi -i "aevalsrc=0.4*sin(2*PI*440*t)|0.3*sin(2*PI*660*t):s=44100:d=2" \
+  -t 2 -c:v mjpeg -q:v 5 -c:a libmp3lame -b:a 64k "$avicbr"
+python3 -I tools/avi-mp3-cbr.py "$avicbr" samples/avi-mjpeg-mp3-cbr.avi > /dev/null
+rm "$avicbr"
 # Grayscale (FFmpeg's MJPEG encoder has no gray output, so ImageMagick encodes the frames)
 frames=$(mktemp -d)
 ff -f lavfi -i testsrc2=size=322x238:rate=25 -t 1 -pix_fmt gray "$frames/f%02d.png"
@@ -871,7 +887,7 @@ for f in samples/*.avi samples/*.mp4; do
     -show_entries frame=color_range,color_space,color_primaries,color_transfer,chroma_location,sample_aspect_ratio "$f")
   if [ -n "$t" ]; then echo "$t" > "${f%.*}.color"; fi
 done
-for f in samples/*.mp4 samples/*.mkv samples/*.webm; do
+for f in samples/*.mp4 samples/*.mkv samples/*.webm samples/*.avi; do
   ff -copyts -i "$f" -c copy -f framemd5 "${f%.*}.packets.framemd5"
   ffprobe -v error -show_packets -show_data_hash MD5 -show_entries packet=stream_index,pts,dts,duration,size,flags,data_hash \
     -of csv=p=0 "$f" > "${f%.*}.packets.csv"
@@ -925,9 +941,9 @@ for f in samples/heaac-*.mp4 samples/heaacv2-*.mp4 samples/heaac-*.aac; do ff -i
 for f in samples/*faac*.aac; do ff -i "$f" -f f32le "${f%.*}.delay.f32"; done
 # MP3: name.mp3.f32, every packet decoded whole (MP4: the edit list ignored), and name.mp3.trim.f32, as FFmpeg gives it
 # by default (MP4: the edit list's priming skipped; Matroska: the end's DiscardPadding dropped; a raw .mp3: its LAME
-# tag's delay and padding). Raw .mp3 files' packets too, as FFmpeg's demuxer gives them (name.packets.framemd5). Suffixes of their own,
-# since AacConformanceTests decodes every name.f32.
-for f in samples/*.mp4 samples/*.mkv samples/*.mp3; do
+# tag's delay and padding; AVI: every frame, in either layout). Raw .mp3 files' packets too, as FFmpeg's demuxer gives
+# them (name.packets.framemd5). Suffixes of their own, since AacConformanceTests decodes every name.f32.
+for f in samples/*.mp4 samples/*.mkv samples/*.mp3 samples/*.avi; do
   [ "$(ffprobe -v error -select_streams a:0 -show_entries stream=codec_name -of csv=p=0 "$f")" = mp3 ] || continue
   [[ $f == *.mp4 ]] && ff -ignore_editlist 1 -i "$f" -map 0:a:0 -f f32le "${f%.*}.mp3.f32"
   ff -i "$f" -map 0:a:0 -f f32le "${f%.*}.mp3.trim.f32"

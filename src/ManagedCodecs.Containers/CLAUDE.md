@@ -30,3 +30,8 @@ The repository's CLAUDE.md (process, core idea, cross-cutting gotchas) applies t
 - Raw MP3: FFmpeg's encoder writes its LAME tag with "Lavc" (not "LAME") as the encoder, and FFmpeg's demuxer takes it as
   LAME's; its info frame counts the frames after it, not itself. `ffprobe -show_packets` shows the gapless trim as
   "Skip Samples" side data (1105 on the first packet, the padding less 529 on the last).
+- AVI audio (docs/conformance.md, AVI audio): ffprobe gives H.264 in AVI no pts (compare its dts); an empty audio
+  chunk takes no tick where an empty video chunk does; FFmpeg's demuxer cuts chunks with a dwSampleSize into packets
+  (1024 blocks), which its muxer's chunks never show (merge a PCM AVI's chunks to see it); VirtualDub's MP3 comes out
+  of FFmpeg's parser, times included, and `ffprobe -fflags +noparse+nofillin` shows the chunks before it. FFmpeg
+  gives an audio stream with a dwSampleSize no duration and no start, and leaves it out of the file's duration.

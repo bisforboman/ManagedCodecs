@@ -167,6 +167,22 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.Containers/Avi/AviDemuxer.cs",
          find="if (isVideoChunk && size == 0)\n                {\n                    frame++;\n                }\n                else ",
          replace="", tests="FullyQualifiedName~Avi|DisplayName~avi-dropped-frame"),
+    # An empty audio chunk gives no packet and takes no tick (FFmpeg's muxer writes some while interleaving: avi-mjpeg-mp3).
+    dict(file="src/ManagedCodecs.Containers/Avi/AviDemuxer.cs",
+         find="if (id == audioId && size > 0)", replace="if (id == audioId)",
+         tests="FullyQualifiedName~AviConformance"),
+    # Audio with a dwSampleSize below 32 comes in pieces of 1024 blocks, from 32 up one block a packet.
+    dict(file="src/ManagedCodecs.Containers/Avi/AviAudio.cs",
+         find="sampleSize < 32 ? 1024 * sampleSize : sampleSize", replace="size",
+         tests="FullyQualifiedName~AviDemuxerTests"),
+    # MP3 cut anywhere in a frame: a frame takes the time of the packet it starts in only if no frame has taken it...
+    dict(file="src/ManagedCodecs.Containers/Avi/AviAudio.cs",
+         find="if (!taken)", replace="if (true)",
+         tests="DisplayName~avi-mp3-cbr"),
+    # ... moved on by the bytes before it at the frame's rate, rounded to nearest.
+    dict(file="src/ManagedCodecs.Containers/Avi/AviAudio.cs",
+         find=" + (length / 2)) / length", replace=") / length",
+         tests="DisplayName~avi-mp3-cbr"),
 
     # ---- MP4 (as FFmpeg reads it)
     # Negative composition offsets in 'ctts': FFmpeg leaves the last two entries out of the shift.

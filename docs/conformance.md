@@ -123,8 +123,10 @@ rotation, average frame rate and the audio stream's rate and channels. The durat
 durations as FFmpeg reads them: MP4's edits' length, but no longer than the samples they take (JM's field-picture
 files edit to the last field's pts, their samples lasting half a frame), else the shorter of 'mdhd''s and the samples'
 (mp4-mdhd-duration: no edit list, the video's 'mdhd' shorter, the audio's longer), or the longer in a fragmented file
-(its 'mdhd' counts only the samples in 'moov'); AVI's 'strh' length, and AVI's audio, which the demuxer
-does not expose, is not counted (avi-dropped-frame's MP3 outlasts its video); Matroska's Segment Duration, which
+(its 'mdhd' counts only the samples in 'moov'); AVI's 'strh' length (the audio's only where dwSampleSize is 0; an
+audio stream with one, avi-mjpeg-pcm's and avi-mp3-cbr's, FFmpeg gives neither a duration nor a start and leaves
+out), the audio counted too (avi-dropped-frame's
+MP3 outlasts its video by half a second); Matroska's Segment Duration, which
 FFmpeg takes as the file's own, from the earliest packet (AAC's, 21 ms before the video, at its CodecDelay), not each
 stream's start plus it; without one (mkv-h264-live) ffprobe gives no duration, and the probe's, from the first packet
 to the end of the last, is checked against ffprobe's packets. H.264's size is the decoder's frame size
@@ -239,6 +241,35 @@ the pts (Mp4DemuxerTests checks the shift on such a table, not that dts).
 Elephants Dream (an Apple-made MOV, offsets down to -600 of a second's 600) had its last 24 frames discarded as past
 its edit's end until the first was read that way. QuickTime files (`aac-quicktime`, FFmpeg's `-f mov`) put the AAC
 `esds` in a `wave` box of the sound description.
+
+## AVI audio
+
+`AviDemuxer.Audio` is the file's first audio stream (docs/decisions/2026-11-08-avi-audio.md). AviConformanceTests
+compares every AVI sample's packets with ffprobe's (name.packets.csv: file order, each stream's pts, its dts where
+FFmpeg has no pts, size, MD5, duration where FFmpeg gives one) and its audio stream with name.streams (codec tag, rate,
+channels, time base, duration, extradata); Mp3ConformanceTests and AacConformanceTests decode the audio against
+FFmpeg's (avi-dropped-frame, avi-mjpeg-mp3 and avi-mp3-cbr's MP3, avi-mjpeg-aac's AAC). What FFmpeg does, found on
+its own files and on rewritten ones (each case below checked with ffprobe):
+
+- **dwSampleSize 0** (MP3 and AAC as FFmpeg's muxer writes them, a frame a chunk): a packet a chunk, a tick each in
+  dwScale / dwRate (1152/44100 for MP3). An empty audio chunk, which its muxer writes while interleaving
+  (avi-mjpeg-mp3), gives no packet and, unlike an empty video chunk, no tick. AAC's first packet has no duration in
+  ffprobe (N/A; the demuxer's is 1, the test leaves it out).
+- **A dwSampleSize** (PCM, ADPCM, VirtualDub's MP3): ticks of dwSampleSize bytes, a packet's pts the bytes before it
+  over dwSampleSize rounded down, its duration its own bytes over it. A chunk is cut into packets of 1024 blocks below
+  32 bytes a block, of one block from 32 bytes up (IMA and MS ADPCM's 1024-byte blocks, 8-channel 32-bit PCM), and not
+  at all at 1 byte (8-bit mono). FFmpeg's muxer writes PCM in chunks of 1024 samples, so the cutting shows only on
+  files whose chunks were merged; AviDemuxerTests checks it on hand-built ones, with the sizes and times ffprobe gave.
+- **MP3 cut anywhere in a frame** (dwSampleSize 1, dwRate the bytes a second; avi-mp3-cbr, by tools/avi-mp3-cbr.py):
+  FFmpeg's demuxer gives a packet a chunk timed in bytes, and its MPEG audio parser cuts them into frames, each handed
+  out once its last byte is in. A frame takes the time of the packet it starts in if no frame has taken that time yet,
+  moved on by the bytes before the frame at the frame's rate (its duration over its size, rounded to nearest: 39 bytes
+  into a packet at 378, a 209-byte frame of 208 ticks, starts at 417); any other frame starts where the one before
+  ends. A frame's duration is its samples in the stream's ticks, rounded down (1152 at 44.1 kHz in 1/8000: 208).
+- **Duration**: FFmpeg gives the stream header's dwLength as the duration only with a dwSampleSize of 0, and a stream
+  with a dwSampleSize neither a duration nor a start time; its file duration leaves such a stream out (avi-mp3-cbr's
+  audio ends 4.5 ms after its video; the file lasts as long as the video). `VideoProbe` does the same.
+- **Seek** (MJPEG): every audio packet is a keyframe, so the audio starts at its last packet at or before the time.
 
 ## Matroska and WebM demuxing
 

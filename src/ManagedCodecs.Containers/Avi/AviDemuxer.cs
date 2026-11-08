@@ -5,13 +5,23 @@ using System.Text;
 namespace ManagedCodecs.Containers;
 
 /// <summary>
-/// Minimal AVI (RIFF) demuxer: finds the first video stream and yields its packets from the
-/// 'movi' list, including chunks grouped in 'rec ' lists.
+/// Minimal AVI (RIFF) demuxer: finds the first video stream and the first audio stream and yields their packets from the
+/// 'movi' list, including chunks grouped in 'rec ' lists, as FFmpeg's demuxer and parsers give them.
 /// </summary>
 /// <remarks>
-/// Not yet supported: OpenDML / AVI 2.0 files over 1 GB (RIFF 'AVIX' extensions), the idx1 or
-/// indx index (so <see cref="Packet.IsKeyframe"/> is always true, which is correct for MJPEG),
-/// and audio streams (<see cref="Audio"/> is always null).
+/// <para>
+/// Not yet supported: OpenDML / AVI 2.0 files over 1 GB (RIFF 'AVIX' extensions), and the idx1 or indx index (so a
+/// video packet's <see cref="Packet.IsKeyframe"/> is always true, which is correct for MJPEG).
+/// </para>
+/// <para>
+/// Audio comes in the stream header's ticks (dwScale / dwRate), its packets as FFmpeg's (docs/decisions/2026-11-08-avi-audio.md):
+/// with a dwSampleSize of 0 (MP3 and AAC as FFmpeg's muxer writes them) one packet a chunk, one tick each, an empty chunk
+/// none; otherwise (PCM, ADPCM, MP3 as VirtualDub writes it) the bytes count, dwSampleSize a tick: a chunk is cut into
+/// packets of 1024 blocks (one block from 32 bytes up, the whole chunk at 1 byte), each timed by the bytes before it.
+/// MP3 in that layout, whose chunks are cut anywhere in a frame, is cut again into whole frames as FFmpeg's parser
+/// cuts them: a frame that starts in a packet whose time no frame has taken yet takes it, moved on by the bytes before
+/// the frame at the frame's rate; the others follow the frame before.
+/// </para>
 /// </remarks>
 public sealed class AviDemuxer : IDemuxer
 {
@@ -20,9 +30,11 @@ public sealed class AviDemuxer : IDemuxer
     private readonly long _moviStart;
     private readonly long _moviEnd;
     private readonly int _videoStreamIndex;
+    private readonly AudioHeader? _audio;
 
-    // The first packet a read gives, 0 until a Seek moves it.
+    // The first packet of each stream a read gives, 0 until a Seek moves them.
     private long _startSequence;
+    private long _audioStartSequence;
 
     /// <summary>Reads the file's headers; packets are read from the stream later, by <see cref="ReadPackets"/>.</summary>
     /// <param name="stream">A seekable stream holding the file.</param>
@@ -105,6 +117,15 @@ public sealed class AviDemuxer : IDemuxer
                 SampleAspectRatio = header.AspectRatio,
                 Duration = header.Length,
             };
+
+            if (header.Audio is { } audio)
+            {
+                _audio = audio;
+                Audio = new AudioStreamInfo(audio.Codec, audio.SampleRate, audio.Channels, audio.SampleSize == 0 ? audio.Length : 0, audio.TimeBase, audio.Extra, audio.StreamIndex)
+                {
+                    Duration = audio.SampleSize == 0 ? audio.Length : 0,
+                };
+            }
         }
         catch (Exception e)
         {
@@ -120,8 +141,15 @@ public sealed class AviDemuxer : IDemuxer
     /// <summary>The first video stream (an AVI file without one is refused).</summary>
     public VideoStreamInfo Video { get; }
 
-    /// <summary>Always null: audio in AVI is not exposed.</summary>
-    public AudioStreamInfo? Audio => null;
+    /// <summary>
+    /// The first audio stream, or null without one. <see cref="AudioStreamInfo.Codec"/> is <see cref="CodecIds.Mp3"/>
+    /// (format tag 0x55) or <see cref="CodecIds.Aac"/> (0xFF), else the WAVEFORMATEX format tag in hex (<c>"0x0001"</c> for
+    /// PCM, <c>"0x0011"</c> for IMA ADPCM); the rate and channels are the WAVEFORMATEX's, <see cref="AudioStreamInfo.CodecPrivate"/>
+    /// its extra bytes (AAC's AudioSpecificConfig). With a dwSampleSize of 0, <see cref="AudioStreamInfo.FrameCount"/>
+    /// and <see cref="AudioStreamInfo.Duration"/> are the stream header's dwLength (which counts empty chunks too); else 0,
+    /// as FFmpeg gives no stream duration there.
+    /// </summary>
+    public AudioStreamInfo? Audio { get; }
 
     /// <summary>Opens the file at <paramref name="path"/>, which the demuxer disposes with itself.</summary>
     public static AviDemuxer Open(string path) => new(File.OpenRead(path));
@@ -142,22 +170,24 @@ public sealed class AviDemuxer : IDemuxer
 
     /// <summary>
     /// The packets <see cref="ReadPackets"/> gives, in its order and with its values, without their data: the walk
-    /// through the 'movi' list reads each chunk's 8-byte header and skips its data.
+    /// through the 'movi' list reads each chunk's 8-byte header and skips its data (but for MP3 audio whose chunks are cut
+    /// anywhere in a frame, which are read to find the frames).
     /// </summary>
     /// <exception cref="InvalidDataException">A chunk runs past the end of the file (after the packets before it).</exception>
     public IEnumerable<PacketInfo> ReadPacketInfo() => ReadSteps.RunInfo(_stream, Steps(withData: false), "AVI");
 
     /// <inheritdoc/>
     /// <remarks>
-    /// MJPEG only: every frame is a keyframe, so reading starts at the frame shown at <paramref name="pts"/> (or the one
-    /// before it, after a dropped frame). The walk to it reads the chunk headers before it, not their data. Other
-    /// codecs need the keyframes, which this demuxer does not read from the 'idx1' index yet, and throw.
+    /// MJPEG only: every frame is a keyframe (and every audio packet), so each stream's reading starts at its packet
+    /// shown at the time (or the one before it, after a dropped frame), the other stream's time rounded down into its
+    /// time base. The walk to it reads the chunk headers, not their data (but for MP3 audio cut anywhere in a frame).
+    /// Other codecs need the keyframes, which this demuxer does not read from the 'idx1' index yet, and throw.
     /// </remarks>
     public void Seek(long pts, int streamIndex)
     {
-        if (streamIndex != _videoStreamIndex)
+        if (streamIndex != _videoStreamIndex && (_audio is null || streamIndex != _audio.StreamIndex))
         {
-            throw new ArgumentOutOfRangeException(nameof(streamIndex), streamIndex, "The file's video stream has another index.");
+            throw new ArgumentOutOfRangeException(nameof(streamIndex), streamIndex, "The file has no video or audio stream of that index.");
         }
 
         if (Video.Codec != CodecIds.Mjpeg)
@@ -165,26 +195,36 @@ public sealed class AviDemuxer : IDemuxer
             throw new NotSupportedException($"Seeking in {Video.Codec} in AVI is not supported: only MJPEG, whose every frame is a keyframe.");
         }
 
-        long start = 0;
-        foreach (var info in ReadSteps.RunInfo(_stream, Steps(withData: false, from: 0), "AVI"))
+        var seekBase = streamIndex == _videoStreamIndex ? Video.TimeBase : _audio!.TimeBase;
+        long videoTime = streamIndex == _videoStreamIndex ? pts : RescaleDown(pts, seekBase, Video.TimeBase);
+        long audioTime = _audio is null || streamIndex == _audio.StreamIndex ? pts : RescaleDown(pts, seekBase, _audio.TimeBase);
+        long videoStart = 0;
+        long audioStart = 0;
+        foreach (var info in ReadSteps.RunInfo(_stream, Steps(withData: false, from: (0, 0)), "AVI"))
         {
-            if (info.Pts > pts)
+            if (info.StreamIndex == _videoStreamIndex && info.Pts <= videoTime)
             {
-                break;
+                videoStart = info.Sequence;
             }
-
-            start = info.Sequence;
+            else if (info.StreamIndex != _videoStreamIndex && info.Pts <= audioTime)
+            {
+                audioStart = info.Sequence;
+            }
         }
 
-        _startSequence = start;
+        _startSequence = videoStart;
+        _audioStartSequence = audioStart;
     }
 
-    // The walk through the movi list: each chunk header's read, and each video chunk's read and packet (or, without
-    // the data, its description), from packet number from on (the ones before it are walked over, their data unread).
-    private IEnumerable<ReadStep> Steps(bool withData = true, long? from = null)
+    // The walk through the movi list: each chunk header's read, and each packet's read and packet (or, without the
+    // data, its description), from each stream's packet number in from on (the ones before are walked over, their data
+    // unread but for MP3 audio cut anywhere in a frame, which the frames need).
+    private IEnumerable<ReadStep> Steps(bool withData = true, (long Video, long Audio)? from = null)
     {
-        long first = from ?? _startSequence;
+        var (first, audioFirst) = from ?? (_startSequence, _audioStartSequence);
         string prefix = _videoStreamIndex.ToString("00", CultureInfo.InvariantCulture);
+        string? audioId = _audio?.StreamIndex.ToString("00", CultureInfo.InvariantCulture) + "wb";
+        var audio = _audio is null ? null : new AviAudioWalk(_audio, audioFirst, withData);
         long sequence = 0;
         long frame = 0;
         var header = new byte[8];
@@ -208,6 +248,19 @@ public sealed class AviDemuxer : IDemuxer
                     ranges.Push((next, end));
                     ranges.Push((pos + 12, Math.Min(pos + 8 + size, end)));
                     break;
+                }
+
+                if (id == audioId && size > 0)
+                {
+                    if (pos + 8 + size > _stream.Length)
+                    {
+                        throw new InvalidDataException($"The chunk at offset {pos} runs past the end of the file.");
+                    }
+
+                    foreach (var step in audio!.Chunk(pos + 8, size))
+                    {
+                        yield return step;
+                    }
                 }
 
                 bool isVideoChunk = id.StartsWith(prefix, StringComparison.Ordinal)
@@ -281,7 +334,11 @@ public sealed class AviDemuxer : IDemuxer
             }
             else if (id == "LIST" && size >= 4 && ReadFourCC(_stream) == "strl")
             {
-                if (info.VideoStreamIndex < 0 && TryReadVideoStream(pos + 12, Math.Min(pos + 8 + size, end), out string codec, out uint scale, out uint rate, out uint length, out var aspectRatio))
+                if (info.Audio is null && TryReadAudioStream(pos + 12, Math.Min(pos + 8 + size, end), streamCount) is { } audio)
+                {
+                    info.Audio = audio;
+                }
+                else if (info.VideoStreamIndex < 0 && TryReadVideoStream(pos + 12, Math.Min(pos + 8 + size, end), out string codec, out uint scale, out uint rate, out uint length, out var aspectRatio))
                 {
                     info.VideoStreamIndex = streamCount;
                     info.Codec = codec;
@@ -358,6 +415,80 @@ public sealed class AviDemuxer : IDemuxer
         return isVideo;
     }
 
+    // An 'auds' stream list's strh and strf (WAVEFORMATEX: wFormatTag, nChannels, nSamplesPerSec, nAvgBytesPerSec,
+    // nBlockAlign, wBitsPerSample, cbSize and its extra bytes), or null for another kind of stream.
+    private AudioHeader? TryReadAudioStream(long start, long end, int streamIndex)
+    {
+        Span<byte> streamHeader = stackalloc byte[48];
+        Span<byte> format = stackalloc byte[18];
+        bool isAudio = false;
+        uint scale = 0;
+        uint rate = 0;
+        uint length = 0;
+        uint sampleSize = 0;
+        int formatTag = -1;
+        int channels = 0;
+        int sampleRate = 0;
+        byte[] extra = [];
+
+        long pos = start;
+        while (pos + 8 <= end)
+        {
+            _stream.Position = pos;
+            var (id, size) = ReadChunkHeader(_stream);
+
+            if (id == "strh" && size >= 48)
+            {
+                // AVISTREAMHEADER: fccType at 0, dwScale at 20, dwRate at 24, dwLength at 32, dwSampleSize at 44.
+                _stream.ReadExactly(streamHeader);
+                isAudio = streamHeader[..4].SequenceEqual("auds"u8);
+                scale = BinaryPrimitives.ReadUInt32LittleEndian(streamHeader[20..]);
+                rate = BinaryPrimitives.ReadUInt32LittleEndian(streamHeader[24..]);
+                length = BinaryPrimitives.ReadUInt32LittleEndian(streamHeader[32..]);
+                sampleSize = BinaryPrimitives.ReadUInt32LittleEndian(streamHeader[44..]);
+            }
+            else if (id == "strf" && isAudio && size >= 16)
+            {
+                _stream.ReadExactly(format[..(int)Math.Min(size, 18)]);
+                formatTag = BinaryPrimitives.ReadUInt16LittleEndian(format);
+                channels = BinaryPrimitives.ReadUInt16LittleEndian(format[2..]);
+                sampleRate = BinaryPrimitives.ReadInt32LittleEndian(format[4..]);
+                int extraSize = size >= 18 ? Math.Min(BinaryPrimitives.ReadUInt16LittleEndian(format[16..]), (int)size - 18) : 0;
+                extra = new byte[extraSize];
+                _stream.ReadExactly(extra);
+            }
+
+            pos = NextChunk(pos, size);
+        }
+
+        if (!isAudio || formatTag < 0)
+        {
+            return null;
+        }
+
+        // The stream header's ticks; without them (a broken header), one a sample.
+        var timeBase = scale > 0 && rate > 0 && scale <= int.MaxValue && rate <= int.MaxValue
+            ? Rational.Reduce(scale, rate)
+            : new Rational(1, Math.Max(sampleRate, 1));
+        string codec = formatTag switch
+        {
+            0x55 => CodecIds.Mp3,
+            0xFF => CodecIds.Aac,
+            _ => "0x" + formatTag.ToString("X4", CultureInfo.InvariantCulture),
+        };
+        return new AudioHeader(streamIndex, codec, sampleRate, channels, timeBase, length, sampleSize, extra);
+    }
+
+    // value in from's ticks in to's, rounded down.
+    private static long RescaleDown(long value, Rational from, Rational to)
+    {
+        var n = (System.Numerics.BigInteger)value * from.Numerator * to.Denominator;
+        var d = (System.Numerics.BigInteger)from.Denominator * to.Numerator;
+        var q = System.Numerics.BigInteger.DivRem(n, d, out var r);
+        var result = r.IsZero || (n.Sign < 0) == (d.Sign < 0) ? q : q - 1;
+        return result > long.MaxValue / 2 ? long.MaxValue / 2 : result < long.MinValue / 2 ? long.MinValue / 2 : (long)result;
+    }
+
     // The MJPEG FourCCs are those FFmpeg's AVI demuxer reads as MJPEG, ignoring case as it does (each checked with
     // `ffmpeg -c copy -tag:v X` and ffprobe): capture cards, editors and cameras write others than MJPG.
     private static string NormalizeCodec(string fourCC) => fourCC.ToUpperInvariant() switch
@@ -411,5 +542,8 @@ public sealed class AviDemuxer : IDemuxer
 
         /// <summary>The video stream's 'vprp' sample aspect ratio, 0:1 without one.</summary>
         public Rational AspectRatio { get; set; } = new(0, 1);
+
+        /// <summary>The first audio stream, null without one.</summary>
+        public AudioHeader? Audio { get; set; }
     }
 }

@@ -76,7 +76,7 @@ public static class VideoProbe
     /// latest stream end, a stream starting at its first packet shown (packets an edit only decodes left out; past the
     /// samples it skips, MP3's encoder delay inside its first packet) and
     /// lasting its container duration (<see cref="VideoStreamInfo.Duration"/>), or to the end of its last packet where
-    /// the container gives none. Matroska's: the Segment's Duration, or, in a file without one (a live recording, for
+    /// the container gives none (AVI: such a stream is left out, as FFmpeg leaves it). Matroska's: the Segment's Duration, or, in a file without one (a live recording, for
     /// which ffprobe gives none), from the first packet shown to the end of the last.
     /// </summary>
     /// <returns>The duration, and the earliest stream's start in seconds (ffprobe's <c>format=start_time</c>).</returns>
@@ -112,6 +112,19 @@ public static class VideoProbe
                     ? packet.SkipSamples * (long)s.TimeBase.Denominator / ((long)sampleRate * s.TimeBase.Numerator)
                     : 0;
                 streams[packet.StreamIndex] = s with { Start = Math.Min(s.Start, packet.Pts + skip), End = Math.Max(s.End, packet.Pts + packet.Duration) };
+            }
+        }
+
+        // AVI: a stream without a duration (audio with a dwSampleSize: PCM, VirtualDub's MP3) FFmpeg gives no start
+        // time either, and leaves out.
+        if (demuxer is AviDemuxer)
+        {
+            foreach (var (index, s) in streams.ToList())
+            {
+                if (s.Duration == 0)
+                {
+                    streams.Remove(index);
+                }
             }
         }
 
@@ -168,7 +181,7 @@ public static class VideoProbe
 /// <param name="FramesPerSecond">The container's frame rate.</param>
 /// <param name="Rotation">How far to turn frames counter-clockwise to show them: 0, 90, 180 or 270 degrees.</param>
 /// <param name="SampleAspectRatio">The pixels' aspect ratio, 1:1 where the container says nothing.</param>
-/// <param name="Audio">The first audio stream, or null without one (AVI's audio is not read).</param>
+/// <param name="Audio">The first audio stream, or null without one.</param>
 public sealed record VideoInfo(
     TimeSpan Duration,
     string Codec,

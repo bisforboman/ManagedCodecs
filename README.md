@@ -91,9 +91,11 @@ and code that reproduces FFmpeg's reading where it differs from the spec), and n
   writes), long, short and mixed blocks, the bit reservoir (a frame reaching back before a cut stream's start comes
   out silent, as FFmpeg's), CRCs checked; from MP4 and Matroska, within 2^-17 of FFmpeg's float output (measured:
   under 2e-6, LAME and shine streams). The MP4 edit list trims the priming (LAME's 1105 samples), Matroska's
-  DiscardPadding the end. `MediaPlayer` plays it (In-game video); raw `.mp3` files gapless by their LAME tag (`Mp3Demuxer`). Not yet:
-  free-format bitrates, Layers I and II, AVI audio (docs/decisions/2026-11-08-mp3-decoder.md).
-- **Containers**: AVI (video), MP4 (video and audio tracks, fragmented files too, edit lists of several edits),
+  DiscardPadding the end. `MediaPlayer` plays it (In-game video); raw `.mp3` files gapless by their LAME tag (`Mp3Demuxer`),
+  and from AVI, in chunks of a frame each or cut anywhere in a frame (VirtualDub's). Not yet: free-format bitrates,
+  Layers I and II (docs/decisions/2026-11-08-mp3-decoder.md).
+- **Containers**: AVI (video, and audio: MP3 and AAC decoded, PCM, ADPCM and others by their format tags; MP3 cut
+  anywhere in a frame cut into frames as FFmpeg's parser cuts it), MP4 (video and audio tracks, fragmented files too, edit lists of several edits),
   Matroska and WebM (video and audio tracks, every kind of lacing, BlockGroups, live files of unknown size, header
   stripping and zlib, the display rotation, DiscardPadding; VP9, AV1, Opus and other codecs this library doesn't decode
   by their Codec IDs; MP3 as `CodecIds.Mp3` in MP4 and Matroska), raw AAC (ADTS) and raw MP3 (gapless by the LAME
@@ -113,6 +115,7 @@ and code that reproduces FFmpeg's reading where it differs from the spec), and n
   API); without concealment, a
   lost reference fails pictures up to the next IDR picture, not an MMCO 5 one (by design: the MMCO 5 picture itself
   would have to be decoded from lists that can no longer be trusted, so its marking never applies).
+- AVI: H.264 is demuxed but not decoded (its packets are Annex B, without the avcC record `H264Decoder` starts from).
 - Matroska: encrypted, bzlib- and LZO-compressed tracks aren't read (no muxer at hand writes them), nor a projection
   other than a flat picture turned by a quarter turn.
 - H.264 speed: 1.4 to 3.0 times FFmpeg's time on one thread in the steady state, interlaced video included (Benchmarking); at 720p
@@ -368,8 +371,7 @@ checks the lists after each.
 wider above 1 and taller below, then turned by the rotation), codec, frame rate, rotation and the audio's codec, rate
 and channels. Each is checked against ffprobe on every sample (VideoProbeTests). The stream must be seekable (an MP4
 file's index can follow its data): buffer an upload first. A codec this library does not decode throws
-`NotSupportedException`, a file without video `InvalidDataException`; AVI's audio is not read, so an AVI lasts as long
-as its video. The duration comes from the streams' `Duration` (`VideoStreamInfo`, `AudioStreamInfo`), which the
+`NotSupportedException`, a file without video `InvalidDataException`. The duration comes from the streams' `Duration` (`VideoStreamInfo`, `AudioStreamInfo`), which the
 demuxers give as FFmpeg's stream duration: MP4's edits' length, capped at the samples they take, else the track's,
 AVI's stream header length; a Matroska file's is its Segment's Duration, from its earliest packet, as FFmpeg's (a live
 recording without one: its packets').

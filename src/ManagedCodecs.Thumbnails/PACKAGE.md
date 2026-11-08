@@ -34,7 +34,7 @@ thumbnail.SavePng(output); // or thumbnail.SaveJpeg(output, quality: 85), or thu
   one stretched by the pixels' aspect ratio (wider for a ratio above 1, taller below it), then turned by the rotation.
 - **What it refuses:** a codec the library does not decode (HEVC, VP9, AV1, MPEG-4 Part 2) throws
   `NotSupportedException`; a file without video, or one that isn't AVI or MP4 or is malformed, throws
-  `InvalidDataException`. AVI's audio is not read (`Audio` is null), so an AVI file lasts as long as its video.
+  `InvalidDataException`.
 
 The [README](https://github.com/bisforboman/ManagedCodecs#readme) has the rest, and
 [the decision record](https://github.com/bisforboman/ManagedCodecs/blob/main/docs/decisions/2026-10-31-thumbnails.md)

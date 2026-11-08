@@ -952,6 +952,17 @@ Tried and dropped (2026-11-06): 4:2:0 chroma without AC coefficients (most chrom
 against the scalar add passed and a broken kernel failed it. Callgrind counted 1.0% fewer instructions on
 `h264-bench-720p.mp4` and 0.3% on the CABAC stream, but under the JIT the chroma functions took only 0.3 and 0.1 points
 less of the frame (six alternating pairs each): not worth a kernel of its own.
+Tried and dropped (2026-11-08): dequantization fused into the 8-bit 4x4 transform and add (`DequantizeAdd`: the scaled
+coefficients kept in registers and handed to the 16-bit transform, one call and one pass over the block where
+`Dequantize` and `InverseTransformAdd` make two of each), at all four callers (inter luma, intra 4x4 and 16x16 AC,
+chroma AC). A test against the two scalar steps passed, and dropping its DC restore or its rounding failed it. The
+transform and add functions, the stage's real cost, were about 5.6% of `h264-bench-720p.mp4` on main (the stage
+script's 8.3% also counts `DecodeInterResidual`, mostly the residual reading inlined into it): `ReconstructChroma` 2.2,
+`InverseTransformAdd16` 1.0, `Dequantize` 0.7, `Transform4Lanes` 0.7, `InverseChromaDc` 0.4, `AddInterResidual` 0.35.
+Under the JIT (perf, six alternating pairs, normalized by residual reading, the edge filters and motion compensation)
+the changed functions took 0.8% less of the frame on that stream and 0.4% on the CABAC one: under the 1% bar
+(docs/decisions/2026-11-04-h264-motion-prediction-frames.md). With this and the chroma DC add above, the stage's
+remaining cost is spread over per-block calls with no larger piece left.
 Tried and dropped (2026-11-06): 8-bit intra prediction by rows (Intra_4x4 and Intra_8x8 Vertical, Horizontal and DC
 as one 4- or 8-byte store a row; 16x16 and chroma rows as vectors, Plane's sums four 32-bit lanes at a time; chroma DC
 a 4-byte store a row), against the by-the-definition code as a reference test on random planes. Callgrind counted 15%

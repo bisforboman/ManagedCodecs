@@ -976,6 +976,18 @@ the intra functions' samples over those of functions it leaves alone (`Cabac.Res
 the inverse transforms) fell from a median 0.233 to 0.212, every run of the branch below every run of the base, about
 a point of the frame; the whole decoder's over the same set by 0.3%, within the runs' spread. Left: the 8x8 edges'
 filter (`FilteredEdges8x8`, now the largest intra function by count), plane prediction and the diagonal modes.
+Tried and dropped (#393, 2026-11-08): the diagonal modes faster on top of that. First as the parallel branch
+`h264-intra-vectors` had them: every directional 4x4 and 8x8 sample is one of the edge's three-tap filters or two-tap
+averages, so those were computed once a block and a table per mode said which each sample takes. Then, for
+Diagonal_Down_Left, Diagonal_Down_Right and Vertical_Left only, whose rows are runs of those filters (row y from
+k = 10 + y, 8 - y, and 9 + y / 2 or 10 + y / 2), each run computed once into a row of samples and copied a row at a
+time, the 4x4 edge gathered in a helper of its own so that the commoner modes don't set up its stack space. Both
+matched the reference on `IntraPredictionTests`' random planes (a single wrong table entry failed 6 of its 11 tests).
+Callgrind (AOT, x86-64-v3, loops 4 minus 1) against main, the tables: +0.35% on `h264-high-intra`, +0.45% on
+`h264-main-intra`, +0.09% on `h264-high-intra-qp4` (noise, where other modes than vertical, horizontal and DC are most
+4x4 blocks) and +0.06% on `h264-bench-720p`; the rows: +0.07, +0.16, -0.25 and 0.00%. The sample-by-sample code
+compiles to little more than a filter a sample, which computing the filters once and copying them barely beats, and
+the extra dispatch costs the common modes about as much: under a quarter of a point on intra-only noise at best.
 The per-partition path (`PredictFromOne`, `PredictFromTwo`: one call to the kernels a component, without
 `PartitionPlace`, `Weighting` for default bi-prediction or `PredictComponent`) then took frame macroblocks of frames
 at any depth and in 4:2:2 too, not only 8-bit 4:2:0; MBAFF frames and field pictures keep `PredictPartitionGeneral`.

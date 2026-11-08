@@ -906,7 +906,7 @@ internal sealed partial class PictureDecoder<TPixel>
 
             if (_mbHeightC == 16)
             {
-                DeblockMbaffChroma422(slice, mbAddr, left, leftLines, vertical, horizontal, topEdges);
+                DeblockMbaffChroma422(slice, mbAddr, left ? leftTop : -1, leftLines, leftSegments, vertical, horizontal, topEdges);
                 continue;
             }
 
@@ -921,6 +921,8 @@ internal sealed partial class PictureDecoder<TPixel>
             else if (left)
             {
                 bool leftField = _fieldMb[leftTop];
+                var topPlace = ChromaPlace(leftTop);
+                var bottomPlace = ChromaPlace(leftTop + 1);
                 for (int y = 0; y < 8; y++)
                 {
                     var (p, yP) = AffLeft(leftTop, leftField, !field, isTop, y, 8);
@@ -928,7 +930,7 @@ internal sealed partial class PictureDecoder<TPixel>
                     int bS = leftLines[field && !_fieldMb[p] ? y << 1 : ((y >> 1) << 2) + (y & 1)];
                     if (bS != 0)
                     {
-                        var (pOrigin, pStride) = ChromaPlace(p);
+                        var (pOrigin, pStride) = p == leftTop ? topPlace : bottomPlace;
                         FilterMbaffChromaLine(pOrigin + (yP * pStride) + xP, 1, chroma + (y * chromaStride), 1, bS, _qp[p], qp, slice);
                     }
                 }
@@ -969,26 +971,43 @@ internal sealed partial class PictureDecoder<TPixel>
     /// <summary>
     /// The chroma edges of a 4:2:2 macroblock of an MBAFF frame or a field picture. Its chroma
     /// rows are the luma's (16 a macroblock), so every chroma line meets the macroblock its luma
-    /// line meets and takes that line's bS: <paramref name="leftLines"/> across the left edge,
-    /// the luma pass's <paramref name="topEdges"/> (two of them under a field pair) across the
+    /// line meets and takes that line's bS: across the left edge (the pair at <paramref name="leftTop"/>, -1 for
+    /// none) <paramref name="leftSegments"/> as a plain edge when both pairs are of one kind, as luma's, else
+    /// <paramref name="leftLines"/> line by line,
+    /// the luma pass's <paramref name="topEdges"/> (two of them under a field pair; a plain edge where p0 is the line above q0) across the
     /// top one, chroma column x the luma segment x / 2. Inside, as in frames: vertical edge 4
     /// along 16 rows, horizontal edges 4, 8 and 12 with the bS of luma edges 1 to 3.
     /// </summary>
-    private void DeblockMbaffChroma422(SliceInfo slice, int mbAddr, bool left, ReadOnlySpan<byte> leftLines, ReadOnlySpan<byte> vertical, ReadOnlySpan<byte> horizontal, (int P, int PRow, int PStep, int QOffset, int QStep)[] topEdges)
+    private void DeblockMbaffChroma422(SliceInfo slice, int mbAddr, int leftTop, ReadOnlySpan<byte> leftLines, ReadOnlySpan<byte> leftSegments, ReadOnlySpan<byte> vertical, ReadOnlySpan<byte> horizontal, (int P, int PRow, int PStep, int QOffset, int QStep)[] topEdges)
     {
         int qp = _qp[mbAddr];
         int qpCb = ChromaQp(qp, slice.CbQpOffset, _qpBdOffset);
         int qpCr = ChromaQp(qp, slice.CrQpOffset, _qpBdOffset);
         var (chroma, chromaStride) = ChromaPlace(mbAddr);
         int chromaRow = Picture.ChromaStride;
-        if (left)
+        bool field = _fieldMb[mbAddr];
+        if (leftTop >= 0 && _fieldMb[leftTop] == field)
         {
+            // Both pairs of one kind: chroma line y meets line y of the left pair's macroblock of the same position,
+            // a plain vertical edge of four segments of four lines (as in frames, DeblockChroma422).
+            int qpP = _qp[leftTop + (mbAddr & 1)];
+            FilterEdge(PlaneCb, chroma, 1, chromaStride, 16, leftSegments, ChromaQp(qpP, slice.CbQpOffset, _qpBdOffset), qpCb, slice.AlphaOffset, slice.BetaOffset, chroma: true, segmentShift: 2, bitDepth: _bitDepth);
+            FilterEdge(PlaneCr, chroma, 1, chromaStride, 16, leftSegments, ChromaQp(qpP, slice.CrQpOffset, _qpBdOffset), qpCr, slice.AlphaOffset, slice.BetaOffset, chroma: true, segmentShift: 2, bitDepth: _bitDepth);
+        }
+        else if (leftTop >= 0)
+        {
+            // Table 6-4's left rows (as luma's: 16 of them), the pair's two macroblocks' places found once.
+            bool leftField = _fieldMb[leftTop];
+            bool isTop = (mbAddr & 1) == 0;
+            var topPlace = ChromaPlace(leftTop);
+            var bottomPlace = ChromaPlace(leftTop + 1);
             for (int y = 0; y < 16; y++)
             {
                 if (leftLines[y] != 0)
                 {
-                    var (p, xP, yP) = AffNeighbor(mbAddr, -1, y, 8, 16, anySlice: true);
-                    var (pOrigin, pStride) = ChromaPlace(p);
+                    var (p, yP) = AffLeft(leftTop, leftField, !field, isTop, y, 16);
+                    const int xP = 7;
+                    var (pOrigin, pStride) = p == leftTop ? topPlace : bottomPlace;
                     FilterMbaffChromaLine(pOrigin + (yP * pStride) + xP, 1, chroma + (y * chromaStride), 1, leftLines[y], _qp[p], qp, slice);
                 }
             }
@@ -1007,11 +1026,19 @@ internal sealed partial class PictureDecoder<TPixel>
             }
 
             var (pOrigin, pStride) = ChromaPlace(p);
+            int q0 = chroma + (qOffset * chromaRow);
+            if (pStep == qStep && pOrigin + (pRow * pStride) == q0 - (qStep * chromaRow))
+            {
+                // p0 is the line above q0 at q's step: a plain horizontal edge, as in 4:2:0.
+                FilterChromaEdge(PlaneCb, PlaneCr, q0, qStep * chromaRow, 1, topSegments, ChromaQp(_qp[p], slice.CbQpOffset, _qpBdOffset), qpCb, ChromaQp(_qp[p], slice.CrQpOffset, _qpBdOffset), qpCr, slice.AlphaOffset, slice.BetaOffset, bitDepth: _bitDepth);
+                continue;
+            }
+
             for (int x = 0; x < 8; x++)
             {
                 if (topSegments[x >> 1] != 0)
                 {
-                    FilterMbaffChromaLine(pOrigin + (pRow * pStride) + x, pStep * chromaRow, chroma + (qOffset * chromaRow) + x, qStep * chromaRow, topSegments[x >> 1], _qp[p], qp, slice);
+                    FilterMbaffChromaLine(pOrigin + (pRow * pStride) + x, pStep * chromaRow, q0 + x, qStep * chromaRow, topSegments[x >> 1], _qp[p], qp, slice);
                 }
             }
         }

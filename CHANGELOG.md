@@ -18,6 +18,9 @@ run time.
 - H.264: intra prediction's vertical, horizontal and DC modes (4x4, 8x8, chroma DC) write a row at a time: 10% fewer
   instructions in an 8-bit intra-only stream under Native AOT, about 1% of its time under the JIT. The output is
   unchanged.
+- H.264: in 4:2:2 MBAFF frames and field pictures, the deblocking filter takes chroma's left edge between pairs of one
+  kind, and the top edge where its rows meet, as plain edges instead of line by line: 17 to 18% fewer instructions
+  in 4:2:2 MBAFF streams, about 11% of their time under the JIT.
 
 ### Fixed
 

@@ -1506,6 +1506,11 @@ public sealed class Mp4Demuxer : IDemuxer
             };
 
             var children = entry.Length > childrenStart ? entry[childrenStart..] : default;
+            if (format is Box.DotMp3 or Box.MsU)
+            {
+                Codec = CodecIds.Mp3; // QuickTime's MP3 entries: '.mp3', and 'ms\0U' (WAVE format 0x55)
+            }
+
             if (format == Box.Mp4a && (FindChild(children, Box.Esds, out var esds)
                 || (FindChild(children, Box.Wave, out var wave) && FindChild(wave, Box.Esds, out esds))))
             {
@@ -1567,6 +1572,7 @@ public sealed class Mp4Demuxer : IDemuxer
                     0x21 => CodecIds.H264,
                     0x40 => CodecIds.Aac,             // ISO/IEC 14496-3 (MPEG-4 audio)
                     0x66 or 0x67 or 0x68 => CodecIds.Aac, // ISO/IEC 13818-7 (MPEG-2 AAC) Main, LC, SSR
+                    0x69 or 0x6B => CodecIds.Mp3,         // ISO/IEC 13818-3 and 11172-3 (MPEG-2 and MPEG-1 audio)
                     _ => Codec,
                 };
 
@@ -1683,6 +1689,8 @@ public sealed class Mp4Demuxer : IDemuxer
         public const uint Vide = 0x76696465;
         public const uint Soun = 0x736F756E;
         public const uint Mp4a = 0x6D703461;
+        public const uint DotMp3 = 0x2E6D7033;
+        public const uint MsU = 0x6D730055;
         public const uint Avc1 = 0x61766331;
         public const uint Avc3 = 0x61766333;
         public const uint AvcC = 0x61766343;

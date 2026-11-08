@@ -42,6 +42,11 @@ public sealed class ManagedCodecsVideo : MonoBehaviour
             return;
         }
 
+        if (_player.SkippedAudioCodec is { } codec)
+        {
+            Debug.LogWarning($"ManagedCodecsVideo: {fileName}'s audio is {codec}, which isn't decoded (only AAC is); playing without sound.");
+        }
+
         _renderer = GetComponent<Renderer>();
         _player.Start();
     }

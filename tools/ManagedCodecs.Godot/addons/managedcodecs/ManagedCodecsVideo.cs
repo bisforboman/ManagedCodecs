@@ -66,6 +66,11 @@ public partial class ManagedCodecsVideo : TextureRect
         }
 
         WarnIfUnoptimized();
+        if (_player.SkippedAudioCodec is { } codec)
+        {
+            GD.PushWarning($"ManagedCodecsVideo: {FilePath}'s audio is {codec}, which isn't decoded (only AAC is); playing without sound.");
+        }
+
         StretchMode = StretchModeEnum.KeepAspectCentered;
         ExpandMode = ExpandModeEnum.IgnoreSize;
         _player.Start();

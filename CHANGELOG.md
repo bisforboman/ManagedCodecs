@@ -11,6 +11,26 @@ share internals, so each depends on the others at exactly its own version (`[X]`
 then reports a mix of versions (NU1107, or NU1608 for a newer one referenced directly) rather than letting it fail at
 run time.
 
+## Unreleased
+
+### Added
+
+- Playback: `MediaPlayer.SkippedAudioCodec` names a file's audio when it isn't played (only AAC is decoded), such as
+  MP3, so a video playing silent can say why. The Godot node, the Unity sample and mcplay print a warning with it
+  (#415).
+- `CodecIds.Mp3`: MP3 (MPEG-1 and MPEG-2 audio) in MP4 (object types 0x6B and 0x69, QuickTime's `.mp3` and `ms\0U`
+  entries) and Matroska (`A_MPEG/L3`). Demuxed, not decoded.
+
+### Changed
+
+- Containers: an MP3 track's `Codec` is now `CodecIds.Mp3` (`"MP3"`), where it was the sample entry's name in MP4
+  (`mp4a`, `.mp3`) and `A_MPEG/L3` in Matroska.
+
+### Fixed
+
+- Thumbnails: `VideoProbe`'s duration counted an MP4 audio track from its first packet's start when the edit list
+  starts inside it (MP3's encoder delay, 1105 samples), 25 ms too long; it now starts where the edit does, as ffprobe's.
+
 ## 0.9.1 – 2026-11-08
 
 Fixes to the new playback packages: `MediaPlayer` no longer drops frames when a game ticks at the video's own rate,

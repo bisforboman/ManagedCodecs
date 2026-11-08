@@ -129,6 +129,12 @@ stream's start plus it; without one (mkv-h264-live) ffprobe gives no duration, a
 to the end of the last, is checked against ffprobe's packets. H.264's size is the decoder's frame size
 from the SPS, which can crop the container's.
 
+MP3, demuxed and not decoded, is `CodecIds.Mp3`: h264-mp3 (FFmpeg's MP4 muxer: `mp4a`, object type 0x6B) and
+h264-mp3-mov (its MOV muxer: a `.mp3` sample entry, as in Tears of Steel) are compared packet by packet like the other
+MP4 samples, and Mp4DemuxerTests builds object type 0x69 (MPEG-2 audio) and QuickTime's `ms\0U` entry, which FFmpeg's
+muxers don't write. In Matroska, mkv-h264-mp3 (`A_MPEG/L3`). `MediaPlayer.SkippedAudioCodec` names it on all three
+(MediaPlayerTests).
+
 The thumbnails' pixels (`RgbaImage`, ManagedCodecs.Thumbnails) are each frame converted to RGBA at its own size (the
 matrix and range the frame says; none said, BT.601 and limited range, as FFmpeg's scaler takes them, but full range for
 MJPEG, as FFmpeg converts its grey frames; the identity matrix as G, B and R planes, FFmpeg's `gbrp`, h264-444-gbr from

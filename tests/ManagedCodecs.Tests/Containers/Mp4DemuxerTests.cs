@@ -90,6 +90,23 @@ public class Mp4DemuxerTests
         Assert.Equal(0, packets[^1].StreamIndex);
     }
 
+    /// <summary>
+    /// MP3 as FFmpeg's MP4 muxer writes it (mp4a, object type 0x6B; 0x69 for MPEG-2's sample rates) and as QuickTime does
+    /// ('.mp3', and 'ms\0U', WAVE format 0x55, which FFmpeg's muxers never write); the entry's own rate and channels.
+    /// </summary>
+    [Theory]
+    [InlineData("mp4a", 0x6B)]
+    [InlineData("mp4a", 0x69)]
+    [InlineData(".mp3", 0)]
+    [InlineData("ms\0U", 0)]
+    public void NamesMp3(string format, byte objectType)
+    {
+        using var demuxer = new Mp4Demuxer(new MemoryStream(TinyMp4(audioDescription: AudioSampleDescription(format, objectType))));
+
+        var audio = demuxer.Audio!;
+        Assert.Equal((CodecIds.Mp3, 44_100, 1), (audio.Codec, audio.SampleRate, audio.Channels));
+    }
+
     [Fact]
     public void DemuxerOpen_RecognizesMp4()
     {
@@ -302,7 +319,7 @@ public class Mp4DemuxerTests
         Assert.Throws<InvalidDataException>(() => new Mp4Demuxer(new MemoryStream(Box("ftyp", Ascii("isom"), U32(0)))));
     }
 
-    private static byte[] TinyMp4(byte[]? ctts = null, bool editList = true, byte[][]? videoEntryBoxes = null, int[]? trackMatrix = null, int[]? movieMatrix = null)
+    private static byte[] TinyMp4(byte[]? ctts = null, bool editList = true, byte[][]? videoEntryBoxes = null, int[]? trackMatrix = null, int[]? movieMatrix = null, byte[]? audioDescription = null)
     {
         var ftyp = Box("ftyp", Ascii("isom"), U32(512), Ascii("isom"));
 
@@ -331,7 +348,7 @@ public class Mp4DemuxerTests
                 Box("minf", stbl)));
 
         var audio = Box("trak", Box("mdia", MediaHeader(timescale: 48_000), Handler("soun"), Box("minf", Box("stbl",
-            AudioSampleDescription(),
+            audioDescription ?? AudioSampleDescription(),
             FullBox("stts", 0, U32(1), U32(1), U32(1024)),
             FullBox("stsc", 0, U32(1), U32(1), U32(1), U32(1)),
             FullBox("stsz", 0, U32(0), U32(1), U32((uint)AudioData.Length)),
@@ -348,7 +365,7 @@ public class Mp4DemuxerTests
         ? FullBox("mdhd", 1, new byte[16], U32(timescale), U64(9000), new byte[4])
         : FullBox("mdhd", 0, new byte[8], U32(timescale), U32(9000), new byte[4]);
 
-    private static byte[] AudioSampleDescription()
+    private static byte[] AudioSampleDescription(string format = "mp4a", byte objectType = 0x40)
     {
         // AudioSampleEntry: channelcount at 16, samplesize at 18, 16.16 samplerate at 24.
         var entry = new byte[28];
@@ -358,9 +375,9 @@ public class Mp4DemuxerTests
         BinaryPrimitives.WriteUInt32BigEndian(entry.AsSpan(24), 44_100u << 16);
 
         // AudioSpecificConfig: AAC LC (2), 48 kHz (index 3), 2 channels.
-        byte[] decoderConfig = [0x04, 17, 0x40, 0x15, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x05, 2, 0x11, 0x90];
+        byte[] decoderConfig = [0x04, 17, objectType, 0x15, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x05, 2, 0x11, 0x90];
         byte[] esDescriptor = [0x03, (byte)(3 + decoderConfig.Length), 0, 2, 0, .. decoderConfig];
-        return FullBox("stsd", 0, U32(1), Box("mp4a", entry, FullBox("esds", 0, esDescriptor)));
+        return FullBox("stsd", 0, U32(1), Box(format, entry, format == "mp4a" ? FullBox("esds", 0, esDescriptor) : []));
     }
 
     private static byte[] Handler(string type) => FullBox("hdlr", 0, U32(0), Ascii(type), new byte[12], [0]);

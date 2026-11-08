@@ -600,6 +600,12 @@ ff -f lavfi -i "aevalsrc=0.2*sin(2*PI*147*t)|0.2*sin(2*PI*257*t)|0.2*sin(2*PI*36
 ff -f lavfi -i "anoisesrc=color=pink:amplitude=0.3:sample_rate=44100:duration=2:seed=1,highpass=f=4000" -c:a aac -b:a 48k samples/aac-pns.mp4
 ff -f lavfi -i "anoisesrc=color=pink:amplitude=0.3:sample_rate=44100:duration=2:seed=1,highpass=f=4000[a];anoisesrc=color=pink:amplitude=0.3:sample_rate=44100:duration=2:seed=2,highpass=f=4000[b];[a][b]amerge=inputs=2" -c:a aac -b:a 64k samples/aac-pns-stereo.mp4
 ff -f lavfi -i "testsrc2=size=320x240:rate=25,scroll=h=0.01" -f lavfi -i "sine=frequency=330:sample_rate=48000:duration=1" -t 1 -c:v libx264 -profile:v baseline -pix_fmt yuv420p -refs 2 -c:a aac -ac 2 -aac_pns 0 samples/h264-with-audio.mp4
+# MP3 audio, demuxed and not decoded (CodecIds.Mp3, MediaPlayer.SkippedAudioCodec): MP4's mp4a with object type 0x6B,
+# and QuickTime's '.mp3' sample entry (FFmpeg's MOV muxer, as in Tears of Steel), named .mp4 for the packet references.
+for f in mp4:h264-mp3.mp4 mov:h264-mp3-mov.mp4; do
+  ff -f lavfi -i testsrc2=size=160x120:rate=25 -f lavfi -i sine=frequency=440:sample_rate=44100 -t 1 -c:v libx264 \
+    -c:a libmp3lame -b:a 64k -f "${f%%:*}" "samples/${f##*:}"
+done
 # Raw AAC in ADTS frames (the ADTS demuxer): stereo at 44.1 kHz, and 5.1 behind an ID3v2 tag (which the demuxer skips).
 ff -f lavfi -i "aevalsrc=0.4*sin(2*PI*440*t)|0.3*sin(2*PI*660*t):s=44100:d=1" -c:a aac -b:a 96k -aac_pns 0 -f adts samples/aac-adts.aac
 # Pulse data, which no encoder at hand writes (FFmpeg's never does): a stream written by its syntax, every frame one
@@ -701,6 +707,9 @@ ff -f lavfi -i testsrc2=size=160x120:rate=25 -f lavfi -i sine=frequency=440:samp
 # WebM: VP9 and Opus, codecs kept by their Codec IDs (V_VP9, A_OPUS); Opus's CodecDelay is 6.5 ms.
 ff -f lavfi -i testsrc2=size=160x120:rate=25 -f lavfi -i sine=frequency=440:sample_rate=48000 -t 1 -c:v libvpx-vp9 -g 10 \
   -deadline realtime -c:a libopus samples/webm-vp9-opus.webm
+# MP3 (A_MPEG/L3, CodecIds.Mp3), demuxed and not decoded.
+ff -f lavfi -i testsrc2=size=160x120:rate=25 -f lavfi -i sine=frequency=440:sample_rate=44100 -t 1 -c:v libx264 \
+  -c:a libmp3lame -b:a 64k samples/mkv-h264-mp3.mkv
 # MJPEG (V_MJPEG) with a sample aspect ratio of 4:3, written as DisplayWidth and DisplayHeight, and the BT.709 colour
 # description in a Colour element.
 ff -f lavfi -i testsrc2=size=160x120:rate=25,setsar=4/3 -t 0.4 -c:v mjpeg -pix_fmt yuvj420p -q:v 5 -color_primaries bt709 \
@@ -861,10 +870,11 @@ for f in samples/heaac-*.mp4 samples/heaacv2-*.mp4 samples/heaac-*.aac; do ff -i
 for f in samples/*faac*.aac; do ff -i "$f" -f f32le "${f%.*}.delay.f32"; done
 
 # name.audioframes.csv: the decoded audio frames as ffprobe lists them, by default (the edit list applied): FFmpeg's
-# time base for the stream on the first line, then each frame's pts in it and its sample count; for AudioFrame.Pts.
+# time base for the stream on the first line, then each frame's pts in it and its sample count; for AudioFrame.Pts. AAC
+# only (not h264-mp3*).
 for f in samples/*.mp4 samples/*.aac; do
-  tb=$(ffprobe -v error -select_streams a:0 -show_entries stream=time_base -of csv=p=0 "$f")
-  if [ -n "$tb" ]; then
+  IFS=, read -r codec tb <<< "$(ffprobe -v error -select_streams a:0 -show_entries stream=codec_name,time_base -of csv=p=0 "$f")"
+  if [ "$codec" = aac ]; then
     { echo "$tb"; ffprobe -v error -select_streams a:0 -show_entries frame=pts,nb_samples -of csv=p=0 "$f"; } > "${f%.*}.audioframes.csv"
   fi
 done

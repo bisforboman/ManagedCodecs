@@ -636,6 +636,13 @@ ff -f lavfi -i "$mp3tones:s=44100" -c:a libshine -b:a 128k samples/mp3-shine.mp4
 # A stream cut out of a longer one (from 0.5 s, packets copied): its first frames' main data starts before the file
 # does, and their granules come out silent, as FFmpeg's.
 ff -ss 0.5 -i samples/mp3-joint.mp4 -c copy samples/mp3-cut.mp4
+# Raw MP3 files (Mp3Demuxer), gapless by their LAME tag as FFmpeg plays them: LAME's Info tag (CBR); a Xing tag (VBR)
+# behind an ID3v2 title and before an ID3v1 tag; no tag (-write_xing 0: nothing trimmed); 22.05 kHz, whose 576-sample
+# frames the 1105 samples to skip run across.
+ff -f lavfi -i "$mp3tones:s=44100" -c:a libmp3lame -b:a 128k samples/mp3-raw-cbr.mp3
+ff -f lavfi -i "$mp3noise:sample_rate=44100" -ac 2 -c:a libmp3lame -q:a 2 -metadata title=ManagedCodecs -write_id3v1 1 samples/mp3-raw-vbr.mp3
+ff -f lavfi -i "$mp3tones:s=44100" -c:a libmp3lame -b:a 128k -write_xing 0 samples/mp3-raw-noxing.mp3
+ff -f lavfi -i "$mp3tones:s=22050" -c:a libmp3lame -b:a 64k samples/mp3-raw-22k.mp3
 # Intensity stereo and mixed blocks, which neither encoder writes: LAME's MPEG-1 joint stereo (gated tones and clicks,
 # for short blocks), as raw frames without a tag, rewritten by tools/mp3-rewrite.py, in Matroska. Intensity stereo in
 # every frame (the bands above the right channel's last value, long and short blocks), with noise in the left channel
@@ -917,13 +924,15 @@ for f in samples/heaac-*.mp4 samples/heaacv2-*.mp4 samples/heaac-*.aac; do ff -i
 # A stream naming FAAC: name.delay.f32, decoded audio as FFmpeg gives it, without FAAC's encoder delay.
 for f in samples/*faac*.aac; do ff -i "$f" -f f32le "${f%.*}.delay.f32"; done
 # MP3: name.mp3.f32, every packet decoded whole (MP4: the edit list ignored), and name.mp3.trim.f32, as FFmpeg gives it
-# by default (MP4: the edit list's priming skipped; Matroska: the end's DiscardPadding dropped). Suffixes of their own,
+# by default (MP4: the edit list's priming skipped; Matroska: the end's DiscardPadding dropped; a raw .mp3: its LAME
+# tag's delay and padding). Raw .mp3 files' packets too, as FFmpeg's demuxer gives them (name.packets.framemd5). Suffixes of their own,
 # since AacConformanceTests decodes every name.f32.
-for f in samples/*.mp4 samples/*.mkv; do
+for f in samples/*.mp4 samples/*.mkv samples/*.mp3; do
   [ "$(ffprobe -v error -select_streams a:0 -show_entries stream=codec_name -of csv=p=0 "$f")" = mp3 ] || continue
   [[ $f == *.mp4 ]] && ff -ignore_editlist 1 -i "$f" -map 0:a:0 -f f32le "${f%.*}.mp3.f32"
   ff -i "$f" -map 0:a:0 -f f32le "${f%.*}.mp3.trim.f32"
 done
+for f in samples/*.mp3; do ff -copyts -i "$f" -c copy -f framemd5 "${f%.mp3}.packets.framemd5"; done
 
 # name.audioframes.csv: the decoded audio frames as ffprobe lists them, by default (the edit list applied): FFmpeg's
 # time base for the stream on the first line, then each frame's pts in it and its sample count; for AudioFrame.Pts. AAC

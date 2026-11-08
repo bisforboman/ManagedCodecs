@@ -557,6 +557,17 @@ MUTATIONS = [
          find="Region1Start = BlockType == 2 ? 3 * Mp3Tables.ShortBands[rateIndex][3] : longBands[8];",
          replace="Region1Start = BlockType == 2 ? 36 : longBands[8];",
          tests="DisplayName~mkv-mp3-8k-transient"),
+    # A raw MP3 file's info frame (Xing, Info, VBRI) is no packet, as in FFmpeg's demuxer.
+    dict(file="src/ManagedCodecs.Containers/Mp3/Mp3Demuxer.cs",
+         find="                pos += first.FrameLength;\n", replace="",
+         tests="FullyQualifiedName~Mp3DemuxerTests"),
+    # Gapless as FFmpeg: the LAME tag's delay and padding each count the decoder's 529 samples too.
+    dict(file="src/ManagedCodecs.Containers/Mp3/Mp3Demuxer.cs",
+         find="_startSkip = delay + DecoderDelay;", replace="_startSkip = delay;",
+         tests="DisplayName~mp3-raw-cbr"),
+    dict(file="src/ManagedCodecs.Containers/Mp3/Mp3Demuxer.cs",
+         find="- tag.Padding + DecoderDelay;", replace="- tag.Padding;",
+         tests="DisplayName~mp3-raw-cbr"),
     # mixed_block_flag gives a start or stop block's lowest subbands the normal window (l3-si_block; mkv-mp3-mixed).
     dict(file="src/ManagedCodecs.Mp3/Hybrid.cs",
          find="LongWindows[g.ShortBlocks || sb < mixedSubbands ? 0 : g.BlockType]", replace="LongWindows[g.ShortBlocks ? 0 : g.BlockType]",

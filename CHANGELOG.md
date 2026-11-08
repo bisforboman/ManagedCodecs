@@ -20,6 +20,9 @@ run time.
   unchanged.
 - H.264: 16x16 and chroma intra prediction (vertical, horizontal, DC, plane) also write a row at a time: 1 to 5% fewer
   instructions in intra-only streams under Native AOT, within noise under the JIT. The output is unchanged.
+- H.264: Intra_8x8 vertical, horizontal and DC filter only the edge they predict from, straight from the picture: about
+  2% faster under the JIT on High profile streams, intra-only or not (2.5 to 3.4% fewer instructions under Native
+  AOT). The output is unchanged.
 
 ### Fixed
 

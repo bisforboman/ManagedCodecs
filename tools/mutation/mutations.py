@@ -557,4 +557,15 @@ MUTATIONS = [
          find="Region1Start = BlockType == 2 ? 3 * Mp3Tables.ShortBands[rateIndex][3] : longBands[8];",
          replace="Region1Start = BlockType == 2 ? 36 : longBands[8];",
          tests="DisplayName~mkv-mp3-8k-transient"),
+    # A raw MP3 file's info frame (Xing, Info, VBRI) is no packet, as in FFmpeg's demuxer.
+    dict(file="src/ManagedCodecs.Containers/Mp3/Mp3Demuxer.cs",
+         find="                pos += first.FrameLength;\n", replace="",
+         tests="FullyQualifiedName~Mp3DemuxerTests"),
+    # Gapless as FFmpeg: the LAME tag's delay and padding each count the decoder's 529 samples too.
+    dict(file="src/ManagedCodecs.Containers/Mp3/Mp3Demuxer.cs",
+         find="_startSkip = delay + DecoderDelay;", replace="_startSkip = delay;",
+         tests="DisplayName~mp3-raw-cbr"),
+    dict(file="src/ManagedCodecs.Containers/Mp3/Mp3Demuxer.cs",
+         find="- tag.Padding + DecoderDelay;", replace="- tag.Padding;",
+         tests="DisplayName~mp3-raw-cbr"),
 ]

@@ -1,4 +1,4 @@
-# Containers: notes for working on the AVI, MP4, Matroska and ADTS demuxers
+# Containers: notes for working on the AVI, MP4, Matroska, ADTS and MP3 demuxers
 
 The repository's CLAUDE.md (process, core idea, cross-cutting gotchas) applies too.
 
@@ -27,3 +27,6 @@ The repository's CLAUDE.md (process, core idea, cross-cutting gotchas) applies t
   demuxer doesn't parse the SPS and takes the fewest frames that work, so its dts can be later than FFmpeg's.
 - .NET's DeflateStream returns what it inflated from a zlib frame cut short, without an error: the Adler-32 after the
   data is what catches it (as zlib's own inflate does).
+- Raw MP3: FFmpeg's encoder writes its LAME tag with "Lavc" (not "LAME") as the encoder, and FFmpeg's demuxer takes it as
+  LAME's; its info frame counts the frames after it, not itself. `ffprobe -show_packets` shows the gapless trim as
+  "Skip Samples" side data (1105 on the first packet, the padding less 529 on the last).

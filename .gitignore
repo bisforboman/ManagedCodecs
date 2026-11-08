@@ -14,6 +14,7 @@ samples/*.mkv
 samples/*.webm
 samples/*.streams
 samples/*.aac
+samples/*.mp3
 samples/*.mjpeg
 samples/*.framemd5
 samples/*.picttypes

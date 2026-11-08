@@ -24,6 +24,8 @@ run time.
   sample rate; mono, stereo, dual channel and joint stereo; the bit reservoir), from MP4 and Matroska, within 2^-17 of
   FFmpeg's float output (measured: under 2e-6). Also in `ManagedCodecs.Unity` and the meta-package; `mcdec` decodes
   it (#415).
+- Containers: `Mp3Demuxer` reads raw `.mp3` files (Layer III frames, ID3 tags skipped), and `Demuxer.Open` detects
+  them; gapless as FFmpeg plays them, its LAME tag's encoder delay and padding trimmed (#415).
 - Playback: `MediaPlayer` plays MP3 audio as it plays AAC, and with it `VideoTexture`, the Godot node and the Unity
   sample: Tears of Steel, one of their test clips, now has sound (#415).
 

@@ -1426,3 +1426,17 @@ of 1024 samples a block, decoded block after block into one frame; with CRCs, th
 the blocks but the first, and each block has its own. No encoder at hand writes them, so the tests join a sample's
 frames, 1 to 4 under one header, with and without CRCs, AAC LC and HE-AAC (the SBR state runs on across blocks), and
 require the same samples as the frames one by one.
+
+## Raw MP3
+
+Raw MP3 files (`Mp3Demuxer`) demux packet by packet as FFmpeg's demuxer does (`Mp3DemuxerTests` against
+name.packets.framemd5: whole frames, header included; ID3v2 tags skipped, an ID3v1 tag after the frames no packet;
+junk between frames and a truncated end built from the samples). A first frame holding a Xing, Info or VBRI tag is no
+packet, and with a LAME tag (LAME's, or FFmpeg's encoder's "Lavc"/"Lavf") the stream plays gapless as in FFmpeg: the
+tag's delay plus 529 are the first packet's SkipSamples, its padding less 529 the end's SkipEndSamples, by the tag's
+frame count; so a 1 s tone at 44.1 kHz decodes to exactly 44,100 samples (mp3-raw-cbr, mp3-raw-vbr behind an ID3v2
+title and before an ID3v1 tag; mp3-raw-22k, whose 1105 samples to skip run across two 576-sample frames;
+mp3-raw-noxing, written without the tag, keeps every sample). The decoded samples are compared with FFmpeg's in
+Mp3ConformanceTests (name.mp3.trim.f32); the three rules that follow FFmpeg have mutation entries. A file of Layer I or
+II frames or of free-format ones is not taken (unit tests mark a sample's frames so). No encoder at hand writes a VBRI
+tag (Fraunhofer's): its frame is skipped by the same rule, untested.

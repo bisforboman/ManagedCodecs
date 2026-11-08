@@ -1,8 +1,8 @@
 # ManagedCodecs
 
 Pure managed C# media codecs: no native binaries, Native AOT friendly, and running on WebAssembly too. Decoders for
-MJPEG, H.264 (Constrained Baseline up to High 4:4:4 Predictive), AAC LC and HE-AAC, and MP3, with AVI, MP4, Matroska/WebM and raw
-AAC (ADTS) demuxing, every one checked against FFmpeg sample by sample: video **bit-exact**, AAC LC and MP3 within 2^-17 of FFmpeg's float
+MJPEG, H.264 (Constrained Baseline up to High 4:4:4 Predictive), AAC LC and HE-AAC, and MP3, with AVI, MP4, Matroska/WebM, raw
+AAC (ADTS) and raw MP3 demuxing, every one checked against FFmpeg sample by sample: video **bit-exact**, AAC LC and MP3 within 2^-17 of FFmpeg's float
 output. H.264 decodes
 on several threads if asked, and every decoder has an async API.
 
@@ -91,12 +91,13 @@ and code that reproduces FFmpeg's reading where it differs from the spec), and n
   writes), long, short and mixed blocks, the bit reservoir (a frame reaching back before a cut stream's start comes
   out silent, as FFmpeg's), CRCs checked; from MP4 and Matroska, within 2^-17 of FFmpeg's float output (measured:
   under 2e-6, LAME and shine streams). The MP4 edit list trims the priming (LAME's 1105 samples), Matroska's
-  DiscardPadding the end. `MediaPlayer` plays it (In-game video). Not yet: free-format bitrates, Layers I and II, raw `.mp3`
-  files, AVI audio (docs/decisions/2026-11-08-mp3-decoder.md).
+  DiscardPadding the end. `MediaPlayer` plays it (In-game video); raw `.mp3` files gapless by their LAME tag (`Mp3Demuxer`). Not yet:
+  free-format bitrates, Layers I and II, AVI audio (docs/decisions/2026-11-08-mp3-decoder.md).
 - **Containers**: AVI (video), MP4 (video and audio tracks, fragmented files too, edit lists of several edits),
   Matroska and WebM (video and audio tracks, every kind of lacing, BlockGroups, live files of unknown size, header
   stripping and zlib, the display rotation, DiscardPadding; VP9, AV1, Opus and other codecs this library doesn't decode
-  by their Codec IDs; MP3 as `CodecIds.Mp3` in MP4 and Matroska) and raw AAC (ADTS), with
+  by their Codec IDs; MP3 as `CodecIds.Mp3` in MP4 and Matroska), raw AAC (ADTS) and raw MP3 (gapless by the LAME
+  tag, as FFmpeg's), with
   packets and timestamps as FFmpeg's demuxers give them.
 - **Throughout**: an async API, malformed input that ends in `InvalidDataException` or `NotSupportedException`
   (fuzzed), and the same output on x64, ARM64 and WebAssembly, and under Native AOT (CI checks all of them).
@@ -242,7 +243,7 @@ base), the other stream at the same instant. The packets are those a read from t
 them with a new decoder (or one flushed) and drop the frames shown before the time, as FFmpeg's `-ss` does. MP4 seeks
 in every file, fragmented and edited ones too, by its sample tables; Matroska in every file, with Cues or without,
 by the blocks it found on opening; AVI in MJPEG, every frame of which is a keyframe
-(other codecs in AVI need the 'idx1' index, not read yet, and throw `NotSupportedException`, as raw AAC does).
+(other codecs in AVI need the 'idx1' index, not read yet, and throw `NotSupportedException`, as raw AAC and MP3 do).
 
 ```csharp
 using var demuxer = Demuxer.Open("video.mp4");

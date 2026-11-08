@@ -779,6 +779,20 @@ coefficients, else 1, never the motion's; the three macroblocks' intra is found 
 of its tests and 186 MBAFF ones against FFmpeg). Callgrind (AOT, steady loops): -0.5% in `h264-mbaff-p`, -0.15 to
 -0.22% in `h264-mbaff-default`, `h264-mbaff-intra` and `h264-422-mbaff-default`, nothing in field pictures (no mixed
 pairs) or frames: such edges are rare in these samples; too little for the JIT's runs to resolve.
+A profile after that (2026-11-08) still put `MbaffEdgeStrengths` at 3.4 to 4.8% of the interlaced samples' own
+instructions, and `TopEdges` allocated an array a call, twice a macroblock (0.67% of `jm-paff-b` with the allocator).
+Frames give an edge one bS when both macroblocks have one motion and no coefficients (`_uniformMb`, kept as each
+macroblock is deblocked); `DeblockMbaff` now keeps it too, before its slice's early exit, and `MbaffEdgeStrengths` takes
+the motion's bS once for an edge between two such macroblocks of one kind (`CheckMbaffStrengths` covers it: the frame
+limit for field macroblocks fails 38 of its tests); `TopEdges` returns its one or two edges in a struct. Callgrind
+(AOT, steady loops): 356.6 to 343.5 M instructions a loop of `h264-mbaff-default` (-3.7%), -3.8% in `h264-mbaff-p`,
+-3.7% in `jm-paff-b`, -2.7% in `h264-422-mbaff-default`, -1.6% in `jm-paff-mbaff`, -0.3% in `h264-mbaff-intra`;
+`h264-bench-720p.mp4` the same to 0.0002% over one loop. Under the JIT the gain is smaller and noisy: perf, normalized
+as above, a median -0.6% on `h264-mbaff-default` (four runs of six faster) and +0.3% on `jm-paff-b` (spread +-7%);
+the wall clock of 300 loops, eight runs each alternating, a median -2.4% on `h264-mbaff-default` (spread about 4%).
+The other allocations in the profile, about 3% of `jm-paff-b` zeroed by the allocator, are the decoder's pictures,
+made once a decoder (174 for its 10 frames, 145 for `h264-b-long-gop`'s 75): mcdec starts a decoder a loop, so short
+samples count them, a stream doesn't.
 
 A profile of a
 720p libx264 default stream (2026-10-22) is flat: CABAC residual decoding takes 14%, deblocking 21%

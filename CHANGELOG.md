@@ -11,6 +11,15 @@ share internals, so each depends on the others at exactly its own version (`[X]`
 then reports a mix of versions (NU1107, or NU1608 for a newer one referenced directly) rather than letting it fail at
 run time.
 
+## Unreleased
+
+### Changed
+
+- H.264: in MBAFF frames and field pictures, a macroblock edge between two macroblocks of one kind, each with one
+  motion and no coefficients, takes one bS for its four segments, as in frames, and the top edges are found without an
+  allocation per macroblock: about 3.7% fewer instructions in MBAFF and field streams, 1 to 2% of their time under the
+  JIT.
+
 ## 0.9.1 – 2026-11-08
 
 Fixes to the new playback packages: `MediaPlayer` no longer drops frames when a game ticks at the video's own rate,

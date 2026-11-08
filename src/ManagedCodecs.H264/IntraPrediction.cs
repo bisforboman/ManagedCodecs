@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Numerics;
 using System.Runtime.CompilerServices;
 
@@ -518,13 +519,19 @@ internal static class IntraPrediction
     }
 
     // Chroma mode numbers differ from 16x16 (0 DC, 1 Horizontal, 2 Vertical, 3 Plane): the 16x16 number for 1 to 3.
-    private static int LumaStyleMode(int mode) => mode switch
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static int LumaStyleMode(int mode)
     {
-        1 => 1,
-        2 => 0,
-        3 => 3,
-        _ => throw new InvalidDataException($"Invalid chroma prediction mode {mode}."),
-    };
+        if ((uint)(mode - 1) > 2)
+        {
+            ThrowInvalidChromaMode(mode);
+        }
+
+        return mode == 2 ? 0 : mode;
+    }
+
+    [DoesNotReturn]
+    private static void ThrowInvalidChromaMode(int mode) => throw new InvalidDataException($"Invalid chroma prediction mode {mode}.");
 
     /// <summary>
     /// Vertical (0), Horizontal (1) and DC (2, luma only) for 16x16, 8x8 or 8x16, a row at a time in 4- and 8-byte
@@ -847,11 +854,17 @@ internal static class IntraPrediction
         }
     }
 
+    // Inlined, the throw in a method of its own: called once a block, Require was 1% of an intra-only frame under the JIT,
+    // which inlines no method that throws.
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void Require(bool available, int mode)
     {
         if (!available)
         {
-            throw new InvalidDataException($"Intra prediction mode {mode} uses unavailable neighbours.");
+            ThrowUnavailable(mode);
         }
     }
+
+    [DoesNotReturn]
+    private static void ThrowUnavailable(int mode) => throw new InvalidDataException($"Intra prediction mode {mode} uses unavailable neighbours.");
 }

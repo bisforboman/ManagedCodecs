@@ -87,5 +87,9 @@ for the first frame), opening the folder in the editor wrote `net8.0` into the `
 `net10.0` itself), and an export left out the C# (no solution file) and the video (not a resource); the folder now has
 both a solution and an export preset.
 
+The table's times are a Debug build's decoders: Godot builds through the solution, where the csproj's Release setting
+for its references was stripped (2026-11-08; fixed since, `ShouldUnsetParentConfigurationAndPlatform`). With the
+decoders in Release, the 640x360 clip's RGBA conversion takes 1.0 ms a frame, against 3 to 4.
+
 Windows: issue #402 (480p and 1080p H.264, the picture; the decoders built in Release since). Still to try: a desktop
 with a sound card (does the sound play live without gaps), and macOS.

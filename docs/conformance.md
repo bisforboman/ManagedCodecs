@@ -130,11 +130,10 @@ stream's start plus it; without one (mkv-h264-live) ffprobe gives no duration, a
 to the end of the last, is checked against ffprobe's packets. H.264's size is the decoder's frame size
 from the SPS, which can crop the container's.
 
-MP3, demuxed and not decoded, is `CodecIds.Mp3`: h264-mp3 (FFmpeg's MP4 muxer: `mp4a`, object type 0x6B) and
+MP3 (decoded: MP3, below) is `CodecIds.Mp3`: h264-mp3 (FFmpeg's MP4 muxer: `mp4a`, object type 0x6B) and
 h264-mp3-mov (its MOV muxer: a `.mp3` sample entry, as in Tears of Steel) are compared packet by packet like the other
 MP4 samples, and Mp4DemuxerTests builds object type 0x69 (MPEG-2 audio) and QuickTime's `ms\0U` entry, which FFmpeg's
-muxers don't write. In Matroska, mkv-h264-mp3 (`A_MPEG/L3`). `MediaPlayer.SkippedAudioCodec` names it on all three
-(MediaPlayerTests).
+muxers don't write. In Matroska, mkv-h264-mp3 (`A_MPEG/L3`). `MediaPlayer` plays it on all three (MediaPlayerTests).
 
 The thumbnails' pixels (`RgbaImage`, ManagedCodecs.Thumbnails) are each frame converted to RGBA at its own size (the
 matrix and range the frame says; none said, BT.601 and limited range, as FFmpeg's scaler takes them, but full range for
@@ -953,6 +952,17 @@ Tried and dropped (2026-11-06): 4:2:0 chroma without AC coefficients (most chrom
 against the scalar add passed and a broken kernel failed it. Callgrind counted 1.0% fewer instructions on
 `h264-bench-720p.mp4` and 0.3% on the CABAC stream, but under the JIT the chroma functions took only 0.3 and 0.1 points
 less of the frame (six alternating pairs each): not worth a kernel of its own.
+Tried and dropped (2026-11-08): dequantization fused into the 8-bit 4x4 transform and add (`DequantizeAdd`: the scaled
+coefficients kept in registers and handed to the 16-bit transform, one call and one pass over the block where
+`Dequantize` and `InverseTransformAdd` make two of each), at all four callers (inter luma, intra 4x4 and 16x16 AC,
+chroma AC). A test against the two scalar steps passed, and dropping its DC restore or its rounding failed it. The
+transform and add functions, the stage's real cost, were about 5.6% of `h264-bench-720p.mp4` on main (the stage
+script's 8.3% also counts `DecodeInterResidual`, mostly the residual reading inlined into it): `ReconstructChroma` 2.2,
+`InverseTransformAdd16` 1.0, `Dequantize` 0.7, `Transform4Lanes` 0.7, `InverseChromaDc` 0.4, `AddInterResidual` 0.35.
+Under the JIT (perf, six alternating pairs, normalized by residual reading, the edge filters and motion compensation)
+the changed functions took 0.8% less of the frame on that stream and 0.4% on the CABAC one: under the 1% bar
+(docs/decisions/2026-11-04-h264-motion-prediction-frames.md). With this and the chroma DC add above, the stage's
+remaining cost is spread over per-block calls with no larger piece left.
 Tried and dropped (2026-11-06): 8-bit intra prediction by rows (Intra_4x4 and Intra_8x8 Vertical, Horizontal and DC
 as one 4- or 8-byte store a row; 16x16 and chroma rows as vectors, Plane's sums four 32-bit lanes at a time; chroma DC
 a 4-byte store a row), against the by-the-definition code as a reference test on random planes. Callgrind counted 15%
@@ -1463,6 +1473,32 @@ and a mutation entry each:
 FFmpeg's decoder (6.1) misses the reference on the lower rates' intensity stereo (RMS 4e-2 on l3-test45, 3e-2 on
 l3-test46) where this one meets it: it is not the oracle there, and the unit tests check the equations instead.
 
+### Speed
+
+The definitions (2026-11-08) took 342 µs a frame (1152 samples) of Tears of Steel's MP3 (44.1 kHz stereo, its
+12 minutes remuxed to MP4), 6.3 times FFmpeg's 54 µs (its user time, one thread), two thirds of it in the synthesis'
+matrixing (2048 multiply-adds a time slot) and 13.5% in the long IMDCT. Both now give the definitions' bits with fewer
+operations. The synthesis computes only the 32 rows of N the others follow from: row 32 - i is row i negated, row
+96 - i is row i, row 16 is zero, exactly so in `ExactMath.CosPi`, which reduces each angle symmetrically. And both run
+vectors across outputs (Vector128, two doubles each, on every runtime), each lane summing over k in the
+definition's order, multiply then add (no fused multiply-add). The Unity build (netstandard2.1, no
+System.Runtime.Intrinsics) keeps the definitions themselves. `FastFilterbanksGiveTheDefinitionsBits` compares V, the
+synthesis' sums before rounding, and the IMDCT's outputs with the definitions bit for bit on random input of every
+magnitude and silence; reversing the order of either vector loop's sum fails it, where comparing the float output alone
+did not notice. 84 µs a frame now (2.4 s for the film against 9.6, the output's hash unchanged), 1.5 times FFmpeg's;
+what is left is spread (perf: the synthesis 18%, Huffman decoding and requantization together 38%, the IMDCT 11%).
+
+Then the Huffman decoding and requantization (2026-11-08), each the same integers and doubles as before (the output's
+hash unchanged): 82 to 55 µs a frame, FFmpeg's 54 (medians of interleaved runs). Most of it was `Math.ScaleB`, a call
+into CoreLib's precompiled code, once a band and window for 2^(q / 4): `RequantizeRun` and the anonymous CoreLib
+address it called took 16% of the profile, 3% after. Requantization's q lies between -390 and 45, so a table of
+`ExactMath.QuarterPowerOfTwo`'s values from -512 to 63 replaces it, computed outside (`QuarterPowerTableIsExactMaths`
+compares them from -1200 to 400). The rest: the requantized value's sign and each line's sign bit without a branch on
+the sign (random signs mispredicted every other one), the bit reader's peek one big-endian read where four bytes are
+there rather than four bounds-checked ones, and only the lines above the last coded one cleared. Under ReadyToRun off
+(CoreLib jitted, as perf needs for names) `ScaleB` is jitted too and the cost doesn't show: profile with it on to see
+CoreLib's share.
+
 ## ADTS (raw AAC)
 
 Raw AAC files (ADTS, `AdtsDemuxer`) demux packet by packet as FFmpeg's
@@ -1477,3 +1513,17 @@ of 1024 samples a block, decoded block after block into one frame; with CRCs, th
 the blocks but the first, and each block has its own. No encoder at hand writes them, so the tests join a sample's
 frames, 1 to 4 under one header, with and without CRCs, AAC LC and HE-AAC (the SBR state runs on across blocks), and
 require the same samples as the frames one by one.
+
+## Raw MP3
+
+Raw MP3 files (`Mp3Demuxer`) demux packet by packet as FFmpeg's demuxer does (`Mp3DemuxerTests` against
+name.packets.framemd5: whole frames, header included; ID3v2 tags skipped, an ID3v1 tag after the frames no packet;
+junk between frames and a truncated end built from the samples). A first frame holding a Xing, Info or VBRI tag is no
+packet, and with a LAME tag (LAME's, or FFmpeg's encoder's "Lavc"/"Lavf") the stream plays gapless as in FFmpeg: the
+tag's delay plus 529 are the first packet's SkipSamples, its padding less 529 the end's SkipEndSamples, by the tag's
+frame count; so a 1 s tone at 44.1 kHz decodes to exactly 44,100 samples (mp3-raw-cbr, mp3-raw-vbr behind an ID3v2
+title and before an ID3v1 tag; mp3-raw-22k, whose 1105 samples to skip run across two 576-sample frames;
+mp3-raw-noxing, written without the tag, keeps every sample). The decoded samples are compared with FFmpeg's in
+Mp3ConformanceTests (name.mp3.trim.f32); the three rules that follow FFmpeg have mutation entries. A file of Layer I or
+II frames or of free-format ones is not taken (unit tests mark a sample's frames so). No encoder at hand writes a VBRI
+tag (Fraunhofer's): its frame is skipped by the same rule, untested.

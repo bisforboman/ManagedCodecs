@@ -110,6 +110,16 @@ public class Mp3UnitTests
         }
     }
 
+    /// <summary>Requantization's table of 2^(q / 4) gives ExactMath's values bit for bit, inside its range and out.</summary>
+    [Fact]
+    public void QuarterPowerTableIsExactMaths()
+    {
+        for (int q = -1200; q <= 400; q++)
+        {
+            Assert.Equal(BitConverter.DoubleToInt64Bits(ExactMath.QuarterPowerOfTwo(q)), BitConverter.DoubleToInt64Bits(Spectrum.QuarterPower(q)));
+        }
+    }
+
     /// <summary>The synthesis filterbank against Annex A's flow chart, step by step with Math.Cos, over 40 time slots.</summary>
     [Fact]
     public void SynthesisIsTheFlowChart()
@@ -152,6 +162,60 @@ public class Mp3UnitTests
                 }
 
                 Assert.Equal(sum, output[j], 1e-6);
+            }
+        }
+    }
+
+    /// <summary>
+    /// The vector synthesis and long IMDCT give the definitions' bits (<see cref="Synthesis.SynthesizeReference"/>,
+    /// <see cref="Hybrid.LongImdctReference"/>), on random input of every magnitude and on silence, and random windows.
+    /// </summary>
+    [Fact]
+    public void FastFilterbanksGiveTheDefinitionsBits()
+    {
+        var random = new Random(17);
+        double Sample() => random.Next(8) switch
+        {
+            0 => 0,
+            1 => random.NextDouble() * 1e-30,
+            _ => (random.NextDouble() - 0.5) * Math.Pow(2, random.Next(-20, 16)),
+        };
+
+        var fast = new Synthesis();
+        var reference = new Synthesis();
+        var output = new double[32];
+        var expected = new double[32];
+        for (int slot = 0; slot < 2000; slot++)
+        {
+            var s = slot % 50 < 5 ? new double[32] : Enumerable.Range(0, 32).Select(_ => Sample()).ToArray();
+            fast.Synthesize(s, output);
+            reference.SynthesizeReference(s, expected);
+
+            // The same doubles (V may hold -0 where the definition has +0, for a row that sums to zero: == takes them
+            // as equal, and the outputs, sums from +0, as the same bits).
+            for (int i = 0; i < 1024; i++)
+            {
+                Assert.True(fast.V[i] == reference.V[i], $"Slot {slot}: v[{i}] {fast.V[i]:R}, by the definition {reference.V[i]:R}.");
+            }
+
+            for (int j = 0; j < 32; j++)
+            {
+                Assert.Equal(BitConverter.DoubleToInt64Bits(expected[j]), BitConverter.DoubleToInt64Bits(output[j]));
+            }
+        }
+
+        var windows = Enumerable.Range(0, 3).Select(_ => Enumerable.Range(0, 36).Select(_ => random.NextDouble()).ToArray()).ToArray();
+        var block = new double[36];
+        var expectedBlock = new double[36];
+        for (int n = 0; n < 2000; n++)
+        {
+            var lines = Enumerable.Range(0, 18).Select(_ => Sample()).ToArray();
+            var window = windows[n % 3];
+            Hybrid.LongImdct(lines, window, block);
+            Hybrid.LongImdctReference(lines, window, expectedBlock);
+            for (int i = 0; i < 36; i++)
+            {
+                Assert.Equal(BitConverter.DoubleToInt64Bits(expectedBlock[i]), BitConverter.DoubleToInt64Bits(block[i]));
             }
         }
     }

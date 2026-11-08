@@ -129,6 +129,14 @@ ManagedCodecs.Containers.MatroskaDemuxer.ReadPackets() -> System.Collections.Gen
 ManagedCodecs.Containers.MatroskaDemuxer.ReadPacketsAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerable<ManagedCodecs.Packet>!
 ManagedCodecs.Containers.MatroskaDemuxer.Seek(long pts, int streamIndex) -> void
 ManagedCodecs.Containers.MatroskaDemuxer.Video.get -> ManagedCodecs.VideoStreamInfo?
+ManagedCodecs.Containers.Mp3Demuxer
+ManagedCodecs.Containers.Mp3Demuxer.Audio.get -> ManagedCodecs.AudioStreamInfo!
+ManagedCodecs.Containers.Mp3Demuxer.Dispose() -> void
+ManagedCodecs.Containers.Mp3Demuxer.Mp3Demuxer(System.IO.Stream! stream, bool leaveOpen = false) -> void
+ManagedCodecs.Containers.Mp3Demuxer.ReadPacketInfo() -> System.Collections.Generic.IEnumerable<ManagedCodecs.PacketInfo>!
+ManagedCodecs.Containers.Mp3Demuxer.ReadPackets() -> System.Collections.Generic.IEnumerable<ManagedCodecs.Packet>!
+ManagedCodecs.Containers.Mp3Demuxer.ReadPacketsAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerable<ManagedCodecs.Packet>!
+ManagedCodecs.Containers.Mp3Demuxer.Video.get -> ManagedCodecs.VideoStreamInfo?
 ManagedCodecs.Containers.Mp4Demuxer
 ManagedCodecs.Containers.Mp4Demuxer.Audio.get -> ManagedCodecs.AudioStreamInfo?
 ManagedCodecs.Containers.Mp4Demuxer.Dispose() -> void
@@ -506,6 +514,7 @@ static ManagedCodecs.Containers.AviDemuxer.Open(string! path) -> ManagedCodecs.C
 static ManagedCodecs.Containers.Demuxer.Open(System.IO.Stream! stream, bool leaveOpen = false) -> ManagedCodecs.IDemuxer!
 static ManagedCodecs.Containers.Demuxer.Open(string! path) -> ManagedCodecs.IDemuxer!
 static ManagedCodecs.Containers.MatroskaDemuxer.Open(string! path) -> ManagedCodecs.Containers.MatroskaDemuxer!
+static ManagedCodecs.Containers.Mp3Demuxer.Open(string! path) -> ManagedCodecs.Containers.Mp3Demuxer!
 static ManagedCodecs.Containers.Mp4Demuxer.Open(string! path) -> ManagedCodecs.Containers.Mp4Demuxer!
 static ManagedCodecs.Packet.operator !=(ManagedCodecs.Packet left, ManagedCodecs.Packet right) -> bool
 static ManagedCodecs.Packet.operator ==(ManagedCodecs.Packet left, ManagedCodecs.Packet right) -> bool

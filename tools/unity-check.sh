@@ -17,7 +17,7 @@ trap 'rm -rf "$work"' EXIT
 dotnet build tools/ManagedCodecs.Cli -c Release -v q -nologo
 dotnet build tools/ManagedCodecs.Cli.Unity -c Release -v q -nologo -warnaserror
 
-files=$(ls samples/*.avi samples/*.mp4 samples/*.mkv samples/*.webm samples/*.aac samples/heaac/*.mp4 samples/heaac/*.aac samples/jm/*.mp4 samples/openh264/*.mp4)
+files=$(ls samples/*.avi samples/*.mp4 samples/*.mkv samples/*.webm samples/*.aac samples/*.mp3 samples/heaac/*.mp4 samples/heaac/*.aac samples/jm/*.mp4 samples/openh264/*.mp4)
 
 # shellcheck disable=SC2086
 dotnet tools/ManagedCodecs.Cli/bin/Release/net10.0/mcdec.dll --hash $files > "$work/net.txt" 2> "$work/net-stderr.txt" ||
@@ -32,7 +32,7 @@ if ! diff "$work/net.txt" "$work/mono.txt"; then
 fi
 
 # The Thumbnails package's probe and thumbnail of every container file (ThumbnailOutput.Line: the RGBA's hash).
-containers=$(echo "$files" | tr ' ' '\n' | grep -v '\.aac$')
+containers=$(echo "$files" | tr ' ' '\n' | grep -v -e '\.aac$' -e '\.mp3$')
 # shellcheck disable=SC2086
 dotnet tools/ManagedCodecs.Cli/bin/Release/net10.0/mcdec.dll --thumbnail-hash $containers > "$work/net-thumb.txt" 2>&1 ||
   { cat "$work/net-thumb.txt" >&2; echo "The net10.0 thumbnail run failed (above: its output up to the failing file)." >&2; exit 1; }

@@ -1,3 +1,9 @@
+#if NET
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+using System.Runtime.Intrinsics;
+#endif
+
 namespace ManagedCodecs.Mp3;
 
 /// <summary>
@@ -13,6 +19,11 @@ internal static class Hybrid
 {
     // cos(pi / 72 (2i + 1 + 18) (2k + 1)) for i 0..35, k 0..17, at [18 i + k].
     private static readonly double[] LongCosines = BuildCosines(36, 18, 72, 18);
+
+#if NET
+    // The same by column, at [36 k + i], for LongImdct's vectors across outputs.
+    private static readonly double[] LongColumns = [.. Enumerable.Range(0, 36 * 18).Select(n => LongCosines[(18 * (n % 36)) + (n / 36)])];
+#endif
 
     // cos(pi / 24 (2i + 1 + 6) (2k + 1)) for i 0..11, k 0..5, at [6 i + k].
     private static readonly double[] ShortCosines = BuildCosines(12, 6, 24, 6);
@@ -85,9 +96,55 @@ internal static class Hybrid
 
     /// <summary>
     /// The 36-point IMDCT of 18 lines (2.4.3.4.10.2): x_i = sum over k of X_k cos(pi / 72 (2i + 1 + 18) (2k + 1)),
-    /// windowed.
+    /// windowed. With vectors across outputs, each lane summing over k in the definition's order: the same bits as
+    /// <see cref="LongImdctReference"/>, which a test compares it with.
     /// </summary>
     public static void LongImdct(ReadOnlySpan<double> lines, double[] window, Span<double> output)
+    {
+#if NET
+        if (Vector128.IsHardwareAccelerated && lines.Length >= 18 && window.Length >= 36 && output.Length >= 36)
+        {
+            ref double columns = ref MemoryMarshal.GetArrayDataReference(LongColumns);
+            ref double w = ref MemoryMarshal.GetArrayDataReference(window);
+            ref double o = ref MemoryMarshal.GetReference(output);
+            for (int i = 0; i < 36; i += 12)
+            {
+                var a0 = Vector128<double>.Zero;
+                var a1 = Vector128<double>.Zero;
+                var a2 = Vector128<double>.Zero;
+                var a3 = Vector128<double>.Zero;
+                var a4 = Vector128<double>.Zero;
+                var a5 = Vector128<double>.Zero;
+                for (int k = 0; k < 18; k++)
+                {
+                    var x = Vector128.Create(lines[k]);
+                    ref double c = ref Unsafe.Add(ref columns, (36 * k) + i);
+                    a0 += x * Vector128.LoadUnsafe(ref c);
+                    a1 += x * Vector128.LoadUnsafe(ref c, 2);
+                    a2 += x * Vector128.LoadUnsafe(ref c, 4);
+                    a3 += x * Vector128.LoadUnsafe(ref c, 6);
+                    a4 += x * Vector128.LoadUnsafe(ref c, 8);
+                    a5 += x * Vector128.LoadUnsafe(ref c, 10);
+                }
+
+                ref double wi = ref Unsafe.Add(ref w, i);
+                (a0 * Vector128.LoadUnsafe(ref wi)).StoreUnsafe(ref o, (nuint)i);
+                (a1 * Vector128.LoadUnsafe(ref wi, 2)).StoreUnsafe(ref o, (nuint)i + 2);
+                (a2 * Vector128.LoadUnsafe(ref wi, 4)).StoreUnsafe(ref o, (nuint)i + 4);
+                (a3 * Vector128.LoadUnsafe(ref wi, 6)).StoreUnsafe(ref o, (nuint)i + 6);
+                (a4 * Vector128.LoadUnsafe(ref wi, 8)).StoreUnsafe(ref o, (nuint)i + 8);
+                (a5 * Vector128.LoadUnsafe(ref wi, 10)).StoreUnsafe(ref o, (nuint)i + 10);
+            }
+
+            return;
+        }
+#endif
+
+        LongImdctReference(lines, window, output);
+    }
+
+    /// <summary><see cref="LongImdct"/> by the definition, output by output.</summary>
+    public static void LongImdctReference(ReadOnlySpan<double> lines, double[] window, Span<double> output)
     {
         for (int i = 0; i < 36; i++)
         {

@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Numerics;
 using System.Runtime.CompilerServices;
 
@@ -521,14 +522,21 @@ internal static class IntraPrediction
         where TPixel : unmanaged =>
         PredictMacroblockReference(LumaStyleMode(mode), plane, offset, stride, n, width: 8, height, bitDepth);
 
-    // Chroma mode numbers differ from 16x16: 1 Horizontal, 2 Vertical, 3 Plane (0, DC, has paths of its own).
-    private static int LumaStyleMode(int mode) => mode switch
+    // Chroma mode numbers differ from 16x16: 1 Horizontal, 2 Vertical, 3 Plane (0, DC, has paths of its own). Inlined, the
+    // throw in a method of its own, as Require's.
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static int LumaStyleMode(int mode)
     {
-        1 => 1,
-        2 => 0,
-        3 => 3,
-        _ => throw new InvalidDataException($"Invalid chroma prediction mode {mode}."),
-    };
+        if ((uint)(mode - 1) > 2)
+        {
+            ThrowInvalidChromaMode(mode);
+        }
+
+        return mode == 2 ? 0 : mode;
+    }
+
+    [DoesNotReturn]
+    private static void ThrowInvalidChromaMode(int mode) => throw new InvalidDataException($"Invalid chroma prediction mode {mode}.");
 
     /// <summary>
     /// Vertical (0), Horizontal (1), DC (2, luma only) and Plane (3) for 16x16, 8x8 or 8x16, a row at a time: whole rows
@@ -897,11 +905,17 @@ internal static class IntraPrediction
         }
     }
 
+    // Inlined, the throw in a method of its own: the JIT inlines no method that throws, and Require, called once a block,
+    // was 1.1% of an intra-only frame's samples under it (#412).
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void Require(bool available, int mode)
     {
         if (!available)
         {
-            throw new InvalidDataException($"Intra prediction mode {mode} uses unavailable neighbours.");
+            ThrowUnavailable(mode);
         }
     }
+
+    [DoesNotReturn]
+    private static void ThrowUnavailable(int mode) => throw new InvalidDataException($"Intra prediction mode {mode} uses unavailable neighbours.");
 }

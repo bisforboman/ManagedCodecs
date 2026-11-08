@@ -636,6 +636,19 @@ ff -f lavfi -i "$mp3tones:s=44100" -c:a libshine -b:a 128k samples/mp3-shine.mp4
 # A stream cut out of a longer one (from 0.5 s, packets copied): its first frames' main data starts before the file
 # does, and their granules come out silent, as FFmpeg's.
 ff -ss 0.5 -i samples/mp3-joint.mp4 -c copy samples/mp3-cut.mp4
+# Raw MP3 (Mp3Demuxer; FFmpeg's MP3 muxer writes an ID3v2 tag and an Info frame, with LAME's extension, by default):
+# CBR stereo at 44.1 kHz, whose Info frame's delay and padding the demuxer trims at both ends; VBR mono at 22.05 kHz
+# (MPEG-2: 576-sample frames, side information of 9 bytes, a Xing tag); MPEG-2.5 stereo at 8 kHz; and no Info frame
+# (-write_xing 0: nothing trimmed) with an ID3v1 tag at the end (written only with metadata).
+ff -f lavfi -i "aevalsrc=0.4*sin(2*PI*440*t)|0.3*sin(2*PI*660*t):s=44100:d=1" -c:a libmp3lame -b:a 128k samples/mp3-cbr-44k.mp3
+ff -f lavfi -i "aevalsrc=0.5*sin(2*PI*600*t+4*sin(2*PI*3*t)):s=22050:d=1" -c:a libmp3lame -q:a 4 samples/mp3-vbr-22k.mp3
+ff -f lavfi -i "aevalsrc=0.4*sin(2*PI*300*t)|0.3*sin(2*PI*500*t):s=8000:d=1" -c:a libmp3lame -b:a 24k samples/mp3-8k.mp3
+ff -f lavfi -i "sine=frequency=440:sample_rate=44100:duration=1" -c:a libmp3lame -b:a 96k -write_xing 0 -write_id3v1 1 \
+  -metadata title=ManagedCodecs samples/mp3-no-tag.mp3
+# The VBR stream remuxed into MP4 (object type 0x69, MPEG-2 audio): FFmpeg's muxer copies the demuxer's 1105-sample
+# start into the edit list, whose end, rounded up in the movie's timescale, then runs 2 samples past the media; FFmpeg
+# lets the last packet's duration run to it, as an edit from a later media time may (Containers CLAUDE.md).
+ff -i samples/mp3-vbr-22k.mp3 -c copy samples/mp3-vbr-22k-remux.mp4
 # Raw AAC in ADTS frames (the ADTS demuxer): stereo at 44.1 kHz, and 5.1 behind an ID3v2 tag (which the demuxer skips).
 ff -f lavfi -i "aevalsrc=0.4*sin(2*PI*440*t)|0.3*sin(2*PI*660*t):s=44100:d=1" -c:a aac -b:a 96k -aac_pns 0 -f adts samples/aac-adts.aac
 # Pulse data, which no encoder at hand writes (FFmpeg's never does): a stream written by its syntax, every frame one
@@ -874,6 +887,13 @@ for s in h264-bframes.mp4:1200 h264-bframes.mp4:960 h264-bframes.mp4:1000 fmp4-b
   ff -seek_timestamp 1 -ss "$(printf '%d.%03d' $((ms / 1000)) $((ms % 1000)))" -idct simple -noautorotate -i "$f" -map 0:v:0 \
     -frames:v 1 -f framemd5 "${f%.*}.seek$ms.framemd5"
 done
+# Raw MP3: packets as FFmpeg's demuxer gives them (whole frames, the tag frame left out), with their skip-samples side
+# data in the .packets.csv.
+for f in samples/*.mp3; do
+  ff -copyts -i "$f" -c copy -f framemd5 "${f%.mp3}.packets.framemd5"
+  ffprobe -v error -show_packets -show_data_hash MD5 -show_entries packet=stream_index,pts,dts,duration,size,flags,data_hash \
+    -of csv=p=0 "$f" > "${f%.mp3}.packets.csv"
+done
 # Raw AAC: packets as FFmpeg's demuxer gives them (whole ADTS frames), and every decoded sample (no edit list).
 for f in samples/*.aac; do
   ff -copyts -i "$f" -c copy -f framemd5 "${f%.aac}.packets.framemd5"
@@ -899,9 +919,9 @@ for f in samples/heaac-*.mp4 samples/heaacv2-*.mp4 samples/heaac-*.aac; do ff -i
 # A stream naming FAAC: name.delay.f32, decoded audio as FFmpeg gives it, without FAAC's encoder delay.
 for f in samples/*faac*.aac; do ff -i "$f" -f f32le "${f%.*}.delay.f32"; done
 # MP3: name.mp3.f32, every packet decoded whole (MP4: the edit list ignored), and name.mp3.trim.f32, as FFmpeg gives it
-# by default (MP4: the edit list's priming skipped; Matroska: the end's DiscardPadding dropped). Suffixes of their own,
-# since AacConformanceTests decodes every name.f32.
-for f in samples/*.mp4 samples/*.mkv; do
+# by default (MP4: the edit list's priming skipped; Matroska: the end's DiscardPadding dropped; raw MP3: the LAME tag's
+# delay and padding trimmed). Suffixes of their own, since AacConformanceTests decodes every name.f32.
+for f in samples/*.mp4 samples/*.mkv samples/*.mp3; do
   [ "$(ffprobe -v error -select_streams a:0 -show_entries stream=codec_name -of csv=p=0 "$f")" = mp3 ] || continue
   [[ $f == *.mp4 ]] && ff -ignore_editlist 1 -i "$f" -map 0:a:0 -f f32le "${f%.*}.mp3.f32"
   ff -i "$f" -map 0:a:0 -f f32le "${f%.*}.mp3.trim.f32"

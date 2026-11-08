@@ -192,6 +192,48 @@ MUTATIONS = [
          find="|| (FindChild(children, Box.Wave, out var wave) && FindChild(wave, Box.Esds, out esds))", replace="",
          tests="FullyQualifiedName~Mp4|FullyQualifiedName~Aac"),
 
+    # The last audio packet runs to the edit's end, but not past the media's end compared with its pts as it is (an
+    # edit from a later media time, mp3-vbr-22k-remux, runs past the last sample; one from 0, aac-fdk-pce-remux, doesn't).
+    dict(file="src/ManagedCodecs.Containers/Mp4/Mp4Demuxer.cs",
+         find="until = Math.Min(until, media.Dts[^1] + media.Durations[^1] - samples.Pts(i));", replace="until = Math.Min(until, samples.Durations[i]);",
+         tests="DisplayName~mp3-vbr-22k-remux|DisplayName~aac-fdk-pce-remux"),
+    dict(file="src/ManagedCodecs.Containers/Mp4/Mp4Demuxer.cs",
+         find="until = Math.Min(until, media.Dts[^1] + media.Durations[^1] - samples.Pts(i));", replace="",
+         tests="DisplayName~mp3-vbr-22k-remux|DisplayName~aac-fdk-pce-remux"),
+
+    # ---- Raw MP3 (as FFmpeg reads it)
+    # A first frame unlike the next one is no packet.
+    dict(file="src/ManagedCodecs.Containers/Mp3/Mp3Demuxer.cs",
+         find="&& TryReadHeader(_stream, pos + header.FrameLength, out var next) && !header.SameStream(next))",
+         replace="&& TryReadHeader(_stream, pos + header.FrameLength, out var next) && false)",
+         tests="FullyQualifiedName~Mp3DemuxerTests"),
+    # ... by the mode, copyright, original and emphasis, not the bits frames of a stream vary in.
+    dict(file="src/ManagedCodecs.Core/MpegAudioHeader.cs",
+         find="private const uint StreamMask = 0xFFFE0CCF;", replace="private const uint StreamMask = 0xFFFE0C0F;",
+         tests="FullyQualifiedName~Mp3DemuxerTests"),
+    dict(file="src/ManagedCodecs.Core/MpegAudioHeader.cs",
+         find="private const uint StreamMask = 0xFFFE0CCF;", replace="private const uint StreamMask = 0xFFFE0FFF;",
+         tests="FullyQualifiedName~Mp3DemuxerTests"),
+    # A tag frame is no packet only when it counts the frames or the bytes.
+    dict(file="src/ManagedCodecs.Containers/Mp3/Mp3Demuxer.cs",
+         find="            return frames != 0 || bytes != 0;\n        }\n\n        // VBRI", replace="            return true;\n        }\n\n        // VBRI",
+         tests="FullyQualifiedName~Mp3DemuxerTests"),
+    # LAME's delay and padding count the decoder's 529 samples in, and the end's spreads over the packets it covers.
+    dict(file="src/ManagedCodecs.Containers/Mp3/Mp3Demuxer.cs",
+         find="_startSkip = delay + DecoderDelay;", replace="_startSkip = delay;",
+         tests="FullyQualifiedName~Mp3DemuxerTests"),
+    dict(file="src/ManagedCodecs.Containers/Mp3/Mp3Demuxer.cs",
+         find="_endSkipFrom = _endSkipTo - padding + DecoderDelay;", replace="_endSkipFrom = _endSkipTo - padding;",
+         tests="FullyQualifiedName~Mp3DemuxerTests"),
+    dict(file="src/ManagedCodecs.Containers/Mp3/Mp3Demuxer.cs",
+         find="int skipEnd = (int)Math.Max(0, Math.Min(end, _endSkipTo) - Math.Max(time, _endSkipFrom));",
+         replace="int skipEnd = sequence + 1 == _frames.Count ? (int)Math.Max(0, _endSkipTo - _endSkipFrom) : 0;",
+         tests="FullyQualifiedName~Mp3DemuxerTests"),
+    # FFmpeg takes the LAME extension only after these encoder names.
+    dict(file="src/ManagedCodecs.Containers/Mp3/Mp3Demuxer.cs",
+         find="if (data.Length >= at + 24 && (data[at..(at + 4)].SequenceEqual(\"LAME\"u8)", replace="if (data.Length >= at + 24 && (true",
+         tests="FullyQualifiedName~Mp3DemuxerTests"),
+
     # Seeking starts at the last keyframe whose pts is at or before the time: a frame shown at a keyframe's own time
     # decodes from that keyframe, not the one before (FFmpeg's -ss reaches it the same way).
     dict(file="src/ManagedCodecs.Containers/Mp4/Mp4Demuxer.cs",

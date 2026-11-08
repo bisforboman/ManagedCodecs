@@ -74,7 +74,7 @@ static void WriteSeeds(string samples, string output)
     // samples/heaac holds the committed HE-AAC streams (the FDK encoder's), parametric stereo among them.
     string heaac = Path.Combine(samples, "heaac");
     var files = Directory.GetFiles(samples).Concat(Directory.Exists(heaac) ? Directory.GetFiles(heaac) : []);
-    foreach (var path in files.Where(f => f.EndsWith(".avi") || f.EndsWith(".mp4") || f.EndsWith(".aac")).Order())
+    foreach (var path in files.Where(f => f.EndsWith(".avi") || f.EndsWith(".mp4") || f.EndsWith(".aac") || f.EndsWith(".mp3")).Order())
     {
         string stem = Path.GetFileNameWithoutExtension(path);
 
@@ -83,7 +83,7 @@ static void WriteSeeds(string samples, string output)
         if ((info.ResolveLinkTarget(true) ?? info) is FileInfo { Length: <= 64 * 1024 })
         {
             File.Copy(path, Path.Combine(output, "file", Path.GetFileName(path)), true);
-            if (!path.EndsWith(".aac"))
+            if (!path.EndsWith(".aac") && !path.EndsWith(".mp3"))
             {
                 File.Copy(path, Path.Combine(output, "thumbnail", Path.GetFileName(path)), true);
             }

@@ -9,7 +9,7 @@ public static class Demuxer
 
     /// <summary>
     /// An <see cref="AviDemuxer"/>, <see cref="Mp4Demuxer"/>, <see cref="MatroskaDemuxer"/> (Matroska or WebM) or
-    /// <see cref="AdtsDemuxer"/>, by the stream's first bytes.
+    /// <see cref="AdtsDemuxer"/> or <see cref="Mp3Demuxer"/>, by the stream's first bytes.
     /// </summary>
     /// <param name="stream">A seekable stream holding the file; it is read from its start.</param>
     /// <param name="leaveOpen">Whether disposing the demuxer (or a failure here) leaves <paramref name="stream"/> open.</param>
@@ -45,6 +45,12 @@ public static class Demuxer
             if (AdtsDemuxer.Probe(stream))
             {
                 return new AdtsDemuxer(stream, leaveOpen);
+            }
+
+            // Raw MP3: a Layer III frame (after any ID3v2 tags) followed by another one.
+            if (Mp3Demuxer.Probe(stream))
+            {
+                return new Mp3Demuxer(stream, leaveOpen);
             }
         }
         catch

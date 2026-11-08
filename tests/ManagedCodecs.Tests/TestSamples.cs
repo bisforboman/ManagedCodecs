@@ -19,7 +19,7 @@ public static class TestSamples
 
         foreach (var file in System.IO.Directory.EnumerateFiles(Directory).Order())
         {
-            if (Path.GetExtension(file) is ".avi" or ".mp4" or ".mkv" or ".webm" or ".aac" && File.Exists(ReferenceOf(file, suffix)))
+            if (Path.GetExtension(file) is ".avi" or ".mp4" or ".mkv" or ".webm" or ".aac" or ".mp3" && File.Exists(ReferenceOf(file, suffix)))
             {
                 yield return Path.GetFileName(file);
             }

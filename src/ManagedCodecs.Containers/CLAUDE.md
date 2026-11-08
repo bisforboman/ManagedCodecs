@@ -1,4 +1,4 @@
-# Containers: notes for working on the AVI, MP4, Matroska and ADTS demuxers
+# Containers: notes for working on the AVI, MP4, Matroska, ADTS and raw MP3 demuxers
 
 The repository's CLAUDE.md (process, core idea, cross-cutting gotchas) applies too.
 
@@ -15,6 +15,11 @@ The repository's CLAUDE.md (process, core idea, cross-cutting gotchas) applies t
   video from the keyframe before), and an empty edit after a real one replays the media's start. `ffmpeg -c copy -f
   framemd5` rewrites decode timestamps that go back (an edit's discarded packets): compare packets with
   `ffprobe -show_packets -show_data_hash MD5` (make-samples.sh's `.packets.csv`).
+- The last audio packet's duration, cut or stretched to the edit's end, stops at the media's end as FFmpeg compares
+  them: the packet's presentation time against the media's end in media time, without the edit's media time taken
+  off, so an edit from media time t may run up to t past the media (a raw MP3 remuxed into MP4, whose 1105-sample
+  start FFmpeg's muxer copies into the edit, mp3-vbr-22k-remux; aac-fdk-pce-remux starts at 0 and stops at the media).
+  Found by rewriting edit lists (`tools/mp4-edit-list.py`, media times 0, 1, 20 and 1105) and reading ffprobe.
 - In fragmented MP4, FFmpeg's packet durations are not the file's: its demuxer leaves them unset and libavformat
   fills in the codec frame size (1024 for AAC). Compare with FFmpeg's next dts instead (Mp4ConformanceTests does).
 - Matroska: FFmpeg's muxer writes only SimpleBlocks, never lacing or BlockGroups, and no DefaultDuration for audio;
@@ -27,3 +32,10 @@ The repository's CLAUDE.md (process, core idea, cross-cutting gotchas) applies t
   demuxer doesn't parse the SPS and takes the fewest frames that work, so its dts can be later than FFmpeg's.
 - .NET's DeflateStream returns what it inflated from a zlib frame cut short, without an error: the Adler-32 after the
   data is what catches it (as zlib's own inflate does).
+- Raw MP3, FFmpeg's demuxer (found by altering libmp3lame's files and reading ffprobe): a first frame whose header
+  differs from the next one's in the mode, copyright, original or emphasis bits is no packet, nor the next while it
+  differs from its own next (`MpegAudioHeader.SameStream`); differences later in the file don't count. A Xing, Info or
+  VBRI frame is no packet only when it counts the frames or the bytes (an Info frame with neither is one), whatever
+  its header. LAME's delay and padding are read only after an encoder name starting LAME, Lavf or Lavc (FFmpeg's own
+  muxer writes Lavc), the tag's CRC unchecked; the end's padding needs the frame count. libmp3lame's Info frame lacks
+  the original bit its audio frames have, so it differs from them too: alter one rule at a time when testing another.

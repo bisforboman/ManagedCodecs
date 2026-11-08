@@ -1006,6 +1006,16 @@ loops, six pairs each, the order alternating, normalized by `Cabac.ResidualBlock
 inverse transforms) the intra functions fell by a median 12% on `h264-high-intra` and 9% on `h264-main-intra`, the
 branch below the base in all twelve pairs: about half a point of an intra-only frame. Callgrind (AOT, loops 4 minus
 1): -0.84%, -0.93% and, on `h264-bench-720p`, -0.08%.
+Then Intra_8x8's vertical, horizontal and DC (most 8x8 blocks) without the edge array (#393, 2026-11-08): each
+filters (8.3.2.2.1) only the edge it reads, straight from the plane through refs, into the first row, each row's value
+or the DC sums, where `FilteredEdges8x8` cleared two 25-value arrays and filtered both edges through bounds-checked
+spans every block; the directional modes, and blocks at the plane's first row or column, keep it, the reference
+`IntraPredictionTests` compares the fast modes with (an off-by-one rounding fails 3 of its 19 tests). Callgrind (AOT,
+loops 4 minus 1, against the commit before): -3.4% on `h264-high-intra`, -2.5% on `h264-high-default` (P and B
+frames: their intra 8x8 blocks), -0.13% on `h264-high-intra-qp4` (noise, whose 8x8 blocks are more often
+directional). Under the JIT the gain is larger (perf, 300 loops, six pairs each, the order alternating): the intra
+functions' share fell from a median 6.1 to 3.9% of `h264-high-intra`'s samples and 4.1 to 1.9% of
+`h264-high-default`'s, every run of the branch below every run of the base: about two points of the frame on both.
 The per-partition path (`PredictFromOne`, `PredictFromTwo`: one call to the kernels a component, without
 `PartitionPlace`, `Weighting` for default bi-prediction or `PredictComponent`) then took frame macroblocks of frames
 at any depth and in 4:2:2 too, not only 8-bit 4:2:0; MBAFF frames and field pictures keep `PredictPartitionGeneral`.

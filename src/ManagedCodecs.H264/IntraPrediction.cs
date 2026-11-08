@@ -121,22 +121,23 @@ internal static class IntraPrediction
     /// <summary>
     /// Intra_8x8 prediction (8.3.2.2) for the block at <paramref name="offset"/>: the neighbouring
     /// samples are low-pass filtered first (8.3.2.2.1), then predicted from as Intra_4x4 does.
-    /// Vertical, horizontal and DC are written a row at a time (<see cref="PredictBlock{TPixel}(int, int, ReadOnlySpan{int}, TPixel[], int, int, IntraNeighbors, int)"/>);
-    /// <see cref="Predict8x8Reference"/> is the reference IntraPredictionTests compares it with.
+    /// Vertical, horizontal and DC filter only the edge they read, straight from the plane, and write a row at a time
+    /// (<see cref="PredictFlat8x8"/>); <see cref="Predict8x8Reference"/> is the reference IntraPredictionTests compares
+    /// it with.
     /// </summary>
     [SkipLocalsInit]
     public static void Predict8x8<TPixel>(int mode, TPixel[] plane, int offset, int stride, IntraNeighbors n, int bitDepth)
         where TPixel : unmanaged
     {
-        Span<int> e = stackalloc int[25];
-        FilteredEdges8x8(plane, offset, stride, n, e);
-        if (mode > 2 || !RowsInside(plane, offset, stride, 8, 8))
+        if (mode <= 2 && RowsInside(plane, offset, stride, 8, 8))
         {
-            PredictBlockReference(8, mode, e, plane, offset, stride, n, bitDepth);
+            PredictFlat8x8(mode, plane, offset, stride, n, bitDepth);
             return;
         }
 
-        PredictBlock(8, mode, e, plane, offset, stride, n, bitDepth);
+        Span<int> e = stackalloc int[25];
+        FilteredEdges8x8(plane, offset, stride, n, e);
+        PredictBlockReference(8, mode, e, plane, offset, stride, n, bitDepth);
     }
 
     /// <summary>Intra_8x8 prediction by the equations, sample by sample: the reference for <see cref="Predict8x8"/>.</summary>
@@ -224,59 +225,98 @@ internal static class IntraPrediction
     }
 
     /// <summary>
-    /// Vertical, horizontal and DC of an Intra_4x4 or Intra_8x8 block from its (filtered) neighbours <paramref name="e"/>,
-    /// in <see cref="PredictBlockReference"/>'s layout, a row at a time; the caller checked that the block's rows lie
-    /// inside the plane.
+    /// Vertical, horizontal and DC of an Intra_8x8 block, a row at a time, each filtering (8.3.2.2.1) only the edge it
+    /// reads, straight from the plane: the same values as <see cref="FilteredEdges8x8"/> gives
+    /// <see cref="PredictBlockReference"/>. The caller checked that the block's rows, the row above with its top right
+    /// and the top-left sample lie inside the plane.
     /// </summary>
-    private static void PredictBlock<TPixel>(int size, int mode, ReadOnlySpan<int> e, TPixel[] plane, int offset, int stride, IntraNeighbors n, int bitDepth)
+    private static void PredictFlat8x8<TPixel>(int mode, TPixel[] plane, int offset, int stride, IntraNeighbors n, int bitDepth)
         where TPixel : unmanaged
     {
-        ref TPixel block = ref plane[offset];
+        // From the top-left sample and the column to the left, so that every offset is non-negative (as Predict4x4's).
+        ref TPixel corner = ref plane[offset - stride - 1];
+        ref TPixel above = ref Unsafe.Add(ref corner, 1);
+        ref TPixel block = ref Unsafe.Add(ref above, stride);
+        ref TPixel left = ref plane[offset - 1];
         switch (mode)
         {
-            case 0: // Vertical: the first row from e, the others copies of it.
+            case 0: // Vertical: the filtered row above as the first row, the others copies of it.
                 Require(n.Top, mode);
-                for (int x = 0; x < size; x++)
                 {
-                    Unsafe.Add(ref block, x) = Samples.From<TPixel>(T(e, x));
+                    int previous = Samples.ToInt(n.TopLeft ? corner : above);
+                    int current = Samples.ToInt(above);
+                    for (int x = 0; x < 8; x++)
+                    {
+                        // p[8, -1] is p[7, -1] when the top right is missing (8.3.2.2).
+                        int next = x < 7 || n.TopRight ? Samples.ToInt(Unsafe.Add(ref above, x + 1)) : current;
+                        Unsafe.Add(ref block, x) = Samples.From<TPixel>((previous + (2 * current) + next + 2) >> 2);
+                        previous = current;
+                        current = next;
+                    }
                 }
 
-                for (int y = 1; y < size; y++)
+                for (int y = 1; y < 8; y++)
                 {
-                    CopyRow(ref block, ref Unsafe.Add(ref block, y * stride), size);
+                    CopyRow(ref block, ref Unsafe.Add(ref block, y * stride), 8);
                 }
 
                 break;
 
-            case 1: // Horizontal
+            case 1: // Horizontal: each row the filtered sample to its left.
                 Require(n.Left, mode);
-                for (int y = 0; y < size; y++)
                 {
-                    FillRow(ref Unsafe.Add(ref block, y * stride), size, L(e, y));
+                    int previous = Samples.ToInt(n.TopLeft ? corner : left);
+                    int current = Samples.ToInt(left);
+                    for (int y = 0; y < 8; y++)
+                    {
+                        int next = y < 7 ? Samples.ToInt(Unsafe.Add(ref left, (y + 1) * stride)) : current;
+                        FillRow(ref Unsafe.Add(ref block, y * stride), 8, (previous + (2 * current) + next + 2) >> 2);
+                        previous = current;
+                        current = next;
+                    }
                 }
 
                 break;
 
-            default: // DC
+            default: // DC: the sums of the filtered edges.
                 int sumTop = 0;
                 int sumLeft = 0;
-                for (int i = 0; i < size; i++)
+                if (n.Top)
                 {
-                    sumTop += T(e, i);
-                    sumLeft += L(e, i);
+                    int previous = Samples.ToInt(n.TopLeft ? corner : above);
+                    int current = Samples.ToInt(above);
+                    for (int x = 0; x < 8; x++)
+                    {
+                        int next = x < 7 || n.TopRight ? Samples.ToInt(Unsafe.Add(ref above, x + 1)) : current;
+                        sumTop += (previous + (2 * current) + next + 2) >> 2;
+                        previous = current;
+                        current = next;
+                    }
                 }
 
-                int log2 = size == 4 ? 2 : 3;
+                if (n.Left)
+                {
+                    int previous = Samples.ToInt(n.TopLeft ? corner : left);
+                    int current = Samples.ToInt(left);
+                    for (int y = 0; y < 8; y++)
+                    {
+                        int next = y < 7 ? Samples.ToInt(Unsafe.Add(ref left, (y + 1) * stride)) : current;
+                        sumLeft += (previous + (2 * current) + next + 2) >> 2;
+                        previous = current;
+                        current = next;
+                    }
+                }
+
                 int dc = (n.Left, n.Top) switch
                 {
-                    (true, true) => (sumTop + sumLeft + size) >> (log2 + 1),
-                    (true, false) => (sumLeft + (size >> 1)) >> log2,
-                    (false, true) => (sumTop + (size >> 1)) >> log2,
+                    (true, true) => (sumTop + sumLeft + 8) >> 4,
+                    (true, false) => (sumLeft + 4) >> 3,
+                    (false, true) => (sumTop + 4) >> 3,
                     _ => 1 << (bitDepth - 1),
                 };
-                for (int y = 0; y < size; y++)
+                for (int y = 0; y < 8; y++)
                 {
-                    FillRow(ref Unsafe.Add(ref block, y * stride), size, dc);
+                    FillRow(ref Unsafe.Add(ref block, y * stride), 8, dc);
                 }
 
                 break;

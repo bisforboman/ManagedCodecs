@@ -128,6 +128,13 @@ public class MbaffNeighborTests
                     continue;
                 }
 
+                // The deblocking filter's top edge, in any slice.
+                foreach (int size in new[] { 16, 8 })
+                {
+                    var above = PictureDecoder<byte>.AffNeighbor(field, slices, PairsWide, mb, 0, -1, size, size, anySlice: true, slotParity);
+                    Assert.Equal(above.Mb < 0 ? (-1, 0) : (above.Mb, above.Y), PictureDecoder<byte>.AffTopNeighbor(field, slices, PairsWide, mb, size, slotParity));
+                }
+
                 var pairs = PictureDecoder<byte>.FindAffPairs(field, slices, PairsWide, mb, slotParity);
                 foreach (var (maxW, maxH) in new[] { (16, 16), (8, 8), (8, 16) })
                 {

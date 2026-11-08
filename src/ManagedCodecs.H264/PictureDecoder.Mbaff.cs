@@ -1148,20 +1148,42 @@ internal sealed partial class PictureDecoder<TPixel>
     private TopEdgeList TopEdges(int mbAddr, int size)
     {
         bool field = _fieldMb[mbAddr];
-        bool isTop = (mbAddr & 1) == 0;
-        if (!field && isTop)
+        var (p, pRow) = AffTopNeighbor(_fieldMb, _sliceOfMb, _widthInMbs, mbAddr, size, Math.Max(_fieldParity, 0));
+        if (!field && (mbAddr & 1) == 0 && _fieldMb[p])
         {
-            int pair = mbAddr >> 1;
-            int above = (pair - _widthInMbs) * 2;
-            if (_fieldMb[above])
-            {
-                return new TopEdgeList(2, (above, size - 1, 2, 0, 2), (above + 1, size - 1, 2, 1, 2));
-            }
+            // A frame macroblock at the top of its pair under a field pair (p is that pair's bottom macroblock).
+            return new TopEdgeList(2, (p - 1, size - 1, 2, 0, 2), (p, size - 1, 2, 1, 2));
         }
 
-        var (p, _, pRow) = AffNeighbor(mbAddr, 0, -1, size, size, anySlice: true);
         bool fieldEdge = field || _fieldMb[p];
         return new TopEdgeList(1, (p, pRow, fieldEdge ? 2 : 1, 0, field ? 2 : 1), default);
+    }
+
+    /// <summary>
+    /// Table 6-4 for B at (0, -1) of a block <paramref name="size"/> samples high, in any slice (the deblocking
+    /// filter's top edge): the macroblock above and its row, as
+    /// <see cref="AffNeighbor(ReadOnlySpan{bool}, ReadOnlySpan{int}, int, int, int, int, int, int, bool, int)"/>
+    /// finds them, without its general case analysis; a test compares the two.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static (int Mb, int Row) AffTopNeighbor(ReadOnlySpan<bool> fieldMb, ReadOnlySpan<int> sliceOfMb, int widthInMbs, int mbAddr, int size, int slotParity)
+    {
+        bool frame = !fieldMb[mbAddr];
+        bool isTop = (mbAddr & 1) == 0;
+        if (frame && !isTop)
+        {
+            return (mbAddr - 1, size - 1); // the top macroblock of the same pair
+        }
+
+        int pair = mbAddr >> 1;
+        int above = (pair - widthInMbs) * 2;
+        if (pair < widthInMbs || sliceOfMb[above + slotParity] < 0)
+        {
+            return (-1, 0);
+        }
+
+        // A top field macroblock under a frame pair looks two frame rows up, into its bottom macroblock.
+        return frame || !isTop ? (above + 1, size - 1) : fieldMb[above] ? (above, size - 1) : (above + 1, size - 2);
     }
 
     /// <summary>The one or two top edges of <see cref="TopEdges"/>, without an array a macroblock.</summary>

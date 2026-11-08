@@ -28,7 +28,8 @@ build; whether Unity runs it as intended needs a Unity install, which nobody has
   once copied or dropped, for a later frame (no new array each frame). Unity's textures start at the bottom row, so the
   material flips the image (`mainTextureScale` y -1) instead of turning every frame over in memory.
 - Audio streams through an `AudioClip` (`AudioClip.Create` with a reader callback, which runs on Unity's audio thread)
-  as the decoder's float stereo, made once the first audio gives the rate.
+  as the decoder's float stereo, made and played once the first frame is shown, so that the sound starts with the
+  picture's clock (the audio decoded before then, which comes first, is queued); the first audio gives the rate.
 - Not for WebGL: it has no threads, and the decoder thread is the sample's design. On Android, StreamingAssets lie in
   the APK: read the file with `UnityWebRequest` into a `MemoryStream`, which `MediaPlayer` takes.
 - Speed on Mono: the package's page has the table. Audio, MJPEG and small videos play; 720p H.264 decodes at 26 to

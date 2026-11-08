@@ -58,8 +58,6 @@ public sealed class ManagedCodecsVideo : MonoBehaviour
             return;
         }
 
-        StartAudio();
-
         // The clock starts with the first frame shown (due at zero).
         var due = _player.TakeFrame(System.TimeSpan.FromSeconds(_start < 0 ? 0 : Time.time - _start));
         if (due is not null)
@@ -73,6 +71,8 @@ public sealed class ManagedCodecsVideo : MonoBehaviour
             _player.Return(due);
             _shown++;
         }
+
+        StartAudio();
 
         if (Time.time - _lastReport >= 5)
         {
@@ -117,8 +117,10 @@ public sealed class ManagedCodecsVideo : MonoBehaviour
         _texture.Apply(false);
     }
 
-    // The audio's clip, made once the first samples give the rate (HE-AAC's output is twice its core's), streaming from
-    // the decoded samples.
+    // The audio's clip, streaming from the decoded samples, made and played once the first frame is shown, so that the
+    // sound starts with the picture's clock: the first audio comes out of the decoder before the first frame (frame
+    // threading's delay and more), and is queued here until then. The first samples give the rate (HE-AAC's output is
+    // twice its core's).
     private void StartAudio()
     {
         while (_player!.TakeAudio() is { } chunk)
@@ -130,7 +132,7 @@ public sealed class ManagedCodecsVideo : MonoBehaviour
             }
         }
 
-        if (_audioRate == 0 || GetComponent<AudioSource>() is { clip: not null })
+        if (_audioRate == 0 || _start < 0 || GetComponent<AudioSource>() is { clip: not null })
         {
             return;
         }

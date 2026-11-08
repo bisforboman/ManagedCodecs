@@ -11,7 +11,10 @@ share internals, so each depends on the others at exactly its own version (`[X]`
 then reports a mix of versions (NU1107, or NU1608 for a newer one referenced directly) rather than letting it fail at
 run time.
 
-## Unreleased
+## 0.9.1 – 2026-11-08
+
+Fixes to the new playback packages: `MediaPlayer` no longer drops frames when a game ticks at the video's own rate,
+and `VideoTexture`'s sound starts with the picture. H.264 intra prediction is a little faster. No public API changes.
 
 ### Changed
 

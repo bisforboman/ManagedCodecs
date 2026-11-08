@@ -253,7 +253,8 @@ its own files and on rewritten ones (each case below checked with ffprobe):
 
 - **dwSampleSize 0** (MP3 and AAC as FFmpeg's muxer writes them, a frame a chunk): a packet a chunk, a tick each in
   dwScale / dwRate (1152/44100 for MP3). An empty audio chunk, which its muxer writes while interleaving
-  (avi-mjpeg-mp3), gives no packet and, unlike an empty video chunk, no tick. AAC's first packet has no duration in
+  beside libx264's video (its encoder delay holds the video back), gives no packet and, unlike an empty video chunk,
+  no tick (AviDemuxerTests, on a hand-built file: the samples' video is MJPEG). AAC's first packet has no duration in
   ffprobe (N/A; the demuxer's is 1, the test leaves it out).
 - **A dwSampleSize** (PCM, ADPCM, VirtualDub's MP3): ticks of dwSampleSize bytes, a packet's pts the bytes before it
   over dwSampleSize rounded down, its duration its own bytes over it. A chunk is cut into packets of 1024 blocks below

@@ -41,8 +41,7 @@ ff -f lavfi -i testsrc2=size=320x240:rate=25,noise=alls=60:allf=t -t 1 -c:v mjpe
 ff -f lavfi -i testsrc2=size=64x48:rate=25:duration=1,format=yuvj420p -f lavfi -i sine=duration=1.5 -c:v mjpeg -q:v 5 \
   -c:a libmp3lame -b:a 32k samples/avi-dropped-frame.avi
 # AVI audio (AviDemuxer.Audio; docs/decisions/2026-11-08-avi-audio.md), small as the one above. Stereo MP3, one frame a
-# chunk as FFmpeg's muxer writes it; the muxer also writes empty audio chunks while interleaving, which FFmpeg gives no
-# packet and no tick. (MJPEG: H.264 in AVI, Annex B without an avcC, is not decoded.)
+# chunk as FFmpeg's muxer writes it. (MJPEG: H.264 in AVI, Annex B without an avcC, is not decoded.)
 ff -f lavfi -i testsrc2=size=64x48:rate=25:duration=1,format=yuvj420p -f lavfi -i "sine=f=440:duration=1,aformat=channel_layouts=stereo" \
   -c:v mjpeg -q:v 5 -c:a libmp3lame -b:a 64k samples/avi-mjpeg-mp3.avi
 # PCM (16-bit mono, dwSampleSize 2): a packet of 1024 samples a chunk, timed in samples; named and skipped

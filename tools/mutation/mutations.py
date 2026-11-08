@@ -167,10 +167,10 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.Containers/Avi/AviDemuxer.cs",
          find="if (isVideoChunk && size == 0)\n                {\n                    frame++;\n                }\n                else ",
          replace="", tests="FullyQualifiedName~Avi|DisplayName~avi-dropped-frame"),
-    # An empty audio chunk gives no packet and takes no tick (FFmpeg's muxer writes some while interleaving: avi-mjpeg-mp3).
+    # An empty audio chunk gives no packet and takes no tick (FFmpeg's muxer writes some beside libx264's video).
     dict(file="src/ManagedCodecs.Containers/Avi/AviDemuxer.cs",
          find="if (id == audioId && size > 0)", replace="if (id == audioId)",
-         tests="FullyQualifiedName~AviConformance"),
+         tests="FullyQualifiedName~AviDemuxerTests"),
     # Audio with a dwSampleSize below 32 comes in pieces of 1024 blocks, from 32 up one block a packet.
     dict(file="src/ManagedCodecs.Containers/Avi/AviAudio.cs",
          find="sampleSize < 32 ? 1024 * sampleSize : sampleSize", replace="size",

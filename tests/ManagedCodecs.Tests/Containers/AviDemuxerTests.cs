@@ -146,9 +146,12 @@ public class AviDemuxerTests
     /// Audio with a dwSampleSize, as FFmpeg's AVI demuxer cuts it (each case checked with ffprobe on an FFmpeg AVI whose
     /// PCM chunks were merged): a chunk in pieces of 1024 blocks below 32 bytes a block, of one block from 32 bytes up,
     /// whole at 1 byte; each piece timed by the bytes before it over dwSampleSize, rounded down, and lasting its own
-    /// bytes over it. Empty chunks give nothing.
+    /// bytes over it. Empty chunks give nothing, and with a dwSampleSize of 0 (a packet a chunk, a tick each) take no
+    /// tick either, unlike an empty video chunk (FFmpeg's muxer writes some beside libx264's video, whose encoder delay
+    /// holds the video back while it interleaves).
     /// </summary>
     [Theory]
+    [InlineData(0, new[] { 2, 0, 3 }, new long[] { 2, 3 }, new long[] { 0, 1 }, new long[] { 1, 1 })]
     [InlineData(2, new[] { 5001, 0, 1001 }, new long[] { 2048, 2048, 905, 1001 }, new long[] { 0, 1024, 2048, 2500 }, new long[] { 1024, 1024, 452, 500 })]
     [InlineData(12, new[] { 30001 }, new long[] { 12288, 12288, 5425 }, new long[] { 0, 1024, 2048 }, new long[] { 1024, 1024, 452 })]
     [InlineData(32, new[] { 96 }, new long[] { 32, 32, 32 }, new long[] { 0, 1, 2 }, new long[] { 1, 1, 1 })]

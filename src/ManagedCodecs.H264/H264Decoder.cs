@@ -156,7 +156,7 @@ public sealed class H264Decoder : IVideoDecoder
     /// <summary>For tests: MBAFF frames and field pictures predict motion vectors from neighbours found both ways, one call for A, B and C and one lookup each, and throw where they differ.</summary>
     internal bool CheckMotionNeighbors { get; init; }
 
-    /// <summary>For tests: MBAFF frames and field pictures find each macroblock edge's bS both ways, for the four segments at once and segment by segment, and throw where they differ.</summary>
+    /// <summary>For tests: MBAFF frames and field pictures find each macroblock edge's bS both ways, for the four segments at once (or, across pairs of different kinds, a line at a time from what holds for the edge) and segment by segment, and throw where they differ.</summary>
     internal bool CheckMbaffStrengths { get; init; }
 
     /// <summary>

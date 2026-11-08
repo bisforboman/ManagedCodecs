@@ -18,10 +18,19 @@
        line), ExportDebug or ExportRelease, which would all reach the decoders unoptimised, about 4 times slower at
        1080p (issue #402). An item definition, so that it also reaches the references the SDK adds transitively (the
        decoders), which would otherwise build in Godot's configuration. A game using the package from nuget.org gets
-       its Release build anyway. -->
+       its Release build anyway. Godot builds through the solution (ManagedCodecs.Godot.sln), and in a solution build
+       MSBuild strips the parent's Configuration from a reference the solution doesn't map (GlobalPropertiesToRemove),
+       which strips SetConfiguration's too: the references built in Debug whatever this said. Not unsetting it keeps
+       SetConfiguration, here and (passed down as a global property) in Playback, which hands Release on to the
+       decoders it references. -->
+  <PropertyGroup>
+    <ShouldUnsetParentConfigurationAndPlatform>false</ShouldUnsetParentConfigurationAndPlatform>
+  </PropertyGroup>
+
   <ItemDefinitionGroup>
     <ProjectReference>
       <SetConfiguration>Configuration=Release</SetConfiguration>
+      <AdditionalProperties>ShouldUnsetParentConfigurationAndPlatform=false</AdditionalProperties>
     </ProjectReference>
   </ItemDefinitionGroup>
 

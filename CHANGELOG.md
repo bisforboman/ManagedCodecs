@@ -21,6 +21,11 @@ run time.
 - H.264: in 4:2:2 MBAFF frames and field pictures, the deblocking filter takes chroma's left edge between pairs of one
   kind, and the top edge where its rows meet, as plain edges instead of line by line: 17 to 18% fewer instructions
   in 4:2:2 MBAFF streams, about 11% of their time under the JIT.
+- H.264: 16x16 and chroma intra prediction (vertical, horizontal, DC, plane) also write a row at a time: 1 to 5% fewer
+  instructions in intra-only streams under Native AOT, within noise under the JIT. The output is unchanged.
+- H.264: Intra_8x8 vertical, horizontal and DC filter only the edge they predict from, straight from the picture: about
+  2% faster under the JIT on High profile streams, intra-only or not (2.5 to 3.4% fewer instructions under Native
+  AOT). The output is unchanged.
 
 ### Fixed
 

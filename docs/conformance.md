@@ -264,8 +264,8 @@ interpolation in a byte's time base, up to 10 ticks (1.25 ms) behind each frame'
 (name.mp3.trim.f32, within 2^-17), and `MediaPlayerTests` plays the two MP3 and the AAC sample against the decoders'
 own output. After a `Seek` (in either stream) the audio starts at its last packet at or before the time asked for,
 as `SeekTests` checks for every demuxer's streams. Not checked against FFmpeg: how it splits PCM chunks of other
-sizes, format tag 0x50 (MPEG Layer I and II) with Layer III frames, IMA ADPCM, AC-3; and H.264 in AVI (Annex B, no
-avcC) is not decoded, with or without audio.
+sizes, format tag 0x50 (MPEG Layer I and II) with Layer III frames, IMA ADPCM, AC-3. H.264 in AVI: see H.264,
+Annex B.
 
 ## Matroska and WebM demuxing
 
@@ -312,6 +312,18 @@ to the track's next frame, which the test checks against FFmpeg's next pts; Opus
 parser, which reads the packets, so they too are compared that way.
 
 ## H.264
+
+### Annex B (AVI)
+
+H.264 in AVI is Annex B: NAL units behind start codes, the SPS and PPS among them, no avcC. A decoder made without
+a configuration record reads that: each unit runs from a start code (0x000001) to the next, less the zero bytes before
+it (a four-byte start code's first, trailing_zero_8bits). AVI gives no presentation times, only its packets' decoding
+order (a frame count), so each frame shown takes the earliest of those not yet given, and the frames come out at
+increasing times as FFmpeg's do; with an avcC (MP4, Matroska) each keeps its own (a mutation entry; avi-h264 has B
+pictures). Bit-exact with FFmpeg, every conformance theory (threads, borrowed frames and the rest), on avi-h264
+(libx264 High with B pictures) and avi-h264-baseline-mp3 (Constrained Baseline beside MP3, the second frame dropped by
+FFmpeg's muxer). AVI's H.264 has no index read for keyframes, so `Seek` refuses it and a thumbnail decodes from the
+start (README).
 
 ### Profiles and tools
 

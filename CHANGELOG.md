@@ -21,6 +21,12 @@ run time.
   plays an AVI's MP3 and AAC, `Seek` takes the audio stream too, and `VideoProbe`'s duration counts the audio, as
   ffprobe's does (docs/decisions/2026-11-08-avi-audio.md).
 
+### Fixed
+
+- H.264 in AVI decodes: its Annex B stream (start codes, the SPS and PPS among the packets, no avcC) made
+  `H264Decoder` throw. A decoder made without a configuration record (`codecPrivate` empty, as `AviDemuxer` gives it)
+  now reads Annex B, and its frames take the packets' decoding-order times in increasing order, as FFmpeg's do.
+
 ## 0.10.0 – 2026-11-08
 
 MP3: the new package `ManagedCodecs.Mp3` decodes MPEG audio Layer III, the containers name MP3 tracks

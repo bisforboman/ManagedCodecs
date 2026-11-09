@@ -227,7 +227,7 @@ public class H264ConformanceTests
     /// <summary>H.264 in MP4 whose avcC says profile_idc 66 (Baseline), 77 (Main) or 100 (High).</summary>
     private static bool IsSupported(string name)
     {
-        if (!name.EndsWith(".mp4", StringComparison.Ordinal) && !name.EndsWith(".mkv", StringComparison.Ordinal))
+        if (!name.EndsWith(".mp4", StringComparison.Ordinal) && !name.EndsWith(".mkv", StringComparison.Ordinal) && !name.EndsWith(".avi", StringComparison.Ordinal))
         {
             return false;
         }
@@ -238,7 +238,8 @@ public class H264ConformanceTests
             return false;
         }
 
+        // AVI's Annex B streams have no avcC: their parameter sets come in the packets.
         var avcC = video.CodecPrivate.Span;
-        return avcC.Length > 1 && avcC[1] is 66 or 77 or 100 or 110 or 122 or 244;
+        return avcC.IsEmpty || (avcC.Length > 1 && avcC[1] is 66 or 77 or 100 or 110 or 122 or 244);
     }
 }

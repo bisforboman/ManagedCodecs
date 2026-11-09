@@ -11,7 +11,11 @@ share internals, so each depends on the others at exactly its own version (`[X]`
 then reports a mix of versions (NU1107, or NU1608 for a newer one referenced directly) rather than letting it fail at
 run time.
 
-## Unreleased
+## 0.11.0 – 2026-11-09
+
+AVI audio: `AviDemuxer` gives an AVI's audio stream, and `MediaPlayer` plays its MP3, AAC and 8- and 16-bit PCM (the new
+`PcmDecoder`), so cameras' MJPEG AVIs have sound. H.264 in AVI decodes and seeks. Raw MP3 files frame as FFmpeg's in
+more cases. New public API, hence a minor version; code built against 0.10 keeps working.
 
 ### Added
 
@@ -23,9 +27,9 @@ run time.
 
 - Containers: `AviDemuxer.Audio` is the file's first audio stream, where it was always null, and `ReadPackets` gives
   its packets with the video's: MP3 (both as FFmpeg's muxer writes it and in the CBR layout of VirtualDub and older
-  muxers, re-split into frames), AAC, and other audio named by its format tag (8- and 16-bit PCM as `CodecIds.PcmU8` and `CodecIds.PcmS16Le`, other
-  PCM as `"0x0001"`; PCM and ADPCM in pieces of chunks, as FFmpeg's demuxer cuts them). So `MediaPlayer`
-  plays an AVI's MP3, AAC and PCM, `Seek` takes the audio stream too, and `VideoProbe`'s duration counts the audio, as
+  muxers, re-split into frames), AAC, and other audio named by its format tag (8- and 16-bit PCM as
+  `CodecIds.PcmU8` and `CodecIds.PcmS16Le`, other PCM as `"0x0001"`; PCM and ADPCM in pieces of chunks, as FFmpeg's
+  demuxer cuts them). So `MediaPlayer` plays an AVI's MP3, AAC and PCM, `Seek` takes the audio stream too, and `VideoProbe`'s duration counts the audio, as
   ffprobe's does: audio with a frame a chunk (MP3, AAC), not PCM, whose stream has no duration in FFmpeg
   (docs/decisions/2026-11-08-avi-audio.md).
 

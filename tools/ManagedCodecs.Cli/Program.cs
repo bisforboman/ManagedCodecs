@@ -138,6 +138,7 @@ for (int loop = 0; loop < loops; loop++)
     {
         CodecIds.Aac => new AacDecoder(audio) { Threads = threads },
         CodecIds.Mp3 => new Mp3Decoder(audio),
+        CodecIds.PcmU8 or CodecIds.PcmS16Le => new PcmDecoder(audio),
         _ => null,
     };
 

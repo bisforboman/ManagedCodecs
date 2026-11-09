@@ -92,7 +92,7 @@ And four cameras' own MJPEG from archive.org (each licence on its item's page; t
 every MJPEG sample above is FFmpeg's or ImageMagick's encoder:
 
 - Three digital cameras' AVIs, a Canon PowerShot's among them: 320x240 at 15 and 640x480 at 30 frames a second, 31
-  to 97 s, 4:2:2, with 8- and 16-bit PCM audio, which is not decoded (nor read by `VideoProbe`, so not probed).
+  to 97 s, 4:2:2, with 8- and 16-bit PCM audio, decoded and compared with FFmpeg's, and probed (rate, channels).
 - A Nikon Coolpix's QuickTime file: 320x240 MJPEG (`jpeg`) at 15 frames a second, 33 s, starting with a `pnot`
   preview box and no `ftyp`, which `Demuxer.Open` didn't recognise until it was added.
 
@@ -250,7 +250,8 @@ FFmpeg gives them) and its codec private data with FFmpeg's extradata, on every 
 | --- | --- |
 | avi-dropped-frame, avi-mjpeg-mp3 | MP3 as FFmpeg's muxer writes it: a frame a chunk, dwScale 1152, mono and stereo |
 | avi-mjpeg-aac | AAC, a frame a chunk, its AudioSpecificConfig in the WAVEFORMATEX's extra bytes |
-| avi-mjpeg-pcm | PCM (dwSampleSize 2): a packet a chunk of 1024 samples, timed in samples; named `0x0001`, not decoded |
+| avi-mjpeg-pcm | 16-bit PCM (dwSampleSize 2): a packet a chunk of 1024 samples, timed in samples; `CodecIds.PcmS16Le` |
+| avi-mjpeg-pcm-u8 | 8-bit unsigned PCM at 11.025 kHz, stereo (dwSampleSize 2); `CodecIds.PcmU8` |
 | avi-mjpeg-mp3-cbr | MP3 in the CBR layout of VirtualDub and older muxers, written by `tools/avi-mp3-cbr.py` |
 
 The CBR layout (dwScale 1, dwRate the bytes a second, dwSampleSize 1) cuts its chunks anywhere in a frame:
@@ -262,7 +263,11 @@ FFmpeg's; their times are their sample positions (time base 1 / the sample rate)
 interpolation in a byte's time base, up to 10 ticks (1.25 ms) behind each frame's byte offset: compared within
 1.5 ms. The decoded audio of the three MP3 samples is checked against FFmpeg's as the other MP3 samples are
 (name.mp3.trim.f32, within 2^-17), and `MediaPlayerTests` plays the two MP3 and the AAC sample against the decoders'
-own output. After a `Seek` (in either stream) the audio starts at its last packet at or before the time asked for,
+own output. `PcmDecoderTests` decodes the two PCM samples exactly as FFmpeg does (name.pcm.f32, its `-f f32le`
+output, compared bit for bit: (x - 128) / 128 and x / 32768) and `MediaPlayerTests` plays them; a packet's bytes after
+its last whole sample frame are ignored and one shorter than a frame refused, as FFmpeg's decoder does (checked on raw
+`-f s16le` input; a unit test and a mutation entry, since AVI chunks are whole frames in every sample). PCM of other
+depths (24 and 32 bits, WAVE_FORMAT_EXTENSIBLE) stays `0x0001`, not decoded. After a `Seek` (in either stream) the audio starts at its last packet at or before the time asked for,
 as `SeekTests` checks for every demuxer's streams.
 
 Audio with a dwSampleSize comes in pieces of chunks, as FFmpeg's demuxer cuts them: 1024 blocks below 32 bytes a block,

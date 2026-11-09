@@ -40,9 +40,15 @@ public static class CodecIds
 
     /// <summary>
     /// MPEG-1 or MPEG-2 audio, MP3 (Layer III) as a rule: the MP4 object types 0x6B and 0x69, which don't tell the layers
-    /// apart, its QuickTime sample entries and Matroska's A_MPEG/L3. Demuxed, not decoded.
+    /// apart, its QuickTime sample entries, Matroska's A_MPEG/L3, AVI's format tag 0x55 and raw .mp3 files.
     /// </summary>
     public const string Mp3 = "MP3";
+
+    /// <summary>PCM, unsigned 8-bit samples, channels interleaved (AVI's format tag 1 at 8 bits); <see cref="PcmDecoder"/>.</summary>
+    public const string PcmU8 = "PCM_U8";
+
+    /// <summary>PCM, signed 16-bit little-endian samples, channels interleaved (AVI's format tag 1 at 16 bits); <see cref="PcmDecoder"/>.</summary>
+    public const string PcmS16Le = "PCM_S16LE";
 }
 
 /// <summary>One compressed unit of data pulled out of a container, e.g. one MJPEG frame.</summary>

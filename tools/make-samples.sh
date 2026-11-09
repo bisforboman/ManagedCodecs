@@ -51,6 +51,9 @@ ff -f lavfi -i testsrc2=size=160x120:rate=25 -f lavfi -i "sine=frequency=440:sam
   -c:a aac -b:a 64k samples/avi-mjpeg-aac.avi
 ff -f lavfi -i testsrc2=size=160x120:rate=25 -f lavfi -i "sine=frequency=440:sample_rate=22050" -t 1 -c:v mjpeg -q:v 5 \
   -c:a pcm_s16le samples/avi-mjpeg-pcm.avi
+# 8-bit PCM, as cameras write it (PcmDecoder): unsigned, at 11.025 kHz, here in stereo for the channels' interleaving.
+ff -f lavfi -i testsrc2=size=160x120:rate=25 -f lavfi -i "aevalsrc=0.4*sin(2*PI*440*t)|0.3*sin(2*PI*660*t):s=11025:d=1" \
+  -t 1 -c:v mjpeg -q:v 5 -c:a pcm_u8 samples/avi-mjpeg-pcm-u8.avi
 avicbr=$(mktemp --suffix=.avi)
 ff -f lavfi -i testsrc2=size=160x120:rate=25 -f lavfi -i "aevalsrc=0.4*sin(2*PI*440*t)|0.3*sin(2*PI*660*t):s=44100:d=2" \
   -t 2 -c:v mjpeg -q:v 5 -c:a libmp3lame -b:a 64k "$avicbr"
@@ -951,6 +954,12 @@ for f in samples/*.mp4 samples/*.mkv samples/*.mp3 samples/*.avi; do
   [ "$(ffprobe -v error -select_streams a:0 -show_entries stream=codec_name -of csv=p=0 "$f")" = mp3 ] || continue
   [[ $f == *.mp4 ]] && ff -ignore_editlist 1 -i "$f" -map 0:a:0 -f f32le "${f%.*}.mp3.f32"
   ff -i "$f" -map 0:a:0 -f f32le "${f%.*}.mp3.trim.f32"
+done
+# PCM in AVI: name.pcm.f32, the decoded audio as FFmpeg gives it (PcmDecoder's values exactly).
+for f in samples/*.avi; do
+  case "$(ffprobe -v error -select_streams a:0 -show_entries stream=codec_name -of csv=p=0 "$f")" in
+    pcm_u8 | pcm_s16le) ff -i "$f" -map 0:a:0 -f f32le "${f%.avi}.pcm.f32" ;;
+  esac
 done
 # Raw MP3: packets as FFmpeg's demuxer gives them, and in .packets.csv with their skip-samples side data (the gapless
 # trim at both ends).

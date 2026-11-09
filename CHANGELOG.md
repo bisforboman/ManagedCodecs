@@ -13,13 +13,19 @@ run time.
 
 ## Unreleased
 
+### Added
+
+- `PcmDecoder` (ManagedCodecs.Core) and `CodecIds.PcmU8` and `CodecIds.PcmS16Le`: AVI's 8-bit unsigned and 16-bit
+  signed PCM, exactly FFmpeg's float output. `MediaPlayer` plays it, so cameras' MJPEG AVIs have sound, and `mcdec`
+  decodes it (docs/decisions/2026-11-09-pcm-decoder.md).
+
 ### Changed
 
 - Containers: `AviDemuxer.Audio` is the file's first audio stream, where it was always null, and `ReadPackets` gives
   its packets with the video's: MP3 (both as FFmpeg's muxer writes it and in the CBR layout of VirtualDub and older
-  muxers, re-split into frames), AAC, and other audio named by its format tag (`"0x0001"` for PCM; PCM and ADPCM in
-  pieces of chunks, as FFmpeg's demuxer cuts them). So `MediaPlayer`
-  plays an AVI's MP3 and AAC, `Seek` takes the audio stream too, and `VideoProbe`'s duration counts the audio, as
+  muxers, re-split into frames), AAC, and other audio named by its format tag (8- and 16-bit PCM as `CodecIds.PcmU8` and `CodecIds.PcmS16Le`, other
+  PCM as `"0x0001"`; PCM and ADPCM in pieces of chunks, as FFmpeg's demuxer cuts them). So `MediaPlayer`
+  plays an AVI's MP3, AAC and PCM, `Seek` takes the audio stream too, and `VideoProbe`'s duration counts the audio, as
   ffprobe's does (docs/decisions/2026-11-08-avi-audio.md).
 
 ### Fixed

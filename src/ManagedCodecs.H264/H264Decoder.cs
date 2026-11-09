@@ -23,8 +23,10 @@ public sealed class H264Decoder : IVideoDecoder
     private readonly ReferenceList _references = new();
     private readonly int _lengthSize;
 
-    // An Annex B stream's decoding-order times of the frames queued for output, not yet given to one (InTimeOrder).
+    // An Annex B stream's packets' times in decoding order, from the first not yet given to a frame (InTimeOrder), and the
+    // reorder depth its frames are output with.
     private readonly List<long> _decodeTimes = [];
+    private int _timesDepth;
 
     // Pictures are reused once they are no longer references and no frame waiting for output
     // borrows them (output is a copy, see Crop, unless BorrowFrames), and so is the per-macroblock
@@ -372,7 +374,7 @@ public sealed class H264Decoder : IVideoDecoder
         }
 
         frames.AddRange(InTimeOrder(_output.Flush()));
-        _decodeTimes.Clear(); // a picture never shown leaves its time behind
+        _decodeTimes.Clear(); // the stream ends; a picture never shown leaves its time behind
         return frames;
     }
 
@@ -543,6 +545,7 @@ public sealed class H264Decoder : IVideoDecoder
         if (_lengthSize == 0)
         {
             _decodeTimes.Add(job.Pts);
+            _timesDepth = ReorderDepth(state.Sps);
         }
 
         frames.AddRange(InTimeOrder(_output.Add(frame, picture.Poc, job.Restart, ReorderDepth(state.Sps), borrow ? picture : null)));
@@ -550,9 +553,10 @@ public sealed class H264Decoder : IVideoDecoder
 
     /// <summary>
     /// Frames as the output queue gives them. An Annex B stream's (AVI's) packets carry no presentation times, only their
-    /// decoding order (a frame count): each frame shown takes the earliest of those not yet given, so the frames come out
-    /// at increasing times, as FFmpeg's do; with a container's presentation times (an avcC: MP4, Matroska) a frame keeps
-    /// its own.
+    /// decoding order (a frame count). As FFmpeg's, the k-th frame shown takes the time of the packet the reorder depth
+    /// D later in decoding order (k + D: the one decoded when a decoder that holds D frames shows it), and past the last
+    /// packet one tick more a frame: increasing times, D frames after the packets' (libx264's B pictures: frames from
+    /// time 2). With a container's presentation times (an avcC: MP4, Matroska) a frame keeps its own.
     /// </summary>
     private List<VideoFrame> InTimeOrder(List<VideoFrame> shown)
     {
@@ -563,16 +567,11 @@ public sealed class H264Decoder : IVideoDecoder
 
         foreach (var frame in shown)
         {
-            int earliest = 0;
-            for (int i = 1; i < _decodeTimes.Count; i++)
-            {
-                earliest = _decodeTimes[i] < _decodeTimes[earliest] ? i : earliest;
-            }
-
+            int at = _timesDepth;
             if (_decodeTimes.Count > 0)
             {
-                frame.Pts = _decodeTimes[earliest];
-                _decodeTimes.RemoveAt(earliest);
+                frame.Pts = at < _decodeTimes.Count ? _decodeTimes[at] : _decodeTimes[^1] + (at - (_decodeTimes.Count - 1));
+                _decodeTimes.RemoveAt(0);
             }
         }
 

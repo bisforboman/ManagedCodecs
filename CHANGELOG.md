@@ -32,7 +32,11 @@ run time.
 
 - H.264 in AVI decodes: its Annex B stream (start codes, the SPS and PPS among the packets, no avcC) made
   `H264Decoder` throw. A decoder made without a configuration record (`codecPrivate` empty, as `AviDemuxer` gives it)
-  now reads Annex B, and its frames take the packets' decoding-order times in increasing order, as FFmpeg's do.
+  now reads Annex B, and its frames take the packets' decoding-order times as FFmpeg's do (the k-th frame shown the
+  time of the packet the reorder depth later).
+- Containers: an AVI's H.264 seeks, by the keyframes of its 'idx1' index (from at least 16 frames before the time, as
+  its packets carry decoding times), and its packets' `IsKeyframe` is the index's, where every packet was a keyframe;
+  so thumbnails of such a file no longer decode it from the start.
 - Containers: `Mp3Demuxer` frames a raw MP3 file as FFmpeg's demuxer in three more cases: a first frame whose header
   differs from the next one's (mode, copyright, original, emphasis) is skipped; a Xing or Info frame that counts neither
   frames nor bytes is a packet; and a packet the LAME padding covers whole skips all its samples

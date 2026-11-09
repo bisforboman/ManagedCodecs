@@ -20,8 +20,9 @@ namespace ManagedCodecs.Containers;
 /// its WAVEFORMATEX format tag in hex ("0x0001" for PCM at other depths, "0x0011" for IMA ADPCM).
 /// </para>
 /// <para>
-/// Not yet supported: OpenDML / AVI 2.0 files over 1 GB (RIFF 'AVIX' extensions), the idx1 or indx index (so
-/// <see cref="Packet.IsKeyframe"/> is always true, which is correct for MJPEG and audio).
+/// Video keyframes come from the 'idx1' index (AVIIF_KEYFRAME), as FFmpeg's demuxer reads them; without one, and for
+/// MJPEG, every video packet is a keyframe (as every audio packet is). Not yet supported: OpenDML / AVI 2.0 files over
+/// 1 GB (RIFF 'AVIX' extensions) and their 'indx' index.
 /// </para>
 /// </remarks>
 public sealed class AviDemuxer : IDemuxer
@@ -30,6 +31,10 @@ public sealed class AviDemuxer : IDemuxer
     private readonly bool _leaveOpen;
     private readonly long _moviStart;
     private readonly long _moviEnd;
+
+    // The video's keyframe flags from the 'idx1' index, one a non-empty video chunk in order; null without an index (or
+    // for MJPEG, whose every frame is one).
+    private readonly bool[]? _keyframes;
     private readonly int _videoStreamIndex;
     private readonly AudioLayout _audioLayout;
     private readonly uint _audioSampleSize;
@@ -66,6 +71,7 @@ public sealed class AviDemuxer : IDemuxer
 
             long riffEnd = Math.Min(8 + (long)riffSize, _stream.Length);
             HeaderInfo? header = null;
+            (long Start, long End)? index = null;
 
             long pos = 12;
             while (pos + 8 <= riffEnd)
@@ -88,6 +94,10 @@ public sealed class AviDemuxer : IDemuxer
                         _moviEnd = dataEnd;
                     }
                 }
+                else if (id == "idx1" && index is null)
+                {
+                    index = (dataStart, dataEnd);
+                }
 
                 pos = NextChunk(pos, size);
             }
@@ -108,6 +118,7 @@ public sealed class AviDemuxer : IDemuxer
             }
 
             _videoStreamIndex = header.VideoStreamIndex;
+            _keyframes = index is { } idx1 && NormalizeCodec(header.Codec) != CodecIds.Mjpeg ? ReadKeyframes(idx1.Start, idx1.End) : null;
 
             // Like FFmpeg, take the time base from the stream header (dwScale / dwRate) and fall
             // back to the main header's frame duration. Each chunk is one tick, an empty one too.
@@ -166,10 +177,12 @@ public sealed class AviDemuxer : IDemuxer
 
     /// <inheritdoc/>
     /// <remarks>
-    /// MJPEG only: every frame is a keyframe, so reading starts at the frame shown at <paramref name="pts"/> (or the one
-    /// before it, after a dropped frame), and the audio at its last packet at or before that time. The time can be the
-    /// audio stream's too. The walk to it reads the chunk headers before it, not their data. Other codecs need the
-    /// keyframes, which this demuxer does not read from the 'idx1' index yet, and throw.
+    /// Reading starts at the last video keyframe at or before <paramref name="pts"/>, by the 'idx1' index at least
+    /// <see cref="MaxReorderFrames"/> frames before it (the packets' times are decoding times, and a frame is shown up
+    /// to that many later; in MJPEG, whose every frame is a keyframe, the frame shown then, or the one before it after
+    /// a dropped frame), and the audio at its last packet at or before
+    /// that time. The time can be the audio stream's too. The walk to it reads the chunk headers before it, not their
+    /// data. Other codecs than MJPEG need the 'idx1' index for their keyframes: a file without one throws.
     /// </remarks>
     public void Seek(long pts, int streamIndex)
     {
@@ -187,13 +200,21 @@ public sealed class AviDemuxer : IDemuxer
             throw new ArgumentOutOfRangeException(nameof(streamIndex), streamIndex, "The file has no stream of that index.");
         }
 
-        if (Video.Codec != CodecIds.Mjpeg)
+        if (Video.Codec != CodecIds.Mjpeg && _keyframes is null)
         {
-            throw new NotSupportedException($"Seeking in {Video.Codec} in AVI is not supported: only MJPEG, whose every frame is a keyframe.");
+            throw new NotSupportedException($"Seeking in {Video.Codec} in AVI needs its 'idx1' index, which the file lacks: only MJPEG, whose every frame is a keyframe, seeks without one.");
         }
 
-        // The video's frame at or before the time (in its ticks, rounded down).
+        // The video's frame at or before the time (in its ticks, rounded down). AVI's packets carry decoding times only, and
+        // a decoder shows a frame up to its reorder delay later (FFmpeg's frame times are the packets' that many later):
+        // with keyframes from the index, the start is the last keyframe at least the largest delay H.264 allows (16
+        // frames) before the time, so the frame shown then comes after it.
         long videoPts = streamIndex == _videoStreamIndex ? pts : FloorTicks(pts, timeBase, Video.TimeBase);
+        if (_keyframes is not null)
+        {
+            videoPts -= MaxReorderFrames;
+        }
+
         long start = 0;
         foreach (var info in ReadSteps.RunInfo(_stream, Steps(withData: false, from: 0, audio: false), "AVI"))
         {
@@ -202,12 +223,46 @@ public sealed class AviDemuxer : IDemuxer
                 break;
             }
 
-            start = info.Sequence;
+            if (info.IsKeyframe)
+            {
+                start = info.Sequence;
+            }
         }
 
         _startSequence = start;
         _start = (pts, timeBase);
     }
+
+    /// <summary>
+    /// How many frames before a seek's time the start of an indexed (non-MJPEG) AVI video lies at least: H.264's largest
+    /// reorder delay (max_num_reorder_frames, 16).
+    /// </summary>
+    internal const int MaxReorderFrames = 16;
+
+    // The 'idx1' index's keyframe flags (AVIIF_KEYFRAME, 0x10) of the video's chunks with data, in order: entries of 16
+    // bytes (dwChunkId, dwFlags, dwOffset, dwSize), as FFmpeg's demuxer reads the flags.
+    private bool[] ReadKeyframes(long start, long end)
+    {
+        string prefix = _videoStreamIndex.ToString("00", CultureInfo.InvariantCulture);
+        var flags = new List<bool>();
+        var entry = new byte[16];
+        for (long pos = start; pos + 16 <= end; pos += 16)
+        {
+            _stream.Position = pos;
+            _stream.ReadExactly(entry);
+            string id = Encoding.ASCII.GetString(entry, 0, 4);
+            bool video = id.StartsWith(prefix, StringComparison.Ordinal) && (id.EndsWith("dc", StringComparison.Ordinal) || id.EndsWith("db", StringComparison.Ordinal));
+            if (video && BinaryPrimitives.ReadUInt32LittleEndian(entry.AsSpan(12)) > 0)
+            {
+                flags.Add((BinaryPrimitives.ReadUInt32LittleEndian(entry.AsSpan(4)) & 0x10) != 0);
+            }
+        }
+
+        return [.. flags];
+    }
+
+    // Whether video packet sequence is a keyframe: by the index, every one without it (or past its end).
+    private bool IsKeyframe(long sequence) => _keyframes is null || sequence >= _keyframes.Length || _keyframes[sequence];
 
     // value x from, in to's ticks, rounded down.
     private static long FloorTicks(long value, Rational from, Rational to)
@@ -313,11 +368,11 @@ public sealed class AviDemuxer : IDemuxer
                     {
                         var data = new byte[size];
                         yield return ReadStep.Read(pos + 8, data);
-                        yield return ReadStep.Yield(new Packet(_videoStreamIndex, sequence, data, IsKeyframe: true, Dts: frame, Pts: frame, Duration: 1));
+                        yield return ReadStep.Yield(new Packet(_videoStreamIndex, sequence, data, IsKeyframe(sequence), Dts: frame, Pts: frame, Duration: 1));
                     }
                     else
                     {
-                        yield return ReadStep.Describe(new PacketInfo(_videoStreamIndex, sequence, checked((int)size), IsKeyframe: true, Dts: frame, Pts: frame, Duration: 1));
+                        yield return ReadStep.Describe(new PacketInfo(_videoStreamIndex, sequence, checked((int)size), IsKeyframe(sequence), Dts: frame, Pts: frame, Duration: 1));
                     }
 
                     sequence++;

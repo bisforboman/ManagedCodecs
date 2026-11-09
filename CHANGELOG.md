@@ -30,6 +30,9 @@ run time.
 
 ### Fixed
 
+- H.264 in AVI decodes: its Annex B stream (start codes, the SPS and PPS among the packets, no avcC) made
+  `H264Decoder` throw. A decoder made without a configuration record (`codecPrivate` empty, as `AviDemuxer` gives it)
+  now reads Annex B, and its frames take the packets' decoding-order times in increasing order, as FFmpeg's do.
 - Containers: `Mp3Demuxer` frames a raw MP3 file as FFmpeg's demuxer in three more cases: a first frame whose header
   differs from the next one's (mode, copyright, original, emphasis) is skipped; a Xing or Info frame that counts neither
   frames nor bytes is a packet; and a packet the LAME padding covers whole skips all its samples

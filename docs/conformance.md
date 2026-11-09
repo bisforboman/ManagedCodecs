@@ -277,8 +277,7 @@ one block from 32 bytes up (IMA and MS ADPCM's 1024-byte blocks, 8-channel 32-bi
 sample shows the cutting: ffprobe did, on FFmpeg AVIs whose PCM chunks were merged into larger and odd-sized ones
 (16-bit mono and stereo, 24-bit stereo, 16-bit 5.1, 8-bit mono, 32-bit 7.1, IMA and MS ADPCM), and
 `AviDemuxerTests.CutsAudioChunksAsFfmpeg` checks its sizes and times on hand-built files. Not checked against FFmpeg:
-format tag 0x50 (MPEG Layer I and II) with Layer III frames, IMA ADPCM, AC-3; and H.264 in AVI (Annex B, no
-avcC) is not decoded, with or without audio.
+format tag 0x50 (MPEG Layer I and II) with Layer III frames, IMA ADPCM, AC-3. H.264 in AVI: see H.264, Annex B.
 
 ## Matroska and WebM demuxing
 
@@ -325,6 +324,18 @@ to the track's next frame, which the test checks against FFmpeg's next pts; Opus
 parser, which reads the packets, so they too are compared that way.
 
 ## H.264
+
+### Annex B (AVI)
+
+H.264 in AVI is Annex B: NAL units behind start codes, the SPS and PPS among them, no avcC. A decoder made without
+a configuration record reads that: each unit runs from a start code (0x000001) to the next, less the zero bytes before
+it (a four-byte start code's first, trailing_zero_8bits). AVI gives no presentation times, only its packets' decoding
+order (a frame count), so each frame shown takes the earliest of those not yet given, and the frames come out at
+increasing times as FFmpeg's do; with an avcC (MP4, Matroska) each keeps its own (a mutation entry; avi-h264 has B
+pictures). Bit-exact with FFmpeg, every conformance theory (threads, borrowed frames and the rest), on avi-h264
+(libx264 High with B pictures) and avi-h264-baseline-mp3 (Constrained Baseline beside MP3, the second frame dropped by
+FFmpeg's muxer). AVI's H.264 has no index read for keyframes, so `Seek` refuses it and a thumbnail decodes from the
+start (README).
 
 ### Profiles and tools
 

@@ -637,4 +637,10 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.Containers/Avi/AviDemuxer.cs",
          find="                at++;\n                continue;\n", replace="                break;\n",
          tests="DisplayName~CbrMp3_SkipsBytesThatStartNoFrame"),
+    # An Annex B stream's (AVI's) frames take its decoding-order times in increasing order, as FFmpeg's do; without it a
+    # stream with B pictures comes out at its pictures' decoding times (avi-h264).
+    dict(file="src/ManagedCodecs.H264/H264Decoder.cs",
+         find="        if (_lengthSize != 0)\n        {\n            return shown;\n        }\n",
+         replace="        if (_lengthSize != 0 || shown.Count >= 0)\n        {\n            return shown;\n        }\n",
+         tests="DisplayName~avi-h264"),
 ]

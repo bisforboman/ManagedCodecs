@@ -173,6 +173,40 @@ public class AviDemuxerTests
         }
     }
 
+    /// <summary>
+    /// Audio with a dwSampleSize, as FFmpeg's AVI demuxer cuts it (each case checked with ffprobe on an FFmpeg AVI whose
+    /// PCM chunks were merged: FFmpeg's muxer writes chunks of 1024 samples, so no sample shows it): a chunk in pieces of
+    /// 1024 blocks below 32 bytes a block, of one block from 32 bytes up, whole at 1 byte; each piece timed by all the
+    /// bytes before it over dwSampleSize, rounded down (after two chunks of 1001 bytes at 2 bytes a block: 1001, not
+    /// 1000), and lasting its own bytes over it. Empty chunks give nothing, and with a dwSampleSize of 0 (a packet a
+    /// chunk, a tick each) take no tick either.
+    /// </summary>
+    [Theory]
+    [InlineData(0, new[] { 2, 0, 3 }, new long[] { 2, 3 }, new long[] { 0, 1 }, new long[] { 1, 1 })]
+    [InlineData(2, new[] { 5001, 0, 1001 }, new long[] { 2048, 2048, 905, 1001 }, new long[] { 0, 1024, 2048, 2500 }, new long[] { 1024, 1024, 452, 500 })]
+    [InlineData(2, new[] { 1001, 1001, 1001 }, new long[] { 1001, 1001, 1001 }, new long[] { 0, 500, 1001 }, new long[] { 500, 500, 500 })]
+    [InlineData(12, new[] { 30001 }, new long[] { 12288, 12288, 5425 }, new long[] { 0, 1024, 2048 }, new long[] { 1024, 1024, 452 })]
+    [InlineData(32, new[] { 96 }, new long[] { 32, 32, 32 }, new long[] { 0, 1, 2 }, new long[] { 1, 1, 1 })]
+    [InlineData(1, new[] { 5000, 3 }, new long[] { 5000, 3 }, new long[] { 0, 5000 }, new long[] { 5000, 3 })]
+    public void CutsAudioChunksAsFfmpeg(int sampleSize, int[] chunks, long[] sizes, long[] pts, long[] durations)
+    {
+        using var demuxer = new AviDemuxer(new MemoryStream(TinyAvi(audioSampleSize: sampleSize, audioChunks: chunks)));
+        var audio = demuxer.Audio!;
+        Assert.Equal("0x0001", audio.Codec);
+        Assert.Equal(new Rational(1, 8000), audio.TimeBase);
+
+        var packets = demuxer.ReadPackets().Where(p => p.StreamIndex == audio.StreamIndex).ToList();
+        Assert.Equal(sizes, packets.Select(p => (long)p.Data.Length));
+        Assert.Equal(pts, packets.Select(p => p.Pts));
+        Assert.Equal(durations, packets.Select(p => p.Duration));
+        Assert.Equal(Enumerable.Range(0, sizes.Length).Select(i => (long)i), packets.Select(p => p.Sequence));
+
+        // The pieces' bytes are the chunks' in order, and the descriptions (no data read) the packets'.
+        var bytes = chunks.SelectMany(n => Enumerable.Range(0, n).Select(i => (byte)i)).ToArray();
+        Assert.Equal(bytes, packets.SelectMany(p => p.Data.ToArray()));
+        Assert.Equal(demuxer.ReadPackets().Select(ReadCountingStream.InfoOf), demuxer.ReadPacketInfo());
+    }
+
     [Fact]
     public void RejectsNonAvi()
     {
@@ -208,7 +242,7 @@ public class AviDemuxerTests
         Assert.Equal(new Rational(0, 1), none.Video!.SampleAspectRatio);
     }
 
-    private static byte[] TinyAvi(bool dropFrame = false, byte[]? vprp = null, string fourCC = "MJPG")
+    private static byte[] TinyAvi(bool dropFrame = false, byte[]? vprp = null, string fourCC = "MJPG", int audioSampleSize = 0, int[]? audioChunks = null)
     {
         var avih = new byte[56];
         BinaryPrimitives.WriteUInt32LittleEndian(avih.AsSpan(0), 40_000); // microseconds per frame = 25 fps
@@ -227,16 +261,30 @@ public class AviDemuxerTests
 
         var audioStrh = new byte[56];
         Encoding.ASCII.GetBytes("auds").CopyTo(audioStrh, 0);
+        var audioStrf = new byte[16];
+        if (audioChunks is not null)
+        {
+            // PCM at 8 kHz, a tick a block: dwScale 1, dwRate 8000, dwSampleSize; WAVEFORMATEX's tag 1 (PCM).
+            BinaryPrimitives.WriteUInt32LittleEndian(audioStrh.AsSpan(20), 1);
+            BinaryPrimitives.WriteUInt32LittleEndian(audioStrh.AsSpan(24), 8000);
+            BinaryPrimitives.WriteUInt32LittleEndian(audioStrh.AsSpan(44), (uint)audioSampleSize);
+            BinaryPrimitives.WriteUInt16LittleEndian(audioStrf.AsSpan(0), 1);
+            BinaryPrimitives.WriteUInt16LittleEndian(audioStrf.AsSpan(2), 1);
+            BinaryPrimitives.WriteInt32LittleEndian(audioStrf.AsSpan(4), 8000);
+        }
+
+        var audioData = audioChunks?.Select(n => Chunk("01wb", Enumerable.Range(0, n).Select(i => (byte)i).ToArray())).SelectMany(c => c).ToArray()
+            ?? Chunk("01wb", [9, 9]);
 
         return Riff(
             "AVI ",
             List("hdrl",
                 Chunk("avih", avih),
                 List("strl", [.. Chunk("strh", videoStrh), .. Chunk("strf", videoStrf), .. vprp is null ? [] : Chunk("vprp", vprp)]),
-                List("strl", Chunk("strh", audioStrh), Chunk("strf", new byte[16]))),
+                List("strl", Chunk("strh", audioStrh), Chunk("strf", audioStrf))),
             List("movi",
                 Chunk("00dc", [1, 2, 3]),
-                Chunk("01wb", [9, 9]),
+                audioData,
                 dropFrame ? Chunk("00dc", []) : [],
                 List("rec ", Chunk("00dc", [4, 5, 6, 7]))));
     }

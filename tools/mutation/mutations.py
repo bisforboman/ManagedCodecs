@@ -167,6 +167,14 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.Containers/Avi/AviDemuxer.cs",
          find="if (isVideoChunk && size == 0)\n                {\n                    frame++;\n                }\n                else ",
          replace="", tests="FullyQualifiedName~Avi|DisplayName~avi-dropped-frame"),
+    # Audio with a dwSampleSize below 32 comes in pieces of 1024 blocks, from 32 up one block a packet...
+    dict(file="src/ManagedCodecs.Containers/Avi/AviDemuxer.cs",
+         find="blockSize < 32 ? 1024 * blockSize : blockSize", replace="size",
+         tests="FullyQualifiedName~AviDemuxerTests"),
+    # ... each timed by all the bytes before it, not by the pieces' durations summed.
+    dict(file="src/ManagedCodecs.Containers/Avi/AviDemuxer.cs",
+         find="long pts = state.Bytes / blockSize;", replace="long pts = state.Position; state.Position += length / blockSize;",
+         tests="FullyQualifiedName~AviDemuxerTests"),
 
     # ---- MP4 (as FFmpeg reads it)
     # Negative composition offsets in 'ctts': FFmpeg leaves the last two entries out of the shift.

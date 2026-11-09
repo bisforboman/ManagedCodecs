@@ -9,14 +9,17 @@ namespace ManagedCodecs.Containers;
 /// ID3v2 tags before the first frame are skipped, and anything after the last frame that does not start a frame (an
 /// ID3v1 or APE tag) ends the stream. Bytes between frames that are not a frame are skipped up to the next header that
 /// is followed by another one (or by the end of the file), as FFmpeg resynchronizes. A file that breaks off inside a
-/// frame gives the packets before it, then <see cref="InvalidDataException"/>. Only Layer III: a file of Layer I or II
-/// frames (.mp2), or of free-format frames, is not taken.
+/// frame gives the packets before it, then <see cref="InvalidDataException"/>. A first frame whose header differs from
+/// the next one's in what a stream keeps (mode, copyright, original, emphasis) is skipped too, as FFmpeg's demuxer skips
+/// it. Only Layer III: a file of Layer I or II frames (.mp2), or of free-format frames, is not taken.
 /// </para>
 /// <para>
-/// A first frame holding a Xing, Info or VBRI tag (the encoder's information, no audio) is not a packet, as in FFmpeg.
+/// A first frame holding a Xing, Info or VBRI tag (the encoder's information, no audio) that counts the stream's frames
+/// or bytes is not a packet, as in FFmpeg (one that counts neither is).
 /// When its tag carries a LAME tag (LAME's, or FFmpeg's "Lavf"/"Lavc"), playback is gapless as FFmpeg's: the
 /// encoder's delay plus the decoder's 529 samples are the first packet's <see cref="Packet.SkipSamples"/>, and its
-/// padding less 529 are cut from the end (<see cref="Packet.SkipEndSamples"/>, by the frame count the tag gives).
+/// padding less 529 are cut from the end (<see cref="Packet.SkipEndSamples"/>, by the frame count the tag gives, over
+/// as many packets as it covers: a packet it covers whole skips all its samples).
 /// Timestamps count samples (<see cref="AudioStreamInfo.TimeBase"/> is one over the sample rate; FFmpeg's is
 /// 1/14112000, for the same times), from 0 at the first packet.
 /// </para>
@@ -79,6 +82,13 @@ public sealed class Mp3Demuxer : IDemuxer
                         _firstDiscarded = (count * _samplesPerFrame) - tag.Padding + DecoderDelay;
                     }
                 }
+            }
+
+            // A first frame unlike the next one is junk to FFmpeg, and so is the next while it is unlike its own next.
+            while (TryReadHeader(_stream, pos, out var frame) && pos + frame.FrameLength < _stream.Length
+                && TryReadHeader(_stream, pos + frame.FrameLength, out var next) && !frame.SameStream(next))
+            {
+                pos += frame.FrameLength;
             }
 
             for (; FindFrame(ref pos, out var header); pos += header.FrameLength)
@@ -189,11 +199,12 @@ public sealed class Mp3Demuxer : IDemuxer
         long time = 0;
         foreach (var (pos, length) in _frames)
         {
-            // The samples from the gapless end on: the end of the last packet, or every sample of packets past it.
+            // The samples from the gapless end on: the end of the last packet, or every sample of packets past it (all of
+            // them skipped from its end, not a discarded packet, as FFmpeg gives them).
             long cut = Math.Clamp(time + _samplesPerFrame - _firstDiscarded, 0, _samplesPerFrame);
-            var info = new PacketInfo(0, sequence, length, IsKeyframe: true, time, time, _samplesPerFrame, sequence == 0 ? _startSkip : 0, Discard: cut == _samplesPerFrame)
+            var info = new PacketInfo(0, sequence, length, IsKeyframe: true, time, time, _samplesPerFrame, sequence == 0 ? _startSkip : 0)
             {
-                SkipEndSamples = cut == _samplesPerFrame ? 0 : (int)cut,
+                SkipEndSamples = (int)cut,
             };
             yield return (pos, info);
             sequence++;
@@ -222,7 +233,9 @@ public sealed class Mp3Demuxer : IDemuxer
         var span = frame.AsSpan();
         if (frame.Length >= 36 + 18 && span.Slice(36, 4).SequenceEqual("VBRI"u8))
         {
-            return (ReadUInt32(span[(36 + 14)..]), null, 0);
+            // Its byte count, then its frame count; with neither, FFmpeg keeps the frame as a packet.
+            uint vbriFrames = ReadUInt32(span[(36 + 14)..]);
+            return vbriFrames != 0 || ReadUInt32(span[(36 + 10)..]) != 0 ? (vbriFrames, null, 0) : null;
         }
 
         if (frame.Length < at + 8 || !(span.Slice(at, 4).SequenceEqual("Xing"u8) || span.Slice(at, 4).SequenceEqual("Info"u8)))
@@ -233,13 +246,26 @@ public sealed class Mp3Demuxer : IDemuxer
         uint flags = ReadUInt32(span[(at + 4)..]);
         int o = at + 8;
         long? frames = null;
+        uint bytes = 0;
         if ((flags & 1) != 0 && o + 4 <= frame.Length)
         {
             frames = ReadUInt32(span[o..]);
             o += 4;
         }
 
-        o += ((flags & 2) != 0 ? 4 : 0) + ((flags & 4) != 0 ? 100 : 0) + ((flags & 8) != 0 ? 4 : 0);
+        if ((flags & 2) != 0 && o + 4 <= frame.Length)
+        {
+            bytes = ReadUInt32(span[o..]);
+            o += 4;
+        }
+
+        // A tag that counts neither frames nor bytes leaves its frame a packet, as FFmpeg does.
+        if ((frames ?? 0) == 0 && bytes == 0)
+        {
+            return null;
+        }
+
+        o += ((flags & 4) != 0 ? 100 : 0) + ((flags & 8) != 0 ? 4 : 0);
         if (o + 24 > frame.Length || !(span.Slice(o, 4).SequenceEqual("LAME"u8) || span.Slice(o, 4).SequenceEqual("Lavf"u8) || span.Slice(o, 4).SequenceEqual("Lavc"u8)))
         {
             return (frames, null, 0);

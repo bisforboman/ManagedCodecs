@@ -21,6 +21,16 @@ run time.
   plays an AVI's MP3 and AAC, `Seek` takes the audio stream too, and `VideoProbe`'s duration counts the audio, as
   ffprobe's does (docs/decisions/2026-11-08-avi-audio.md).
 
+### Fixed
+
+- Containers: `Mp3Demuxer` frames a raw MP3 file as FFmpeg's demuxer in three more cases: a first frame whose header
+  differs from the next one's (mode, copyright, original, emphasis) is skipped; a Xing or Info frame that counts neither
+  frames nor bytes is a packet; and a packet the LAME padding covers whole skips all its samples
+  (`SkipEndSamples`) rather than being discarded (the same samples decoded).
+- Containers: an MP4 audio track's last packet, where the edit list starts late in the media (MP3 remuxed from a raw
+  file, 1105 samples in), lasted to the media's end rather than to the edit's, as FFmpeg's: 576 samples where FFmpeg
+  gives 578.
+
 ## 0.10.0 – 2026-11-08
 
 MP3: the new package `ManagedCodecs.Mp3` decodes MPEG audio Layer III, the containers name MP3 tracks

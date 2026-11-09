@@ -1553,4 +1553,23 @@ title and before an ID3v1 tag; mp3-raw-22k, whose 1105 samples to skip run acros
 mp3-raw-noxing, written without the tag, keeps every sample). The decoded samples are compared with FFmpeg's in
 Mp3ConformanceTests (name.mp3.trim.f32); the three rules that follow FFmpeg have mutation entries. A file of Layer I or
 II frames or of free-format ones is not taken (unit tests mark a sample's frames so). No encoder at hand writes a VBRI
-tag (Fraunhofer's): its frame is skipped by the same rule, untested.
+tag (Fraunhofer's): unit tests build one.
+
+Three more of FFmpeg's demuxer's rules, found by altering libmp3lame's files and reading ffprobe's packets (2026-11-09),
+each with unit tests on frames built for it and mutation entries; the samples' packets are now compared with
+ffprobe's skip-samples side data and discard flag too (name.packets.csv):
+- A first frame whose header differs from the next one's in the mode, copyright, original or emphasis bits is no
+  packet, nor the next while it differs from its own next; the private bit, mode extension, protection and padding
+  don't count, nor differences later in the file.
+- A Xing, Info or VBRI frame is no packet only when its tag counts the frames or the bytes: an Info frame with no
+  fields, or a table of contents alone, is a packet.
+- Padding that covers a whole packet skips all of its samples (padding 2000 over 40 frames: 319 from the second to
+  last packet, 1152 from the last), where the demuxer discarded the packet: the same samples decoded, the packets now
+  as FFmpeg's.
+
+MP3 remuxed into MP4 (mp3-raw-22k-remux, object type 0x69) found a rule of FFmpeg's MP4 demuxer: the last audio
+packet's duration runs to the edit's end but stops at the media's end compared with its pts as it is, without the
+edit's media time taken off. FFmpeg's muxer copies the raw file's 1105-sample start into the edit, whose end, rounded
+up in the movie's timescale, runs 2 samples past the media: FFmpeg's last packet lasts 578 samples, where the demuxer
+gave 576. Edit lists rewritten from media times 0, 1, 20 and 1105 (`tools/mp4-edit-list.py`) all fit the rule;
+aac-fdk-pce-remux, from 0, keeps its cap.

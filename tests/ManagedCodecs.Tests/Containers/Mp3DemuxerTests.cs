@@ -1,3 +1,5 @@
+using System.Buffers.Binary;
+using System.Globalization;
 using ManagedCodecs.Containers;
 
 namespace ManagedCodecs.Tests.Containers;
@@ -6,7 +8,10 @@ namespace ManagedCodecs.Tests.Containers;
 /// Raw MP3: every samples/*.mp3 demuxed packet by packet against FFmpeg's (samples/*.packets.framemd5, whose timestamps
 /// are in another time base, so they are compared as instants; FFmpeg's demuxer leaves the info frame out too), the
 /// gapless trim from the LAME tag (the decoded samples are checked in Mp3ConformanceTests), and the cases FFmpeg's
-/// samples don't have, built from them: junk between frames, tags around them, a truncated end, other layers.
+/// samples don't have, built from them: junk between frames, tags around them, a truncated end, other layers. The rules
+/// FFmpeg's demuxer follows that libmp3lame's files don't reach (a first frame unlike the next, tag frames that count
+/// nothing, padding over more than one packet) on frames built here, whose contents don't matter to the demuxer; each
+/// was found by altering libmp3lame's files and reading ffprobe's packets.
 /// </summary>
 public class Mp3DemuxerTests
 {
@@ -31,6 +36,10 @@ public class Mp3DemuxerTests
         var packets = demuxer.ReadPackets().ToList();
         Assert.Equal(expected.Count, packets.Count);
         Assert.Equal(expected.Count, audio.FrameCount);
+
+        // ffprobe's packets with their side data: the skip samples at both ends, and the discard flag.
+        var probed = File.ReadAllLines(TestSamples.ReferenceOf(sampleName, ".packets.csv")).Select(SkipsOf).ToList();
+        Assert.Equal(expected.Count, probed.Count);
         for (int i = 0; i < packets.Count; i++)
         {
             var p = packets[i];
@@ -38,7 +47,116 @@ public class Mp3DemuxerTests
             Assert.True(FrameMd5.SameTime(p.Dts, audio.TimeBase, expected[i].Dts, timeBase), $"Packet {i}: dts {p.Dts}.");
             Assert.True(FrameMd5.SameTime(p.Pts, audio.TimeBase, expected[i].Pts, timeBase), $"Packet {i}: pts {p.Pts}.");
             Assert.True(FrameMd5.SameTime(p.Duration, audio.TimeBase, expected[i].Duration, timeBase), $"Packet {i}: duration {p.Duration}.");
+            Assert.True(probed[i] == (p.SkipSamples, p.SkipEndSamples, p.Discard), $"Packet {i}: {(p.SkipSamples, p.SkipEndSamples, p.Discard)}, FFmpeg's {probed[i]}.");
         }
+    }
+
+    /// <summary>
+    /// A first frame whose header differs from the next one's in the mode, copyright, original or emphasis is no packet
+    /// to FFmpeg, and the next one neither while it differs from its own next; a frame differing later is kept, and so
+    /// is a first frame differing only where frames of a stream may (private bit, mode extension, protection, padding).
+    /// </summary>
+    [Theory]
+    [InlineData(new[] { 0 }, 3, 0x04, 1)] // original
+    [InlineData(new[] { 0 }, 3, 0x08, 1)] // copyright
+    [InlineData(new[] { 0 }, 3, 0x01, 1)] // emphasis
+    [InlineData(new[] { 0 }, 3, 0xC0, 1)] // mode: stereo
+    [InlineData(new[] { 1 }, 3, 0x04, 2)] // the second frame: the first is unlike it, it unlike the third
+    [InlineData(new[] { 0, 1 }, 3, 0x04, 0)] // the first two alike
+    [InlineData(new[] { 2 }, 3, 0x04, 0)] // later: kept
+    [InlineData(new[] { 0 }, 2, 0x01, 0)] // private bit
+    [InlineData(new[] { 0 }, 3, 0x30, 0)] // mode extension
+    [InlineData(new[] { 0 }, 2, 0x02, 0)] // padding (one byte longer)
+    [InlineData(new[] { 0 }, 1, 0x01, 0)] // protection (a CRC)
+    public void FirstFrameUnlikeTheNext_IsSkipped(int[] changed, int headerByte, int bits, int skipped)
+    {
+        var frames = BuiltFrames(5);
+        foreach (int i in changed)
+        {
+            frames[i][headerByte] ^= (byte)bits;
+            if (headerByte == 2 && bits == 2)
+            {
+                frames[i] = [.. frames[i], 0];
+            }
+        }
+
+        Assert.Equal(frames[skipped..], Packets(Join(frames)));
+    }
+
+    /// <summary>
+    /// A first frame with a Xing or Info tag (after the side information) is no packet when the tag counts the frames or
+    /// the bytes; one that counts neither (no fields, or a table of contents alone) is a packet, as FFmpeg keeps it.
+    /// </summary>
+    [Theory]
+    [InlineData("Info", 1, true)]
+    [InlineData("Xing", 1, true)]
+    [InlineData("Info", 2, true)]
+    [InlineData("Info", 0, false)]
+    [InlineData("Info", 4, false)]
+    public void TagFrame_IsNoPacketWhenItCounts(string name, int flags, bool skipped)
+    {
+        var frames = BuiltFrames(5);
+        var tag = frames[0];
+        name.Select(c => (byte)c).ToArray().CopyTo(tag, 4 + 17);
+        BinaryPrimitives.WriteUInt32BigEndian(tag.AsSpan(4 + 17 + 4), (uint)flags);
+        if (flags is 1 or 2)
+        {
+            BinaryPrimitives.WriteUInt32BigEndian(tag.AsSpan(4 + 17 + 8), 4);
+        }
+
+        Assert.Equal(skipped ? frames[1..] : frames, Packets(Join(frames)));
+    }
+
+    /// <summary>A VBRI tag (32 bytes after the header): the same, by its byte and frame counts; its delay isn't taken.</summary>
+    [Theory]
+    [InlineData(4, true)]
+    [InlineData(0, false)]
+    public void VbriFrame_IsNoPacketWhenItCounts(int frameCount, bool skipped)
+    {
+        var frames = BuiltFrames(5);
+        var tag = frames[0];
+        "VBRI"u8.CopyTo(tag.AsSpan(4 + 32));
+        BinaryPrimitives.WriteUInt16BigEndian(tag.AsSpan(4 + 32 + 6), 576);
+        BinaryPrimitives.WriteUInt32BigEndian(tag.AsSpan(4 + 32 + 10), 0);
+        BinaryPrimitives.WriteUInt32BigEndian(tag.AsSpan(4 + 32 + 14), (uint)frameCount);
+        using var demuxer = new Mp3Demuxer(new MemoryStream(Join(frames)));
+        var packets = demuxer.ReadPackets().ToList();
+        Assert.Equal(skipped ? frames[1..] : frames, packets.Select(p => p.Data.ToArray()));
+        Assert.All(packets, p => Assert.Equal((0, 0), (p.SkipSamples, p.SkipEndSamples)));
+    }
+
+    /// <summary>
+    /// The LAME extension's padding less 529 over as many packets as it covers, a packet covered whole skipping all its
+    /// samples rather than discarded (FFmpeg: padding 2000 over 40 frames gives 319 and then 1152); none below 529, none
+    /// without the frame count, none for an encoder name FFmpeg doesn't take.
+    /// </summary>
+    [Theory]
+    [InlineData("LAME", 576, 1404, 1, 1105, new[] { 0, 0, 0, 875 })]
+    [InlineData("Lavf", 0, 2000, 1, 529, new[] { 0, 0, 319, 1152 })]
+    [InlineData("LAME", 576, 300, 1, 1105, new[] { 0, 0, 0, 0 })]
+    [InlineData("LAME", 576, 1404, 2, 1105, new[] { 0, 0, 0, 0 })]
+    [InlineData("Xxxx", 576, 1404, 1, 0, new[] { 0, 0, 0, 0 })]
+    public void LamePadding_IsSkippedOverThePacketsItCovers(string encoder, int delay, int padding, int flags, int startSkip, int[] endSkips)
+    {
+        var frames = BuiltFrames(5);
+        var tag = frames[0];
+        int at = 4 + 17;
+        "Info"u8.CopyTo(tag.AsSpan(at));
+        BinaryPrimitives.WriteUInt32BigEndian(tag.AsSpan(at + 4), (uint)flags);
+        BinaryPrimitives.WriteUInt32BigEndian(tag.AsSpan(at + 8), 4); // the frames after this one, or the bytes
+        at += 12;
+        encoder.Select(c => (byte)c).ToArray().CopyTo(tag, at);
+        tag[at + 21] = (byte)(delay >> 4);
+        tag[at + 22] = (byte)((delay << 4) | (padding >> 8));
+        tag[at + 23] = (byte)padding;
+
+        using var demuxer = new Mp3Demuxer(new MemoryStream(Join(frames)));
+        var packets = demuxer.ReadPackets().ToList();
+        Assert.Equal(frames[1..], packets.Select(p => p.Data.ToArray()));
+        Assert.Equal([startSkip, 0, 0, 0], packets.Select(p => p.SkipSamples));
+        Assert.Equal(endSkips, packets.Select(p => p.SkipEndSamples));
+        Assert.DoesNotContain(packets, p => p.Discard);
+        Assert.Equal(packets.Select(ReadCountingStream.InfoOf), demuxer.ReadPacketInfo());
     }
 
     /// <summary>
@@ -180,6 +298,22 @@ public class Mp3DemuxerTests
         start = file.AsSpan().IndexOf(frames[0]);
         return true;
     }
+
+    // A line of the .packets.csv (stream, pts, dts, duration, size, flags, hash, then any side data): its skip samples
+    // at the start and the end, and whether it is discarded.
+    private static (int Start, int End, bool Discard) SkipsOf(string line)
+    {
+        var f = line.Split(',');
+        bool skips = f.Length > 9 && f[7] == "Skip Samples";
+        return (skips ? int.Parse(f[8], CultureInfo.InvariantCulture) : 0, skips ? int.Parse(f[9], CultureInfo.InvariantCulture) : 0, f[5].Contains('D', StringComparison.Ordinal));
+    }
+
+    // MPEG-1 Layer III frames, 128 kbit/s at 44.1 kHz, single channel, original, no CRC (417 bytes, 1152 samples), each
+    // its own bytes after the header.
+    private static List<byte[]> BuiltFrames(int count) =>
+        [.. Enumerable.Range(0, count).Select(i => (byte[])[0xFF, 0xFB, 0x90, 0xC4, .. Enumerable.Repeat((byte)(i + 1), 417 - 4)])];
+
+    private static byte[] Join(IEnumerable<byte[]> frames) => [.. frames.SelectMany(f => f)];
 
     private static List<byte[]> Packets(byte[] file)
     {

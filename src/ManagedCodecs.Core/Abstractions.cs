@@ -161,6 +161,12 @@ public sealed record VideoStreamInfo(
     /// 'strh' length in frames. 0 where the container says nothing.
     /// </summary>
     public long Duration { get; init; }
+
+    /// <summary>
+    /// An Annex B H.264 stream whose frames are numbered from 0 in output order (a raw stream, as FFmpeg's command line
+    /// numbers them), not the reorder delay after its packets' decoding-order times (AVI's, as FFmpeg's frames are).
+    /// </summary>
+    internal bool FramesFromZero { get; init; }
 }
 
 /// <summary>Basic facts about a container's audio stream.</summary>

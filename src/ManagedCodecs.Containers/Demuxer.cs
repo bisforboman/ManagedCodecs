@@ -9,7 +9,7 @@ public static class Demuxer
 
     /// <summary>
     /// An <see cref="AviDemuxer"/>, <see cref="Mp4Demuxer"/>, <see cref="MatroskaDemuxer"/> (Matroska or WebM),
-    /// <see cref="AdtsDemuxer"/> or <see cref="Mp3Demuxer"/>, by the stream's first bytes.
+    /// <see cref="H264Demuxer"/>, <see cref="AdtsDemuxer"/> or <see cref="Mp3Demuxer"/>, by the stream's first bytes.
     /// </summary>
     /// <param name="stream">A seekable stream holding the file; it is read from its start.</param>
     /// <param name="leaveOpen">Whether disposing the demuxer (or a failure here) leaves <paramref name="stream"/> open.</param>
@@ -39,6 +39,12 @@ public static class Demuxer
             if (read >= 4 && head[..4].SequenceEqual((ReadOnlySpan<byte>)[0x1A, 0x45, 0xDF, 0xA3]))
             {
                 return new MatroskaDemuxer(stream, leaveOpen);
+            }
+
+            // Raw H.264: Annex B, a start code and a parameter set, delimiter or SEI first.
+            if (H264Demuxer.Probe(stream))
+            {
+                return new H264Demuxer(stream, leaveOpen);
             }
 
             // Raw AAC: an ADTS frame (after any ID3v2 tags) followed by another one.

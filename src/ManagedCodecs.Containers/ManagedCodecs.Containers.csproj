@@ -11,4 +11,8 @@
     <ProjectReference Include="..\ManagedCodecs.Core\ManagedCodecs.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="ManagedCodecs.Tests" />
+  </ItemGroup>
+
 </Project>

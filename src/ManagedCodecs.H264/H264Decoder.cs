@@ -23,6 +23,14 @@ public sealed class H264Decoder : IVideoDecoder
     private readonly ReferenceList _references = new();
     private readonly int _lengthSize;
 
+    // Annex B (no avcC): packets of NAL units after start codes.
+    private readonly bool _annexB;
+
+    // A container without presentation times (AVI, or Annex B with no stream to say): the packets' times, kept sorted
+    // until frames take them in display order, the smallest first.
+    private readonly bool _displayOrderTimes;
+    private readonly List<long> _times = [];
+
     // Pictures are reused once they are no longer references and no frame waiting for output
     // borrows them (output is a copy, see Crop, unless BorrowFrames), and so is the per-macroblock
     // state, as long as the picture size stays the same.
@@ -70,6 +78,9 @@ public sealed class H264Decoder : IVideoDecoder
     private (int Parity, int FrameNum) _parserLastField = (-1, 0);
     private bool _started;
 
+    // Without presentation times (AVI) and a field first: FieldOrder waits for the second field, as FFmpeg's analysis does.
+    private bool _fieldOrderFromSecondField;
+
     // The container's picture size (VideoStreamInfo), cropping the frames further as FFmpeg does (OutputSize); 0 when
     // there is none, or once a picture's SPS did not allow it.
     private int _containerWidth;
@@ -82,9 +93,22 @@ public sealed class H264Decoder : IVideoDecoder
     // colour description keeps the earlier ones, through new sequences and flushes alike.
     private VideoSignal _signal = VideoSignal.None;
 
-    /// <param name="codecPrivate">The AVCDecoderConfigurationRecord ('avcC') from the container.</param>
+    /// <param name="codecPrivate">
+    /// The AVCDecoderConfigurationRecord ('avcC') from the container; empty for Annex B (H.264 in AVI): packets of NAL
+    /// units each after a start code (00 00 01, or 00 00 00 01), the parameter sets among them. A container without an
+    /// avcC stores no presentation times either (AVI's are decoding order), so there the frames take the packets' times
+    /// in display order: the first frame shown the earliest packet's, and so on (FFmpeg gives each frame the time of the
+    /// packet that brought it out of the decoder, later by the reordering's delay, as many frames as B pictures wait).
+    /// </param>
     public H264Decoder(ReadOnlySpan<byte> codecPrivate)
     {
+        if (codecPrivate.IsEmpty)
+        {
+            _annexB = true;
+            _displayOrderTimes = true;
+            return;
+        }
+
         var config = AvcConfiguration.Parse(codecPrivate);
         _lengthSize = config.LengthSize;
         foreach (var sps in config.Sps)
@@ -112,6 +136,7 @@ public sealed class H264Decoder : IVideoDecoder
         _containerWidth = stream.Width;
         _containerHeight = stream.Height;
         _stream = stream;
+        _displayOrderTimes = _annexB || stream.DecodeOrderTimes;
     }
 
     /// <summary>
@@ -145,8 +170,9 @@ public sealed class H264Decoder : IVideoDecoder
     /// The stream's field order as <c>ffprobe -show_streams</c> prints it for an MP4 file: the one FFmpeg's parser gives
     /// the first picture decoded (see <see cref="VideoFrame.FieldOrder"/>), as FFmpeg's stream analysis reads only the
     /// first packet of an MP4 stream before it has all it needs. <see cref="ManagedCodecs.FieldOrder.Unknown"/> before the
-    /// first picture, and for a stream whose first picture is a field picture (for a raw H.264 file FFmpeg reads on, to
-    /// the second field, whose frame's <see cref="VideoFrame.FieldOrder"/> it then takes).
+    /// first picture, and for a stream whose first picture is a field picture; but where the container has no
+    /// presentation times (AVI, Annex B), as for a raw H.264 file, FFmpeg reads on, to the second field, whose frame's
+    /// <see cref="VideoFrame.FieldOrder"/> it then takes, and so does this.
     /// </summary>
     public FieldOrder FieldOrder { get; private set; }
 
@@ -186,9 +212,9 @@ public sealed class H264Decoder : IVideoDecoder
     public IReadOnlyList<VideoFrame> Decode(Packet packet) => Decode(packet.Data.Span, packet.Pts, packet.Discard);
 
     /// <summary>
-    /// Decodes one picture's length-prefixed NAL units from <paramref name="data"/>, which need not outlive the call
-    /// (the decoder copies what it keeps), as <see cref="Decode(Packet)"/> does; the frame that comes from it gets
-    /// <paramref name="pts"/>.
+    /// Decodes one picture's length-prefixed NAL units (Annex B ones without an avcC) from <paramref name="data"/>, which
+    /// need not outlive the call (the decoder copies what it keeps), as <see cref="Decode(Packet)"/> does; the frame that
+    /// comes from it gets <paramref name="pts"/> (Annex B: the frames take the times in display order).
     /// </summary>
     public IReadOnlyList<VideoFrame> Decode(ReadOnlySpan<byte> data, long pts) => Decode(data, pts, discard: false);
 
@@ -204,6 +230,7 @@ public sealed class H264Decoder : IVideoDecoder
         try
         {
             DecodeInto(data, pts, discard, frames);
+            TimeInDisplayOrder(frames);
             return frames;
         }
         catch
@@ -228,6 +255,13 @@ public sealed class H264Decoder : IVideoDecoder
     {
         _discard = discard;
         var job = ParsePicture(data, pts, frames);
+        if (_displayOrderTimes && job.FirstField is null && !discard)
+        {
+            // A picture's time (a second field's is its first's), for whichever frame is shown in its place.
+            int at = _times.BinarySearch(pts);
+            _times.Insert(at < 0 ? ~at : at, pts);
+        }
+
         if (Threads == 1)
         {
             // A picture that fails is still marked as its headers say, as with threads: later pictures that predict
@@ -361,7 +395,30 @@ public sealed class H264Decoder : IVideoDecoder
         }
 
         frames.AddRange(_output.Flush());
+        TimeInDisplayOrder(frames);
+        _times.Clear();
         return frames;
+    }
+
+    /// <summary>
+    /// Without presentation times: each frame, in the order they come out (display order), takes the smallest of the
+    /// pictures' times not yet taken. Elsewhere a frame keeps its own packet's time.
+    /// </summary>
+    private void TimeInDisplayOrder(List<VideoFrame> frames)
+    {
+        if (!_displayOrderTimes)
+        {
+            return;
+        }
+
+        foreach (var frame in frames)
+        {
+            if (_times.Count > 0)
+            {
+                frame.Pts = _times[0];
+                _times.RemoveAt(0);
+            }
+        }
     }
 
     /// <summary>Outputs the decoded pictures at the front of the queue, in decoding order: those done, or all of them (waiting).</summary>
@@ -582,6 +639,39 @@ public sealed class H264Decoder : IVideoDecoder
         }
 
         PictureJob? current = null;
+        if (_annexB)
+        {
+            // NAL units between start codes; the zero bytes before a start code (a 4-byte start code's first, or
+            // trailing_zero_8bits) belong to no NAL unit.
+            ReadOnlySpan<byte> startCode = [0, 0, 1];
+            int first = packet.IndexOf(startCode);
+            if (first < 0)
+            {
+                throw new InvalidDataException("No start code in an Annex B packet.");
+            }
+
+            int start = first + 3;
+            while (start < packet.Length)
+            {
+                int next = packet[start..].IndexOf(startCode);
+                int end = next < 0 ? packet.Length : start + next;
+                int nalEnd = end;
+                while (nalEnd > start && packet[nalEnd - 1] == 0)
+                {
+                    nalEnd--;
+                }
+
+                if (nalEnd > start)
+                {
+                    current = HandleNal(NalUnit.Parse(packet[start..nalEnd]), current, pts, frames);
+                }
+
+                start = end + 3;
+            }
+
+            return current ?? throw new InvalidDataException("The packet contains no picture.");
+        }
+
         int pos = 0;
         while (pos < packet.Length)
         {
@@ -810,6 +900,12 @@ public sealed class H264Decoder : IVideoDecoder
         {
             FieldOrder = order;
             _started = true;
+            _fieldOrderFromSecondField = _displayOrderTimes && header.FieldPic && !secondField;
+        }
+        else if (_fieldOrderFromSecondField && secondField)
+        {
+            FieldOrder = order;
+            _fieldOrderFromSecondField = false;
         }
 
         var (interlaced, topFieldFirst) = Interlacing.Flags(timing, header.FieldPic || sps.MbAdaptiveFrameField, _previousInterlaced, top, bottom);
@@ -1065,10 +1161,16 @@ public sealed class H264Decoder : IVideoDecoder
 
     /// <summary>
     /// The size of the stream's first frames as a decoder for it gives them (<see cref="OutputSize"/>), from the first
-    /// SPS of its configuration record without decoding; null without one. For the thumbnail package's probe.
+    /// SPS of its configuration record without decoding; null without one (Annex B in AVI, whose header's size is the
+    /// encoder's picture size). For the thumbnail package's probe.
     /// </summary>
     internal static (int Width, int Height)? FrameSize(VideoStreamInfo stream)
     {
+        if (stream.CodecPrivate.IsEmpty)
+        {
+            return null;
+        }
+
         var config = AvcConfiguration.Parse(stream.CodecPrivate.Span);
         foreach (var data in config.Sps)
         {

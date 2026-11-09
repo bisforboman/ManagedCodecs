@@ -162,6 +162,21 @@ MUTATIONS = [
          find="else if (_references.Any(p => !FitsFormat(p, sps)))", replace="else if (false)",
          tests="DisplayName~sps-format-change-without-idr"),
 
+    # ---- H.264 in AVI: no presentation times (docs/decisions/2026-11-09-h264-in-avi.md)
+    # The frames take the pictures' times in display order (with B pictures, a frame's own packet's time is not its own)...
+    dict(file="src/ManagedCodecs.H264/H264Decoder.cs",
+         find="        if (!_displayOrderTimes)\n        {\n            return;", replace="        if (true)\n        {\n            return;",
+         tests="DisplayName~avi-h264-mp3"),
+    # ... and a second field's packet adds no time (a packet a field: avi-h264-paff).
+    dict(file="src/ManagedCodecs.H264/H264Decoder.cs",
+         find="if (_displayOrderTimes && job.FirstField is null && !discard)", replace="if (_displayOrderTimes && !discard)",
+         tests="DisplayName~avi-h264-paff"),
+    # A stream without presentation times that starts with a field takes its field order from the second field, as
+    # FFmpeg's analysis reads on there (MP4's stops at the first packet: unknown).
+    dict(file="src/ManagedCodecs.H264/H264Decoder.cs",
+         find="_fieldOrderFromSecondField = _displayOrderTimes && header.FieldPic && !secondField;",
+         replace="_fieldOrderFromSecondField = false;", tests="DisplayName~avi-h264-paff"),
+
     # ---- AVI (as FFmpeg reads it)
     # An empty video chunk (a dropped frame) gives no packet but takes its tick.
     dict(file="src/ManagedCodecs.Containers/Avi/AviDemuxer.cs",

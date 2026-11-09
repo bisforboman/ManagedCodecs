@@ -155,6 +155,12 @@ public sealed record VideoStreamInfo(
     /// 'strh' length in frames. 0 where the container says nothing.
     /// </summary>
     public long Duration { get; init; }
+
+    /// <summary>
+    /// The packets' times are their decoding order, the container storing no presentation times (AVI): a decoder that
+    /// reorders gives its frames those times in display order.
+    /// </summary>
+    internal bool DecodeOrderTimes { get; init; }
 }
 
 /// <summary>Basic facts about a container's audio stream.</summary>

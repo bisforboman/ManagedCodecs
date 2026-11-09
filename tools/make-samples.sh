@@ -55,6 +55,22 @@ avicbr=$(mktemp --suffix=.avi)
 ff -f lavfi -i testsrc2=size=160x120:rate=25 -f lavfi -i "aevalsrc=0.4*sin(2*PI*440*t)|0.3*sin(2*PI*660*t):s=44100:d=2" \
   -t 2 -c:v mjpeg -q:v 5 -c:a libmp3lame -b:a 64k "$avicbr"
 python3 -I tools/avi-mp3-cbr.py "$avicbr" samples/avi-mjpeg-mp3-cbr.avi > /dev/null
+# H.264 in AVI: Annex B (no avcC: the parameter sets come in the first packet) and no presentation times. With B
+# pictures, so the decoder's frames take the packets' times in display order (FFmpeg's start later, by the reorder
+# delay: H264ConformanceTests compares times from the first frame's); 160x120 crops the last macroblock row. With
+# stereo MP3: FFmpeg's muxer writes empty audio chunks beside libx264's delayed video.
+ff -f lavfi -i testsrc2=size=160x120:rate=25:duration=2 -f lavfi -i "sine=f=440:duration=2,aformat=channel_layouts=stereo" \
+  -c:v libx264 -g 25 -bf 2 -c:a libmp3lame -b:a 64k samples/avi-h264-mp3.avi
+# H.264 field pictures in AVI, a packet a field, remuxed from JM's (samples/jm/): FFmpeg's muxer keeps MP4's
+# length-prefixed NAL units and puts the avcC in the BITMAPINFOHEADER, which FFmpeg's demuxer reads as extradata. A frame
+# takes its first field's time only.
+ff -i samples/jm/jm-paff-b.mp4 -c copy samples/avi-h264-paff.avi
+# name.frametimes: their decoded frames' times as FFmpeg gives them, the stream's time base first, then each frame's
+# best_effort_timestamp: N/A for those its flush brings out, where framemd5 fills in the time before plus one tick.
+for f in samples/avi-h264-*.avi; do
+  { ffprobe -v error -select_streams v:0 -show_entries stream=time_base -of csv=p=0 "$f"
+    ffprobe -v error -select_streams v:0 -show_entries frame=best_effort_timestamp -of csv=p=0 "$f"; } > "${f%.*}.frametimes"
+done
 rm "$avicbr"
 # Grayscale (FFmpeg's MJPEG encoder has no gray output, so ImageMagick encodes the frames)
 frames=$(mktemp -d)

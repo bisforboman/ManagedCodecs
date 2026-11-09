@@ -18,6 +18,7 @@ samples/*.mp3
 samples/*.mjpeg
 samples/*.framemd5
 samples/*.picttypes
+samples/*.frametimes
 samples/*.interlacing
 samples/*.color
 samples/*.display

@@ -114,8 +114,9 @@ public sealed class AviDemuxer : IDemuxer
                 ? Rational.Reduce(header.Scale, header.Rate)
                 : Rational.Reduce(header.MicrosecondsPerFrame, 1_000_000);
             double fps = timeBase.Numerator > 0 ? 1 / timeBase.ToDouble() : 0;
-            Video = new VideoStreamInfo(NormalizeCodec(header.Codec), header.Width, header.Height, fps, header.TotalFrames, timeBase, ReadOnlyMemory<byte>.Empty, _videoStreamIndex)
+            Video = new VideoStreamInfo(NormalizeCodec(header.Codec), header.Width, header.Height, fps, header.TotalFrames, timeBase, header.CodecPrivate, _videoStreamIndex)
             {
+                DecodeOrderTimes = true,
                 SampleAspectRatio = header.AspectRatio,
                 Duration = header.Length,
             };
@@ -497,10 +498,11 @@ public sealed class AviDemuxer : IDemuxer
             else if (id == "LIST" && size >= 4 && ReadFourCC(_stream) == "strl")
             {
                 long listEnd = Math.Min(pos + 8 + size, end);
-                if (info.VideoStreamIndex < 0 && TryReadVideoStream(pos + 12, listEnd, out string codec, out uint scale, out uint rate, out uint length, out var aspectRatio))
+                if (info.VideoStreamIndex < 0 && TryReadVideoStream(pos + 12, listEnd, out string codec, out uint scale, out uint rate, out uint length, out var aspectRatio, out var codecPrivate))
                 {
                     info.VideoStreamIndex = streamCount;
                     info.Codec = codec;
+                    info.CodecPrivate = codecPrivate;
                     info.Scale = scale;
                     info.Rate = rate;
                     info.Length = length;
@@ -557,8 +559,9 @@ public sealed class AviDemuxer : IDemuxer
         return isAudio && format is not null ? new AudioStreamHeader(index, scale, rate, length, sampleSize, format) : null;
     }
 
-    private bool TryReadVideoStream(long start, long end, out string codec, out uint scale, out uint rate, out uint length, out Rational aspectRatio)
+    private bool TryReadVideoStream(long start, long end, out string codec, out uint scale, out uint rate, out uint length, out Rational aspectRatio, out byte[] codecPrivate)
     {
+        codecPrivate = [];
         codec = "????";
         scale = 0;
         rate = 0;
@@ -590,9 +593,17 @@ public sealed class AviDemuxer : IDemuxer
             }
             else if (id == "strf" && isVideo && size >= 20)
             {
-                // BITMAPINFOHEADER: biCompression is the FourCC at offset 16.
+                // BITMAPINFOHEADER: biCompression is the FourCC at offset 16; bytes after its 40 are the codec's
+                // configuration, as FFmpeg takes them (H.264 remuxed from MP4 keeps its avcC there, and its packets
+                // length-prefixed; FFmpeg's encoder writes Annex B and none).
                 _stream.ReadExactly(bitmapInfo);
                 codec = Encoding.ASCII.GetString(bitmapInfo.Slice(16, 4));
+                if (size > 40)
+                {
+                    _stream.Position += 20;
+                    codecPrivate = new byte[size - 40];
+                    _stream.ReadExactly(codecPrivate);
+                }
             }
             else if (id == "vprp" && size > 36)
             {
@@ -665,6 +676,9 @@ public sealed class AviDemuxer : IDemuxer
         public int VideoStreamIndex { get; set; } = -1;
 
         public string Codec { get; set; } = "????";
+
+        /// <summary>The video stream's BITMAPINFOHEADER bytes after its 40, empty without any.</summary>
+        public byte[] CodecPrivate { get; set; } = [];
 
         /// <summary>The video stream's 'vprp' sample aspect ratio, 0:1 without one.</summary>
         public Rational AspectRatio { get; set; } = new(0, 1);

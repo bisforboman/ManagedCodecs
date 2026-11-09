@@ -89,3 +89,7 @@ writes, and `tests/ManagedCodecs.Tests/H264/CabacEncoder.cs` (a CABAC encoder an
   (a Stopwatch around `Picture.Wait`, logging waiter, reference, row and duration, in a scratch copy) and the front
   end's wait for the oldest picture. mcdec's loops each start a fresh decoder on an IDR picture, whose followers
   trail its slower intra rows: a third of the 720p sample's waits are that.
+- H.264 in AVI (docs/decisions/2026-11-09-h264-in-avi.md): ffprobe gives its packets no pts, and FFmpeg's frames the
+  dts of the packet that brought them out (late by the reorder delay; none for those its flush brings out, which
+  framemd5 fills in as the time before plus one tick). `ffmpeg -c copy` from MP4 into AVI keeps length-prefixed NAL
+  units and an avcC: for Annex B, encode into AVI.

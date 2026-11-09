@@ -13,6 +13,14 @@ run time.
 
 ## Unreleased
 
+### Added
+
+- H.264 in AVI: `H264Decoder` takes a stream without an avcC as Annex B (start codes, the parameter sets in band), as
+  FFmpeg's encoder writes H.264 into AVI, and `AviDemuxer` gives a remuxed file's avcC (after the BITMAPINFOHEADER) as
+  `CodecPrivate`, so `MediaPlayer`, `VideoThumbnail` and `VideoProbe` take H.264 AVIs. AVI stores no presentation
+  times: the frames take the packets' times in display order, from the first packet's (FFmpeg's start later, by the
+  reorder delay; docs/decisions/2026-11-09-h264-in-avi.md).
+
 ### Changed
 
 - Containers: `AviDemuxer.Audio` is the file's first audio stream, where it was always null, and `ReadPackets` gives

@@ -93,7 +93,8 @@ and code that reproduces FFmpeg's reading where it differs from the spec), and n
   under 2e-6, LAME and shine streams). The MP4 edit list trims the priming (LAME's 1105 samples), Matroska's
   DiscardPadding the end. `MediaPlayer` plays it (In-game video); raw `.mp3` files gapless by their LAME tag (`Mp3Demuxer`);
   AVI's in both its chunk layouts. Not yet: free-format bitrates, Layers I and II (docs/decisions/2026-11-08-mp3-decoder.md).
-- **Containers**: AVI (video, and the first audio stream: MP3 in both its chunk layouts, AAC, others by their format
+- **Containers**: AVI (video, H.264 as FFmpeg's encoder writes it (Annex B) or remuxed with an avcC, its frames timed
+  in display order as AVI stores no presentation times; and the first audio stream: MP3 in both its chunk layouts, AAC, others by their format
   tag such as `0x0001` for PCM; docs/decisions/2026-11-08-avi-audio.md), MP4 (video and audio tracks, fragmented files too, edit lists of several edits),
   Matroska and WebM (video and audio tracks, every kind of lacing, BlockGroups, live files of unknown size, header
   stripping and zlib, the display rotation, DiscardPadding; VP9, AV1, Opus and other codecs this library doesn't decode

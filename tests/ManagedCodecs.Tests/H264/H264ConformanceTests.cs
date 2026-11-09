@@ -1,10 +1,11 @@
+using System.Globalization;
 using ManagedCodecs.Containers;
 using ManagedCodecs.H264;
 
 namespace ManagedCodecs.Tests.H264;
 
 /// <summary>
-/// Decodes every Constrained Baseline, Main and High profile H.264 sample (samples/*.mp4 and *.mkv with a .framemd5)
+/// Decodes every Constrained Baseline, Main and High profile H.264 sample (samples/*.mp4, *.mkv and *.avi with a .framemd5)
 /// and compares each frame's MD5, timestamp, picture type and interlacing, in output order, and the stream's field order,
 /// with FFmpeg's. See samples/README.md.
 /// Timestamps are compared from the first frame's, as FFmpeg's framemd5 moves them to start at 0.
@@ -116,8 +117,17 @@ public class H264ConformanceTests
 
         int index = 0;
         long firstPts = 0;
+
+        // AVI stores no presentation times: the frames take the packets' in display order, and FFmpeg's are the times
+        // of the packets that brought them out, later by the reorder delay, the same from the first frame. Those its
+        // flush brings out it gives none, where framemd5 fills in the time before plus one tick (a field's where a
+        // frame is two, avi-h264-paff): the times are compared with ffprobe's (name.frametimes), where it gives one.
+        var frameTimes = FrameTimes(sampleName);
+        long previousPts = long.MinValue;
         void Check(VideoFrame frame)
         {
+            Assert.True(!video.DecodeOrderTimes || frame.Pts > previousPts, $"Frame {index}: pts {frame.Pts} not after the frame before's ({previousPts}).");
+            previousPts = frame.Pts;
             Assert.True(index < expected.Count, $"More frames than the reference ({expected.Count}).");
             Assert.True(expected[index].Md5 == FrameMd5.Hash(frame), $"Frame {index} differs from FFmpeg.");
             if (index == 0)
@@ -125,9 +135,19 @@ public class H264ConformanceTests
                 firstPts = frame.Pts;
             }
 
-            Assert.True(
-                FrameMd5.SameTime(expected[index].Pts - expected[0].Pts, timeBase, frame.Pts - firstPts, video.TimeBase),
-                $"Frame {index}: pts {frame.Pts} ({video.TimeBase}) is not FFmpeg's {expected[index].Pts} ({timeBase}).");
+            if (frameTimes is { } times)
+            {
+                Assert.True(
+                    times.Pts[index] is not { } theirs || FrameMd5.SameTime(theirs - times.Pts[0]!.Value, times.TimeBase, frame.Pts - firstPts, video.TimeBase),
+                    $"Frame {index}: pts {frame.Pts} ({video.TimeBase}) is not FFmpeg's {times.Pts[index]} ({times.TimeBase}).");
+            }
+            else
+            {
+                Assert.True(
+                    FrameMd5.SameTime(expected[index].Pts - expected[0].Pts, timeBase, frame.Pts - firstPts, video.TimeBase),
+                    $"Frame {index}: pts {frame.Pts} ({video.TimeBase}) is not FFmpeg's {expected[index].Pts} ({timeBase}).");
+            }
+
             Assert.True(types is null || types[index] == frame.PictureType, $"Frame {index}: picture type {frame.PictureType} is not FFmpeg's {types?[index]}.");
             interlacing?.Check(index, frame);
             colors?.Check(index, frame);
@@ -224,10 +244,32 @@ public class H264ConformanceTests
         }
     }
 
-    /// <summary>H.264 in MP4 whose avcC says profile_idc 66 (Baseline), 77 (Main) or 100 (High).</summary>
+    /// <summary>
+    /// name.frametimes (AVI): the stream's time base on the first line, then each decoded frame's best_effort_timestamp
+    /// as ffprobe gives it (null for N/A), or null without the file.
+    /// </summary>
+    private static (Rational TimeBase, List<long?> Pts)? FrameTimes(string name)
+    {
+        string path = TestSamples.ReferenceOf(name, ".frametimes");
+        if (!File.Exists(path))
+        {
+            return null;
+        }
+
+        var lines = File.ReadAllLines(path);
+        var parts = lines[0].Split('/');
+        var timeBase = new Rational(int.Parse(parts[0], CultureInfo.InvariantCulture), int.Parse(parts[1], CultureInfo.InvariantCulture));
+        var pts = lines.Skip(1).Select(l => l.Split(',')[0]).Select(f => f == "N/A" ? (long?)null : long.Parse(f, CultureInfo.InvariantCulture)).ToList();
+        return (timeBase, pts);
+    }
+
+    /// <summary>
+    /// H.264 in MP4 or Matroska whose avcC names a profile the decoder takes, and in AVI (Annex B, without an avcC; its
+    /// frames' times are the packets' in display order, FFmpeg's later by the reorder delay, the same from the first).
+    /// </summary>
     private static bool IsSupported(string name)
     {
-        if (!name.EndsWith(".mp4", StringComparison.Ordinal) && !name.EndsWith(".mkv", StringComparison.Ordinal))
+        if (!name.EndsWith(".mp4", StringComparison.Ordinal) && !name.EndsWith(".mkv", StringComparison.Ordinal) && !name.EndsWith(".avi", StringComparison.Ordinal))
         {
             return false;
         }
@@ -239,6 +281,6 @@ public class H264ConformanceTests
         }
 
         var avcC = video.CodecPrivate.Span;
-        return avcC.Length > 1 && avcC[1] is 66 or 77 or 100 or 110 or 122 or 244;
+        return avcC.IsEmpty || (avcC.Length > 1 && avcC[1] is 66 or 77 or 100 or 110 or 122 or 244);
     }
 }

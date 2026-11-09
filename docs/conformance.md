@@ -272,8 +272,16 @@ one block from 32 bytes up (IMA and MS ADPCM's 1024-byte blocks, 8-channel 32-bi
 sample shows the cutting: ffprobe did, on FFmpeg AVIs whose PCM chunks were merged into larger and odd-sized ones
 (16-bit mono and stereo, 24-bit stereo, 16-bit 5.1, 8-bit mono, 32-bit 7.1, IMA and MS ADPCM), and
 `AviDemuxerTests.CutsAudioChunksAsFfmpeg` checks its sizes and times on hand-built files. Not checked against FFmpeg:
-format tag 0x50 (MPEG Layer I and II) with Layer III frames, IMA ADPCM, AC-3; and H.264 in AVI (Annex B, no
-avcC) is not decoded, with or without audio.
+format tag 0x50 (MPEG Layer I and II) with Layer III frames, IMA ADPCM, AC-3.
+
+H.264 in AVI (docs/decisions/2026-11-09-h264-in-avi.md) comes as FFmpeg's encoder writes it, Annex B with the parameter
+sets in the first packet and no avcC (`avi-h264-mp3`: libx264 with two B frames, 160x120, beside stereo MP3), or
+remuxed from MP4, length-prefixed with the avcC after the BITMAPINFOHEADER (`avi-h264-paff`: JM's field pictures, a
+packet a field). Every H.264 conformance test decodes both, frames by MD5 against FFmpeg's. AVI stores no presentation
+times, so the frames take the packets' times in display order from the first; FFmpeg's are the times of the packets
+that brought them out of its decoder, later by the reorder delay for every frame alike, so the times are compared from
+the first frame's, with ffprobe's frame times (name.frametimes): FFmpeg gives the frames its flush brings out none,
+where framemd5 fills in the time before plus one tick, a field's where `avi-h264-paff`'s frames are two.
 
 ## Matroska and WebM demuxing
 

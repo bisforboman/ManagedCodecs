@@ -168,6 +168,12 @@ ManagedCodecs.PacketInfo.SkipSamples.get -> int
 ManagedCodecs.PacketInfo.SkipSamples.init -> void
 ManagedCodecs.PacketInfo.StreamIndex.get -> int
 ManagedCodecs.PacketInfo.StreamIndex.init -> void
+ManagedCodecs.PcmDecoder
+ManagedCodecs.PcmDecoder.Channels.get -> int
+ManagedCodecs.PcmDecoder.Decode(ManagedCodecs.Packet packet) -> ManagedCodecs.AudioFrame!
+ManagedCodecs.PcmDecoder.Decode(System.ReadOnlySpan<byte> packet) -> ManagedCodecs.AudioFrame!
+ManagedCodecs.PcmDecoder.PcmDecoder(ManagedCodecs.AudioStreamInfo! stream) -> void
+ManagedCodecs.PcmDecoder.SampleRate.get -> int
 ManagedCodecs.PictureType
 ManagedCodecs.PictureType.B = 3 -> ManagedCodecs.PictureType
 ManagedCodecs.PictureType.BI = 7 -> ManagedCodecs.PictureType
@@ -277,6 +283,8 @@ const ManagedCodecs.CodecIds.H264 = "H264" -> string!
 const ManagedCodecs.CodecIds.Mjpeg = "MJPG" -> string!
 const ManagedCodecs.CodecIds.Mp3 = "MP3" -> string!
 const ManagedCodecs.CodecIds.Mpeg4Visual = "MP4V" -> string!
+const ManagedCodecs.CodecIds.PcmS16Le = "PCM_S16LE" -> string!
+const ManagedCodecs.CodecIds.PcmU8 = "PCM_U8" -> string!
 override ManagedCodecs.AudioStreamInfo.Equals(object? obj) -> bool
 override ManagedCodecs.AudioStreamInfo.GetHashCode() -> int
 override ManagedCodecs.AudioStreamInfo.ToString() -> string!

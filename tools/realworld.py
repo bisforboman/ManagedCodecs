@@ -68,15 +68,15 @@ FILMS = {
     "lucy_loop_mjpeg.avi": (
         "https://archive.org/download/MarcCanterLucyLoop/JUly4_003.avi",
         "9e2b696601ba5396e5cdb7a760facbdcac07eb95bfd00b24ff913e0a0cf37e8c",
-        "A digital camera's AVI (CC BY-SA 2.5): 320x240 MJPEG 4:2:2 at 15 frames a second, 97 s, 8-bit PCM audio at 11 kHz (not decoded)"),
+        "A digital camera's AVI (CC BY-SA 2.5): 320x240 MJPEG 4:2:2 at 15 frames a second, 97 s, 8-bit PCM audio at 11 kHz"),
     "spinning_skull_mjpeg.avi": (
         "https://archive.org/download/Flickr-5946839923/The_Deadly_Spinning_Skull-5946839923.avi",
         "d259c2ad9cbf0270a4e3bac6a97dbea29604ee1b35b94fc1471981a841e54b57",
-        "A digital camera's AVI (CC BY 2.0): 640x480 MJPEG 4:2:2 at 30 frames a second, 37 s, 8-bit PCM audio at 11 kHz (not decoded)"),
+        "A digital camera's AVI (CC BY 2.0): 640x480 MJPEG 4:2:2 at 30 frames a second, 37 s, 8-bit PCM audio at 11 kHz"),
     "canon_mvi_5143_mjpeg.avi": (
         "https://archive.org/download/Flickr-3688286227/mvi_5143.avi-3688286227.avi",
         "923231c3e2436ee36921d77c84bd96b5f83d35b88f4968dd53339684bb608b51",
-        "A Canon PowerShot's MVI AVI (CC BY-NC-ND 2.0): 640x480 MJPEG 4:2:2 at 30 frames a second, 31 s, 16-bit PCM audio (not decoded)"),
+        "A Canon PowerShot's MVI AVI (CC BY-NC-ND 2.0): 640x480 MJPEG 4:2:2 at 30 frames a second, 31 s, 16-bit PCM audio"),
     "nikon_dscn0520_mjpeg.mov": (
         "https://archive.org/download/CassandraDuganOurLazyCats/DSCN0520.MOV",
         "9705257be90dc1ad8b185609b90575f54d7a57a379567c1d97f1a419f7b07f57",
@@ -164,8 +164,7 @@ def compare_thumbnail(path, work):
         problems.append(f"rotation {rotation} against ffprobe's {side.get('rotation', 0)}")
     if den and abs(fps - num / den) > 1e-6:
         problems.append(f"{fps} frames a second against ffprobe's average {video['avg_frame_rate']}")
-    # VideoProbe doesn't read AVI's audio (VideoInfo.Audio says so): the camera AVIs' PCM is not compared.
-    if audio and not path.endswith(".avi") and (rate, channels) != (int(audio["sample_rate"]), audio["channels"]):
+    if audio and (rate, channels) != (int(audio["sample_rate"]), audio["channels"]):
         problems.append(f"audio {rate} Hz {channels} channels against ffprobe's {audio['sample_rate']} {audio['channels']}")
     if problems:
         return "probe: " + "; ".join(problems), False

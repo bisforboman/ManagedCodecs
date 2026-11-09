@@ -447,7 +447,7 @@ while (player.TakeAudio() is { } audio) { /* audio.Samples at audio.SampleRate t
   FFmpeg's scaler (tools/ManagedCodecs.MonoGame.Sample/README.md); the fast path is checked against the formula on random
   samples of every 8-bit layout.
 - **Speed:** on 4 vCPUs at 2.1 GHz, 1080p24 and 1080p30 keep up, decoding and conversion included (mcplay's README).
-- **Audio it doesn't decode** (Opus, Vorbis, AVI's PCM, ...; AAC and MP3 play) plays as none: `Audio` is null and
+- **Audio it doesn't decode** (Opus, Vorbis, IMA ADPCM, ...; AAC, MP3 and AVI's PCM play) plays as none: `Audio` is null and
   `SkippedAudioCodec` names it (the container's Codec ID, such as `A_OPUS`, or AVI's format tag, `0x0001`), for a warning; the Godot, Unity and
   mcplay samples print one.
 - **Not a media player:** no seeking and no clock of its own (pause by stopping the clock you pass); `Loop` plays the

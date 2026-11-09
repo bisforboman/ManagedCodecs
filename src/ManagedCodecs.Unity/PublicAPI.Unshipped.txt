@@ -1,1 +1,9 @@
 #nullable enable
+const ManagedCodecs.CodecIds.PcmS16Le = "PCM_S16LE" -> string!
+const ManagedCodecs.CodecIds.PcmU8 = "PCM_U8" -> string!
+ManagedCodecs.PcmDecoder
+ManagedCodecs.PcmDecoder.Channels.get -> int
+ManagedCodecs.PcmDecoder.Decode(ManagedCodecs.Packet packet) -> ManagedCodecs.AudioFrame!
+ManagedCodecs.PcmDecoder.Decode(System.ReadOnlySpan<byte> packet) -> ManagedCodecs.AudioFrame!
+ManagedCodecs.PcmDecoder.PcmDecoder(ManagedCodecs.AudioStreamInfo! stream) -> void
+ManagedCodecs.PcmDecoder.SampleRate.get -> int

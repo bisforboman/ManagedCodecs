@@ -550,6 +550,10 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.Playback/MediaPlayer.cs",
          find="if (_next.Time - _next.Lead > position)", replace="if (_next.Time > position)",
          tests="DisplayName~ClockAtTheFrameRate"),
+    # ---- PCM: bytes after a packet's last whole sample frame are ignored, as FFmpeg's decoder ignores them (no spec).
+    dict(file="src/ManagedCodecs.Core/PcmDecoder.cs",
+         find="if (packet.Length > 0 && packet.Length < frameBytes)", replace="if (packet.Length % frameBytes != 0)",
+         tests="FullyQualifiedName~PcmDecoderTests"),
     # ---- MP3: where the decoder does what FFmpeg's does and the spec leaves open, or what only some streams reach.
     # A frame whose main data starts before the reservoir does (a stream cut from a longer one): its granules are
     # skipped, silent, by their lengths until the data is there (mp3-cut).

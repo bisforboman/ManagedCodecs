@@ -2,7 +2,7 @@
 
 AVI audio is exposed since #446 (docs/decisions/2026-11-08-avi-audio.md), but only MP3 and AAC are decoded: the
 cameras' AVIs (realworld.py's three MJPEG AVIs, 8-bit PCM at 11 kHz and 16-bit PCM) play silent, their audio named
-`"0x0001"` and skipped. That record left PCM decoding for later; this one decides it. Nothing is built yet.
+`"0x0001"` and skipped. That record left PCM decoding for later; this one decides it. Built in #454.
 
 ## What AVI gives today
 

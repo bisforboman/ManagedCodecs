@@ -17,7 +17,8 @@ run time.
 
 - Containers: `AviDemuxer.Audio` is the file's first audio stream, where it was always null, and `ReadPackets` gives
   its packets with the video's: MP3 (both as FFmpeg's muxer writes it and in the CBR layout of VirtualDub and older
-  muxers, re-split into frames), AAC, and other audio named by its format tag (`"0x0001"` for PCM). So `MediaPlayer`
+  muxers, re-split into frames), AAC, and other audio named by its format tag (`"0x0001"` for PCM; PCM and ADPCM in
+  pieces of chunks, as FFmpeg's demuxer cuts them). So `MediaPlayer`
   plays an AVI's MP3 and AAC, `Seek` takes the audio stream too, and `VideoProbe`'s duration counts the audio, as
   ffprobe's does (docs/decisions/2026-11-08-avi-audio.md).
 

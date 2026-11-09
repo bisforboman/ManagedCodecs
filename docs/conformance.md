@@ -250,7 +250,7 @@ FFmpeg gives them) and its codec private data with FFmpeg's extradata, on every 
 | --- | --- |
 | avi-dropped-frame, avi-mjpeg-mp3 | MP3 as FFmpeg's muxer writes it: a frame a chunk, dwScale 1152, mono and stereo |
 | avi-mjpeg-aac | AAC, a frame a chunk, its AudioSpecificConfig in the WAVEFORMATEX's extra bytes |
-| avi-mjpeg-pcm | PCM (dwSampleSize 2): a packet a chunk, timed in samples; named `0x0001`, not decoded |
+| avi-mjpeg-pcm | PCM (dwSampleSize 2): a packet a chunk of 1024 samples, timed in samples; named `0x0001`, not decoded |
 | avi-mjpeg-mp3-cbr | MP3 in the CBR layout of VirtualDub and older muxers, written by `tools/avi-mp3-cbr.py` |
 
 The CBR layout (dwScale 1, dwRate the bytes a second, dwSampleSize 1) cuts its chunks anywhere in a frame:
@@ -263,8 +263,16 @@ interpolation in a byte's time base, up to 10 ticks (1.25 ms) behind each frame'
 1.5 ms. The decoded audio of the three MP3 samples is checked against FFmpeg's as the other MP3 samples are
 (name.mp3.trim.f32, within 2^-17), and `MediaPlayerTests` plays the two MP3 and the AAC sample against the decoders'
 own output. After a `Seek` (in either stream) the audio starts at its last packet at or before the time asked for,
-as `SeekTests` checks for every demuxer's streams. Not checked against FFmpeg: how it splits PCM chunks of other
-sizes, format tag 0x50 (MPEG Layer I and II) with Layer III frames, IMA ADPCM, AC-3; and H.264 in AVI (Annex B, no
+as `SeekTests` checks for every demuxer's streams.
+
+Audio with a dwSampleSize comes in pieces of chunks, as FFmpeg's demuxer cuts them: 1024 blocks below 32 bytes a block,
+one block from 32 bytes up (IMA and MS ADPCM's 1024-byte blocks, 8-channel 32-bit PCM), the whole chunk at 1 byte
+(8-bit mono), each timed by all the bytes before it over dwSampleSize, rounded down (after two chunks of 1001 bytes at
+2 bytes a block: 1001), and lasting its own bytes over it. FFmpeg's muxer writes PCM in chunks of 1024 samples, so no
+sample shows the cutting: ffprobe did, on FFmpeg AVIs whose PCM chunks were merged into larger and odd-sized ones
+(16-bit mono and stereo, 24-bit stereo, 16-bit 5.1, 8-bit mono, 32-bit 7.1, IMA and MS ADPCM), and
+`AviDemuxerTests.CutsAudioChunksAsFfmpeg` checks its sizes and times on hand-built files. Not checked against FFmpeg:
+format tag 0x50 (MPEG Layer I and II) with Layer III frames, IMA ADPCM, AC-3; and H.264 in AVI (Annex B, no
 avcC) is not decoded, with or without audio.
 
 ## Matroska and WebM demuxing

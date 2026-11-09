@@ -250,7 +250,7 @@ FFmpeg gives them) and its codec private data with FFmpeg's extradata, on every 
 | --- | --- |
 | avi-dropped-frame, avi-mjpeg-mp3 | MP3 as FFmpeg's muxer writes it: a frame a chunk, dwScale 1152, mono and stereo |
 | avi-mjpeg-aac | AAC, a frame a chunk, its AudioSpecificConfig in the WAVEFORMATEX's extra bytes |
-| avi-mjpeg-pcm | PCM (dwSampleSize 2): a packet a chunk, timed in samples; named `0x0001`, not decoded |
+| avi-mjpeg-pcm | PCM (dwSampleSize 2): a packet a chunk of 1024 samples, timed in samples; named `0x0001`, not decoded |
 | avi-mjpeg-mp3-cbr | MP3 in the CBR layout of VirtualDub and older muxers, written by `tools/avi-mp3-cbr.py` |
 
 The CBR layout (dwScale 1, dwRate the bytes a second, dwSampleSize 1) cuts its chunks anywhere in a frame:
@@ -263,9 +263,16 @@ interpolation in a byte's time base, up to 10 ticks (1.25 ms) behind each frame'
 1.5 ms. The decoded audio of the three MP3 samples is checked against FFmpeg's as the other MP3 samples are
 (name.mp3.trim.f32, within 2^-17), and `MediaPlayerTests` plays the two MP3 and the AAC sample against the decoders'
 own output. After a `Seek` (in either stream) the audio starts at its last packet at or before the time asked for,
-as `SeekTests` checks for every demuxer's streams. Not checked against FFmpeg: how it splits PCM chunks of other
-sizes, format tag 0x50 (MPEG Layer I and II) with Layer III frames, IMA ADPCM, AC-3. H.264 in AVI: see H.264,
-Annex B.
+as `SeekTests` checks for every demuxer's streams.
+
+Audio with a dwSampleSize comes in pieces of chunks, as FFmpeg's demuxer cuts them: 1024 blocks below 32 bytes a block,
+one block from 32 bytes up (IMA and MS ADPCM's 1024-byte blocks, 8-channel 32-bit PCM), the whole chunk at 1 byte
+(8-bit mono), each timed by all the bytes before it over dwSampleSize, rounded down (after two chunks of 1001 bytes at
+2 bytes a block: 1001), and lasting its own bytes over it. FFmpeg's muxer writes PCM in chunks of 1024 samples, so no
+sample shows the cutting: ffprobe did, on FFmpeg AVIs whose PCM chunks were merged into larger and odd-sized ones
+(16-bit mono and stereo, 24-bit stereo, 16-bit 5.1, 8-bit mono, 32-bit 7.1, IMA and MS ADPCM), and
+`AviDemuxerTests.CutsAudioChunksAsFfmpeg` checks its sizes and times on hand-built files. Not checked against FFmpeg:
+format tag 0x50 (MPEG Layer I and II) with Layer III frames, IMA ADPCM, AC-3. H.264 in AVI: see H.264, Annex B.
 
 ## Matroska and WebM demuxing
 
@@ -1565,4 +1572,23 @@ title and before an ID3v1 tag; mp3-raw-22k, whose 1105 samples to skip run acros
 mp3-raw-noxing, written without the tag, keeps every sample). The decoded samples are compared with FFmpeg's in
 Mp3ConformanceTests (name.mp3.trim.f32); the three rules that follow FFmpeg have mutation entries. A file of Layer I or
 II frames or of free-format ones is not taken (unit tests mark a sample's frames so). No encoder at hand writes a VBRI
-tag (Fraunhofer's): its frame is skipped by the same rule, untested.
+tag (Fraunhofer's): unit tests build one.
+
+Three more of FFmpeg's demuxer's rules, found by altering libmp3lame's files and reading ffprobe's packets (2026-11-09),
+each with unit tests on frames built for it and mutation entries; the samples' packets are now compared with
+ffprobe's skip-samples side data and discard flag too (name.packets.csv):
+- A first frame whose header differs from the next one's in the mode, copyright, original or emphasis bits is no
+  packet, nor the next while it differs from its own next; the private bit, mode extension, protection and padding
+  don't count, nor differences later in the file.
+- A Xing, Info or VBRI frame is no packet only when its tag counts the frames or the bytes: an Info frame with no
+  fields, or a table of contents alone, is a packet.
+- Padding that covers a whole packet skips all of its samples (padding 2000 over 40 frames: 319 from the second to
+  last packet, 1152 from the last), where the demuxer discarded the packet: the same samples decoded, the packets now
+  as FFmpeg's.
+
+MP3 remuxed into MP4 (mp3-raw-22k-remux, object type 0x69) found a rule of FFmpeg's MP4 demuxer: the last audio
+packet's duration runs to the edit's end but stops at the media's end compared with its pts as it is, without the
+edit's media time taken off. FFmpeg's muxer copies the raw file's 1105-sample start into the edit, whose end, rounded
+up in the movie's timescale, runs 2 samples past the media: FFmpeg's last packet lasts 578 samples, where the demuxer
+gave 576. Edit lists rewritten from media times 0, 1, 20 and 1105 (`tools/mp4-edit-list.py`) all fit the rule;
+aac-fdk-pce-remux, from 0, keeps its cap.

@@ -167,6 +167,14 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.Containers/Avi/AviDemuxer.cs",
          find="if (isVideoChunk && size == 0)\n                {\n                    frame++;\n                }\n                else ",
          replace="", tests="FullyQualifiedName~Avi|DisplayName~avi-dropped-frame"),
+    # Audio with a dwSampleSize below 32 comes in pieces of 1024 blocks, from 32 up one block a packet...
+    dict(file="src/ManagedCodecs.Containers/Avi/AviDemuxer.cs",
+         find="blockSize < 32 ? 1024 * blockSize : blockSize", replace="size",
+         tests="FullyQualifiedName~AviDemuxerTests"),
+    # ... each timed by all the bytes before it, not by the pieces' durations summed.
+    dict(file="src/ManagedCodecs.Containers/Avi/AviDemuxer.cs",
+         find="long pts = state.Bytes / blockSize;", replace="long pts = state.Position; state.Position += length / blockSize;",
+         tests="FullyQualifiedName~AviDemuxerTests"),
 
     # ---- MP4 (as FFmpeg reads it)
     # Negative composition offsets in 'ctts': FFmpeg leaves the last two entries out of the shift.
@@ -568,6 +576,37 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.Containers/Mp3/Mp3Demuxer.cs",
          find="- tag.Padding + DecoderDelay;", replace="- tag.Padding;",
          tests="DisplayName~mp3-raw-cbr"),
+    # A first frame unlike the next one is no packet, by the mode, copyright, original and emphasis only.
+    dict(file="src/ManagedCodecs.Containers/Mp3/Mp3Demuxer.cs",
+         find="&& TryReadHeader(_stream, pos + frame.FrameLength, out var next) && !frame.SameStream(next))",
+         replace="&& TryReadHeader(_stream, pos + frame.FrameLength, out var next) && false)",
+         tests="FullyQualifiedName~Mp3DemuxerTests"),
+    dict(file="src/ManagedCodecs.Containers/Mp3/MpegAudioHeader.cs",
+         find="private const uint StreamMask = 0xFFFE0CCF;", replace="private const uint StreamMask = 0xFFFE0C0F;",
+         tests="FullyQualifiedName~Mp3DemuxerTests"),
+    dict(file="src/ManagedCodecs.Containers/Mp3/MpegAudioHeader.cs",
+         find="private const uint StreamMask = 0xFFFE0CCF;", replace="private const uint StreamMask = 0xFFFE0FFF;",
+         tests="FullyQualifiedName~Mp3DemuxerTests"),
+    # A tag frame is no packet only when it counts the frames or the bytes (Xing and Info; VBRI).
+    dict(file="src/ManagedCodecs.Containers/Mp3/Mp3Demuxer.cs",
+         find="if ((frames ?? 0) == 0 && bytes == 0)", replace="if (false)",
+         tests="FullyQualifiedName~Mp3DemuxerTests"),
+    dict(file="src/ManagedCodecs.Containers/Mp3/Mp3Demuxer.cs",
+         find="return vbriFrames != 0 || ReadUInt32(span[(36 + 10)..]) != 0 ? (vbriFrames, null, 0) : null;",
+         replace="return (vbriFrames, null, 0);",
+         tests="FullyQualifiedName~Mp3DemuxerTests"),
+    # A packet the padding covers whole skips all its samples, not a discarded packet.
+    dict(file="src/ManagedCodecs.Containers/Mp3/Mp3Demuxer.cs",
+         find="SkipEndSamples = (int)cut,", replace="SkipEndSamples = cut == _samplesPerFrame ? 0 : (int)cut,",
+         tests="FullyQualifiedName~Mp3DemuxerTests"),
+    # MP4: the last audio packet runs to the edit's end, but not past the media's end compared with its pts as it is
+    # (an edit from a later media time, mp3-raw-22k-remux, runs past the last sample; aac-fdk-pce-remux, from 0, doesn't).
+    dict(file="src/ManagedCodecs.Containers/Mp4/Mp4Demuxer.cs",
+         find="until = Math.Min(until, media.Dts[^1] + media.Durations[^1] - samples.Pts(i));", replace="until = Math.Min(until, samples.Durations[i]);",
+         tests="DisplayName~mp3-raw-22k-remux|DisplayName~aac-fdk-pce-remux"),
+    dict(file="src/ManagedCodecs.Containers/Mp4/Mp4Demuxer.cs",
+         find="until = Math.Min(until, media.Dts[^1] + media.Durations[^1] - samples.Pts(i));", replace="",
+         tests="DisplayName~mp3-raw-22k-remux|DisplayName~aac-fdk-pce-remux"),
     # mixed_block_flag gives a start or stop block's lowest subbands the normal window (l3-si_block; mkv-mp3-mixed).
     dict(file="src/ManagedCodecs.Mp3/Hybrid.cs",
          find="LongWindows[g.ShortBlocks || sb < mixedSubbands ? 0 : g.BlockType]", replace="LongWindows[g.ShortBlocks ? 0 : g.BlockType]",

@@ -665,6 +665,10 @@ ff -f lavfi -i "$mp3tones:s=44100" -c:a libmp3lame -b:a 128k samples/mp3-raw-cbr
 ff -f lavfi -i "$mp3noise:sample_rate=44100" -ac 2 -c:a libmp3lame -q:a 2 -metadata title=ManagedCodecs -write_id3v1 1 samples/mp3-raw-vbr.mp3
 ff -f lavfi -i "$mp3tones:s=44100" -c:a libmp3lame -b:a 128k -write_xing 0 samples/mp3-raw-noxing.mp3
 ff -f lavfi -i "$mp3tones:s=22050" -c:a libmp3lame -b:a 64k samples/mp3-raw-22k.mp3
+# The 22.05 kHz file remuxed into MP4 (object type 0x69): FFmpeg's muxer copies the demuxer's 1105-sample start into
+# the edit list, whose end, rounded up in the movie's timescale, runs 2 samples past the media; FFmpeg lets the last
+# packet's duration run to it, as an edit from a later media time may (Containers CLAUDE.md).
+ff -i samples/mp3-raw-22k.mp3 -c copy samples/mp3-raw-22k-remux.mp4
 # Intensity stereo and mixed blocks, which neither encoder writes: LAME's MPEG-1 joint stereo (gated tones and clicks,
 # for short blocks), as raw frames without a tag, rewritten by tools/mp3-rewrite.py, in Matroska. Intensity stereo in
 # every frame (the bands above the right channel's last value, long and short blocks), with noise in the left channel
@@ -954,7 +958,13 @@ for f in samples/*.mp4 samples/*.mkv samples/*.mp3 samples/*.avi; do
   [[ $f == *.mp4 ]] && ff -ignore_editlist 1 -i "$f" -map 0:a:0 -f f32le "${f%.*}.mp3.f32"
   ff -i "$f" -map 0:a:0 -f f32le "${f%.*}.mp3.trim.f32"
 done
-for f in samples/*.mp3; do ff -copyts -i "$f" -c copy -f framemd5 "${f%.mp3}.packets.framemd5"; done
+# Raw MP3: packets as FFmpeg's demuxer gives them, and in .packets.csv with their skip-samples side data (the gapless
+# trim at both ends).
+for f in samples/*.mp3; do
+  ff -copyts -i "$f" -c copy -f framemd5 "${f%.mp3}.packets.framemd5"
+  ffprobe -v error -show_packets -show_data_hash MD5 -show_entries packet=stream_index,pts,dts,duration,size,flags,data_hash \
+    -of csv=p=0 "$f" > "${f%.mp3}.packets.csv"
+done
 
 # name.audioframes.csv: the decoded audio frames as ffprobe lists them, by default (the edit list applied): FFmpeg's
 # time base for the stream on the first line, then each frame's pts in it and its sample count; for AudioFrame.Pts. AAC

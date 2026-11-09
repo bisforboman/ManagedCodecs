@@ -29,7 +29,19 @@ The repository's CLAUDE.md (process, core idea, cross-cutting gotchas) applies t
   data is what catches it (as zlib's own inflate does).
 - Raw MP3: FFmpeg's encoder writes its LAME tag with "Lavc" (not "LAME") as the encoder, and FFmpeg's demuxer takes it as
   LAME's; its info frame counts the frames after it, not itself. `ffprobe -show_packets` shows the gapless trim as
-  "Skip Samples" side data (1105 on the first packet, the padding less 529 on the last).
+  "Skip Samples" side data (1105 on the first packet, the padding less 529 on the last; a packet the padding covers
+  whole skips all its 1152, not a discarded packet).
+- Raw MP3, more of FFmpeg's demuxer (found by altering libmp3lame's files and reading ffprobe): a first frame whose
+  header differs from the next one's in the mode, copyright, original or emphasis bits is no packet, nor the next while
+  it differs from its own next (`MpegAudioHeader.SameStream`); differences later in the file don't count. A Xing, Info
+  or VBRI frame is no packet only when it counts the frames or the bytes (an Info frame with neither is one). The LAME
+  tag's CRC is not checked. libmp3lame's info frame lacks the original bit its audio frames have, so it differs from
+  them too: alter one rule at a time when testing another.
+- The last MP4 audio packet's duration, cut or stretched to the edit's end, stops at the media's end as FFmpeg compares
+  them: the packet's presentation time against the media's end in media time, without the edit's media time taken
+  off, so an edit from media time t may run up to t past the media (a raw MP3 remuxed into MP4, whose 1105-sample
+  start FFmpeg's muxer copies into the edit: mp3-vbr-22k-remux; aac-fdk-pce-remux starts at 0 and stops at the media).
+  Found by rewriting edit lists (`tools/mp4-edit-list.py`, media times 0, 1, 20 and 1105) and reading ffprobe.
 - AVI: FFmpeg's muxer drops the second video frame (an empty chunk) while interleaving audio, so every FFmpeg AVI with
   audio has a pts gap (0, 2, 3, ...): tests that tick at the first frames' spacing can't take them. It writes the
   audio's chunk id ('01wb') in the header's OpenDML 'indx' too: search the 'movi' list for chunks. FFmpeg's muxer

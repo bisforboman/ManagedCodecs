@@ -10,8 +10,9 @@ namespace ManagedCodecs.Containers;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Audio comes a packet a chunk, timed by the stream header (dwScale / dwRate; with dwSampleSize, the samples before
-/// it), as FFmpeg's demuxer gives it, except MP3 in the "CBR" layout (dwSampleSize set: chunks of any length, cut
+/// Audio comes as FFmpeg's demuxer gives it, timed by the stream header (dwScale / dwRate): a packet a chunk where
+/// dwSampleSize is 0; with one (PCM, ADPCM), pieces of each chunk (1024 blocks below 32 bytes a block, one block from
+/// 32 up, the whole chunk at 1 byte), each timed by the bytes before it over dwSampleSize. Except MP3 in the "CBR" layout (dwSampleSize set: chunks of any length, cut
 /// anywhere in a frame), which is re-split into whole frames, each timed at its sample position (time base 1 / the
 /// sample rate; FFmpeg's parser interpolates there, up to a millisecond off: docs/decisions/2026-11-08-avi-audio.md).
 /// MP3 is <see cref="CodecIds.Mp3"/> and AAC <see cref="CodecIds.Aac"/> (its AudioSpecificConfig as the codec private
@@ -229,7 +230,7 @@ public sealed class AviDemuxer : IDemuxer
         var audioInfo = audio ? Audio : null;
         string audioId = audioInfo is null ? "" : audioInfo.StreamIndex.ToString("00", CultureInfo.InvariantCulture) + "wb";
         var audioState = new AudioState();
-        (Packet Packet, uint Size)? held = null;
+        (Packet Packet, int Size)? held = null;
 
         // Explicit stack instead of recursion so nested 'rec ' lists work inside an iterator.
         var ranges = new Stack<(long Pos, long End)>();
@@ -270,13 +271,13 @@ public sealed class AviDemuxer : IDemuxer
                         yield return ReadStep.Read(pos + 8, data);
                     }
 
-                    foreach (var packet in AudioPackets(audioInfo, audioState, data, size))
+                    foreach (var (packet, packetSize) in AudioPackets(audioInfo, audioState, data, size))
                     {
                         // After a Seek: the last packet at or before its time is held until a later one shows it is
                         // the one to start from (or the walk ends).
                         if (start is { } time && AtOrBefore(packet, audioInfo, time))
                         {
-                            held = (packet, size);
+                            held = (packet, packetSize);
                             continue;
                         }
 
@@ -286,7 +287,7 @@ public sealed class AviDemuxer : IDemuxer
                             held = null;
                         }
 
-                        yield return AudioStep(packet, size, withData);
+                        yield return AudioStep(packet, packetSize, withData);
                     }
                 }
 
@@ -332,13 +333,14 @@ public sealed class AviDemuxer : IDemuxer
         }
     }
 
-    // An audio packet's step: the packet, or without the data its description (a chunk's size, or a re-split frame's).
-    private ReadStep AudioStep(Packet packet, uint chunkSize, bool withData) => withData
+    // An audio packet's step: the packet, or without the data its description (of size bytes: its data is not read).
+    private static ReadStep AudioStep(Packet packet, int size, bool withData) => withData
         ? ReadStep.Yield(packet)
-        : ReadStep.Describe(new PacketInfo(packet.StreamIndex, packet.Sequence, _audioLayout == AudioLayout.Mp3Frames ? packet.Data.Length : checked((int)chunkSize), true, packet.Dts, packet.Pts, packet.Duration));
+        : ReadStep.Describe(new PacketInfo(packet.StreamIndex, packet.Sequence, size, true, packet.Dts, packet.Pts, packet.Duration));
 
     // How the audio's chunks become packets: a packet a chunk, a tick each (dwSampleSize 0, as FFmpeg's muxer writes MP3
-    // and AAC) or timed by the samples before it (dwSampleSize set: PCM and the like); or CBR MP3 re-split into frames.
+    // and AAC), or pieces of chunks timed by the bytes before them (dwSampleSize set: PCM and the like); or CBR MP3
+    // re-split into frames.
     private enum AudioLayout
     {
         None,
@@ -385,25 +387,46 @@ public sealed class AviDemuxer : IDemuxer
         return (info, samples ? AudioLayout.ChunkSamples : AudioLayout.Chunks);
     }
 
-    // The audio's place in the walk: packets, samples or bytes so far, and CBR MP3's bytes not yet a whole frame.
+    // The audio's place in the walk: packets, and ticks so far (or, with a dwSampleSize, bytes), and CBR MP3's bytes
+    // not yet a whole frame.
     private sealed class AudioState
     {
         public long Sequence { get; set; }
 
         public long Position { get; set; }
 
+        public long Bytes { get; set; }
+
         public List<byte> Pending { get; } = [];
     }
 
-    // The packets an audio chunk gives: itself, or the whole MP3 frames it completes. Without its data (packet
-    // descriptions) data is empty and size the chunk's.
-    private IEnumerable<Packet> AudioPackets(AudioStreamInfo audio, AudioState state, byte[] data, uint size)
+    // The packets an audio chunk gives, each with its size: itself, its pieces, or the whole MP3 frames it completes.
+    // Without its data (packet descriptions) data is empty and size the chunk's.
+    private IEnumerable<(Packet Packet, int Size)> AudioPackets(AudioStreamInfo audio, AudioState state, byte[] data, uint size)
     {
-        if (_audioLayout != AudioLayout.Mp3Frames)
+        if (_audioLayout == AudioLayout.Chunks)
         {
-            long ticks = _audioLayout == AudioLayout.Chunks ? 1 : size / _audioSampleSize;
-            yield return new Packet(audio.StreamIndex, state.Sequence++, data, IsKeyframe: true, Dts: state.Position, Pts: state.Position, Duration: ticks);
-            state.Position += ticks;
+            yield return (new Packet(audio.StreamIndex, state.Sequence++, data, IsKeyframe: true, Dts: state.Position, Pts: state.Position, Duration: 1), checked((int)size));
+            state.Position++;
+            yield break;
+        }
+
+        if (_audioLayout == AudioLayout.ChunkSamples)
+        {
+            // As FFmpeg's demuxer cuts them (each case checked with ffprobe on FFmpeg AVIs whose PCM chunks were merged):
+            // pieces of 1024 blocks below 32 bytes a block, of one block from 32 up (ADPCM), the whole chunk at 1 byte;
+            // each timed by all the bytes before it over dwSampleSize, rounded down, and lasting its own bytes over it.
+            long blockSize = _audioSampleSize;
+            long piece = blockSize <= 1 ? size : blockSize < 32 ? 1024 * blockSize : blockSize;
+            for (long offset = 0; offset < size; offset += piece)
+            {
+                int length = (int)Math.Min(piece, size - offset);
+                long pts = state.Bytes / blockSize;
+                state.Bytes += length;
+                var bytes = data.Length > 0 ? data.AsMemory((int)offset, length) : ReadOnlyMemory<byte>.Empty;
+                yield return (new Packet(audio.StreamIndex, state.Sequence++, bytes, IsKeyframe: true, Dts: pts, Pts: pts, Duration: length / blockSize), length);
+            }
+
             yield break;
         }
 
@@ -429,7 +452,7 @@ public sealed class AviDemuxer : IDemuxer
 
             var frame = pending.GetRange(at, length).ToArray();
             at += length;
-            yield return new Packet(audio.StreamIndex, state.Sequence++, frame, IsKeyframe: true, Dts: state.Position, Pts: state.Position, Duration: frameHeader.SamplesPerFrame);
+            yield return (new Packet(audio.StreamIndex, state.Sequence++, frame, IsKeyframe: true, Dts: state.Position, Pts: state.Position, Duration: frameHeader.SamplesPerFrame), length);
             state.Position += frameHeader.SamplesPerFrame;
         }
 

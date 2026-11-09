@@ -17,7 +17,8 @@ run time.
 
 - Containers: `AviDemuxer.Audio` is the file's first audio stream, where it was always null, and `ReadPackets` gives
   its packets with the video's: MP3 (both as FFmpeg's muxer writes it and in the CBR layout of VirtualDub and older
-  muxers, re-split into frames), AAC, and other audio named by its format tag (`"0x0001"` for PCM). So `MediaPlayer`
+  muxers, re-split into frames), AAC, and other audio named by its format tag (`"0x0001"` for PCM; PCM and ADPCM in
+  pieces of chunks, as FFmpeg's demuxer cuts them). So `MediaPlayer`
   plays an AVI's MP3 and AAC, `Seek` takes the audio stream too, and `VideoProbe`'s duration counts the audio, as
   ffprobe's does (docs/decisions/2026-11-08-avi-audio.md).
 
@@ -26,6 +27,13 @@ run time.
 - H.264 in AVI decodes: its Annex B stream (start codes, the SPS and PPS among the packets, no avcC) made
   `H264Decoder` throw. A decoder made without a configuration record (`codecPrivate` empty, as `AviDemuxer` gives it)
   now reads Annex B, and its frames take the packets' decoding-order times in increasing order, as FFmpeg's do.
+- Containers: `Mp3Demuxer` frames a raw MP3 file as FFmpeg's demuxer in three more cases: a first frame whose header
+  differs from the next one's (mode, copyright, original, emphasis) is skipped; a Xing or Info frame that counts neither
+  frames nor bytes is a packet; and a packet the LAME padding covers whole skips all its samples
+  (`SkipEndSamples`) rather than being discarded (the same samples decoded).
+- Containers: an MP4 audio track's last packet, where the edit list starts late in the media (MP3 remuxed from a raw
+  file, 1105 samples in), lasted to the media's end rather than to the edit's, as FFmpeg's: 576 samples where FFmpeg
+  gives 578.
 
 ## 0.10.0 – 2026-11-08
 

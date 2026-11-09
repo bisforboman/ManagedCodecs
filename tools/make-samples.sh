@@ -52,9 +52,10 @@ ff -f lavfi -i testsrc2=size=160x120:rate=25 -f lavfi -i "sine=frequency=440:sam
 ff -f lavfi -i testsrc2=size=160x120:rate=25 -f lavfi -i "sine=frequency=440:sample_rate=22050" -t 1 -c:v mjpeg -q:v 5 \
   -c:a pcm_s16le samples/avi-mjpeg-pcm.avi
 # H.264 in AVI: Annex B (start codes, the SPS and PPS in the stream, no avcC), which H264Decoder reads without a
-# configuration record: libx264's High with B pictures, and Constrained Baseline beside MP3 (FFmpeg's muxer drops its
-# second video frame while interleaving the audio).
-ff -f lavfi -i testsrc2=size=160x120:rate=25 -t 2 -c:v libx264 samples/avi-h264.avi
+# configuration record: libx264's High with B pictures and a keyframe every 12 frames (its 'idx1' index flags them, which
+# Seek starts from), and Constrained Baseline beside MP3 (FFmpeg's muxer drops its second video frame while
+# interleaving the audio).
+ff -f lavfi -i testsrc2=size=160x120:rate=25 -t 2 -c:v libx264 -g 12 samples/avi-h264.avi
 ff -f lavfi -i testsrc2=size=176x144:rate=25 -f lavfi -i "sine=frequency=440:sample_rate=44100" -t 1 -c:v libx264 \
   -profile:v baseline -c:a libmp3lame -b:a 64k samples/avi-h264-baseline-mp3.avi
 avicbr=$(mktemp --suffix=.avi)
@@ -918,9 +919,11 @@ done
 # name.seekNNNN.framemd5: the first video frame FFmpeg's accurate seek gives at NNNN ms, for IDemuxer.Seek (-ss before
 # -i: from the keyframe at or before the time, the frames shown before it dropped; -seek_timestamp 1: the time is the
 # packets' own, not counted from the file's start time). Between keyframes, on one, in a fragmented file that starts
-# late, in a file with an empty edit, in MJPEG, and in Matroska (SimpleBlocks; BlockGroups and laced audio).
+# late, in a file with an empty edit, in MJPEG, in Matroska (SimpleBlocks; BlockGroups and laced audio), and in H.264 in
+# AVI (by its 'idx1' index's keyframes: on one and between two).
 for s in h264-bframes.mp4:1200 h264-bframes.mp4:960 h264-bframes.mp4:1000 fmp4-base-moof.mp4:1200 \
-  h264-edit-gap.mp4:1000 testsrc-420.avi:600 mkv-h264-aac.mkv:1200 mkv-lace-xiph.mkv:1000; do
+  h264-edit-gap.mp4:1000 testsrc-420.avi:600 mkv-h264-aac.mkv:1200 mkv-lace-xiph.mkv:1000 avi-h264.avi:960 \
+  avi-h264.avi:1000; do
   f=samples/${s%%:*}; ms=${s##*:}
   ff -seek_timestamp 1 -ss "$(printf '%d.%03d' $((ms / 1000)) $((ms % 1000)))" -idct simple -noautorotate -i "$f" -map 0:v:0 \
     -frames:v 1 -f framemd5 "${f%.*}.seek$ms.framemd5"

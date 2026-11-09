@@ -47,3 +47,7 @@ The repository's CLAUDE.md (process, core idea, cross-cutting gotchas) applies t
   audio's chunk id ('01wb') in the header's OpenDML 'indx' too: search the 'movi' list for chunks. FFmpeg's muxer
   never writes the CBR MP3 layout: `tools/avi-mp3-cbr.py` rewrites its files into it, and FFmpeg's packet times there
   are its parser's interpolation, not the frames' (docs/decisions/2026-11-08-avi-audio.md).
+- AVI's H.264 packets carry decoding times (FFmpeg's have no pts at all), and FFmpeg's frames are shown at the packet
+  times the reorder delay later: frame k at k + 2 for libx264's B pictures. Seek by the index's keyframes therefore
+  backs off H.264's largest delay (16 frames); a seek-frame reference shows the frame FFmpeg's `-ss` gives, from the
+  keyframe before the one at the time.

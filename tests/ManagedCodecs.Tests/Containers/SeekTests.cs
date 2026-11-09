@@ -34,10 +34,6 @@ public class SeekTests
     public void ReadsTheTailFromTheKeyframeBefore(string name)
     {
         using var demuxer = Demuxer.Open(TestSamples.PathOf(name));
-        if (demuxer is AviDemuxer && demuxer.Video?.Codec != CodecIds.Mjpeg)
-        {
-            return; // SeeksOnlyMjpegInAvi
-        }
 
         var all = Infos(demuxer).ToList();
         foreach (var (stream, timeBase) in Streams(demuxer))
@@ -50,6 +46,14 @@ public class SeekTests
                 foreach (var (other, otherBase) in Streams(demuxer))
                 {
                     long time = other == stream ? pts : Rescale(pts, timeBase, otherBase);
+
+                    // AVI's indexed video (H.264) starts the largest reorder delay earlier: its packets' times are
+                    // decoding times (AviDemuxer.MaxReorderFrames: H.264's largest reorder delay, 16).
+                    if (demuxer is AviDemuxer { Video.Codec: not CodecIds.Mjpeg } avi && other == avi.Video.StreamIndex)
+                    {
+                        time -= 16;
+                    }
+
                     var expected = Tail(all.Where(p => p.StreamIndex == other).ToList(), time);
                     var actual = read.Where(p => p.StreamIndex == other).ToList();
                     Assert.True(expected.SequenceEqual(actual), $"Seek to {pts} in stream {stream}: stream {other}'s packets are not the tail from its keyframe at or before {time} ({actual.Count} packets, {expected.Count} expected).");

@@ -61,6 +61,32 @@ public class AviConformanceTests
         }
     }
 
+    /// <summary>
+    /// The video of every samples/*.avi against ffprobe's packets: each packet's size and MD5, its keyframe flag (the
+    /// 'idx1' index's, which Seek starts from; MJPEG's every packet), and its timestamps where FFmpeg gives them (H.264
+    /// in AVI has no pts in FFmpeg: its frames take their times from the decoder).
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(Samples))]
+    public void VideoMatchesFfmpegPacketByPacket(string sampleName)
+    {
+        var expected = File.ReadAllLines(TestSamples.ReferenceOf(sampleName, ".packets.csv")).Select(Probed.Parse).ToList();
+        using var demuxer = AviDemuxer.Open(TestSamples.PathOf(sampleName));
+        int index = demuxer.Video.StreamIndex;
+        var theirs = expected.Where(e => e.StreamIndex == index).ToList();
+        var ours = demuxer.ReadPackets().Where(p => p.StreamIndex == index).ToList();
+        Assert.Equal(theirs.Count, ours.Count);
+        for (int i = 0; i < ours.Count; i++)
+        {
+            var (p, e) = (ours[i], theirs[i]);
+            Assert.Equal(e.Size, p.Data.Length);
+            Assert.Equal(e.Md5, "MD5:" + FrameMd5.Hash(p.Data.Span));
+            Assert.True(e.IsKeyframe == p.IsKeyframe, $"Packet {i}: keyframe {p.IsKeyframe}, FFmpeg's {e.IsKeyframe}.");
+            Assert.True(e.Dts == Probed.Unset || e.Dts == p.Dts, $"Packet {i}: dts {p.Dts}, FFmpeg's {e.Dts}.");
+            Assert.True(e.Pts == Probed.Unset || e.Pts == p.Pts, $"Packet {i}: pts {p.Pts}, FFmpeg's {e.Pts}.");
+        }
+    }
+
     // The audio stream's WAVEFORMATEX nAvgBytesPerSec: its 'strf' after the 'strh' of type 'auds'.
     private static int AverageBytesPerSecond(string path)
     {
@@ -70,7 +96,7 @@ public class AviConformanceTests
         return BitConverter.ToInt32(data, strf + 8 + 8);
     }
 
-    private sealed record Probed(int StreamIndex, long Pts, long Dts, long Duration, int Size, string Md5)
+    private sealed record Probed(int StreamIndex, long Pts, long Dts, long Duration, int Size, string Md5, bool IsKeyframe)
     {
         public const long Unset = long.MinValue;
 
@@ -78,7 +104,7 @@ public class AviConformanceTests
         {
             var f = line.Split(',');
             long Number(string field) => field == "N/A" ? Unset : long.Parse(field, CultureInfo.InvariantCulture);
-            return new Probed(int.Parse(f[0], CultureInfo.InvariantCulture), Number(f[1]), Number(f[2]), Number(f[3]), int.Parse(f[4], CultureInfo.InvariantCulture), f[6]);
+            return new Probed(int.Parse(f[0], CultureInfo.InvariantCulture), Number(f[1]), Number(f[2]), Number(f[3]), int.Parse(f[4], CultureInfo.InvariantCulture), f[6], f[5].StartsWith('K'));
         }
     }
 }

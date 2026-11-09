@@ -325,12 +325,20 @@ parser, which reads the packets, so they too are compared that way.
 H.264 in AVI is Annex B: NAL units behind start codes, the SPS and PPS among them, no avcC. A decoder made without
 a configuration record reads that: each unit runs from a start code (0x000001) to the next, less the zero bytes before
 it (a four-byte start code's first, trailing_zero_8bits). AVI gives no presentation times, only its packets' decoding
-order (a frame count), so each frame shown takes the earliest of those not yet given, and the frames come out at
-increasing times as FFmpeg's do; with an avcC (MP4, Matroska) each keeps its own (a mutation entry; avi-h264 has B
-pictures). Bit-exact with FFmpeg, every conformance theory (threads, borrowed frames and the rest), on avi-h264
-(libx264 High with B pictures) and avi-h264-baseline-mp3 (Constrained Baseline beside MP3, the second frame dropped by
-FFmpeg's muxer). AVI's H.264 has no index read for keyframes, so `Seek` refuses it and a thumbnail decodes from the
-start (README).
+order (a frame count). As FFmpeg's, the k-th frame shown takes the time of the packet the reorder depth D later in
+decoding order (k + D), past the last packet a tick more a frame: avi-h264's B pictures delay two, so its frames are
+at 2, 3, 4, ... (FFmpeg's framemd5); with an avcC (MP4, Matroska) each frame keeps its own (a mutation entry). Bit-exact
+with FFmpeg, every conformance theory (threads, borrowed frames and the rest), on avi-h264 (libx264 High with B
+pictures, a keyframe every 12 frames) and avi-h264-baseline-mp3 (Constrained Baseline beside MP3, the second frame
+dropped by FFmpeg's muxer).
+
+Seeking: the video's keyframes come from the 'idx1' index (AVIIF_KEYFRAME), each packet's flag checked against
+ffprobe's (`AviConformanceTests.VideoMatchesFfmpegPacketByPacket`). The packets' times are decoding times, and FFmpeg
+shows a frame at a time up to D frames before the keyframe at or before it (its accurate seek to 960 ms in avi-h264
+shows frame 22, whose time is 24, though a keyframe has decoding time 24): `Seek` starts at the last keyframe at least
+16 frames (H.264's largest reorder delay) before the time, and the frame shown then is FFmpeg's (avi-h264.seek960 and
+seek1000, `SeekFrameTests`; a mutation entry each for the start and the shift). A file without the index can't seek
+its H.264, and a thumbnail decodes it from the start.
 
 ### Profiles and tools
 

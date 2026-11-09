@@ -244,8 +244,9 @@ long bytes = demuxer.ReadPacketInfo().Sum(p => (long)p.Size);
 base), the other stream at the same instant. The packets are those a read from the start gives from there, so decode
 them with a new decoder (or one flushed) and drop the frames shown before the time, as FFmpeg's `-ss` does. MP4 seeks
 in every file, fragmented and edited ones too, by its sample tables; Matroska in every file, with Cues or without,
-by the blocks it found on opening; AVI in MJPEG, every frame of which is a keyframe
-(other codecs in AVI need the 'idx1' index, not read yet, and throw `NotSupportedException`, as raw AAC and MP3 do).
+by the blocks it found on opening; AVI in MJPEG, every frame of which is a keyframe, and H.264 by the keyframes of its
+'idx1' index, from at least 16 frames before the time (its packets carry decoding times, and a frame is shown up to
+its reorder delay later); a file without the index throws `NotSupportedException`, as raw AAC and MP3 do.
 
 ```csharp
 using var demuxer = Demuxer.Open("video.mp4");
@@ -393,7 +394,7 @@ deflated by the BCL: no image library, native code or FFmpeg) and `SaveJpeg`/`To
   Compatible" records H.264).
 - **Which frame:** the one shown at `At` from the file's start as ffmpeg's `-ss` takes it (the time in the stream's
   time base to the nearest unit, then the first frame at or after that), decoded from the keyframe before it
-  (`IDemuxer.Seek`; AVI's H.264, which has no index to seek by, from the start). By default 10% into the video, at most
+  (`IDemuxer.Seek`; an AVI's H.264 without an 'idx1' index, from the start). By default 10% into the video, at most
   10 s. `SkipDark` steps keyframe by keyframe past frames whose mean luma is under 10% of white (up to 10, then the
   brightest). Damaged streams decode on with concealment, and an undamaged frame is taken where there is one.
 - **Its size:** the frame as shown (aspect ratio and rotation applied), scaled down by area to fit `MaxWidth` x

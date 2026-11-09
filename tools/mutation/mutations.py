@@ -639,4 +639,14 @@ MUTATIONS = [
          find="        if (_lengthSize != 0)\n        {\n            return shown;\n        }\n",
          replace="        if (_lengthSize != 0 || shown.Count >= 0)\n        {\n            return shown;\n        }\n",
          tests="DisplayName~avi-h264"),
+    # An Annex B stream's k-th frame takes the time of the packet the reorder depth later, as FFmpeg's (frames from time 2
+    # in avi-h264, whose B pictures delay two): without it a seek's frame at a time is another than FFmpeg's.
+    dict(file="src/ManagedCodecs.H264/H264Decoder.cs",
+         find="            int at = _timesDepth;\n", replace="            int at = 0;\n",
+         tests="DisplayName~avi-h264.seek"),
+    # Seeking indexed AVI video (H.264) starts the largest reorder delay before the time: its packets' times are decoding
+    # times, and FFmpeg shows the frame at a time up to that many frames before the keyframe at or before it.
+    dict(file="src/ManagedCodecs.Containers/Avi/AviDemuxer.cs",
+         find="            videoPts -= MaxReorderFrames;\n", replace="",
+         tests="DisplayName~avi-h264.seek"),
 ]

@@ -26,7 +26,8 @@ run time.
   muxers, re-split into frames), AAC, and other audio named by its format tag (8- and 16-bit PCM as `CodecIds.PcmU8` and `CodecIds.PcmS16Le`, other
   PCM as `"0x0001"`; PCM and ADPCM in pieces of chunks, as FFmpeg's demuxer cuts them). So `MediaPlayer`
   plays an AVI's MP3, AAC and PCM, `Seek` takes the audio stream too, and `VideoProbe`'s duration counts the audio, as
-  ffprobe's does (docs/decisions/2026-11-08-avi-audio.md).
+  ffprobe's does: audio with a frame a chunk (MP3, AAC), not PCM, whose stream has no duration in FFmpeg
+  (docs/decisions/2026-11-08-avi-audio.md).
 
 ### Fixed
 

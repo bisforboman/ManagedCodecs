@@ -294,6 +294,11 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.Thumbnails/VideoProbe.cs",
          find="Start = Math.Min(s.Start, packet.Pts + skip)", replace="Start = Math.Min(s.Start, packet.Pts)",
          tests="FullyQualifiedName~VideoProbeTests"),
+    # ... and in AVI a stream without a duration (PCM, by dwSampleSize) ends nothing: avi-mjpeg-pcm-u8's audio runs past
+    # its video, and ffprobe's duration is the video's (the camera AVIs in realworld.py too).
+    dict(file="src/ManagedCodecs.Thumbnails/VideoProbe.cs",
+         find="bool durationsOnly = demuxer is AviDemuxer;", replace="bool durationsOnly = false;",
+         tests="DisplayName~avi-mjpeg-pcm-u8"),
     # The probe's H.264 frame size is the SPS's visible area or the container's crop of it, as the decoder's frames.
     dict(file="src/ManagedCodecs.H264/H264Decoder.cs",
          find="return TakesContainerSize(sps, stream.Width, stream.Height) ? (stream.Width, stream.Height) : (sps.Width, sps.Height);",

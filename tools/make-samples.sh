@@ -62,6 +62,11 @@ ff -f lavfi -i testsrc2=size=160x120:rate=25:d=1 -f lavfi -i "aevalsrc=0.4*sin(2
 ff -f lavfi -i testsrc2=size=160x120:rate=25 -t 2 -c:v libx264 -g 12 samples/avi-h264.avi
 ff -f lavfi -i testsrc2=size=176x144:rate=25 -f lavfi -i "sine=frequency=440:sample_rate=44100" -t 1 -c:v libx264 \
   -profile:v baseline -c:a libmp3lame -b:a 64k samples/avi-h264-baseline-mp3.avi
+# Raw H.264 (H264Demuxer): Annex B elementary streams, cut into access units as FFmpeg's parser cuts them, timed by the
+# SPS's VUI (libx264 writes it): High with B pictures at 30 fps, cropped (100 rows of 112 coded), and Constrained
+# Baseline at 24 fps under the other extension.
+ff -f lavfi -i testsrc2=size=176x100:rate=30 -t 1 -c:v libx264 -g 12 -f h264 samples/h264-raw.h264
+ff -f lavfi -i testsrc2=size=160x120:rate=24 -t 1 -c:v libx264 -profile:v baseline -f h264 samples/h264-raw-baseline.264
 avicbr=$(mktemp --suffix=.avi)
 ff -f lavfi -i testsrc2=size=160x120:rate=25 -f lavfi -i "aevalsrc=0.4*sin(2*PI*440*t)|0.3*sin(2*PI*660*t):s=44100:d=2" \
   -t 2 -c:v mjpeg -q:v 5 -c:a libmp3lame -b:a 64k "$avicbr"
@@ -824,7 +829,7 @@ for r in 90 180 270; do ff -i "samples/h264-rotate-$r.mp4" -c copy "samples/mkv-
 # FFmpeg gives it by default, trimmed by the edit list. -idct simple: FFmpeg's C IDCT for JPEG, the arithmetic the MJPEG
 # decoder follows; its default picks by CPU, the same results on x64 (SSE2) but not on ARM64 (NEON rounds otherwise).
 # -noautorotate: FFmpeg's command line turns frames by a track's rotation (h264-rotate-*), which decoders do not.
-for f in samples/*.avi samples/*.mp4 samples/*.mkv; do ff -idct simple -noautorotate -i "$f" -f framemd5 "${f%.*}.framemd5"; done
+for f in samples/*.avi samples/*.mp4 samples/*.mkv samples/*.h264 samples/*.264; do ff -idct simple -noautorotate -i "$f" -f framemd5 "${f%.*}.framemd5"; done
 # Monochrome H.264 (by the name): FFmpeg decodes it to 4:2:0 with flat chroma, so the references take its Y plane
 # alone, as it is (extractplanes; -pix_fmt gray would rescale a limited-range stream's samples to full range).
 for f in samples/*gray*.mp4; do ff -noautorotate -i "$f" -vf extractplanes=y -f framemd5 "${f%.*}.framemd5"; done
@@ -854,7 +859,7 @@ for f in samples/*.mp4 samples/*.avi samples/*.mkv; do
   if [ -n "$t" ]; then echo "$t" > "${f%.*}.display"; fi
 done
 # name.probe.json: the file's duration and its streams' facts as ffprobe reports them, for VideoProbe (Thumbnails).
-for f in samples/*.mp4 samples/*.avi samples/*.mkv; do
+for f in samples/*.mp4 samples/*.avi samples/*.mkv samples/*.h264 samples/*.264; do
   ffprobe -v error -of json -show_entries format=duration,start_time:stream=index,codec_type,codec_name,width,height,sample_aspect_ratio,r_frame_rate,avg_frame_rate,sample_rate,channels,duration:stream_side_data=rotation \
     "$f" > "${f%.*}.probe.json"
 done
@@ -902,7 +907,7 @@ for f in samples/*.avi samples/*.mp4; do
     -show_entries frame=color_range,color_space,color_primaries,color_transfer,chroma_location,sample_aspect_ratio "$f")
   if [ -n "$t" ]; then echo "$t" > "${f%.*}.color"; fi
 done
-for f in samples/*.mp4 samples/*.mkv samples/*.webm samples/*.avi; do
+for f in samples/*.mp4 samples/*.mkv samples/*.webm samples/*.avi samples/*.h264 samples/*.264; do
   ff -copyts -i "$f" -c copy -f framemd5 "${f%.*}.packets.framemd5"
   ffprobe -v error -show_packets -show_data_hash MD5 -show_entries packet=stream_index,pts,dts,duration,size,flags,data_hash \
     -of csv=p=0 "$f" > "${f%.*}.packets.csv"

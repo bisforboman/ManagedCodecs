@@ -326,6 +326,23 @@ parser, which reads the packets, so they too are compared that way.
 
 ## H.264
 
+### Raw H.264 files
+
+`H264Demuxer` cuts a raw Annex B stream into access units as FFmpeg's parser does: a new one at an access unit
+delimiter, at an SPS, PPS or SEI (or NAL unit types 14 to 18) after a picture's slices, or at a slice whose
+first_mb_in_slice is 0; each from its first unit's start code, a four-byte code's zero included (as FFmpeg's packets
+start, 00 00 00 01), the first from the file's start. IDR pictures, and access units with a recovery point SEI, are
+keyframes. Against ffprobe's packets (h264-raw, libx264 High with B pictures at 30 fps and cropped to 100 rows;
+h264-raw-baseline.264, Constrained Baseline at 24 fps): every packet's size, MD5 and keyframe flag
+(`H264DemuxerTests`); FFmpeg gives them no times, ours are a tick each in decoding order. The time base is the SPS's
+VUI frame rate (time_scale / 2 num_units_in_tick), else 25 as FFmpeg's raw demuxer assumes: FFmpeg's frames' time base
+(framemd5's 1/30 and 1/24). The decoder numbers the frames from 0, as FFmpeg's command line does (a flag the demuxer
+sets: AVI's frames come the reorder delay later, as FFmpeg's do there), and they are bit-exact with FFmpeg's in every
+H.264 conformance theory. The size comes from the SPS through a reader of the demuxer's own (`SpsInfo`: size,
+cropping, VUI timing), which gives the decoder's size on every MP4 and Matroska sample's SPS (312 of them). Not
+covered by a sample: field pictures in a raw stream (a field a packet, as FFmpeg's parser cuts them), and a stream
+without VUI timing (libx264 always writes it), which takes 25 frames a second.
+
 ### Annex B (AVI)
 
 H.264 in AVI is Annex B: NAL units behind start codes, the SPS and PPS among them, no avcC. A decoder made without

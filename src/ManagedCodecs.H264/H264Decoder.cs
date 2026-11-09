@@ -545,7 +545,7 @@ public sealed class H264Decoder : IVideoDecoder
         if (_lengthSize == 0)
         {
             _decodeTimes.Add(job.Pts);
-            _timesDepth = ReorderDepth(state.Sps);
+            _timesDepth = _stream?.FramesFromZero == true ? 0 : ReorderDepth(state.Sps);
         }
 
         frames.AddRange(InTimeOrder(_output.Add(frame, picture.Poc, job.Restart, ReorderDepth(state.Sps), borrow ? picture : null)));

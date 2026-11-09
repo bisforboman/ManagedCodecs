@@ -107,6 +107,8 @@ jobs:
             samples/*.webm
             samples/*.aac
             samples/*.mp3
+            samples/*.h264
+            samples/*.264
             samples/jm/*.mp4
             samples/openh264/*.mp4
           retention-days: 1

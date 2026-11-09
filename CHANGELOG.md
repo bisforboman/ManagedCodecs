@@ -11,6 +11,15 @@ share internals, so each depends on the others at exactly its own version (`[X]`
 then reports a mix of versions (NU1107, or NU1608 for a newer one referenced directly) rather than letting it fail at
 run time.
 
+## Unreleased
+
+### Added
+
+- Containers: `H264Demuxer` reads raw H.264 files (Annex B elementary streams, `.h264` and `.264`), and
+  `Demuxer.Open` detects them: a packet an access unit, as FFmpeg's parser cuts them (IDR pictures keyframes), a tick
+  each at the SPS's VUI frame rate (else 25), the size from the SPS; `H264Decoder` numbers their frames from 0, as
+  FFmpeg's command line does. No seeking (docs/decisions/2026-11-09-raw-h264.md).
+
 ## 0.11.0 – 2026-11-09
 
 AVI audio: `AviDemuxer` gives an AVI's audio stream, and `MediaPlayer` plays its MP3, AAC and 8- and 16-bit PCM (the new

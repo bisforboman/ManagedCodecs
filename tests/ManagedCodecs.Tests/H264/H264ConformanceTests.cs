@@ -227,7 +227,8 @@ public class H264ConformanceTests
     /// <summary>H.264 in MP4 whose avcC says profile_idc 66 (Baseline), 77 (Main) or 100 (High).</summary>
     private static bool IsSupported(string name)
     {
-        if (!name.EndsWith(".mp4", StringComparison.Ordinal) && !name.EndsWith(".mkv", StringComparison.Ordinal) && !name.EndsWith(".avi", StringComparison.Ordinal))
+        if (!name.EndsWith(".mp4", StringComparison.Ordinal) && !name.EndsWith(".mkv", StringComparison.Ordinal) && !name.EndsWith(".avi", StringComparison.Ordinal)
+            && !name.EndsWith(".h264", StringComparison.Ordinal) && !name.EndsWith(".264", StringComparison.Ordinal))
         {
             return false;
         }

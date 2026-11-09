@@ -51,6 +51,12 @@ ff -f lavfi -i testsrc2=size=160x120:rate=25 -f lavfi -i "sine=frequency=440:sam
   -c:a aac -b:a 64k samples/avi-mjpeg-aac.avi
 ff -f lavfi -i testsrc2=size=160x120:rate=25 -f lavfi -i "sine=frequency=440:sample_rate=22050" -t 1 -c:v mjpeg -q:v 5 \
   -c:a pcm_s16le samples/avi-mjpeg-pcm.avi
+# H.264 in AVI: Annex B (start codes, the SPS and PPS in the stream, no avcC), which H264Decoder reads without a
+# configuration record: libx264's High with B pictures, and Constrained Baseline beside MP3 (FFmpeg's muxer drops its
+# second video frame while interleaving the audio).
+ff -f lavfi -i testsrc2=size=160x120:rate=25 -t 2 -c:v libx264 samples/avi-h264.avi
+ff -f lavfi -i testsrc2=size=176x144:rate=25 -f lavfi -i "sine=frequency=440:sample_rate=44100" -t 1 -c:v libx264 \
+  -profile:v baseline -c:a libmp3lame -b:a 64k samples/avi-h264-baseline-mp3.avi
 avicbr=$(mktemp --suffix=.avi)
 ff -f lavfi -i testsrc2=size=160x120:rate=25 -f lavfi -i "aevalsrc=0.4*sin(2*PI*440*t)|0.3*sin(2*PI*660*t):s=44100:d=2" \
   -t 2 -c:v mjpeg -q:v 5 -c:a libmp3lame -b:a 64k "$avicbr"

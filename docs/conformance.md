@@ -124,7 +124,8 @@ durations as FFmpeg reads them: MP4's edits' length, but no longer than the samp
 files edit to the last field's pts, their samples lasting half a frame), else the shorter of 'mdhd''s and the samples'
 (mp4-mdhd-duration: no edit list, the video's 'mdhd' shorter, the audio's longer), or the longer in a fragmented file
 (its 'mdhd' counts only the samples in 'moov'); AVI's 'strh' length, the audio's too (avi-dropped-frame's MP3
-outlasts its video, and the file lasts as long as ffprobe says); Matroska's Segment Duration, which
+outlasts its video, and the file lasts as long as ffprobe says), except PCM's, which has none in FFmpeg and
+ends nothing (avi-mjpeg-pcm-u8's runs 0.2 s past its video; the camera AVIs' a few ms); Matroska's Segment Duration, which
 FFmpeg takes as the file's own, from the earliest packet (AAC's, 21 ms before the video, at its CodecDelay), not each
 stream's start plus it; without one (mkv-h264-live) ffprobe gives no duration, and the probe's, from the first packet
 to the end of the last, is checked against ffprobe's packets. H.264's size is the decoder's frame size

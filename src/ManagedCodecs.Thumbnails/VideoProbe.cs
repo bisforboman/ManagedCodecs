@@ -76,7 +76,8 @@ public static class VideoProbe
     /// latest stream end, a stream starting at its first packet shown (packets an edit only decodes left out; past the
     /// samples it skips, MP3's encoder delay inside its first packet) and
     /// lasting its container duration (<see cref="VideoStreamInfo.Duration"/>), or to the end of its last packet where
-    /// the container gives none. Matroska's: the Segment's Duration, or, in a file without one (a live recording, for
+    /// the container gives none (except in AVI, where such a stream, audio with a dwSampleSize, ends nothing: FFmpeg gives it
+    /// no duration and reads no packets for one). Matroska's: the Segment's Duration, or, in a file without one (a live recording, for
     /// which ffprobe gives none), from the first packet shown to the end of the last.
     /// </summary>
     /// <returns>The duration, and the earliest stream's start in seconds (ffprobe's <c>format=start_time</c>).</returns>
@@ -118,6 +119,7 @@ public static class VideoProbe
         // Matroska's Duration is the Segment's (its streams' Duration carries it), which FFmpeg takes as the file's
         // duration itself, from the earliest stream's start.
         bool segmentDuration = demuxer is MatroskaDemuxer;
+        bool durationsOnly = demuxer is AviDemuxer;
         double start = double.PositiveInfinity;
         double end = double.NegativeInfinity;
         foreach (var (timeBase, duration, first, last) in streams.Values)
@@ -128,6 +130,11 @@ public static class VideoProbe
             }
 
             start = Math.Min(start, first * timeBase.ToDouble());
+            if (durationsOnly && duration <= 0)
+            {
+                continue;
+            }
+
             end = Math.Max(end, (duration > 0 && !segmentDuration ? first + duration : last) * timeBase.ToDouble());
         }
 

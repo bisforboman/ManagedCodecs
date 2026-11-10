@@ -702,6 +702,9 @@ public sealed class Mp4Demuxer : IDemuxer
     private sealed class Track
     {
         private readonly byte[] _stsz = [];
+
+        // An ISO/IEC 23003-5 PCM entry ('ipcm', 'fpcm'), whose pieces 'stsz' sizes.
+        private bool _isoPcm;
         private readonly byte[] _stz2 = [];
         private readonly byte[] _stco = [];
         private readonly byte[] _co64 = [];
@@ -1007,9 +1010,14 @@ public sealed class Mp4Demuxer : IDemuxer
                 next = time + duration;
             }
 
-            if (_isAudio && _fragmentSamples.Count == 0 && PcmDecoder.BytesPerSample(Codec) * Channels is > 0 and var frameBytes
+            if (_isAudio && _fragmentSamples.Count == 0 && PcmDecoder.BytesPerSample(Codec) * Channels is > 0 and var codecFrameBytes
                 && IsOneTickPerSample())
             {
+                // QuickTime's PCM pieces are the codec's frames; ISO's 'ipcm' and 'fpcm' are 'stsz''s samples, as FFmpeg
+                // sizes them (its 6.1 muxer writes a 'pcmC' of 32 bits over 24-bit samples, which it then reads as such).
+                int frameBytes = _isoPcm && _stsz.Length >= 12 && ReadUInt32(_stsz, 4) is > 0 and < int.MaxValue and var stszSize
+                    ? (int)stszSize
+                    : codecFrameBytes;
                 (offsets, sizes, dts, durations) = PcmPieces(frameBytes, count);
                 ptsOffsets = new int[sizes.Length];
                 flags = new byte[sizes.Length];
@@ -1576,6 +1584,7 @@ public sealed class Mp4Demuxer : IDemuxer
             }
 
             Codec = PcmCodec(format, BinaryPrimitives.ReadUInt16BigEndian(entry[18..]), children) ?? Codec;
+            _isoPcm = format is Box.Ipcm or Box.Fpcm;
 
             if (format == Box.Mp4a && (FindChild(children, Box.Esds, out var esds)
                 || (FindChild(children, Box.Wave, out var wave) && FindChild(wave, Box.Esds, out esds))))
@@ -1597,6 +1606,11 @@ public sealed class Mp4Demuxer : IDemuxer
         /// </summary>
         private static string? PcmCodec(uint format, int sampleSize, ReadOnlySpan<byte> children)
         {
+            if (format is Box.Ipcm or Box.Fpcm)
+            {
+                return IsoPcmCodec(format, children);
+            }
+
             bool little = (FindChild(children, Box.Enda, out var enda) || (FindChild(children, Box.Wave, out var wave) && FindChild(wave, Box.Enda, out enda)))
                 && enda.Length >= 2 && (BinaryPrimitives.ReadUInt16BigEndian(enda) & 0xFF) == 1;
             return format switch
@@ -1608,6 +1622,30 @@ public sealed class Mp4Demuxer : IDemuxer
                 Box.In32 => little ? CodecIds.PcmS32Le : CodecIds.PcmS32Be,
                 Box.Fl32 => little ? CodecIds.PcmF32Le : CodecIds.PcmF32Be,
                 Box.Fl64 => little ? CodecIds.PcmF64Le : CodecIds.PcmF64Be,
+                _ => null,
+            };
+        }
+
+        /// <summary>
+        /// ISO/IEC 23003-5's 'ipcm' (integer) and 'fpcm' (float) entries, by their 'pcmC' box (a FullBox, then format_flags,
+        /// whose bit 0 is little-endian, and PCM_sample_size): 'ipcm' at 16, 24 and 32 bits, 'fpcm' at 32 and 64, as
+        /// FFmpeg's mov demuxer names them. Null without a 'pcmC' or at another size.
+        /// </summary>
+        private static string? IsoPcmCodec(uint format, ReadOnlySpan<byte> children)
+        {
+            if (!FindChild(children, Box.PcmC, out var pcmC) || pcmC.Length < 6)
+            {
+                return null;
+            }
+
+            bool little = (pcmC[4] & 1) != 0;
+            return (format, pcmC[5]) switch
+            {
+                (Box.Ipcm, 16) => little ? CodecIds.PcmS16Le : CodecIds.PcmS16Be,
+                (Box.Ipcm, 24) => little ? CodecIds.PcmS24Le : CodecIds.PcmS24Be,
+                (Box.Ipcm, 32) => little ? CodecIds.PcmS32Le : CodecIds.PcmS32Be,
+                (Box.Fpcm, 32) => little ? CodecIds.PcmF32Le : CodecIds.PcmF32Be,
+                (Box.Fpcm, 64) => little ? CodecIds.PcmF64Le : CodecIds.PcmF64Be,
                 _ => null,
             };
         }
@@ -1794,6 +1832,9 @@ public sealed class Mp4Demuxer : IDemuxer
         public const uint In32 = 0x696E3332;
         public const uint Fl32 = 0x666C3332;
         public const uint Fl64 = 0x666C3634;
+        public const uint Ipcm = 0x6970636D;
+        public const uint Fpcm = 0x6670636D;
+        public const uint PcmC = 0x70636D43;
         public const uint Jpeg = 0x6A706567;
         public const uint Mjpa = 0x6D6A7061;
         public const uint Colr = 0x636F6C72;

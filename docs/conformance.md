@@ -1307,6 +1307,15 @@ pictures; docs/notes/h264-1080p-scaling-2026-11.md) the chroma functions (`Predi
 `Across`) fell from 0.93 to 1.00 of the untouched set (`FilterMacroblock420`, `HalfHorizontal`, `HalfVertical`) to
 0.74 to 0.77 (perf, six runs each, the order alternating, every branch run below every base run): from 8.5 to 6.7% of
 the frame, about 1.7%.
+Weighted prediction's 8-bit kernels: bi-prediction (`WeightBoth`, explicit and implicit weights) widened both
+predictions to 32-bit lanes and took two 32-bit multiplies (`pmulld`) and an add for four samples, then clamped with a
+minimum and a maximum. With SSE2 the two predictions' samples are now interleaved as 16-bit words, so that one
+`pmaddwd` against (w0, w1) gives p0 w0 + p1 w1 for four samples, exactly (samples to 255, weights -128 to 128), and the
+clip to 0..255 is the saturating packs (`packssdw`, then `packuswb`), as FFmpeg's does; blocks up to 8 wide take only a
+row's first half. One-list weighting (`WeightOne`) clips with `packuswb` too. `VectorWeights_MatchReference` checks
+both against the definition (a wrong shift fails it). On the same 1080p frames the weighting kernels fell from 0.27 to
+0.32 of the untouched set to 0.17 to 0.19 (perf, six runs each, the order alternating, every branch run below every
+base run): from about 2.6 to 1.6% of the frame.
 
 ## AAC
 

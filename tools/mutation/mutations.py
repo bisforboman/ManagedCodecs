@@ -675,6 +675,12 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.Core/ImaAdpcmDecoder.cs",
          find="if (bytes < headers)", replace="if (bytes < headers || (bytes - headers) % headers != 0)",
          tests="FullyQualifiedName~ImaAdpcmDecoderTests"),
+    # ---- Microsoft ADPCM: the step capped at int.MaxValue / 768, as FFmpeg caps it (the format has no cap; without one
+    # a run of the largest codes overflows it; docs/decisions/2026-11-10-ms-adpcm.md).
+    dict(file="src/ManagedCodecs.Core/MsAdpcmDecoder.cs",
+         find="delta[c] = Math.Clamp((Adaptation[nibble] * delta[c]) >> 8, 16, MaxDelta);",
+         replace="delta[c] = Math.Max((Adaptation[nibble] * delta[c]) >> 8, 16);",
+         tests="FullyQualifiedName~MsAdpcmDecoderTests"),
     # ---- MP3: where the decoder does what FFmpeg's does and the spec leaves open, or what only some streams reach.
     # A frame whose main data starts before the reservoir does (a stream cut from a longer one): its granules are
     # skipped, silent, by their lengths until the data is there (mp3-cut).

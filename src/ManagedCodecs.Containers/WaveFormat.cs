@@ -6,15 +6,15 @@ namespace ManagedCodecs.Containers;
 /// <summary>
 /// A WAVEFORMATEX (an AVI audio stream's 'strf', a .wav file's 'fmt ' chunk): wFormatTag, nChannels, nSamplesPerSec,
 /// nAvgBytesPerSec, nBlockAlign, wBitsPerSample, then cbSize and cbSize bytes more. The codec is named as FFmpeg names
-/// it: format tag 0x55 MP3, 0xFF AAC, 0x11 at 4 bits IMA ADPCM; integer PCM (tag 1) and float PCM (tag 3) by
+/// it: format tag 0x55 MP3, 0xFF AAC, 0x11 at 4 bits IMA ADPCM, 0x02 at 4 bits Microsoft ADPCM; integer PCM (tag 1) and float PCM (tag 3) by
 /// wBitsPerSample, 8-bit unsigned, the rest little-endian; WAVE_FORMAT_EXTENSIBLE (0xFFFE) by its sub-format's tag, the
-/// first two bytes of its GUID. Any other format is its tag in hex ("0x0002"), and so is PCM at a depth FFmpeg names
+/// first two bytes of its GUID. Any other format is its tag in hex ("0x0006" for A-law), and so is PCM at a depth FFmpeg names
 /// otherwise (64-bit integers, 12 bits).
 /// </summary>
 /// <param name="Tag">wFormatTag, or for WAVE_FORMAT_EXTENSIBLE its sub-format's.</param>
 /// <param name="CodecPrivate">
 /// The bytes after cbSize, as FFmpeg's extradata: none for WAVE_FORMAT_EXTENSIBLE but what follows its 22 bytes (valid
-/// bits, channel mask, sub-format); an AAC stream's AudioSpecificConfig, IMA ADPCM's wSamplesPerBlock.
+/// bits, channel mask, sub-format); an AAC stream's AudioSpecificConfig, IMA ADPCM's wSamplesPerBlock, Microsoft ADPCM's wSamplesPerBlock and coefficients.
 /// </param>
 internal readonly record struct WaveFormat(
     int Tag,
@@ -65,6 +65,7 @@ internal readonly record struct WaveFormat(
             (3, 32) => CodecIds.PcmF32Le,
             (3, 64) => CodecIds.PcmF64Le,
             (0x11, 4) => CodecIds.AdpcmImaWav,
+            (0x02, 4) => CodecIds.AdpcmMs,
             _ => "0x" + tag.ToString("X4", CultureInfo.InvariantCulture),
         };
         waveFormat = new WaveFormat(tag, channels, sampleRate, averageBytes, blockAlign, bits, codec, codecPrivate);

@@ -11,6 +11,15 @@ share internals, so each depends on the others at exactly its own version (`[X]`
 then reports a mix of versions (NU1107, or NU1608 for a newer one referenced directly) rather than letting it fail at
 run time.
 
+## Unreleased
+
+### Added
+
+- `MsAdpcmDecoder` (ManagedCodecs.Core) and `CodecIds.AdpcmMs`: Microsoft ADPCM (the WAVE format tag 0x02), mono and
+  stereo, exactly FFmpeg's output (its standard coefficient table whatever the file lists, and its cap on the step).
+  `.wav` and AVI files name such streams `CodecIds.AdpcmMs` where they named them `"0x0002"`, and `MediaPlayer` plays
+  them (docs/decisions/2026-11-10-ms-adpcm.md).
+
 ## 0.12.0 – 2026-11-10
 
 PCM everywhere: `PcmDecoder` takes every integer and float PCM format in both byte orders, from AVI, QuickTime, ISO

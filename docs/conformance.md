@@ -359,6 +359,23 @@ file (FFmpeg's muxer writes no DefaultDuration for AAC; libavformat fills in 102
 to the track's next frame, which the test checks against FFmpeg's next pts; Opus's durations come from FFmpeg's
 parser, which reads the packets, so they too are compared that way.
 
+## MXF demuxing (partitions so far)
+
+The MXF demuxer is being built in slices (#469); so far it finds a file's partitions (SMPTE ST 377-1 6.2, 7, 12), with
+nothing public yet. `MxfPartitionTests` compares every samples/*.mxf with the partition packs FFmpeg's demuxer reads
+(`ffprobe -v trace -show_packets`, its "PartitionPack:" lines: ThisPartition, PreviousPartition, FooterPartition,
+IndexSID and BodySID, in name.partitions.csv), and checks that the three ways of finding them (the random index pack,
+the chain back from the footer by PreviousPartition, and a walk over every KLV item) agree on each. The samples, from
+FFmpeg's `-f mxf` muxer (OP1a, H.264 and 24-bit PCM): a header, body and footer partition with a random index pack
+(mxf-h264-pcm); 20 s, for a body partition with index table segments beside the essence (mxf-h264-index); written to
+a pipe, so the header and body packs leave FooterPartition 0 (mxf-h264-pipe). tools/mxf-rewrite.py makes what FFmpeg's
+muxer never writes, each against its source's reference: no random index pack (mxf-h264-pcm-norip, found back from the
+footer; mxf-h264-pipe-norip, found by the walk, where FFmpeg's demuxer never reads the footer) and a 1 KiB run-in
+(mxf-h264-pcm-runin). Hand-made bytes cover the rest: BER lengths (the long form for short lengths, 0x80 and more than
+nine bytes refused), keys whose version byte differs (the fill item's two keys), partition packs whose essence
+container batch doesn't hold together, a random index pack that lists a partition that isn't there or gives a wrong
+BodySID, a PreviousPartition chain that loops, the run-in's 64 KiB limit, and a KLV item past the end of the file.
+
 ## H.264
 
 ### Raw H.264 files

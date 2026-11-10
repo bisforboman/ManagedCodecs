@@ -42,6 +42,9 @@ references:
   with `-fflags +nofillin+noparse`): the durations the file itself gives, N/A where FFmpeg would fill one in.
   `name.streams` (`ffprobe -show_streams`): a Matroska file's streams (size, aspect ratio, rate, channels, time base)
   and its duration.
+- `name.partitions.csv` (`ffprobe -v trace -show_packets`, its "PartitionPack:" lines): an MXF file's partition packs as
+  FFmpeg's demuxer reads them, one a line as ThisPartition, PreviousPartition, FooterPartition, IndexSID, BodySID, by
+  offset. The samples tools/mxf-rewrite.py makes take their source's (the partitions don't move).
 - `name.f32`: decoded AAC as 32-bit floats, edit list ignored so it holds 1024 samples for every packet (raw AAC
   has no edit list); AAC is compared by value, within a tolerance.
 - `name.trim.f32`: the same as FFmpeg decodes it by default, trimmed by the edit list (`aac-edit-trim` has an edit

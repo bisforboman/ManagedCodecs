@@ -176,6 +176,25 @@ MUTATIONS = [
          find="long pts = state.Bytes / blockSize;", replace="long pts = state.Position; state.Position += length / blockSize;",
          tests="FullyQualifiedName~AviDemuxerTests"),
 
+    # ---- MXF partitions (SMPTE ST 377-1): rules only some files reach
+    # A key's byte 8 (the registry version) is ignored: earlier encoders wrote the fill item's with version 1 (6.3.3).
+    dict(file="src/ManagedCodecs.Containers/Mxf/Klv.cs",
+         find="key[..7].SequenceEqual(label[..7]) && key[8..label.Length].SequenceEqual(label[8..])",
+         replace="key[..label.Length].SequenceEqual(label)",
+         tests="FullyQualifiedName~MxfPartitionTests"),
+    # A run-in is under 64 KiB (6.6): the header partition is searched for no further.
+    dict(file="src/ManagedCodecs.Containers/Mxf/MxfPartitions.cs",
+         find="new byte[Klv.MaxRunIn - 1 + Klv.KeyLength]", replace="new byte[(2 * Klv.MaxRunIn) + Klv.KeyLength]",
+         tests="FullyQualifiedName~MxfPartitionTests"),
+    # A random index pack is taken only if each partition it lists has its BodySID ...
+    dict(file="src/ManagedCodecs.Containers/Mxf/MxfPartitions.cs",
+         find="if (partition.BodySid != bodySid)", replace="if (false)",
+         tests="FullyQualifiedName~MxfPartitionTests"),
+    # ... and without one, the partitions come back from the footer by PreviousPartition (mxf-h264-pcm-norip).
+    dict(file="src/ManagedCodecs.Containers/Mxf/MxfPartitions.cs",
+         find="if (TryFromFooter(stream, runIn, header, out partitions))", replace="if (false)",
+         tests="FullyQualifiedName~MxfPartitionTests"),
+
     # ---- MP4 (as FFmpeg reads it)
     # Negative composition offsets in 'ctts': FFmpeg leaves the last two entries out of the shift.
     dict(file="src/ManagedCodecs.Containers/Mp4/Mp4Demuxer.cs",

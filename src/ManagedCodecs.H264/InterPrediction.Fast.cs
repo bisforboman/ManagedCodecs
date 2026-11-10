@@ -301,20 +301,46 @@ internal static partial class InterPrediction
             throw new ArgumentOutOfRangeException(nameof(window));
         }
 
-        ref byte source = ref MemoryMarshal.GetReference(window);
+        ref byte source = ref Unsafe.Add(ref MemoryMarshal.GetReference(window), origin);
         ref byte dest = ref MemoryMarshal.GetReference(output);
+        switch (width)
+        {
+            case 8:
+                BilinearRows<Width8>(ref source, ws, height, xFrac, yFrac, ref dest, outputStride);
+                break;
+            case 4:
+                BilinearRows<Width4>(ref source, ws, height, xFrac, yFrac, ref dest, outputStride);
+                break;
+            case 2:
+                BilinearRows<Width2>(ref source, ws, height, xFrac, yFrac, ref dest, outputStride);
+                break;
+            default:
+                BilinearRows<Width16>(ref source, ws, height, xFrac, yFrac, ref dest, outputStride);
+                break;
+        }
+    }
+
+    /// <summary>
+    /// <see cref="Bilinear"/>'s rows, the block's width a type argument (the row store chosen once a block); source and
+    /// output step down a row at a time. The rounded sums are 0 .. 255, so the narrowing is the saturating pack.
+    /// </summary>
+    private static void BilinearRows<TWidth>(ref byte source, int ws, int height, int xFrac, int yFrac, ref byte dest, int outputStride)
+        where TWidth : IRowWidth
+    {
         var left = Vector128.Create((short)(8 - xFrac));
         var right = Vector128.Create((short)xFrac);
         var upper = Vector128.Create((short)(8 - yFrac));
         var lower = Vector128.Create((short)yFrac);
         var pairWeights = Vector128.Create((ushort)((8 - xFrac) | (xFrac << 8))).AsSByte();
-        var above = Across(ref source, origin, left, right, pairWeights);
+        var above = Across(ref source, 0, left, right, pairWeights);
         for (int j = 0; j < height; j++)
         {
-            var below = Across(ref source, origin + ((j + 1) * ws), left, right, pairWeights);
+            source = ref Unsafe.Add(ref source, ws);
+            var below = Across(ref source, 0, left, right, pairWeights);
             var sum = (above * upper) + (below * lower);
-            var rounded = ((sum + Vector128.Create((short)32)) >> 6).AsUInt16();
-            StorePartial(Vector128.Narrow(rounded, rounded), ref Unsafe.Add(ref dest, j * outputStride), width);
+            var rounded = (sum + Vector128.Create((short)32)) >> 6;
+            TWidth.Write(Sse2.IsSupported ? Sse2.PackUnsignedSaturate(rounded, rounded) : Vector128.Narrow(rounded.AsUInt16(), rounded.AsUInt16()), ref dest);
+            dest = ref Unsafe.Add(ref dest, outputStride);
             above = below;
         }
     }

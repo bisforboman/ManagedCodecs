@@ -161,7 +161,7 @@ public class MatroskaConformanceTests
     [InlineData("mkv-h264-aac.mkv", CodecIds.H264, CodecIds.Aac)]
     [InlineData("webm-vp9-opus.webm", "V_VP9", "A_OPUS")]
     [InlineData("mkv-mjpeg-sar.mkv", CodecIds.Mjpeg, null)]
-    [InlineData("mkv-lace-fixed.mkv", CodecIds.H264, "A_PCM/INT/LIT")]
+    [InlineData("mkv-lace-fixed.mkv", CodecIds.H264, CodecIds.PcmS16Le)]
     [InlineData("mkv-h264-mp3.mkv", CodecIds.H264, CodecIds.Mp3)]
     public void NamesTheCodecs(string sampleName, string video, string? audio)
     {

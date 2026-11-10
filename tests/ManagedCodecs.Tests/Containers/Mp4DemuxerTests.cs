@@ -243,6 +243,49 @@ public class Mp4DemuxerTests
         Assert.Throws<ArgumentOutOfRangeException>(() => new Mp4Demuxer(new MemoryStream(TinyMp4()), tracks));
     }
 
+    /// <summary>
+    /// QuickTime PCM with one tick a sample ('sowt', mono 16-bit): each chunk cut in pieces of up to 1024 sample frames,
+    /// as ffprobe gives this very file's packets (pts, duration, size, file position): chunks of 1500, 1500 and 700
+    /// frames make 1024 + 476, 1024 + 476 and 700. FFmpeg's muxer writes chunks of 1024, so no sample shows it.
+    /// </summary>
+    [Fact]
+    public void CutsQuickTimePcmChunksAsFfmpeg()
+    {
+        int[] chunks = [1500, 1500, 700];
+        var ftyp = Box("ftyp", Ascii("qt  "), U32(0), Ascii("qt  "));
+        var data = new byte[3700 * 2];
+        for (int i = 0; i < data.Length; i++)
+        {
+            data[i] = (byte)(i * 7);
+        }
+
+        var mdat = Box("mdat", data);
+        uint first = (uint)ftyp.Length + 8;
+        var entry = new byte[28];
+        BinaryPrimitives.WriteUInt16BigEndian(entry.AsSpan(6), 1);
+        BinaryPrimitives.WriteUInt16BigEndian(entry.AsSpan(16), 1);
+        BinaryPrimitives.WriteUInt16BigEndian(entry.AsSpan(18), 16);
+        BinaryPrimitives.WriteUInt32BigEndian(entry.AsSpan(24), 8000u << 16);
+        var stbl = Box("stbl",
+            FullBox("stsd", 0, U32(1), Box("sowt", entry)),
+            FullBox("stts", 0, U32(1), U32(3700), U32(1)),
+            FullBox("stsc", 0, U32(2), U32(1), U32(1500), U32(1), U32(3), U32(700), U32(1)),
+            FullBox("stsz", 0, U32(2), U32(3700)),
+            FullBox("stco", 0, U32(3), U32(first), U32(first + 3000), U32(first + 6000)));
+        var trak = Box("trak", Box("mdia", MediaHeader(timescale: 8000), Handler("soun"), Box("minf", stbl)));
+        var moov = Box("moov", FullBox("mvhd", 0, new byte[8], U32(8000), new byte[84]), trak);
+
+        using var demuxer = new Mp4Demuxer(new MemoryStream([.. ftyp, .. mdat, .. moov]));
+        Assert.Equal(CodecIds.PcmS16Le, demuxer.Audio!.Codec);
+        var packets = demuxer.ReadPackets().ToList();
+        Assert.Equal([0L, 1024, 1500, 2524, 3000], packets.Select(p => p.Pts));
+        Assert.Equal([1024L, 476, 1024, 476, 700], packets.Select(p => p.Duration));
+        Assert.Equal([2048, 952, 2048, 952, 1400], packets.Select(p => p.Data.Length));
+        Assert.Equal(data.AsSpan(2048, 952).ToArray(), packets[1].Data.ToArray());
+        Assert.Equal(data.AsSpan(6000, 1400).ToArray(), packets[4].Data.ToArray());
+        Assert.Equal(chunks.Sum(), packets.Sum(p => p.Data.Length) / 2);
+    }
+
     /// <summary>The audio track alone, from a file whose audio track comes first: its stream index stays the file's.</summary>
     [Fact]
     public void ReadsAudioTrackAlone()

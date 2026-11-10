@@ -57,6 +57,9 @@ public sealed class PcmDecoder : IAudioDecoder
     /// <summary>The channel count, as the stream gives it.</summary>
     public int Channels { get; }
 
+    /// <summary>The bytes of one sample of <paramref name="codec"/> (one channel's), or 0 for a codec this decoder doesn't take.</summary>
+    internal static int BytesPerSample(string? codec) => TryGetFormat(codec, out _, out int bytes) ? bytes : 0;
+
     /// <summary>Whether <paramref name="codec"/> is one of the PCM formats this decoder takes (the <c>CodecIds.Pcm*</c> constants).</summary>
     public static bool CanDecode(string? codec) => TryGetFormat(codec, out _, out _);
 

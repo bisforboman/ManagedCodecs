@@ -298,6 +298,12 @@ to it on random bytes. `PcmDecoderTests.MatchesFfmpegExactly` decodes every samp
 | mkv-pcm-f32le, mkv-pcm-f64le | A_PCM/FLOAT/IEEE at 32 and 64 |
 | mkv-lace-fixed | A_PCM/INT/LIT at 16, in fixed-size lacing |
 
+QuickTime's PCM has one 'stts' tick a sample frame, and FFmpeg's mov demuxer reads it by chunk, each cut in pieces of up
+to 1024 frames (their bytes the frames' whatever 'stsz' says, timed by the frames before them). Its muxer writes chunks of
+1024, so the samples' packets show only whole chunks: `Mp4DemuxerTests.CutsQuickTimePcmChunksAsFfmpeg` builds chunks of
+1500, 1500 and 700 frames and checks the packets ffprobe gives that very file (1024 + 476 twice, then 700); a mutation
+entry.
+
 Not from FFmpeg's muxers, so not checked against FFmpeg: QuickTime's `lpcm` (sound description version 2, its format
 in flags) and 'twos' at 8 bits (signed 8-bit), which keep their entry's name, undecoded; big-endian float in Matroska
 (FFmpeg's muxer refuses it, and A_PCM/FLOAT/IEEE has no order of its own); ISO MP4's `ipcm` and `fpcm` (next, by the

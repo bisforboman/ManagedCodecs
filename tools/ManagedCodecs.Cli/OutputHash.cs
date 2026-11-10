@@ -29,7 +29,7 @@ public static class OutputHash
             CodecIds.H264 => new H264Decoder(video),
             _ => null,
         };
-        IAudioDecoder? audioDecoder = audio?.Codec switch { CodecIds.Aac => new AacDecoder(audio), CodecIds.Mp3 => new Mp3Decoder(audio), var codec when PcmDecoder.CanDecode(codec) => new PcmDecoder(audio), _ => null };
+        IAudioDecoder? audioDecoder = audio?.Codec switch { CodecIds.Aac => new AacDecoder(audio), CodecIds.Mp3 => new Mp3Decoder(audio), var codec when PcmDecoder.CanDecode(codec) => new PcmDecoder(audio!), _ => null };
         var packed = new MemoryStream();
         int videoFrames = 0;
         int audioFrames = 0;

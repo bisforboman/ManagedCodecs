@@ -869,6 +869,34 @@ python3 tools/mkv-rewrite.py samples/mkv-h264-aac.mkv samples/mkv-aac-padding.mk
 # A display rotation, which FFmpeg's muxer writes as a Projection's ProjectionPoseRoll (90, 180 and -90 degrees).
 for r in 90 180 270; do ff -i "samples/h264-rotate-$r.mp4" -c copy "samples/mkv-h264-rotate-$r.mkv"; done
 
+# ---- MXF for the demuxer (its partitions so far) ----
+# name.partitions.csv: the partition packs FFmpeg's demuxer reads (ffprobe -v trace, every packet read), one a line as
+# ThisPartition,PreviousPartition,FooterPartition,IndexSID,BodySID, by offset. FFmpeg's muxer writes OP1a, frame-wrapped.
+# mxf-h264-pcm: H.264 and 24-bit PCM (48 kHz, the only rate it writes), a header, a body and a footer partition and a
+# random index pack. mxf-h264-index: 20 s, long enough for a body partition with index table segments beside the
+# essence (IndexSID and BodySID both set). mxf-h264-pipe: written to a pipe, so the header and body packs leave
+# FooterPartition 0 (ST 377-1 7.2.2).
+mxf_src=(-f lavfi -i testsrc2=s=160x120:r=25 -f lavfi -i sine=sample_rate=48000)
+ff "${mxf_src[@]}" -t 2 -c:v libx264 -pix_fmt yuv420p -c:a pcm_s24le samples/mxf-h264-pcm.mxf
+ff "${mxf_src[@]}" -t 20 -c:v libx264 -pix_fmt yuv420p -g 25 -c:a pcm_s24le samples/mxf-h264-index.mxf
+ff "${mxf_src[@]}" -t 2 -c:v libx264 -pix_fmt yuv420p -c:a pcm_s24le -f mxf - > samples/mxf-h264-pipe.mxf
+for f in samples/mxf-h264-pcm.mxf samples/mxf-h264-index.mxf samples/mxf-h264-pipe.mxf; do
+  ffprobe -v trace -show_packets "$f" 2>&1 >/dev/null \
+    | sed -n 's/.*PartitionPack: ThisPartition = 0x\([0-9A-F]*\), PreviousPartition = 0x\([0-9A-F]*\), FooterPartition = 0x\([0-9A-F]*\), IndexSID = \([0-9]*\), BodySID = \([0-9]*\).*/\1 \2 \3 \4 \5/p' \
+    | while read -r this prev footer isid bsid; do echo "$((16#$this)),$((16#$prev)),$((16#$footer)),$isid,$bsid"; done \
+    | sort -t, -k1,1n -u > "${f%.mxf}.partitions.csv"
+done
+# What FFmpeg's muxer never writes (tools/mxf-rewrite.py), each against its source's partitions (FFmpeg's demuxer does
+# not read the footer of a pipe-written file without a random index pack): no random index pack, so the partitions
+# come back from the footer by PreviousPartition (mxf-h264-pcm-norip) or, with no FooterPartition to start from, by
+# walking the file (mxf-h264-pipe-norip); and a 1 KiB run-in before the header partition (mxf-h264-pcm-runin).
+python3 -I tools/mxf-rewrite.py samples/mxf-h264-pcm.mxf samples/mxf-h264-pcm-norip.mxf --strip-rip
+python3 -I tools/mxf-rewrite.py samples/mxf-h264-pipe.mxf samples/mxf-h264-pipe-norip.mxf --strip-rip
+python3 -I tools/mxf-rewrite.py samples/mxf-h264-pcm.mxf samples/mxf-h264-pcm-runin.mxf --run-in 1024
+cp samples/mxf-h264-pcm.partitions.csv samples/mxf-h264-pcm-norip.partitions.csv
+cp samples/mxf-h264-pipe.partitions.csv samples/mxf-h264-pipe-norip.partitions.csv
+cp samples/mxf-h264-pcm.partitions.csv samples/mxf-h264-pcm-runin.partitions.csv
+
 # ---- FFmpeg's references ----
 # name.framemd5: decoded frames. name.packets.csv: demuxed packets as ffprobe lists them (the demuxer's own timestamps,
 # flags with discard, MD5 of the data); name.packets.framemd5 for the codec private data (and the ADTS packets).

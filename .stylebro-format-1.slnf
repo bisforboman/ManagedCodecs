@@ -1,0 +1,16 @@
+{
+  "solution": {
+    "path": "ManagedCodecs.slnx",
+    "projects": [
+      "src/ManagedCodecs.MonoGame/ManagedCodecs.MonoGame.csproj",
+      "src/ManagedCodecs.Mp3/ManagedCodecs.Mp3.csproj",
+      "src/ManagedCodecs.Playback/ManagedCodecs.Playback.csproj",
+      "src/ManagedCodecs/ManagedCodecs.csproj",
+      "tests/ManagedCodecs.Tests/ManagedCodecs.Tests.csproj",
+      "tools/ManagedCodecs.Cli/ManagedCodecs.Cli.csproj",
+      "tools/ManagedCodecs.Fuzz/ManagedCodecs.Fuzz.csproj",
+      "tools/ManagedCodecs.Godot/ManagedCodecs.Godot.csproj",
+      "tools/ManagedCodecs.MonoGame.Sample/ManagedCodecs.MonoGame.Sample.csproj"
+    ]
+  }
+}

@@ -15,6 +15,11 @@ run time.
 
 ### Added
 
+- Containers: `WavDemuxer` reads `.wav` files (RIFF WAVE), and `Demuxer.Open` detects them: integer and float PCM
+  (WAVE_FORMAT_EXTENSIBLE too), IMA ADPCM and MP3, packets as FFmpeg's wav demuxer gives them; `mcdec` decodes them.
+  AVI names its 24- and 32-bit and float PCM by the same rules (`CodecIds.PcmS24Le`, `PcmS32Le`, `PcmF32Le`,
+  `PcmF64Le`), where it gave the format tag (docs/decisions/2026-11-10-pcm-containers.md).
+
 - PCM in QuickTime and Matroska files: `PcmDecoder` decodes signed 16-, 24- and 32-bit PCM in either byte order and
   32- and 64-bit float PCM, exactly as FFmpeg does, named by new `CodecIds` constants (`PcmS16Be`, `PcmS24Le`,
   `PcmS24Be`, `PcmS32Le`, `PcmS32Be`, `PcmF32Le`, `PcmF32Be`, `PcmF64Le`, `PcmF64Be`). `Mp4Demuxer` names QuickTime's

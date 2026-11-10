@@ -15,6 +15,7 @@ samples/*.webm
 samples/*.streams
 samples/*.aac
 samples/*.mp3
+samples/*.wav
 samples/*.h264
 samples/*.264
 samples/*.mjpeg

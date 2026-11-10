@@ -88,6 +88,12 @@ public static class CodecIds
     /// at 4 bits; FFmpeg's adpcm_ima_wav); <see cref="ImaAdpcmDecoder"/>.
     /// </summary>
     public const string AdpcmImaWav = "ADPCM_IMA_WAV";
+
+    /// <summary>
+    /// Microsoft ADPCM at 4 bits, in blocks with a header a channel (the WAVE format tag 0x02 at 4 bits, in .wav and AVI
+    /// files; FFmpeg's adpcm_ms); <see cref="MsAdpcmDecoder"/>.
+    /// </summary>
+    public const string AdpcmMs = "ADPCM_MS";
 }
 
 /// <summary>One compressed unit of data pulled out of a container, e.g. one MJPEG frame.</summary>

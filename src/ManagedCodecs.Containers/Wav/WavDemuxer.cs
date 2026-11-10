@@ -4,7 +4,7 @@ namespace ManagedCodecs.Containers;
 
 /// <summary>
 /// A .wav file (RIFF WAVE): one audio stream, its 'fmt ' chunk a WAVEFORMATEX named as AVI's audio is (integer and
-/// float PCM by their depth, WAVE_FORMAT_EXTENSIBLE by its sub-format, IMA ADPCM, MP3; any other format by its tag in
+/// float PCM by their depth, WAVE_FORMAT_EXTENSIBLE by its sub-format, IMA and Microsoft ADPCM, MP3; any other format by its tag in
 /// hex), its 'data' chunk the packets, as FFmpeg's wav demuxer gives them.
 /// </summary>
 /// <remarks>
@@ -12,8 +12,9 @@ namespace ManagedCodecs.Containers;
 /// Packets are 4096 bytes, rounded down to whole blocks (nBlockAlign; one block where a block is longer), the last one
 /// what the data has left; timed in samples (<see cref="AudioStreamInfo.TimeBase"/> is one over the sample rate): PCM's
 /// a sample a block, IMA ADPCM's wSamplesPerBlock a block (a block cut short its whole groups of 4 bytes a channel, as
-/// <see cref="ImaAdpcmDecoder"/> decodes it). MP3 is cut into frames by their headers instead, as FFmpeg's parser cuts
-/// it, skipping bytes that start none, each frame its samples long. Other formats' packets are timed by the bytes
+/// <see cref="ImaAdpcmDecoder"/> decodes it), Microsoft ADPCM's likewise (a block cut short its header's two samples
+/// and two codes a byte over the channels, as <see cref="MsAdpcmDecoder"/> decodes it). MP3 is cut into frames by their
+/// headers instead, as FFmpeg's parser cuts it, skipping bytes that start none, each frame its samples long. Other formats' packets are timed by the bytes
 /// before them over nAvgBytesPerSec, an estimate no sample checks.
 /// </para>
 /// <para>
@@ -202,7 +203,7 @@ public sealed class WavDemuxer : IDemuxer
     {
         int block = Math.Max(format.BlockAlign, 1);
         int size = block <= PacketBytes ? PacketBytes / block * block : block;
-        int samplesPerBlock = format.Codec == CodecIds.AdpcmImaWav && format.CodecPrivate.Length >= 2
+        int samplesPerBlock = format.Codec is CodecIds.AdpcmImaWav or CodecIds.AdpcmMs && format.CodecPrivate.Length >= 2
             ? BinaryPrimitives.ReadUInt16LittleEndian(format.CodecPrivate.Span)
             : 0;
         long time = 0;
@@ -221,6 +222,13 @@ public sealed class WavDemuxer : IDemuxer
                 int headers = 4 * format.Channels;
                 int rest = length % block;
                 duration = ((long)(length / block) * samplesPerBlock) + (rest >= headers ? 1 + ((rest - headers) / headers * 8) : 0);
+            }
+            else if (format.Codec == CodecIds.AdpcmMs && samplesPerBlock > 0)
+            {
+                // Whole blocks, then a block cut short: its header's two samples and 2 codes a byte over the channels.
+                int headers = 7 * format.Channels;
+                int rest = length % block;
+                duration = ((long)(length / block) * samplesPerBlock) + (rest >= headers ? 2 + ((rest - headers) * 2 / format.Channels) : 0);
             }
             else
             {

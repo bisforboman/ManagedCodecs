@@ -89,8 +89,8 @@ public class WavDemuxerTests
             Assert.Equal([682L, 682, 302], demuxer.ReadPacketInfo().Select(p => p.Duration));
         }
 
-        using var big = new WavDemuxer(new MemoryStream(Wave(Format(0x0002, 2, 8000, 5000, 4), [], new byte[12000], [])));
-        Assert.Equal("0x0002", big.Audio.Codec);
+        using var big = new WavDemuxer(new MemoryStream(Wave(Format(0x0006, 2, 8000, 5000, 8), [], new byte[12000], [])));
+        Assert.Equal("0x0006", big.Audio.Codec);
         Assert.Equal([5000, 5000, 2000], big.ReadPackets().Select(p => p.Data.Length));
     }
 

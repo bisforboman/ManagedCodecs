@@ -42,6 +42,9 @@ The repository's CLAUDE.md (process, core idea, cross-cutting gotchas) applies t
   off, so an edit from media time t may run up to t past the media (a raw MP3 remuxed into MP4, whose 1105-sample
   start FFmpeg's muxer copies into the edit: mp3-vbr-22k-remux; aac-fdk-pce-remux starts at 0 and stops at the media).
   Found by rewriting edit lists (`tools/mp4-edit-list.py`, media times 0, 1, 20 and 1105) and reading ffprobe.
+- QuickTime PCM ('sowt', 'twos', 'in24', ...): 'stts' gives one tick a sample frame and 'stsz' a sample a frame, so
+  read sample by sample it is one packet per frame; FFmpeg reads such audio by chunk, in pieces of up to 1024 frames
+  (`Mp4Demuxer.PcmPieces`). Its muxer writes 1024-frame chunks, which hides the cutting: a hand-built file shows it.
 - AVI: FFmpeg's muxer drops the second video frame (an empty chunk) while interleaving audio, so every FFmpeg AVI with
   audio has a pts gap (0, 2, 3, ...): tests that tick at the first frames' spacing can't take them. It writes the
   audio's chunk id ('01wb') in the header's OpenDML 'indx' too: search the 'movi' list for chunks. FFmpeg's muxer

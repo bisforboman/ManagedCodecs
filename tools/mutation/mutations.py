@@ -555,6 +555,11 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.Playback/MediaPlayer.cs",
          find="if (_next.Time - _next.Lead > position)", replace="if (_next.Time > position)",
          tests="DisplayName~ClockAtTheFrameRate"),
+    # ---- QuickTime PCM with one tick a sample: each chunk in pieces of up to 1024 frames, as FFmpeg's mov demuxer cuts
+    # them (FFmpeg's muxer writes chunks of 1024, so only a hand-built file shows it).
+    dict(file="src/ManagedCodecs.Containers/Mp4/Mp4Demuxer.cs",
+         find="int piece = (int)Math.Min(1024, left);", replace="int piece = (int)left;",
+         tests="FullyQualifiedName~CutsQuickTimePcmChunksAsFfmpeg"),
     # ---- PCM: bytes after a packet's last whole sample frame are ignored, as FFmpeg's decoder ignores them (no spec).
     dict(file="src/ManagedCodecs.Core/PcmDecoder.cs",
          find="if (packet.Length > 0 && packet.Length < frameBytes)", replace="if (packet.Length % frameBytes != 0)",

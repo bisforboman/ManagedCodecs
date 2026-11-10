@@ -1007,6 +1007,15 @@ public sealed class Mp4Demuxer : IDemuxer
                 next = time + duration;
             }
 
+            if (_isAudio && _fragmentSamples.Count == 0 && PcmDecoder.BytesPerSample(Codec) * Channels is > 0 and var frameBytes
+                && IsOneTickPerSample())
+            {
+                (offsets, sizes, dts, durations) = PcmPieces(frameBytes, count);
+                ptsOffsets = new int[sizes.Length];
+                flags = new byte[sizes.Length];
+                Array.Fill(flags, SampleTable.Keyframe);
+            }
+
             var media = new SampleTable(StreamIndex, offsets, sizes, dts, ptsOffsets, durations, flags);
             var edits = Edits(movieTimescale);
             if (edits.Count == 0)
@@ -1241,6 +1250,58 @@ public sealed class Mp4Demuxer : IDemuxer
             }
 
             throw new InvalidDataException("Track has no sample size table.");
+        }
+
+        // An 'stts' of one entry of one tick a sample: QuickTime's uncompressed audio, whose samples are its sample frames.
+        private bool IsOneTickPerSample()
+        {
+            var stts = Entries(_stts, 8, "stts");
+            return stts.Length == 8 && ReadUInt32(stts, 4) == 1;
+        }
+
+        /// <summary>
+        /// PCM's packets as FFmpeg's mov demuxer cuts them where 'stts' gives one tick a sample: each chunk in pieces of
+        /// up to 1024 sample frames, a piece the frames' bytes (bytes a sample times channels, whatever 'stsz' says) and
+        /// as many ticks, timed by the frames before it. Up to <paramref name="frames"/> frames in all, as the chunks hold.
+        /// </summary>
+        private (long[] Offsets, int[] Sizes, long[] Dts, int[] Durations) PcmPieces(int frameBytes, int frames)
+        {
+            bool wide = _co64.Length > 0;
+            var chunkTable = Entries(wide ? _co64 : _stco, wide ? 8 : 4, wide ? "co64" : "stco");
+            int chunkCount = chunkTable.Length / (wide ? 8 : 4);
+            var stsc = Entries(_stsc, 12, "stsc");
+            int entryCount = stsc.Length / 12;
+            var offsets = new List<long>();
+            var sizes = new List<int>();
+            var dts = new List<long>();
+            var durations = new List<int>();
+            long frame = 0;
+            for (int e = 0; e < entryCount && frame < frames; e++)
+            {
+                long firstChunk = ReadUInt32(stsc, e * 12);
+                long perChunk = ReadUInt32(stsc, (e * 12) + 4);
+                long nextFirst = e + 1 < entryCount ? ReadUInt32(stsc, (e + 1) * 12) : chunkCount + 1L;
+                for (long chunk = Math.Max(firstChunk, 1); chunk < nextFirst && chunk <= chunkCount && frame < frames; chunk++)
+                {
+                    int index = (int)(chunk - 1);
+                    long offset = wide
+                        ? checked((long)BinaryPrimitives.ReadUInt64BigEndian(chunkTable[(index * 8)..]))
+                        : BinaryPrimitives.ReadUInt32BigEndian(chunkTable[(index * 4)..]);
+                    for (long left = Math.Min(perChunk, frames - frame); left > 0;)
+                    {
+                        int piece = (int)Math.Min(1024, left);
+                        offsets.Add(offset);
+                        sizes.Add(checked(piece * frameBytes));
+                        dts.Add(frame);
+                        durations.Add(piece);
+                        offset += (long)piece * frameBytes;
+                        frame += piece;
+                        left -= piece;
+                    }
+                }
+            }
+
+            return (offsets.ToArray(), sizes.ToArray(), dts.ToArray(), durations.ToArray());
         }
 
         /// <summary>
@@ -1514,6 +1575,8 @@ public sealed class Mp4Demuxer : IDemuxer
                 Codec = CodecIds.Mp3; // QuickTime's MP3 entries: '.mp3', and 'ms\0U' (WAVE format 0x55)
             }
 
+            Codec = PcmCodec(format, BinaryPrimitives.ReadUInt16BigEndian(entry[18..]), children) ?? Codec;
+
             if (format == Box.Mp4a && (FindChild(children, Box.Esds, out var esds)
                 || (FindChild(children, Box.Wave, out var wave) && FindChild(wave, Box.Esds, out esds))))
             {
@@ -1524,6 +1587,29 @@ public sealed class Mp4Demuxer : IDemuxer
                     Channels = channels > 0 ? channels : Channels; // 0: the channels are in a program_config_element
                 }
             }
+        }
+
+        /// <summary>
+        /// QuickTime's PCM entries, as FFmpeg's mov demuxer names them: 'raw ' unsigned 8-bit, 'sowt' and 'twos' signed
+        /// 16-bit little- and big-endian (at a samplesize of 16; 'twos' at 8 is signed 8-bit, not decoded), and 'in24',
+        /// 'in32', 'fl32' and 'fl64' by their names, big-endian unless an 'enda' box (in the 'wave' box, or among the
+        /// entry's children) says 1. Null for any other entry.
+        /// </summary>
+        private static string? PcmCodec(uint format, int sampleSize, ReadOnlySpan<byte> children)
+        {
+            bool little = (FindChild(children, Box.Enda, out var enda) || (FindChild(children, Box.Wave, out var wave) && FindChild(wave, Box.Enda, out enda)))
+                && enda.Length >= 2 && (BinaryPrimitives.ReadUInt16BigEndian(enda) & 0xFF) == 1;
+            return format switch
+            {
+                Box.Raw when sampleSize == 8 => CodecIds.PcmU8,
+                Box.Sowt when sampleSize == 16 => CodecIds.PcmS16Le,
+                Box.Twos when sampleSize == 16 => CodecIds.PcmS16Be,
+                Box.In24 => little ? CodecIds.PcmS24Le : CodecIds.PcmS24Be,
+                Box.In32 => little ? CodecIds.PcmS32Le : CodecIds.PcmS32Be,
+                Box.Fl32 => little ? CodecIds.PcmF32Le : CodecIds.PcmF32Be,
+                Box.Fl64 => little ? CodecIds.PcmF64Le : CodecIds.PcmF64Be,
+                _ => null,
+            };
         }
 
         /// <summary>
@@ -1700,6 +1786,14 @@ public sealed class Mp4Demuxer : IDemuxer
         public const uint Mp4v = 0x6D703476;
         public const uint Esds = 0x65736473;
         public const uint Wave = 0x77617665;
+        public const uint Enda = 0x656E6461;
+        public const uint Raw = 0x72617720;  // 'raw '
+        public const uint Sowt = 0x736F7774;
+        public const uint Twos = 0x74776F73;
+        public const uint In24 = 0x696E3234;
+        public const uint In32 = 0x696E3332;
+        public const uint Fl32 = 0x666C3332;
+        public const uint Fl64 = 0x666C3634;
         public const uint Jpeg = 0x6A706567;
         public const uint Mjpa = 0x6D6A7061;
         public const uint Colr = 0x636F6C72;

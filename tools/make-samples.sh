@@ -623,6 +623,14 @@ ff -f lavfi -i "aevalsrc=0.4*sin(2*PI*440*t)+0.1*sin(2*PI*3000*t)|0.4*sin(2*PI*4
 # The same AAC in a QuickTime file (-f mov), whose sound description holds the 'esds' in a 'wave' box; named .mp4 so
 # the MP4 references and tests take it.
 ff -i samples/aac-stereo-48k.mp4 -c copy -f mov samples/aac-quicktime.mp4
+# PCM in QuickTime files (PcmDecoder; named .mp4 like the one above), one per sample entry FFmpeg's muxer writes:
+# 'raw ' (unsigned 8-bit), 'sowt' and 'twos' (16-bit little- and big-endian, the latter in stereo), and 'in24', 'in32',
+# 'fl32' and 'fl64', whose byte order is an 'enda' box in the 'wave' box (1: little-endian), both orders between them.
+for spec in u8:raw:1 s16le:sowt:1 s16be:twos:2 s24le:in24:2 s32be:in32:1 f32le:fl32:2 f64be:fl64:1; do
+  IFS=: read -r fmt entry channels <<< "$spec"
+  ff -f lavfi -i testsrc2=size=160x120:rate=25:d=1 -f lavfi -i "sine=frequency=440:sample_rate=22050:d=1" \
+    -c:v mjpeg -q:v 5 -c:a "pcm_$fmt" -ac "$channels" -f mov "samples/mov-pcm-$fmt.mp4"
+done
 ff -f lavfi -i "aevalsrc=0.5*sin(2*PI*300*t)*sin(2*PI*2*t)+0.05*sin(2*PI*1700*t):s=8000:d=2" -c:a aac -b:a 16k -aac_pns 0 samples/aac-mono-8k.mp4
 ff -f lavfi -i "aevalsrc=0.5*sin(2*PI*600*t+4*sin(2*PI*3*t))|0.3*sin(2*PI*900*t):s=22050:d=2" -c:a aac -b:a 40k -aac_pns 0 samples/aac-stereo-22k.mp4
 ff -f lavfi -i "aevalsrc=0.6*sin(2*PI*440*t)*gt(mod(t\,0.1)\,0.05)+0.5*lt(mod(t\,0.25)\,0.0005):s=44100:d=2" -c:a aac -b:a 128k -aac_pns 0 samples/aac-transients.mp4
@@ -820,6 +828,14 @@ ff -f lavfi -i testsrc2=size=160x120:rate=25 -f lavfi -i sine=frequency=440:samp
   -g 12 -c:a pcm_s16le "$pcm"
 python3 tools/mkv-rewrite.py "$pcm" samples/mkv-lace-fixed.mkv --lace fixed --unknown-size
 rm "$pcm"
+# PCM's other Codec IDs by BitDepth (PcmDecoder; 16-bit little-endian is mkv-lace-fixed above): A_PCM/INT/LIT at 8 bits
+# (unsigned), 24 and 32; A_PCM/INT/BIG at 16 and 32 (in stereo); A_PCM/FLOAT/IEEE at 32 and 64 (FFmpeg's muxer writes no
+# big-endian float).
+for spec in u8:1 s24le:2 s32le:1 s16be:2 s32be:2 f32le:1 f64le:2; do
+  IFS=: read -r fmt channels <<< "$spec"
+  ff -f lavfi -i testsrc2=size=160x120:rate=25:d=1 -f lavfi -i "sine=frequency=440:sample_rate=32000:d=1" \
+    -c:v mjpeg -q:v 5 -c:a "pcm_$fmt" -ac "$channels" "samples/mkv-pcm-$fmt.mkv"
+done
 # The video's frames and CodecPrivate compressed with zlib (ContentCompAlgo 0), as mkvmerge's --compression writes them.
 python3 tools/mkv-rewrite.py samples/mkv-h264-aac.mkv samples/mkv-zlib.mkv --zlib
 # AAC whose last block has a DiscardPadding of 10 ms (480 samples at 48 kHz), which FFmpeg's decoder drops from its end.
@@ -976,12 +992,13 @@ for f in samples/*.mp4 samples/*.mkv samples/*.mp3 samples/*.avi; do
   [[ $f == *.mp4 ]] && ff -ignore_editlist 1 -i "$f" -map 0:a:0 -f f32le "${f%.*}.mp3.f32"
   ff -i "$f" -map 0:a:0 -f f32le "${f%.*}.mp3.trim.f32"
 done
-# PCM and IMA ADPCM in AVI: name.pcm.f32 and name.ima.f32, the decoded audio as FFmpeg gives it (PcmDecoder's and
-# ImaAdpcmDecoder's values exactly).
-for f in samples/*.avi; do
+# PCM and IMA ADPCM: name.pcm.f32 and name.ima.f32, the decoded audio as FFmpeg gives it (PcmDecoder's and
+# ImaAdpcmDecoder's values exactly), for the formats they decode.
+for f in samples/*.avi samples/*.mp4 samples/*.mkv; do
   case "$(ffprobe -v error -select_streams a:0 -show_entries stream=codec_name -of csv=p=0 "$f")" in
-    pcm_u8 | pcm_s16le) ff -i "$f" -map 0:a:0 -f f32le "${f%.avi}.pcm.f32" ;;
-    adpcm_ima_wav) ff -i "$f" -map 0:a:0 -f f32le "${f%.avi}.ima.f32" ;;
+    pcm_u8 | pcm_s16le | pcm_s16be | pcm_s24le | pcm_s24be | pcm_s32le | pcm_s32be | pcm_f32le | pcm_f32be | pcm_f64le | pcm_f64be)
+      ff -i "$f" -map 0:a:0 -f f32le "${f%.*}.pcm.f32" ;;
+    adpcm_ima_wav) ff -i "$f" -map 0:a:0 -f f32le "${f%.*}.ima.f32" ;;
   esac
 done
 # Raw MP3: packets as FFmpeg's demuxer gives them, and in .packets.csv with their skip-samples side data (the gapless

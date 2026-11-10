@@ -42,6 +42,7 @@ internal static class Ebml
     public const uint SamplingFrequency = 0xB5;
     public const uint OutputSamplingFrequency = 0x78B5;
     public const uint Channels = 0x9F;
+    public const uint BitDepth = 0x6264;
     public const uint ContentEncodings = 0x6D80;
     public const uint ContentEncoding = 0x6240;
     public const uint ContentEncodingScope = 0x5032;

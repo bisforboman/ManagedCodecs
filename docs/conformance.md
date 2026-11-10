@@ -286,6 +286,35 @@ sample shows the cutting: ffprobe did, on FFmpeg AVIs whose PCM chunks were merg
 `AviDemuxerTests.CutsAudioChunksAsFfmpeg` checks its sizes and times on hand-built files. Not checked against FFmpeg:
 format tag 0x50 (MPEG Layer I and II) with Layer III frames, Microsoft ADPCM, AC-3. H.264 in AVI: see H.264, Annex B.
 
+## PCM in QuickTime and Matroska
+
+`PcmDecoder` takes PCM as FFmpeg's pcm_* decoders name it (docs/decisions/2026-11-10-pcm-containers.md): unsigned
+8-bit; signed 16, 24 and 32 bits, little- and big-endian; 32- and 64-bit float, both orders. FFmpeg's float output is a
+formula for each ((x - 128) / 128, x / 2^15, x / 2^23 and x / 2^31; floats as they are, doubles rounded), checked bit
+for bit on 20000 random values per format, and `PcmDecoderTests.ConvertsEveryFormatByTheDefinition` holds the decoder
+to it on random bytes. `PcmDecoderTests.MatchesFfmpegExactly` decodes every sample with a name.pcm.f32 reference
+(FFmpeg's `-f f32le`) bit for bit, and `MediaPlayerTests` plays three of them:
+
+| Sample | What |
+| --- | --- |
+| mov-pcm-u8, mov-pcm-s16le, mov-pcm-s16be | QuickTime's 'raw ', 'sowt' and 'twos' (stereo) |
+| mov-pcm-s24le, mov-pcm-s32be, mov-pcm-f32le, mov-pcm-f64be | 'in24', 'in32', 'fl32' and 'fl64', their byte order an 'enda' box in the 'wave' box |
+| mkv-pcm-u8, mkv-pcm-s24le, mkv-pcm-s32le | A_PCM/INT/LIT at BitDepth 8 (unsigned, as FFmpeg reads it), 24 and 32 |
+| mkv-pcm-s16be, mkv-pcm-s32be | A_PCM/INT/BIG at 16 and 32 |
+| mkv-pcm-f32le, mkv-pcm-f64le | A_PCM/FLOAT/IEEE at 32 and 64 |
+| mkv-lace-fixed | A_PCM/INT/LIT at 16, in fixed-size lacing |
+
+QuickTime's PCM has one 'stts' tick a sample frame, and FFmpeg's mov demuxer reads it by chunk, each cut in pieces of up
+to 1024 frames (their bytes the frames' whatever 'stsz' says, timed by the frames before them). Its muxer writes chunks of
+1024, so the samples' packets show only whole chunks: `Mp4DemuxerTests.CutsQuickTimePcmChunksAsFfmpeg` builds chunks of
+1500, 1500 and 700 frames and checks the packets ffprobe gives that very file (1024 + 476 twice, then 700); a mutation
+entry.
+
+Not from FFmpeg's muxers, so not checked against FFmpeg: QuickTime's `lpcm` (sound description version 2, its format
+in flags) and 'twos' at 8 bits (signed 8-bit), which keep their entry's name, undecoded; big-endian float in Matroska
+(FFmpeg's muxer refuses it, and A_PCM/FLOAT/IEEE has no order of its own); ISO MP4's `ipcm` and `fpcm` (next, by the
+decision) and `.wav` files.
+
 ## Matroska and WebM demuxing
 
 `MatroskaConformanceTests` compares every packet of every samples/*.mkv and *.webm with FFmpeg's demuxer: pts, size,

@@ -44,11 +44,44 @@ public static class CodecIds
     /// </summary>
     public const string Mp3 = "MP3";
 
-    /// <summary>PCM, unsigned 8-bit samples, channels interleaved (AVI's format tag 1 at 8 bits); <see cref="PcmDecoder"/>.</summary>
+    /// <summary>
+    /// PCM, unsigned 8-bit samples, channels interleaved (AVI's format tag 1 at 8 bits, QuickTime's 'raw ', Matroska's
+    /// A_PCM/INT/LIT and BIG at BitDepth 8); <see cref="PcmDecoder"/>.
+    /// </summary>
     public const string PcmU8 = "PCM_U8";
 
-    /// <summary>PCM, signed 16-bit little-endian samples, channels interleaved (AVI's format tag 1 at 16 bits); <see cref="PcmDecoder"/>.</summary>
+    /// <summary>
+    /// PCM, signed 16-bit little-endian samples, channels interleaved (AVI's format tag 1 at 16 bits, QuickTime's 'sowt',
+    /// Matroska's A_PCM/INT/LIT at BitDepth 16); <see cref="PcmDecoder"/>.
+    /// </summary>
     public const string PcmS16Le = "PCM_S16LE";
+
+    /// <summary>PCM, signed 16-bit big-endian samples (QuickTime's 'twos', Matroska's A_PCM/INT/BIG at BitDepth 16); <see cref="PcmDecoder"/>.</summary>
+    public const string PcmS16Be = "PCM_S16BE";
+
+    /// <summary>PCM, signed 24-bit little-endian samples (QuickTime's 'in24' with 'enda' 1, Matroska's A_PCM/INT/LIT at BitDepth 24); <see cref="PcmDecoder"/>.</summary>
+    public const string PcmS24Le = "PCM_S24LE";
+
+    /// <summary>PCM, signed 24-bit big-endian samples (QuickTime's 'in24', Matroska's A_PCM/INT/BIG at BitDepth 24); <see cref="PcmDecoder"/>.</summary>
+    public const string PcmS24Be = "PCM_S24BE";
+
+    /// <summary>PCM, signed 32-bit little-endian samples (QuickTime's 'in32' with 'enda' 1, Matroska's A_PCM/INT/LIT at BitDepth 32); <see cref="PcmDecoder"/>.</summary>
+    public const string PcmS32Le = "PCM_S32LE";
+
+    /// <summary>PCM, signed 32-bit big-endian samples (QuickTime's 'in32', Matroska's A_PCM/INT/BIG at BitDepth 32); <see cref="PcmDecoder"/>.</summary>
+    public const string PcmS32Be = "PCM_S32BE";
+
+    /// <summary>PCM, 32-bit IEEE float little-endian samples (QuickTime's 'fl32' with 'enda' 1, Matroska's A_PCM/FLOAT/IEEE at BitDepth 32); <see cref="PcmDecoder"/>.</summary>
+    public const string PcmF32Le = "PCM_F32LE";
+
+    /// <summary>PCM, 32-bit IEEE float big-endian samples (QuickTime's 'fl32'); <see cref="PcmDecoder"/>.</summary>
+    public const string PcmF32Be = "PCM_F32BE";
+
+    /// <summary>PCM, 64-bit IEEE float little-endian samples (QuickTime's 'fl64' with 'enda' 1, Matroska's A_PCM/FLOAT/IEEE at BitDepth 64); <see cref="PcmDecoder"/>.</summary>
+    public const string PcmF64Le = "PCM_F64LE";
+
+    /// <summary>PCM, 64-bit IEEE float big-endian samples (QuickTime's 'fl64'); <see cref="PcmDecoder"/>.</summary>
+    public const string PcmF64Be = "PCM_F64BE";
 }
 
 /// <summary>One compressed unit of data pulled out of a container, e.g. one MJPEG frame.</summary>

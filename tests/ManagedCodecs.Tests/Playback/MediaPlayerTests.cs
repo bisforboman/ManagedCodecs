@@ -25,9 +25,14 @@ public class MediaPlayerTests
     // while interleaving the audio, so they are not for the tests that tick at the first frames' spacing.)
     public static TheoryData<string> AviAudioSamples() => ["avi-mjpeg-mp3.avi", "avi-mjpeg-mp3-cbr.avi", "avi-mjpeg-aac.avi", "avi-mjpeg-pcm.avi", "avi-mjpeg-pcm-u8.avi"];
 
+    // PCM in QuickTime and Matroska, one stereo format of each kind: 24-bit little-endian ('in24' and an 'enda'), 16-bit
+    // big-endian (A_PCM/INT/BIG) and 64-bit float (A_PCM/FLOAT/IEEE).
+    public static TheoryData<string> PcmSamples() => ["mov-pcm-s24le.mp4", "mkv-pcm-s16be.mkv", "mkv-pcm-f64le.mkv"];
+
     [Theory]
     [MemberData(nameof(Samples))]
     [MemberData(nameof(AviAudioSamples))]
+    [MemberData(nameof(PcmSamples))]
     public void PlaysTheDecodersFramesAndAudio(string name)
     {
         var (frames, audio) = Expected(name, null);
@@ -327,7 +332,7 @@ public class MediaPlayerTests
         {
             { Codec: CodecIds.Aac } audio => new AacDecoder(audio),
             { Codec: CodecIds.Mp3 } audio => new Mp3Decoder(audio),
-            { Codec: CodecIds.PcmU8 or CodecIds.PcmS16Le } audio => new PcmDecoder(audio),
+            { } audio when PcmDecoder.CanDecode(audio.Codec) => new PcmDecoder(audio),
             _ => null,
         };
         var frames = new List<(TimeSpan, byte[])>();

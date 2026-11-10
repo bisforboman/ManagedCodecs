@@ -1,7 +1,8 @@
 # PCM in MOV, MP4, Matroska and .wav files (2026-11-10)
 
 0.11.0 decodes AVI's 8- and 16-bit PCM (docs/decisions/2026-11-09-pcm-decoder.md, which left the other containers for
-later). This record decides the rest. Nothing is built yet.
+later). This record decides the rest. Built: the decoder's formats with QuickTime and Matroska; ISO MP4 and `.wav`
+files are next.
 
 ## What the demuxers give today
 

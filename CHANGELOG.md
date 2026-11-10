@@ -15,6 +15,13 @@ run time.
 
 ### Added
 
+- PCM in QuickTime and Matroska files: `PcmDecoder` decodes signed 16-, 24- and 32-bit PCM in either byte order and
+  32- and 64-bit float PCM, exactly as FFmpeg does, named by new `CodecIds` constants (`PcmS16Be`, `PcmS24Le`,
+  `PcmS24Be`, `PcmS32Le`, `PcmS32Be`, `PcmF32Le`, `PcmF32Be`, `PcmF64Le`, `PcmF64Be`). `Mp4Demuxer` names QuickTime's
+  'raw ', 'sowt', 'twos', 'in24', 'in32', 'fl32' and 'fl64' entries by them (the byte order from 'enda'), and
+  `MatroskaDemuxer` the A_PCM Codec IDs by their BitDepth; `PcmDecoder.CanDecode` says whether a codec is one. So
+  `MediaPlayer` plays them and `mcdec` decodes them (docs/decisions/2026-11-10-pcm-containers.md).
+
 - Containers: `H264Demuxer` reads raw H.264 files (Annex B elementary streams, `.h264` and `.264`), and
   `Demuxer.Open` detects them: a packet an access unit, as FFmpeg's parser cuts them (IDR pictures keyframes), a tick
   each at the SPS's VUI frame rate (else 25), the size from the SPS; `H264Decoder` numbers their frames from 0, as

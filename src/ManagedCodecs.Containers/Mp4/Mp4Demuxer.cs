@@ -1514,6 +1514,8 @@ public sealed class Mp4Demuxer : IDemuxer
                 Codec = CodecIds.Mp3; // QuickTime's MP3 entries: '.mp3', and 'ms\0U' (WAVE format 0x55)
             }
 
+            Codec = PcmCodec(format, BinaryPrimitives.ReadUInt16BigEndian(entry[18..]), children) ?? Codec;
+
             if (format == Box.Mp4a && (FindChild(children, Box.Esds, out var esds)
                 || (FindChild(children, Box.Wave, out var wave) && FindChild(wave, Box.Esds, out esds))))
             {
@@ -1524,6 +1526,29 @@ public sealed class Mp4Demuxer : IDemuxer
                     Channels = channels > 0 ? channels : Channels; // 0: the channels are in a program_config_element
                 }
             }
+        }
+
+        /// <summary>
+        /// QuickTime's PCM entries, as FFmpeg's mov demuxer names them: 'raw ' unsigned 8-bit, 'sowt' and 'twos' signed
+        /// 16-bit little- and big-endian (at a samplesize of 16; 'twos' at 8 is signed 8-bit, not decoded), and 'in24',
+        /// 'in32', 'fl32' and 'fl64' by their names, big-endian unless an 'enda' box (in the 'wave' box, or among the
+        /// entry's children) says 1. Null for any other entry.
+        /// </summary>
+        private static string? PcmCodec(uint format, int sampleSize, ReadOnlySpan<byte> children)
+        {
+            bool little = (FindChild(children, Box.Enda, out var enda) || (FindChild(children, Box.Wave, out var wave) && FindChild(wave, Box.Enda, out enda)))
+                && enda.Length >= 2 && (BinaryPrimitives.ReadUInt16BigEndian(enda) & 0xFF) == 1;
+            return format switch
+            {
+                Box.Raw when sampleSize == 8 => CodecIds.PcmU8,
+                Box.Sowt when sampleSize == 16 => CodecIds.PcmS16Le,
+                Box.Twos when sampleSize == 16 => CodecIds.PcmS16Be,
+                Box.In24 => little ? CodecIds.PcmS24Le : CodecIds.PcmS24Be,
+                Box.In32 => little ? CodecIds.PcmS32Le : CodecIds.PcmS32Be,
+                Box.Fl32 => little ? CodecIds.PcmF32Le : CodecIds.PcmF32Be,
+                Box.Fl64 => little ? CodecIds.PcmF64Le : CodecIds.PcmF64Be,
+                _ => null,
+            };
         }
 
         /// <summary>
@@ -1700,6 +1725,14 @@ public sealed class Mp4Demuxer : IDemuxer
         public const uint Mp4v = 0x6D703476;
         public const uint Esds = 0x65736473;
         public const uint Wave = 0x77617665;
+        public const uint Enda = 0x656E6461;
+        public const uint Raw = 0x72617720;  // 'raw '
+        public const uint Sowt = 0x736F7774;
+        public const uint Twos = 0x74776F73;
+        public const uint In24 = 0x696E3234;
+        public const uint In32 = 0x696E3332;
+        public const uint Fl32 = 0x666C3332;
+        public const uint Fl64 = 0x666C3634;
         public const uint Jpeg = 0x6A706567;
         public const uint Mjpa = 0x6D6A7061;
         public const uint Colr = 0x636F6C72;

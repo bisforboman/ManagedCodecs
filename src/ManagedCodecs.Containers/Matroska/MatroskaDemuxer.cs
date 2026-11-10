@@ -442,6 +442,8 @@ public sealed class MatroskaDemuxer : IDemuxer
 
         public int Channels { get; set; } = 1;
 
+        public int BitDepth { get; set; }
+
         public double TimestampScale { get; set; } = 1;
     }
 
@@ -648,6 +650,7 @@ public sealed class MatroskaDemuxer : IDemuxer
             // av_rescale_q's rounding (to nearest, halves away from zero) of nanoseconds into the time base.
             track.CodecDelayTicks = (track.CodecDelay + (TimestampScale / 2)) / TimestampScale;
             track.Codec = NormalizeCodec(track.CodecId);
+            track.Codec = PcmCodec(track.CodecId, track.BitDepth) ?? track.Codec;
             if (track.Type == 1)
             {
                 // The display size's ratio over the pixels' (in any DisplayUnit but 4, unknown, only the ratio counts), as
@@ -842,6 +845,9 @@ public sealed class MatroskaDemuxer : IDemuxer
                     case Ebml.Channels:
                         track.Channels = (int)Math.Min(Ebml.UInt(payload), int.MaxValue);
                         break;
+                    case Ebml.BitDepth:
+                        track.BitDepth = (int)Math.Min(Ebml.UInt(payload), int.MaxValue);
+                        break;
                     default:
                         break;
                 }
@@ -926,6 +932,25 @@ public sealed class MatroskaDemuxer : IDemuxer
             _ when codecId == "A_AAC" || codecId.StartsWith("A_AAC/", StringComparison.Ordinal) => CodecIds.Aac,
             "A_MPEG/L3" => CodecIds.Mp3,
             _ => codecId,
+        };
+
+        /// <summary>
+        /// Matroska's PCM Codec IDs by the track's BitDepth, as FFmpeg's demuxer names them: A_PCM/INT/LIT and
+        /// A_PCM/INT/BIG at 8 bits unsigned (either order), at 16, 24 and 32 bits signed little- or big-endian;
+        /// A_PCM/FLOAT/IEEE at 32 and 64 bits (little-endian). Null for any other Codec ID or depth (no BitDepth too).
+        /// </summary>
+        private static string? PcmCodec(string codecId, int bitDepth) => (codecId, bitDepth) switch
+        {
+            ("A_PCM/INT/LIT" or "A_PCM/INT/BIG", 8) => CodecIds.PcmU8,
+            ("A_PCM/INT/LIT", 16) => CodecIds.PcmS16Le,
+            ("A_PCM/INT/BIG", 16) => CodecIds.PcmS16Be,
+            ("A_PCM/INT/LIT", 24) => CodecIds.PcmS24Le,
+            ("A_PCM/INT/BIG", 24) => CodecIds.PcmS24Be,
+            ("A_PCM/INT/LIT", 32) => CodecIds.PcmS32Le,
+            ("A_PCM/INT/BIG", 32) => CodecIds.PcmS32Be,
+            ("A_PCM/FLOAT/IEEE", 32) => CodecIds.PcmF32Le,
+            ("A_PCM/FLOAT/IEEE", 64) => CodecIds.PcmF64Le,
+            _ => null,
         };
 
         /// <summary>

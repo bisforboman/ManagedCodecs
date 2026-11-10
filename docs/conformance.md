@@ -319,10 +319,15 @@ to 1024 frames (their bytes the frames' whatever 'stsz' says, timed by the frame
 1500, 1500 and 700 frames and checks the packets ffprobe gives that very file (1024 + 476 twice, then 700); a mutation
 entry.
 
+ISO MP4's `ipcm` and `fpcm` (ISO/IEC 23003-5, as FFmpeg's mp4 muxer writes PCM) take their depth and byte order from a
+`pcmC` box (format_flags bit 0 little-endian, PCM_sample_size): `mp4-pcm-s16le`, `-s16be` (stereo), `-s32le`, `-f32le`
+(stereo), `-f32be` and `-f64le` decode exactly. FFmpeg cuts their pieces by 'stsz''s sample size, not the codec's: its
+6.1 muxer writes 24-bit samples (3 bytes in 'stsz') under a `pcmC` of 32 bits and reads them back as 32-bit samples in
+3072-byte pieces. `mp4-pcm-s24le` is that file, which decodes as FFmpeg decodes it (a mutation entry).
+
 Not from FFmpeg's muxers, so not checked against FFmpeg: QuickTime's `lpcm` (sound description version 2, its format
 in flags) and 'twos' at 8 bits (signed 8-bit), which keep their entry's name, undecoded; big-endian float in Matroska
-(FFmpeg's muxer refuses it, and A_PCM/FLOAT/IEEE has no order of its own); ISO MP4's `ipcm` and `fpcm` (next, by the
-decision).
+(FFmpeg's muxer refuses it, and A_PCM/FLOAT/IEEE has no order of its own); `ipcm` at 8 bits.
 
 ## .wav files
 
@@ -1304,6 +1309,13 @@ inlining): -2.21% on `h264-mbaff-default`, -3.41% on `jm-paff-b`, -1.41% on `h26
 `Weighting`, `LumaPlace`, `ChromaPlace`) the partition functions fell from 0.224 to 0.196 of the untouched set on
 `h264-mbaff-default` (every branch run below every base run) and from 0.191 to 0.137 on `jm-paff-b`: about 0.6 and
 1.4% of the frame.
+The chroma filter's row helper (`Across`: one load, the pairing shuffle and `pmaddubsw`) was a call of its own under
+the JIT, once a row of every chroma block, its vector arguments with it (2.1% of a 1080p frame by perf, by itself);
+it is now inlined (`AggressiveInlining`). On the first 360 frames of the Sintel trailer at 1080p (libx264 High, B
+pictures; docs/notes/h264-1080p-scaling-2026-11.md) the chroma functions (`PredictChromaPair`, `PredictChroma`,
+`Across`) fell from 0.93 to 1.00 of the untouched set (`FilterMacroblock420`, `HalfHorizontal`, `HalfVertical`) to
+0.74 to 0.77 (perf, six runs each, the order alternating, every branch run below every base run): from 8.5 to 6.7% of
+the frame, about 1.7%.
 
 ## AAC
 

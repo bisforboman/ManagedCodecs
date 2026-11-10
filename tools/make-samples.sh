@@ -649,6 +649,14 @@ for spec in u8:raw:1 s16le:sowt:1 s16be:twos:2 s24le:in24:2 s32be:in32:1 f32le:f
   ff -f lavfi -i testsrc2=size=160x120:rate=25:d=1 -f lavfi -i "sine=frequency=440:sample_rate=22050:d=1" \
     -c:v mjpeg -q:v 5 -c:a "pcm_$fmt" -ac "$channels" -f mov "samples/mov-pcm-$fmt.mp4"
 done
+# PCM in ISO MP4 files (ISO/IEC 23003-5; FFmpeg's mp4 muxer): 'ipcm' and 'fpcm', depth and byte order in a 'pcmC' box.
+# FFmpeg 6.1 writes 24-bit samples under a 'pcmC' of 32 bits and reads them back so, 'stsz''s 3 bytes a piece:
+# mp4-pcm-s24le holds Mp4Demuxer to that (pieces by 'stsz').
+for spec in s16le:1 s16be:2 s24le:1 s32le:1 f32le:2 f32be:1 f64le:1; do
+  IFS=: read -r fmt channels <<< "$spec"
+  ff -f lavfi -i testsrc2=size=160x120:rate=25:d=1 -f lavfi -i "sine=frequency=440:sample_rate=22050:d=1" \
+    -c:v mjpeg -q:v 5 -c:a "pcm_$fmt" -ac "$channels" "samples/mp4-pcm-$fmt.mp4"
+done
 ff -f lavfi -i "aevalsrc=0.5*sin(2*PI*300*t)*sin(2*PI*2*t)+0.05*sin(2*PI*1700*t):s=8000:d=2" -c:a aac -b:a 16k -aac_pns 0 samples/aac-mono-8k.mp4
 ff -f lavfi -i "aevalsrc=0.5*sin(2*PI*600*t+4*sin(2*PI*3*t))|0.3*sin(2*PI*900*t):s=22050:d=2" -c:a aac -b:a 40k -aac_pns 0 samples/aac-stereo-22k.mp4
 ff -f lavfi -i "aevalsrc=0.6*sin(2*PI*440*t)*gt(mod(t\,0.1)\,0.05)+0.5*lt(mod(t\,0.25)\,0.0005):s=44100:d=2" -c:a aac -b:a 128k -aac_pns 0 samples/aac-transients.mp4

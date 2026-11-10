@@ -252,7 +252,12 @@ public sealed class LivePlayer : IDisposable
 
             response.EnsureSuccessStatusCode();
             var type = response.Content.Headers.ContentType;
-            if (type?.MediaType is { } media && !media.StartsWith("multipart/", StringComparison.OrdinalIgnoreCase))
+
+            // application/octet-stream is what FFmpeg's HTTP server (-f mpjpeg -listen 1) sends for its multipart
+            // body, so it is read as one; another type (a snapshot's image/jpeg, a login page) is not MJPEG over HTTP.
+            if (type?.MediaType is { } media
+                && !media.StartsWith("multipart/", StringComparison.OrdinalIgnoreCase)
+                && !media.Equals("application/octet-stream", StringComparison.OrdinalIgnoreCase))
             {
                 throw new FatalException(new NotSupportedException($"The server sent {media}, not MJPEG over HTTP (multipart/x-mixed-replace)."));
             }

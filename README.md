@@ -41,6 +41,8 @@ in between. That comparison is not measured here.
 | `src/Shared` | Source files linked into several codec projects (the VLC decoder, powers and cosines with the same bits on every runtime) |
 | `tools/ManagedCodecs.Cli` | `mcdec`: decodes a file and times it, to compare with `ffmpeg -benchmark` (`--threads N` for H.264 frame threading and HE-AAC's channels) |
 | `tools/ManagedCodecs.Godot` | A Godot 4 (.NET) node that plays a video into an `ImageTexture` and an `AudioStreamGenerator` with `ManagedCodecs.Playback`, as an addon (`addons/managedcodecs/`, a global class) to copy into a game; CI builds it with the Godot .NET SDK, Godot has not run it |
+| `tools/ManagedCodecs.Avalonia.Sample` | `mclive`: an Avalonia window showing a camera's MJPEG over HTTP with `LivePlayer` (issue #462); run on Linux under Xvfb against FFmpeg's `-f mpjpeg` |
+| `tools/ManagedCodecs.Wpf.Sample` | `mclive-wpf`: the same in WPF; CI builds it on Linux, nobody has run it on Windows yet |
 | `tools/ManagedCodecs.MonoGame.Sample` | `mcplay`: a MonoGame `Game` around `VideoTexture` (`ManagedCodecs.MonoGame`) (its README has the 1080p measurements; issue #254) |
 | `tools/ManagedCodecs.Unity.Sample` | A Unity `MonoBehaviour` that plays a video into a `Texture2D` and an `AudioClip` with the `ManagedCodecs.Unity` package (its `MediaPlayer`); CI compiles it against stubs of UnityEngine, Unity has not run it |
 | `tools/make-samples.sh` | Generates the test samples and FFmpeg's references |
@@ -477,8 +479,9 @@ ESP32-CAM, mjpg-streamer, OctoPrint, most IP cameras' `video.mjpg`), with no nat
 another decodes, and the UI takes the newest frame on its render tick. No clock and no queue: a JPEG that arrives
 while the decoder is busy waits only until a newer one does, and a frame not taken before the next is decoded is
 dropped; `Statistics` counts both. A dropped connection, an error status or a stall (no part for `StallTimeout`, 5 s)
-is retried after 0.5 s, then up to 10 s apart; 401, 403, 404 and a response that isn't multipart (a snapshot URL) are
-final. `State` and `Error` say which.
+is retried after 0.5 s, then up to 10 s apart; 401, 403, 404 and a response of another type than multipart or
+`application/octet-stream` (FFmpeg's HTTP server sends its multipart body as that), such as a snapshot URL's
+`image/jpeg`, are final. `State` and `Error` say which.
 
 ```csharp
 using var player = new LivePlayer(new MjpegHttpSource(new Uri("http://camera.local/video.mjpg")));
@@ -497,6 +500,7 @@ if (player.TakeLatest() is { } frame)
 - **What cameras get wrong:** a part without `Content-Length` (split at the next delimiter), LF line ends, a header's
   boundary written with its `--`, or one the body doesn't use (the first delimiter line's wins), none at all. Parts
   that aren't JPEGs, and JPEGs the decoder refuses, are counted and skipped.
+- **Samples:** `tools/ManagedCodecs.Avalonia.Sample` (`mclive`) and `tools/ManagedCodecs.Wpf.Sample` (`mclive-wpf`).
 - **Cost:** a software decoder's: a wall of cameras wants their low-resolution substreams. RTSP (H.264) is next
   (issue #462); docs/decisions/2026-11-10-live-mjpeg-over-http.md has the plan.
 

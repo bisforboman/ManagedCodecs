@@ -7,10 +7,14 @@ using ManagedCodecs.Playback;
 
 namespace ManagedCodecs.Tests.Playback;
 
-/// <summary>A clock that moves only when a test advances it, so that stalls and backoffs take no real time.</summary>
+/// <summary>
+/// A clock that moves only when a test advances it, so that stalls and backoffs take no real time.
+/// (<c>TaskCompletionSource&lt;bool&gt;</c>: the Unity build, which these tests also run against, has a
+/// non-generic one of its own in Polyfills.cs, ambiguous with the runtime's.)
+/// </summary>
 internal sealed class FakeLiveClock : ILiveClock
 {
-    private readonly List<(TimeSpan Due, TimeSpan Length, TaskCompletionSource Done)> _waiters = [];
+    private readonly List<(TimeSpan Due, TimeSpan Length, TaskCompletionSource<bool> Done)> _waiters = [];
     private TimeSpan _now;
 
     public TimeSpan Elapsed
@@ -50,7 +54,7 @@ internal sealed class FakeLiveClock : ILiveClock
 
     public Task Delay(TimeSpan delay, CancellationToken token)
     {
-        var done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var done = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         lock (_waiters)
         {
             if (delay <= TimeSpan.Zero)
@@ -75,7 +79,7 @@ internal sealed class FakeLiveClock : ILiveClock
 
     public void Advance(TimeSpan by)
     {
-        List<TaskCompletionSource> due;
+        List<TaskCompletionSource<bool>> due;
         lock (_waiters)
         {
             _now += by;
@@ -85,7 +89,7 @@ internal sealed class FakeLiveClock : ILiveClock
 
         foreach (var done in due)
         {
-            done.TrySetResult();
+            done.TrySetResult(true);
         }
     }
 }

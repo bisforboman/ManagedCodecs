@@ -1295,6 +1295,13 @@ inlining): -2.21% on `h264-mbaff-default`, -3.41% on `jm-paff-b`, -1.41% on `h26
 `Weighting`, `LumaPlace`, `ChromaPlace`) the partition functions fell from 0.224 to 0.196 of the untouched set on
 `h264-mbaff-default` (every branch run below every base run) and from 0.191 to 0.137 on `jm-paff-b`: about 0.6 and
 1.4% of the frame.
+The chroma filter's row helper (`Across`: one load, the pairing shuffle and `pmaddubsw`) was a call of its own under
+the JIT, once a row of every chroma block, its vector arguments with it (2.1% of a 1080p frame by perf, by itself);
+it is now inlined (`AggressiveInlining`). On the first 360 frames of the Sintel trailer at 1080p (libx264 High, B
+pictures; docs/notes/h264-1080p-scaling-2026-11.md) the chroma functions (`PredictChromaPair`, `PredictChroma`,
+`Across`) fell from 0.93 to 1.00 of the untouched set (`FilterMacroblock420`, `HalfHorizontal`, `HalfVertical`) to
+0.74 to 0.77 (perf, six runs each, the order alternating, every branch run below every base run): from 8.5 to 6.7% of
+the frame, about 1.7%.
 
 ## AAC
 

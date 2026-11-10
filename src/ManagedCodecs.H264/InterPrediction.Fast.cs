@@ -324,6 +324,7 @@ internal static partial class InterPrediction
     /// paired with their right-hand neighbours by a shuffle, and one multiply-add of the pairs with the weights
     /// (<paramref name="pairWeights"/>: 8 - xFrac and xFrac in turn); else both samples widened and multiplied.
     /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static Vector128<short> Across(ref byte source, int offset, Vector128<short> left, Vector128<short> right, Vector128<sbyte> pairWeights)
     {
         if (Ssse3.IsSupported)

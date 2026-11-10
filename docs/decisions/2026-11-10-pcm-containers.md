@@ -56,3 +56,10 @@ x / 2^31, f32 as it is, f64 rounded to the nearest float. That was checked bit f
 - Exact against FFmpeg on every new sample, as `PcmDecoderTests` does for AVI.
 - `MediaPlayer` plays each; `mcdec` decodes each, so the AOT, Unity and WebAssembly checks compare them.
 - A CHANGELOG "Added" line per PR, in the next minor version (new public API).
+
+## Later: seeking in .wav (2026-11-10)
+
+The owner chose that `WavDemuxer` seeks, before its first release. Every packet is a keyframe, and the packets are
+listed when opening, so `Seek` starts at the one whose samples hold the time, with no read of the file. FFmpeg's wav
+seek starts a packet at the exact sample instead; ours keep the packets of a read from the start, as `IDemuxer.Seek`
+asks of every demuxer (docs/conformance.md, .wav files).

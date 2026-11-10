@@ -104,7 +104,8 @@ and code that reproduces FFmpeg's reading where it differs from the spec), and n
   Matroska and WebM (video and audio tracks, every kind of lacing, BlockGroups, live files of unknown size, header
   stripping and zlib, the display rotation, DiscardPadding; VP9, AV1, Opus and other codecs this library doesn't decode
   by their Codec IDs; MP3 as `CodecIds.Mp3` in MP4 and Matroska), raw AAC (ADTS), raw MP3 (gapless by the LAME
-  tag, as FFmpeg's), `.wav` files (`WavDemuxer`: PCM, IMA ADPCM and MP3, packets as FFmpeg's) and raw H.264 (`.h264`, `.264`: access units as FFmpeg's parser cuts them, timed by the SPS's VUI;
+  tag, as FFmpeg's), `.wav` files (`WavDemuxer`: PCM, IMA ADPCM and MP3, packets as FFmpeg's) and raw H.264 (`.h264`,
+  `.264`: access units as FFmpeg's parser cuts them, timed by the SPS's VUI, seeking to IDR pictures;
   docs/decisions/2026-11-09-raw-h264.md), with
   packets and timestamps as FFmpeg's demuxers give them.
 - **Throughout**: an async API, malformed input that ends in `InvalidDataException` or `NotSupportedException`

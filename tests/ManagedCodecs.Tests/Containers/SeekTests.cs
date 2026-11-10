@@ -3,7 +3,7 @@ using ManagedCodecs.Containers;
 namespace ManagedCodecs.Tests.Containers;
 
 /// <summary>
-/// <see cref="IDemuxer.Seek"/> of the MP4, AVI, Matroska and raw H.264 demuxers: after a seek, each stream's packets are the tail of a read
+/// <see cref="IDemuxer.Seek"/> of the MP4, AVI, Matroska, raw H.264 and WAVE demuxers: after a seek, each stream's packets are the tail of a read
 /// from the start, from the last keyframe whose pts is at or before the time (the other stream's at the same instant),
 /// for every sample, at each keyframe's time, just after it, between keyframes, before the first and past the last.
 /// The decoded frame at a time is checked against FFmpeg's <c>-ss</c> in <see cref="SeekFrameTests"/>.
@@ -20,7 +20,7 @@ public class SeekTests
 
         foreach (var file in Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories).Order())
         {
-            if (Path.GetExtension(file) is ".avi" or ".mp4" or ".mkv" or ".webm" or ".h264" or ".264")
+            if (Path.GetExtension(file) is ".avi" or ".mp4" or ".mkv" or ".webm" or ".h264" or ".264" or ".wav")
             {
                 files.Add(Path.GetRelativePath(directory, file));
             }
@@ -122,6 +122,8 @@ public class SeekTests
         Assert.Throws<ArgumentOutOfRangeException>(() => avi.Seek(0, avi.Video!.StreamIndex + 1));
         using var raw = Demuxer.Open(TestSamples.PathOf("h264-raw.h264"));
         Assert.Throws<ArgumentOutOfRangeException>(() => raw.Seek(0, 1));
+        using var wav = new WavDemuxer(new MemoryStream(File.ReadAllBytes(TestSamples.PathOf("wav-pcm-s16.wav"))));
+        Assert.Throws<ArgumentOutOfRangeException>(() => wav.Seek(0, 1));
     }
 
     [Fact]
@@ -198,7 +200,8 @@ public class SeekTests
         AviDemuxer avi => avi.ReadPacketInfo(),
         MatroskaDemuxer mkv => mkv.ReadPacketInfo(),
         H264Demuxer raw => raw.ReadPacketInfo(),
-        _ => throw new ArgumentException("An MP4, AVI, Matroska or raw H.264 demuxer.", nameof(demuxer)),
+        WavDemuxer wav => wav.ReadPacketInfo(),
+        _ => throw new ArgumentException("An MP4, AVI, Matroska, raw H.264 or WAVE demuxer.", nameof(demuxer)),
     };
 
     // Whether an Annex B access unit holds an IDR slice (NAL unit type 5).

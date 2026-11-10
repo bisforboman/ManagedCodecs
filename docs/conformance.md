@@ -342,6 +342,12 @@ than 4096 bytes, a packet each. Formats FFmpeg names otherwise keep their tag (`
 nAvgBytesPerSec, unchecked; AAC in WAV is named but no sample has it. RF64 and Wave64 are not read. AVI shares the
 naming: `avi-mjpeg-pcm-s24` and `avi-mjpeg-pcm-f32` (format tags 1 and 3) decode exactly too.
 
+`Seek` starts at the packet whose samples hold the time (every packet is a keyframe), among the packets listed when
+opening: the tail of a read from the start, as `IDemuxer.Seek` asks and `SeekTests` checks on every .wav sample.
+FFmpeg's own wav seek starts a packet at the exact sample instead (ffprobe `-read_intervals 0.5%` on 16-bit stereo at
+22.05 kHz: a packet at 11025, where a read from the start has them at 10240 and 11264), so its packets after a seek
+are not a read's; the samples before the time are dropped by whoever wants it, as for the other demuxers.
+
 ## Matroska and WebM demuxing
 
 `MatroskaConformanceTests` compares every packet of every samples/*.mkv and *.webm with FFmpeg's demuxer: pts, size,

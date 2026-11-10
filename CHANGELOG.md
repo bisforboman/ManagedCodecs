@@ -16,7 +16,8 @@ run time.
 ### Added
 
 - Containers: `WavDemuxer` reads `.wav` files (RIFF WAVE), and `Demuxer.Open` detects them: integer and float PCM
-  (WAVE_FORMAT_EXTENSIBLE too), IMA ADPCM and MP3, packets as FFmpeg's wav demuxer gives them; `mcdec` decodes them.
+  (WAVE_FORMAT_EXTENSIBLE too), IMA ADPCM and MP3, packets as FFmpeg's wav demuxer gives them; `Seek` starts at the
+  packet holding the time; `mcdec` decodes them.
   AVI names its 24- and 32-bit and float PCM by the same rules (`CodecIds.PcmS24Le`, `PcmS32Le`, `PcmF32Le`,
   `PcmF64Le`), where it gave the format tag (docs/decisions/2026-11-10-pcm-containers.md).
 

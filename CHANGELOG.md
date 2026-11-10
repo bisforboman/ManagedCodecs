@@ -36,6 +36,11 @@ run time.
   cameras write it beside MJPEG, exactly FFmpeg's output. `AviDemuxer` names such streams `CodecIds.AdpcmImaWav`
   where it named them `"0x0011"`, and `MediaPlayer` plays them (docs/decisions/2026-11-10-ima-adpcm.md).
 
+### Changed
+
+- H.264: the chroma motion compensation filter's rows are inlined, no longer a call each: about 1.7% faster under the
+  JIT on a 1080p High profile stream with B pictures. The output is unchanged.
+
 ## 0.11.0 – 2026-11-09
 
 AVI audio: `AviDemuxer` gives an AVI's audio stream, and `MediaPlayer` plays its MP3, AAC and 8- and 16-bit PCM (the new

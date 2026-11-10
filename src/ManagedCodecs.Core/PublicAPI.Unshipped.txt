@@ -6,4 +6,3 @@ ManagedCodecs.MsAdpcmDecoder.Decode(ManagedCodecs.Packet packet) -> ManagedCodec
 ManagedCodecs.MsAdpcmDecoder.Decode(System.ReadOnlySpan<byte> packet) -> ManagedCodecs.AudioFrame!
 ManagedCodecs.MsAdpcmDecoder.MsAdpcmDecoder(ManagedCodecs.AudioStreamInfo! stream) -> void
 ManagedCodecs.MsAdpcmDecoder.SampleRate.get -> int
->>>>>>> b4ff383 (Core: MsAdpcmDecoder, Microsoft ADPCM exactly as FFmpeg decodes it)

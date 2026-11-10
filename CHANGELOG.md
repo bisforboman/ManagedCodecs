@@ -11,7 +11,12 @@ share internals, so each depends on the others at exactly its own version (`[X]`
 then reports a mix of versions (NU1107, or NU1608 for a newer one referenced directly) rather than letting it fail at
 run time.
 
-## Unreleased
+## 0.12.0 – 2026-11-10
+
+PCM everywhere: `PcmDecoder` takes every integer and float PCM format in both byte orders, from AVI, QuickTime, ISO
+MP4, Matroska and the new `WavDemuxer` for `.wav` files, exactly as FFmpeg decodes it. IMA ADPCM from cameras' AVIs
+(`ImaAdpcmDecoder`), raw H.264 files with seeking (`H264Demuxer`), and live cameras over HTTP (`LivePlayer`). New public
+API, hence a minor version; code built against 0.11 keeps working.
 
 ### Added
 
@@ -20,7 +25,6 @@ run time.
   packet holding the time; `mcdec` decodes them.
   AVI names its 24- and 32-bit and float PCM by the same rules (`CodecIds.PcmS24Le`, `PcmS32Le`, `PcmF32Le`,
   `PcmF64Le`), where it gave the format tag (docs/decisions/2026-11-10-pcm-containers.md).
-
 - PCM in ISO MP4 files: `Mp4Demuxer` names 'ipcm' and 'fpcm' (ISO/IEC 23003-5, as FFmpeg's mp4 muxer writes PCM) by
   their 'pcmC' box, so `PcmDecoder` decodes them, exactly as FFmpeg does.
 - Live cameras: `LivePlayer` (Playback, and the Unity package) shows a camera serving MJPEG over HTTP
@@ -33,7 +37,6 @@ run time.
   'raw ', 'sowt', 'twos', 'in24', 'in32', 'fl32' and 'fl64' entries by them (the byte order from 'enda'), and
   `MatroskaDemuxer` the A_PCM Codec IDs by their BitDepth; `PcmDecoder.CanDecode` says whether a codec is one. So
   `MediaPlayer` plays them and `mcdec` decodes them (docs/decisions/2026-11-10-pcm-containers.md).
-
 - Containers: `H264Demuxer` reads raw H.264 files (Annex B elementary streams, `.h264` and `.264`), and
   `Demuxer.Open` detects them: a packet an access unit, as FFmpeg's parser cuts them (IDR pictures keyframes), a tick
   each at the SPS's VUI frame rate (else 25), the size from the SPS; `H264Decoder` numbers their frames from 0, as

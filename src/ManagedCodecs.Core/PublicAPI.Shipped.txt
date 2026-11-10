@@ -113,6 +113,12 @@ ManagedCodecs.IVideoDecoder.Decode(ManagedCodecs.Packet packet) -> System.Collec
 ManagedCodecs.IVideoDecoder.DecodeAsync(ManagedCodecs.Packet packet, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<System.Collections.Generic.IReadOnlyList<ManagedCodecs.VideoFrame!>!>
 ManagedCodecs.IVideoDecoder.Flush() -> System.Collections.Generic.IReadOnlyList<ManagedCodecs.VideoFrame!>!
 ManagedCodecs.IVideoDecoder.FlushAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<System.Collections.Generic.IReadOnlyList<ManagedCodecs.VideoFrame!>!>
+ManagedCodecs.ImaAdpcmDecoder
+ManagedCodecs.ImaAdpcmDecoder.Channels.get -> int
+ManagedCodecs.ImaAdpcmDecoder.Decode(ManagedCodecs.Packet packet) -> ManagedCodecs.AudioFrame!
+ManagedCodecs.ImaAdpcmDecoder.Decode(System.ReadOnlySpan<byte> packet) -> ManagedCodecs.AudioFrame!
+ManagedCodecs.ImaAdpcmDecoder.ImaAdpcmDecoder(ManagedCodecs.AudioStreamInfo! stream) -> void
+ManagedCodecs.ImaAdpcmDecoder.SampleRate.get -> int
 ManagedCodecs.MediaTypes
 ManagedCodecs.MediaTypes.All = ManagedCodecs.MediaTypes.Video | ManagedCodecs.MediaTypes.Audio -> ManagedCodecs.MediaTypes
 ManagedCodecs.MediaTypes.Audio = 2 -> ManagedCodecs.MediaTypes
@@ -279,11 +285,21 @@ ManagedCodecs.VideoStreamInfo.VideoStreamInfo(string! Codec, int Width, int Heig
 ManagedCodecs.VideoStreamInfo.Width.get -> int
 ManagedCodecs.VideoStreamInfo.Width.init -> void
 const ManagedCodecs.CodecIds.Aac = "AAC" -> string!
+const ManagedCodecs.CodecIds.AdpcmImaWav = "ADPCM_IMA_WAV" -> string!
 const ManagedCodecs.CodecIds.H264 = "H264" -> string!
 const ManagedCodecs.CodecIds.Mjpeg = "MJPG" -> string!
 const ManagedCodecs.CodecIds.Mp3 = "MP3" -> string!
 const ManagedCodecs.CodecIds.Mpeg4Visual = "MP4V" -> string!
+const ManagedCodecs.CodecIds.PcmF32Be = "PCM_F32BE" -> string!
+const ManagedCodecs.CodecIds.PcmF32Le = "PCM_F32LE" -> string!
+const ManagedCodecs.CodecIds.PcmF64Be = "PCM_F64BE" -> string!
+const ManagedCodecs.CodecIds.PcmF64Le = "PCM_F64LE" -> string!
+const ManagedCodecs.CodecIds.PcmS16Be = "PCM_S16BE" -> string!
 const ManagedCodecs.CodecIds.PcmS16Le = "PCM_S16LE" -> string!
+const ManagedCodecs.CodecIds.PcmS24Be = "PCM_S24BE" -> string!
+const ManagedCodecs.CodecIds.PcmS24Le = "PCM_S24LE" -> string!
+const ManagedCodecs.CodecIds.PcmS32Be = "PCM_S32BE" -> string!
+const ManagedCodecs.CodecIds.PcmS32Le = "PCM_S32LE" -> string!
 const ManagedCodecs.CodecIds.PcmU8 = "PCM_U8" -> string!
 override ManagedCodecs.AudioStreamInfo.Equals(object? obj) -> bool
 override ManagedCodecs.AudioStreamInfo.GetHashCode() -> int
@@ -301,6 +317,7 @@ static ManagedCodecs.Packet.operator !=(ManagedCodecs.Packet left, ManagedCodecs
 static ManagedCodecs.Packet.operator ==(ManagedCodecs.Packet left, ManagedCodecs.Packet right) -> bool
 static ManagedCodecs.PacketInfo.operator !=(ManagedCodecs.PacketInfo left, ManagedCodecs.PacketInfo right) -> bool
 static ManagedCodecs.PacketInfo.operator ==(ManagedCodecs.PacketInfo left, ManagedCodecs.PacketInfo right) -> bool
+static ManagedCodecs.PcmDecoder.CanDecode(string? codec) -> bool
 static ManagedCodecs.PixelFormatExtensions.BitDepth(this ManagedCodecs.PixelFormat format) -> int
 static ManagedCodecs.PixelFormatExtensions.BytesPerSample(this ManagedCodecs.PixelFormat format) -> int
 static ManagedCodecs.PixelFormatExtensions.PlaneCount(this ManagedCodecs.PixelFormat format) -> int

@@ -196,10 +196,6 @@ public sealed class LivePlayer : IDisposable
                 await ConnectAsync(connection, token).ConfigureAwait(false);
                 _error = new EndOfStreamException("The server ended the stream.");
             }
-            catch (OperationCanceledException) when (token.IsCancellationRequested)
-            {
-                return;
-            }
             catch (FatalException e)
             {
                 Fail(e.InnerException!);
@@ -207,6 +203,13 @@ public sealed class LivePlayer : IDisposable
             }
             catch (Exception e)
             {
+                // No exception filter (catch ... when) in the libraries: WebAssembly's AOT mistranslates them
+                // (ExceptionFilterTests).
+                if (token.IsCancellationRequested)
+                {
+                    return;
+                }
+
                 // A refused or dropped connection, an error status, a stall or a body that isn't multipart: all may be
                 // gone on the next try, as cameras reboot and networks drop.
                 _error = connection.Stalled
@@ -352,8 +355,13 @@ public sealed class LivePlayer : IDisposable
         {
             frame = decoder.Decode(received.Jpeg);
         }
-        catch (Exception e) when (e is InvalidDataException or NotSupportedException)
+        catch (Exception e)
         {
+            if (e is not (InvalidDataException or NotSupportedException))
+            {
+                throw;
+            }
+
             Interlocked.Increment(ref _damaged);
             return;
         }

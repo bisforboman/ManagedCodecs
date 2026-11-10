@@ -106,16 +106,21 @@ public class LivePlayerTests
             await Task.Delay(Timeout.Infinite, token);
         });
 
-        using var player = new LivePlayer(new MjpegHttpSource(server.Uri));
+        // A part a second, so that each frame's time tells which it is (the pixels alone don't: a dropped frame's array
+        // is reused for a later one).
+        var clock = new FakeLiveClock();
+        using var player = new LivePlayer(new MjpegHttpSource(server.Uri), clock);
         player.Start();
         for (int i = 1; i <= jpegs.Length; i++)
         {
             WaitFor(player, () => player.Statistics.DecodedFrames == i ? player : null);
+            clock.Advance(TimeSpan.FromSeconds(1));
             gate.Release();
         }
 
         var frame = player.TakeLatest();
-        Assert.Equal(LiveSamples.Rgba(jpegs[^1]), frame!.Pixels);
+        Assert.Equal(TimeSpan.FromSeconds(jpegs.Length - 1), frame!.Time);
+        Assert.Equal(LiveSamples.Rgba(jpegs[^1]), frame.Pixels);
         Assert.Equal((jpegs.Length, 0L, jpegs.Length - 1L, 1L), (player.Statistics.DecodedFrames, player.Statistics.SkippedFrames, player.Statistics.DroppedFrames, player.Statistics.TakenFrames));
     }
 

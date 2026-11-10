@@ -126,8 +126,14 @@ internal sealed class MxfPartitions
             // The last four bytes of a file without one are anything: so is what they point at.
             valueStart = Klv.ReadHeader(stream, start, key, out length);
         }
-        catch (Exception e) when (e is InvalidDataException or EndOfStreamException or OverflowException)
+        catch (Exception e)
         {
+            // No exception filter: compiled to WebAssembly, one broke the method's arguments (ExceptionFilterTests).
+            if (!IsNotThere(e))
+            {
+                throw;
+            }
+
             return false;
         }
 
@@ -224,6 +230,9 @@ internal sealed class MxfPartitions
         return partitions;
     }
 
+    /// <summary>Whether <paramref name="e"/> says that what an offset points at is not what it should be.</summary>
+    private static bool IsNotThere(Exception e) => e is InvalidDataException || Malformed.IsMalformedInput(e);
+
     private static bool TryReadPartition(Stream stream, long runIn, ulong offset, out MxfPartition partition)
     {
         partition = null!;
@@ -236,8 +245,14 @@ internal sealed class MxfPartitions
         {
             partition = MxfPartition.Read(stream, runIn + (long)offset);
         }
-        catch (Exception e) when (e is InvalidDataException or EndOfStreamException or OverflowException)
+        catch (Exception e)
         {
+            // No exception filter: compiled to WebAssembly, one broke the method's arguments (ExceptionFilterTests).
+            if (!IsNotThere(e))
+            {
+                throw;
+            }
+
             return false;
         }
 

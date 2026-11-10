@@ -593,6 +593,11 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.Containers/Wav/WavDemuxer.cs",
          find="long end = size == 0 || start + size", replace="long end = start + size",
          tests="FullyQualifiedName~SkipsOtherChunksAndBoundsTheData"),
+    # ... but ISO's 'ipcm' and 'fpcm' in pieces of 'stsz''s samples, as FFmpeg sizes them (mp4-pcm-s24le, whose 'pcmC'
+    # says 32 bits over 3-byte samples).
+    dict(file="src/ManagedCodecs.Containers/Mp4/Mp4Demuxer.cs",
+         find="int frameBytes = _isoPcm && _stsz.Length >= 12", replace="int frameBytes = false && _stsz.Length >= 12",
+         tests="DisplayName~mp4-pcm-s24le"),
     # ---- PCM: bytes after a packet's last whole sample frame are ignored, as FFmpeg's decoder ignores them (no spec).
     dict(file="src/ManagedCodecs.Core/PcmDecoder.cs",
          find="if (packet.Length > 0 && packet.Length < frameBytes)", replace="if (packet.Length % frameBytes != 0)",

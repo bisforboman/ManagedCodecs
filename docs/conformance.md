@@ -310,10 +310,15 @@ to 1024 frames (their bytes the frames' whatever 'stsz' says, timed by the frame
 1500, 1500 and 700 frames and checks the packets ffprobe gives that very file (1024 + 476 twice, then 700); a mutation
 entry.
 
+ISO MP4's `ipcm` and `fpcm` (ISO/IEC 23003-5, as FFmpeg's mp4 muxer writes PCM) take their depth and byte order from a
+`pcmC` box (format_flags bit 0 little-endian, PCM_sample_size): `mp4-pcm-s16le`, `-s16be` (stereo), `-s32le`, `-f32le`
+(stereo), `-f32be` and `-f64le` decode exactly. FFmpeg cuts their pieces by 'stsz''s sample size, not the codec's: its
+6.1 muxer writes 24-bit samples (3 bytes in 'stsz') under a `pcmC` of 32 bits and reads them back as 32-bit samples in
+3072-byte pieces. `mp4-pcm-s24le` is that file, which decodes as FFmpeg decodes it (a mutation entry).
+
 Not from FFmpeg's muxers, so not checked against FFmpeg: QuickTime's `lpcm` (sound description version 2, its format
 in flags) and 'twos' at 8 bits (signed 8-bit), which keep their entry's name, undecoded; big-endian float in Matroska
-(FFmpeg's muxer refuses it, and A_PCM/FLOAT/IEEE has no order of its own); ISO MP4's `ipcm` and `fpcm` (next, by the
-decision).
+(FFmpeg's muxer refuses it, and A_PCM/FLOAT/IEEE has no order of its own); `ipcm` at 8 bits.
 
 ## .wav files
 

@@ -20,6 +20,8 @@ run time.
   AVI names its 24- and 32-bit and float PCM by the same rules (`CodecIds.PcmS24Le`, `PcmS32Le`, `PcmF32Le`,
   `PcmF64Le`), where it gave the format tag (docs/decisions/2026-11-10-pcm-containers.md).
 
+- PCM in ISO MP4 files: `Mp4Demuxer` names 'ipcm' and 'fpcm' (ISO/IEC 23003-5, as FFmpeg's mp4 muxer writes PCM) by
+  their 'pcmC' box, so `PcmDecoder` decodes them, exactly as FFmpeg does.
 - PCM in QuickTime and Matroska files: `PcmDecoder` decodes signed 16-, 24- and 32-bit PCM in either byte order and
   32- and 64-bit float PCM, exactly as FFmpeg does, named by new `CodecIds` constants (`PcmS16Be`, `PcmS24Le`,
   `PcmS24Be`, `PcmS32Le`, `PcmS32Be`, `PcmF32Le`, `PcmF32Be`, `PcmF64Le`, `PcmF64Be`). `Mp4Demuxer` names QuickTime's

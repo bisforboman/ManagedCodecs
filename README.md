@@ -96,7 +96,7 @@ and code that reproduces FFmpeg's reading where it differs from the spec), and n
 - **PCM** (`PcmDecoder`, in ManagedCodecs.Core): unsigned 8-bit, signed 16-, 24- and 32-bit and 32- and 64-bit float,
   either byte order, exactly FFmpeg's float output; from AVI and `.wav` files (format tags 1 and 3 and
   WAVE_FORMAT_EXTENSIBLE), QuickTime ('raw ', 'sowt', 'twos', 'in24', 'in32', 'fl32', 'fl64') and Matroska (A_PCM by
-  BitDepth). `MediaPlayer` plays it beside video. Not yet: ISO MP4's `ipcm`/`fpcm`
+  BitDepth), ISO MP4 (`ipcm`, `fpcm`). `MediaPlayer` plays it beside video
   (docs/decisions/2026-11-10-pcm-containers.md).
 - **Containers**: AVI (video, and the first audio stream: MP3 in both its chunk layouts, AAC, integer and float PCM
   and 4-bit IMA ADPCM, which `PcmDecoder` and `ImaAdpcmDecoder` decode exactly as FFmpeg, others by their format tag such as

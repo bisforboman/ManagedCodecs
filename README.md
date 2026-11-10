@@ -94,17 +94,19 @@ and code that reproduces FFmpeg's reading where it differs from the spec), and n
   DiscardPadding the end. `MediaPlayer` plays it (In-game video); raw `.mp3` files gapless by their LAME tag (`Mp3Demuxer`);
   AVI's in both its chunk layouts. Not yet: free-format bitrates, Layers I and II (docs/decisions/2026-11-08-mp3-decoder.md).
 - **PCM** (`PcmDecoder`, in ManagedCodecs.Core): unsigned 8-bit, signed 16-, 24- and 32-bit and 32- and 64-bit float,
-  either byte order, exactly FFmpeg's float output; from AVI (8 and 16 bits), QuickTime ('raw ', 'sowt', 'twos', 'in24',
-  'in32', 'fl32', 'fl64') and Matroska (A_PCM by BitDepth). `MediaPlayer` plays it. Not yet: ISO MP4's `ipcm`/`fpcm`
-  and `.wav` files (docs/decisions/2026-11-10-pcm-containers.md).
-- **Containers**: AVI (video, and the first audio stream: MP3 in both its chunk layouts, AAC, 8- and 16-bit PCM and
-  4-bit IMA ADPCM, which `PcmDecoder` and `ImaAdpcmDecoder` decode exactly as FFmpeg, others by their format tag such as
+  either byte order, exactly FFmpeg's float output; from AVI and `.wav` files (format tags 1 and 3 and
+  WAVE_FORMAT_EXTENSIBLE), QuickTime ('raw ', 'sowt', 'twos', 'in24', 'in32', 'fl32', 'fl64') and Matroska (A_PCM by
+  BitDepth). `MediaPlayer` plays it beside video. Not yet: ISO MP4's `ipcm`/`fpcm`
+  (docs/decisions/2026-11-10-pcm-containers.md).
+- **Containers**: AVI (video, and the first audio stream: MP3 in both its chunk layouts, AAC, integer and float PCM
+  and 4-bit IMA ADPCM, which `PcmDecoder` and `ImaAdpcmDecoder` decode exactly as FFmpeg, others by their format tag such as
   `0x0002` for Microsoft ADPCM; docs/decisions/2026-11-08-avi-audio.md), MP4 (video and audio tracks, fragmented files too, edit lists of several edits),
   Matroska and WebM (video and audio tracks, every kind of lacing, BlockGroups, live files of unknown size, header
   stripping and zlib, the display rotation, DiscardPadding; VP9, AV1, Opus and other codecs this library doesn't decode
   by their Codec IDs; MP3 as `CodecIds.Mp3` in MP4 and Matroska), raw AAC (ADTS), raw MP3 (gapless by the LAME
-  tag, as FFmpeg's) and raw H.264 (`.h264`, `.264`: access units as FFmpeg's parser cuts them, timed by the SPS's VUI,
-  seeking to IDR pictures; docs/decisions/2026-11-09-raw-h264.md), with
+  tag, as FFmpeg's), `.wav` files (`WavDemuxer`: PCM, IMA ADPCM and MP3, packets as FFmpeg's) and raw H.264 (`.h264`,
+  `.264`: access units as FFmpeg's parser cuts them, timed by the SPS's VUI, seeking to IDR pictures;
+  docs/decisions/2026-11-09-raw-h264.md), with
   packets and timestamps as FFmpeg's demuxers give them.
 - **Throughout**: an async API, malformed input that ends in `InvalidDataException` or `NotSupportedException`
   (fuzzed), and the same output on x64, ARM64 and WebAssembly, and under Native AOT (CI checks all of them).

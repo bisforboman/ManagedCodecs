@@ -26,7 +26,7 @@ trap 'rm -rf "$work"' EXIT
 dotnet build tools/ManagedCodecs.Cli -c Release -v q -nologo
 dotnet publish tools/ManagedCodecs.Cli -c Release -r "$rid" -v q -nologo -warnaserror -p:PublishAot=true "${isa[@]}" -o "$work/aot"
 
-files=$(ls samples/*.avi samples/*.mp4 samples/*.mkv samples/*.webm samples/*.aac samples/*.mp3 samples/*.h264 samples/*.264 samples/heaac/*.mp4 samples/heaac/*.aac samples/jm/*.mp4 samples/openh264/*.mp4)
+files=$(ls samples/*.avi samples/*.mp4 samples/*.mkv samples/*.webm samples/*.aac samples/*.mp3 samples/*.wav samples/*.h264 samples/*.264 samples/heaac/*.mp4 samples/heaac/*.aac samples/jm/*.mp4 samples/openh264/*.mp4)
 
 # shellcheck disable=SC2086
 dotnet tools/ManagedCodecs.Cli/bin/Release/net10.0/mcdec.dll --hash $files > "$work/jit.txt" 2> "$work/jit-stderr.txt" ||

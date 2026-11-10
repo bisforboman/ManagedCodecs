@@ -313,7 +313,29 @@ entry.
 Not from FFmpeg's muxers, so not checked against FFmpeg: QuickTime's `lpcm` (sound description version 2, its format
 in flags) and 'twos' at 8 bits (signed 8-bit), which keep their entry's name, undecoded; big-endian float in Matroska
 (FFmpeg's muxer refuses it, and A_PCM/FLOAT/IEEE has no order of its own); ISO MP4's `ipcm` and `fpcm` (next, by the
-decision) and `.wav` files.
+decision).
+
+## .wav files
+
+`WavDemuxer` reads RIFF WAVE files: the 'fmt ' chunk's WAVEFORMATEX named as AVI's audio (`WaveFormat`, shared: integer
+PCM by wBitsPerSample, float PCM, WAVE_FORMAT_EXTENSIBLE by its sub-format's tag, IMA ADPCM, MP3), other chunks
+skipped. `WavDemuxerTests.MatchesFfmpegPacketByPacket` compares every samples/*.wav with ffprobe's packets (size, MD5,
+pts, dts, duration): FFmpeg's wav demuxer reads 4096 bytes a packet rounded down to whole blocks (nBlockAlign), timed in
+samples, and MP3 by frames, as its parser cuts them. Their decoded audio is checked as the other samples' are
+(name.pcm.f32, name.ima.f32 exactly; name.mp3.trim.f32 within 2^-17).
+
+| Sample | What |
+| --- | --- |
+| wav-pcm-u8, wav-pcm-s16 | Format tag 1: 8-bit mono (4096-byte packets), 16-bit stereo |
+| wav-pcm-s24, wav-pcm-f32, wav-pcm-s16-6ch | WAVE_FORMAT_EXTENSIBLE (FFmpeg's muxer writes it above 16 bits, for float and above 2 channels): blocks of 6 and 12 bytes make packets of 4092 |
+| wav-ima | IMA ADPCM, stereo, 1024-byte blocks: packets of 4, the last 1 |
+| wav-mp3 | MP3 (tag 0x55), a packet a frame |
+
+Built by hand (`WavDemuxerTests`), since FFmpeg's muxer writes neither: chunks before and after 'data', an odd-sized
+one padded; a 'data' size of 0xFFFFFFFF (a recording never closed) or 0, which runs to the end of the file (as ffprobe reads it); blocks longer
+than 4096 bytes, a packet each. Formats FFmpeg names otherwise keep their tag (`0x0002` for Microsoft ADPCM), timed by
+nAvgBytesPerSec, unchecked; AAC in WAV is named but no sample has it. RF64 and Wave64 are not read. AVI shares the
+naming: `avi-mjpeg-pcm-s24` and `avi-mjpeg-pcm-f32` (format tags 1 and 3) decode exactly too.
 
 ## Matroska and WebM demuxing
 

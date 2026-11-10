@@ -8,4 +8,13 @@ ManagedCodecs.Containers.H264Demuxer.ReadPackets() -> System.Collections.Generic
 ManagedCodecs.Containers.H264Demuxer.ReadPacketsAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerable<ManagedCodecs.Packet>!
 ManagedCodecs.Containers.H264Demuxer.Seek(long pts, int streamIndex) -> void
 ManagedCodecs.Containers.H264Demuxer.Video.get -> ManagedCodecs.VideoStreamInfo!
+ManagedCodecs.Containers.WavDemuxer
+ManagedCodecs.Containers.WavDemuxer.Audio.get -> ManagedCodecs.AudioStreamInfo!
+ManagedCodecs.Containers.WavDemuxer.Dispose() -> void
+ManagedCodecs.Containers.WavDemuxer.ReadPacketInfo() -> System.Collections.Generic.IEnumerable<ManagedCodecs.PacketInfo>!
+ManagedCodecs.Containers.WavDemuxer.ReadPackets() -> System.Collections.Generic.IEnumerable<ManagedCodecs.Packet>!
+ManagedCodecs.Containers.WavDemuxer.ReadPacketsAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerable<ManagedCodecs.Packet>!
+ManagedCodecs.Containers.WavDemuxer.Video.get -> ManagedCodecs.VideoStreamInfo?
+ManagedCodecs.Containers.WavDemuxer.WavDemuxer(System.IO.Stream! stream, bool leaveOpen = false) -> void
 static ManagedCodecs.Containers.H264Demuxer.Open(string! path) -> ManagedCodecs.Containers.H264Demuxer!
+static ManagedCodecs.Containers.WavDemuxer.Open(string! path) -> ManagedCodecs.Containers.WavDemuxer!

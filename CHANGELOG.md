@@ -16,7 +16,8 @@ run time.
 ### Added
 
 - Containers: `WavDemuxer` reads `.wav` files (RIFF WAVE), and `Demuxer.Open` detects them: integer and float PCM
-  (WAVE_FORMAT_EXTENSIBLE too), IMA ADPCM and MP3, packets as FFmpeg's wav demuxer gives them; `mcdec` decodes them.
+  (WAVE_FORMAT_EXTENSIBLE too), IMA ADPCM and MP3, packets as FFmpeg's wav demuxer gives them; `Seek` starts at the
+  packet holding the time; `mcdec` decodes them.
   AVI names its 24- and 32-bit and float PCM by the same rules (`CodecIds.PcmS24Le`, `PcmS32Le`, `PcmF32Le`,
   `PcmF64Le`), where it gave the format tag (docs/decisions/2026-11-10-pcm-containers.md).
 
@@ -25,7 +26,7 @@ run time.
 - Live cameras: `LivePlayer` (Playback, and the Unity package) shows a camera serving MJPEG over HTTP
   (`MjpegHttpSource`), handing the UI the newest decoded frame each render (`TakeLatest`), dropping older ones, and
   connecting again after a drop or a stall, with `State`, `Error` and `LiveStatistics` to say what is happening
-  (issue #462).
+  (issue #462). Samples for Avalonia (`tools/ManagedCodecs.Avalonia.Sample`) and WPF (`tools/ManagedCodecs.Wpf.Sample`).
 - PCM in QuickTime and Matroska files: `PcmDecoder` decodes signed 16-, 24- and 32-bit PCM in either byte order and
   32- and 64-bit float PCM, exactly as FFmpeg does, named by new `CodecIds` constants (`PcmS16Be`, `PcmS24Le`,
   `PcmS24Be`, `PcmS32Le`, `PcmS32Be`, `PcmF32Le`, `PcmF32Be`, `PcmF64Le`, `PcmF64Be`). `Mp4Demuxer` names QuickTime's
@@ -46,6 +47,9 @@ run time.
 
 - H.264: the chroma motion compensation filter's rows are inlined, no longer a call each: about 1.7% faster under the
   JIT on a 1080p High profile stream with B pictures. The output is unchanged.
+- H.264: weighted prediction (libx264's default weighted P and implicit B weights) multiplies both predictions'
+  samples by their weights in one step and clips by saturating packs: about 1% faster under the JIT on the same
+  stream. The output is unchanged.
 
 ## 0.11.0 – 2026-11-09
 

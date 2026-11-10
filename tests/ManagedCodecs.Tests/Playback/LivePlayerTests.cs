@@ -26,6 +26,7 @@ public class LivePlayerTests
         { true, "\r\n", "multipart/x-mixed-replace; boundary=--frame" }, // the delimiter's dashes in the header
         { false, "\r\n", "multipart/x-mixed-replace; boundary=other" }, // a boundary the body doesn't use
         { true, "\r\n", "multipart/x-mixed-replace" }, // no boundary at all
+        { true, "\r\n", "application/octet-stream" }, // FFmpeg's HTTP server (-f mpjpeg -listen 1)
     };
 
     [Theory]
@@ -291,6 +292,7 @@ public class LivePlayerTests
     [InlineData("403 Forbidden", typeof(HttpRequestException))]
     [InlineData("404 Not Found", typeof(HttpRequestException))]
     [InlineData("200 OK\r\nContent-Type: image/jpeg", typeof(NotSupportedException))] // a snapshot URL
+    [InlineData("200 OK\r\nContent-Type: text/html", typeof(NotSupportedException))] // a login page
     public void GivesUpOnAnswersARetryWontChange(string status, Type error)
     {
         using var server = new LoopbackServer((stream, _, token) =>

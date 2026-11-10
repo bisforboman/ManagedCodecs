@@ -634,6 +634,11 @@ MUTATIONS = [
          find="                backoff = FirstBackoff;\n            }",
          replace="            }",
          tests="FullyQualifiedName~LivePlayerTests.StartsTheWaitAgainOnceAFramePlays"),
+    # ... and a body sent as application/octet-stream is read as multipart, as FFmpeg's HTTP server sends -f mpjpeg.
+    dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
+         find="                && !media.Equals(\"application/octet-stream\", StringComparison.OrdinalIgnoreCase))",
+         replace="                && true)",
+         tests="DisplayName~application/octet-stream"),
     # MJPEG over HTTP: the first delimiter line names the boundary, whatever the header said (cameras get it wrong).
     dict(file="src/ManagedCodecs.Playback/MultipartReader.cs",
          find="            if (_first)\n", replace="            if (_boundary is null)\n",

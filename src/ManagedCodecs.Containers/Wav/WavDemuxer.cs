@@ -32,6 +32,9 @@ public sealed class WavDemuxer : IDemuxer
     private readonly List<PacketInfo> _packets = [];
     private readonly List<long> _positions = [];
 
+    // The first packet a read gives: 0 until a Seek moves it.
+    private int _start;
+
     /// <summary>Reads the file's chunks (and, for MP3, finds every frame); packets are read from the stream later, by <see cref="ReadPackets"/>.</summary>
     /// <param name="stream">A seekable stream holding the file.</param>
     /// <param name="leaveOpen">Whether <see cref="Dispose"/> leaves <paramref name="stream"/> open.</param>
@@ -99,7 +102,29 @@ public sealed class WavDemuxer : IDemuxer
     public IAsyncEnumerable<Packet> ReadPacketsAsync(CancellationToken cancellationToken = default) => ReadSteps.RunAsync(_stream, Steps(), "WAVE", cancellationToken);
 
     /// <summary>The packets <see cref="ReadPackets"/> gives, in its order and with its values, without their data and with no read of the file.</summary>
-    public IEnumerable<PacketInfo> ReadPacketInfo() => _packets;
+    public IEnumerable<PacketInfo> ReadPacketInfo() => _packets.Skip(_start);
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// Every packet is a keyframe: reading starts at the last packet whose pts is at or before <paramref name="pts"/>
+    /// (in samples), found among the packets listed when opening, with no read of the file; before the first at the
+    /// first, past the last at the last.
+    /// </remarks>
+    public void Seek(long pts, int streamIndex)
+    {
+        if (streamIndex != Audio.StreamIndex)
+        {
+            throw new ArgumentOutOfRangeException(nameof(streamIndex), streamIndex, "A .wav file has one stream, of index 0.");
+        }
+
+        int start = 0;
+        for (int i = 1; i < _packets.Count && _packets[i].Pts <= pts; i++)
+        {
+            start = i;
+        }
+
+        _start = start;
+    }
 
     /// <summary>Disposes the stream, unless the demuxer was made to leave it open.</summary>
     public void Dispose()
@@ -123,7 +148,7 @@ public sealed class WavDemuxer : IDemuxer
     // Each packet's read and packet.
     private IEnumerable<ReadStep> Steps()
     {
-        for (int i = 0; i < _packets.Count; i++)
+        for (int i = _start; i < _packets.Count; i++)
         {
             var info = _packets[i];
             var data = new byte[info.Size];

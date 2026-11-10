@@ -1374,6 +1374,14 @@ weight or a wrong offset for the second half. On the same 1080p frames the luma 
 `HalfHorizontal`, `HalfVertical`, `Center`) fell from 0.83 to 0.90 of an untouched set (`FilterMacroblock420`,
 `PredictChromaPair`, `Cabac.ResidualBlock`) to 0.73 to 0.77 (perf, six runs each, the order alternating, every branch
 run below every base run): from about 12.2 to 10.6% of the frame.
+The chroma filter's row loop (`BilinearRows`) now takes the block's width as a type argument, so the row store is
+chosen once a block rather than by a switch every row, steps its source and output down by a row instead of
+multiplying, and narrows by one `packuswb` (the rounded sums are 0 to 255) where `Vector128.Narrow` took three
+instructions: 15 instructions a row, about 25 before. Callgrind (Native AOT, as above) counts 19.30 against 19.66 M
+instructions a frame on the first 360 frames of the 480p Sintel trailer (-1.8%). The time gained is smaller: the
+chroma functions fell from 0.70 to 0.81 of the untouched set (`FilterMacroblock420`, `HalfHorizontal`,
+`Cabac.ResidualBlock`) to 0.67 to 0.73 on the 1080p frames (perf, six runs each, the order alternating, lower in every
+pair), about 0.5% of the frame: at 1080p chroma's time is mostly reference reads and per-block setup, not the loop.
 
 ## AAC
 

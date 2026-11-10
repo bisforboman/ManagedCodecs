@@ -176,6 +176,12 @@ MUTATIONS = [
          find="long pts = state.Bytes / blockSize;", replace="long pts = state.Position; state.Position += length / blockSize;",
          tests="FullyQualifiedName~AviDemuxerTests"),
 
+    # ---- Raw H.264: a seek starts at an IDR picture, not at the recovery points FFmpeg's parser also flags as keyframes
+    # (an open GOP's pictures shown before one need the GOP before; h264-raw-open-gop).
+    dict(file="src/ManagedCodecs.Containers/H264/H264Demuxer.cs",
+         find="if (_units[i].Idr)", replace="if (_units[i].Keyframe)",
+         tests="DisplayName~h264-raw-open-gop"),
+
     # ---- MP4 (as FFmpeg reads it)
     # Negative composition offsets in 'ctts': FFmpeg leaves the last two entries out of the shift.
     dict(file="src/ManagedCodecs.Containers/Mp4/Mp4Demuxer.cs",

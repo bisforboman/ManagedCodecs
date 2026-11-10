@@ -25,7 +25,8 @@ run time.
 - Containers: `H264Demuxer` reads raw H.264 files (Annex B elementary streams, `.h264` and `.264`), and
   `Demuxer.Open` detects them: a packet an access unit, as FFmpeg's parser cuts them (IDR pictures keyframes), a tick
   each at the SPS's VUI frame rate (else 25), the size from the SPS; `H264Decoder` numbers their frames from 0, as
-  FFmpeg's command line does. No seeking (docs/decisions/2026-11-09-raw-h264.md).
+  FFmpeg's command line does. `Seek` starts at an IDR picture, so `MediaPlayer`'s `Loop` and thumbnails at a
+  time work too (docs/decisions/2026-11-09-raw-h264.md).
 - `ImaAdpcmDecoder` (ManagedCodecs.Core) and `CodecIds.AdpcmImaWav`: AVI's 4-bit IMA ADPCM (format tag 0x11), as
   cameras write it beside MJPEG, exactly FFmpeg's output. `AviDemuxer` names such streams `CodecIds.AdpcmImaWav`
   where it named them `"0x0011"`, and `MediaPlayer` plays them (docs/decisions/2026-11-10-ima-adpcm.md).

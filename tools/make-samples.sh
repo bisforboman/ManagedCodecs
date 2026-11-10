@@ -73,6 +73,11 @@ ff -f lavfi -i testsrc2=size=176x144:rate=25 -f lavfi -i "sine=frequency=440:sam
 # Baseline at 24 fps under the other extension.
 ff -f lavfi -i testsrc2=size=176x100:rate=30 -t 1 -c:v libx264 -g 12 -f h264 samples/h264-raw.h264
 ff -f lavfi -i testsrc2=size=160x120:rate=24 -t 1 -c:v libx264 -profile:v baseline -f h264 samples/h264-raw-baseline.264
+# Open GOPs: after the first IDR picture, I pictures behind a recovery point SEI, which FFmpeg's parser flags as
+# keyframes (packets 11, 22, 35) but H264Demuxer.Seek doesn't start at (the B pictures shown before each need the GOP
+# before it), so a seek anywhere starts at the stream's start.
+ff -f lavfi -i testsrc2=size=176x100:rate=30 -t 1.5 -c:v libx264 -bf 3 -x264-params open-gop=1:keyint=12:min-keyint=12:scenecut=0 \
+  -f h264 samples/h264-raw-open-gop.h264
 avicbr=$(mktemp --suffix=.avi)
 ff -f lavfi -i testsrc2=size=160x120:rate=25 -f lavfi -i "aevalsrc=0.4*sin(2*PI*440*t)|0.3*sin(2*PI*660*t):s=44100:d=2" \
   -t 2 -c:v mjpeg -q:v 5 -c:a libmp3lame -b:a 64k "$avicbr"
@@ -958,6 +963,13 @@ for s in h264-bframes.mp4:1200 h264-bframes.mp4:960 h264-bframes.mp4:1000 fmp4-b
   f=samples/${s%%:*}; ms=${s##*:}
   ff -seek_timestamp 1 -ss "$(printf '%d.%03d' $((ms / 1000)) $((ms % 1000)))" -idct simple -noautorotate -i "$f" -map 0:v:0 \
     -frames:v 1 -f framemd5 "${f%.*}.seek$ms.framemd5"
+done
+# The same for raw H.264, where FFmpeg can't seek (-ss before -i fails): its -ss after -i decodes from the start and
+# drops the frames before the time, the frame H264Demuxer.Seek's read shows there. On an IDR picture, between two, and
+# in an open GOP between recovery points.
+for s in h264-raw.h264:400 h264-raw.h264:500 h264-raw-open-gop.h264:900; do
+  f=samples/${s%%:*}; ms=${s##*:}
+  ff -i "$f" -ss "$(printf '%d.%03d' $((ms / 1000)) $((ms % 1000)))" -map 0:v:0 -frames:v 1 -f framemd5 "${f%.*}.seek$ms.framemd5"
 done
 # Raw AAC: packets as FFmpeg's demuxer gives them (whole ADTS frames), and every decoded sample (no edit list).
 for f in samples/*.aac; do

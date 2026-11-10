@@ -755,5 +755,5 @@ deblocking filter's field edges and the co-located field or frame of direct pred
 in for the specification's text where that was out of reach; no code was copied.
 
 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md), packed into every package, has the notices of the projects whose
-tables were transcribed (OpenH264's CABAC tables; libxaac's QMF window, SBR noise table and 34-band tables) and lists
-the ones only consulted.
+tables were transcribed (OpenH264's CABAC tables; libxaac's QMF window, SBR noise table and 34-band tables; the SMPTE
+Metadata Registers' MXF labels, BSD-3-Clause, each checked against SMPTE ST 377-1) and lists the ones only consulted.

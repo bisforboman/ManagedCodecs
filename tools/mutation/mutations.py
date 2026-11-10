@@ -194,6 +194,31 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.Containers/Mxf/MxfPartitions.cs",
          find="if (TryFromFooter(stream, runIn, header, out partitions))", replace="if (false)",
          tests="FullyQualifiedName~MxfPartitionTests"),
+    # ---- MXF header metadata (SMPTE ST 377-1 9, Annexes B, F, G)
+    # One fill item may come between the partition pack and the primer pack (9.1), as FFmpeg's muxer writes.
+    dict(file="src/ManagedCodecs.Containers/Mxf/MxfHeaderMetadata.cs",
+         find="if (Klv.IsFill(key))", replace="if (false)",
+         tests="FullyQualifiedName~MxfHeaderTests"),
+    # An open header's metadata gives way to a closed partition's (6.2.3; the unit test, since FFmpeg's files close it).
+    dict(file="src/ManagedCodecs.Containers/Mxf/MxfHeader.cs",
+         find="if (partition.IsClosed && partition.HeaderByteCount > 0)", replace="if (false)",
+         tests="FullyQualifiedName~MxfHeaderTests"),
+    # A multiple descriptor's sub-descriptor is the one whose LinkedTrackID names the track (mxf-prores-pcm16).
+    dict(file="src/ManagedCodecs.Containers/Mxf/MxfHeader.cs",
+         find=".FirstOrDefault(d => d.UInt32(MxfLabels.LinkedTrackId) == trackId)", replace=".FirstOrDefault()",
+         tests="FullyQualifiedName~MxfHeaderTests"),
+    # Separate fields store a field: the frame is twice as tall (G.2.1; mxf-h264-interlaced).
+    dict(file="src/ManagedCodecs.Containers/Mxf/MxfHeader.cs",
+         find="int fields = layout == 1 ? 2 : 1;", replace="int fields = 1;",
+         tests="FullyQualifiedName~MxfHeaderTests"),
+    # A duration of -1 is unknown (a pipe-written file's open header: mxf-h264-pipe).
+    dict(file="src/ManagedCodecs.Containers/Mxf/MxfHeader.cs",
+         find="is { } d and >= 0 ? d : null", replace="is { } d ? d : null",
+         tests="FullyQualifiedName~MxfHeaderTests"),
+    # Drop-frame timecodes skip codes each minute but the tenth (mxf-h264-interlaced's 01:00:00;02).
+    dict(file="src/ManagedCodecs.Containers/Mxf/MxfHeader.cs",
+         find="frames += (9L * drop * tens) + (rest > drop ? drop * ((rest - drop) / perMinute) : 0);", replace="",
+         tests="FullyQualifiedName~MxfHeaderTests"),
 
     # ---- Raw H.264: a seek starts at an IDR picture, not at the recovery points FFmpeg's parser also flags as keyframes
     # (an open GOP's pictures shown before one need the GOP before; h264-raw-open-gop).

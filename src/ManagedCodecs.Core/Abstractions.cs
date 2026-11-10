@@ -82,6 +82,12 @@ public static class CodecIds
 
     /// <summary>PCM, 64-bit IEEE float big-endian samples (QuickTime's 'fl64'); <see cref="PcmDecoder"/>.</summary>
     public const string PcmF64Be = "PCM_F64BE";
+
+    /// <summary>
+    /// IMA ADPCM at 4 bits as Microsoft's WAVE format stores it, in blocks with a header a channel (AVI's format tag 0x11
+    /// at 4 bits; FFmpeg's adpcm_ima_wav); <see cref="ImaAdpcmDecoder"/>.
+    /// </summary>
+    public const string AdpcmImaWav = "ADPCM_IMA_WAV";
 }
 
 /// <summary>One compressed unit of data pulled out of a container, e.g. one MJPEG frame.</summary>

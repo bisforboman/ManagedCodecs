@@ -1,4 +1,5 @@
 #nullable enable
+const ManagedCodecs.CodecIds.AdpcmImaWav = "ADPCM_IMA_WAV" -> string!
 const ManagedCodecs.CodecIds.PcmF32Be = "PCM_F32BE" -> string!
 const ManagedCodecs.CodecIds.PcmF32Le = "PCM_F32LE" -> string!
 const ManagedCodecs.CodecIds.PcmF64Be = "PCM_F64BE" -> string!
@@ -17,5 +18,11 @@ ManagedCodecs.Containers.H264Demuxer.ReadPackets() -> System.Collections.Generic
 ManagedCodecs.Containers.H264Demuxer.ReadPacketsAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerable<ManagedCodecs.Packet>!
 ManagedCodecs.Containers.H264Demuxer.Seek(long pts, int streamIndex) -> void
 ManagedCodecs.Containers.H264Demuxer.Video.get -> ManagedCodecs.VideoStreamInfo!
+ManagedCodecs.ImaAdpcmDecoder
+ManagedCodecs.ImaAdpcmDecoder.Channels.get -> int
+ManagedCodecs.ImaAdpcmDecoder.Decode(ManagedCodecs.Packet packet) -> ManagedCodecs.AudioFrame!
+ManagedCodecs.ImaAdpcmDecoder.Decode(System.ReadOnlySpan<byte> packet) -> ManagedCodecs.AudioFrame!
+ManagedCodecs.ImaAdpcmDecoder.ImaAdpcmDecoder(ManagedCodecs.AudioStreamInfo! stream) -> void
+ManagedCodecs.ImaAdpcmDecoder.SampleRate.get -> int
 static ManagedCodecs.Containers.H264Demuxer.Open(string! path) -> ManagedCodecs.Containers.H264Demuxer!
 static ManagedCodecs.PcmDecoder.CanDecode(string? codec) -> bool

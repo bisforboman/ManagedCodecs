@@ -16,8 +16,9 @@ namespace ManagedCodecs.Containers;
 /// anywhere in a frame), which is re-split into whole frames, each timed at its sample position (time base 1 / the
 /// sample rate; FFmpeg's parser interpolates there, up to a millisecond off: docs/decisions/2026-11-08-avi-audio.md).
 /// MP3 is <see cref="CodecIds.Mp3"/> and AAC <see cref="CodecIds.Aac"/> (its AudioSpecificConfig as the codec private
-/// data), PCM at 8 and 16 bits <see cref="CodecIds.PcmU8"/> and <see cref="CodecIds.PcmS16Le"/>; other audio is named by
-/// its WAVEFORMATEX format tag in hex ("0x0001" for PCM at other depths, "0x0011" for IMA ADPCM).
+/// data), PCM at 8 and 16 bits <see cref="CodecIds.PcmU8"/> and <see cref="CodecIds.PcmS16Le"/>, IMA ADPCM at 4 bits
+/// <see cref="CodecIds.AdpcmImaWav"/> (wSamplesPerBlock as the codec private data); other audio is named by its
+/// WAVEFORMATEX format tag in hex ("0x0001" for PCM at other depths, "0x0011" for IMA ADPCM at 2, 3 or 5 bits).
 /// </para>
 /// <para>
 /// Video keyframes come from the 'idx1' index (AVIIF_KEYFRAME), as FFmpeg's demuxer reads them; without one, and for
@@ -428,6 +429,7 @@ public sealed class AviDemuxer : IDemuxer
             (0xFF, _) => CodecIds.Aac,
             (1, 8) => CodecIds.PcmU8,
             (1, 16) => CodecIds.PcmS16Le,
+            (0x11, 4) => CodecIds.AdpcmImaWav,
             _ => "0x" + tag.ToString("X4", CultureInfo.InvariantCulture),
         };
 

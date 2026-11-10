@@ -564,6 +564,16 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.Core/PcmDecoder.cs",
          find="if (packet.Length > 0 && packet.Length < frameBytes)", replace="if (packet.Length % frameBytes != 0)",
          tests="FullyQualifiedName~PcmDecoderTests"),
+    # ---- IMA ADPCM: the difference rounded once, as FFmpeg's decoder does, not by IMA's recommended practice's shifts
+    # (up to 2 lower; docs/decisions/2026-11-10-ima-adpcm.md) ...
+    dict(file="src/ManagedCodecs.Core/ImaAdpcmDecoder.cs",
+         find="int difference = (((2 * (nibble & 7)) + 1) * step) >> 3;",
+         replace="int difference = (step >> 3) + ((nibble & 4) != 0 ? step : 0) + ((nibble & 2) != 0 ? step >> 1 : 0) + ((nibble & 1) != 0 ? step >> 2 : 0);",
+         tests="FullyQualifiedName~ImaAdpcmDecoderTests"),
+    # ... and a block cut short gives its whole groups of 4 bytes a channel, the rest ignored, as FFmpeg's (no spec).
+    dict(file="src/ManagedCodecs.Core/ImaAdpcmDecoder.cs",
+         find="if (bytes < headers)", replace="if (bytes < headers || (bytes - headers) % headers != 0)",
+         tests="FullyQualifiedName~ImaAdpcmDecoderTests"),
     # ---- MP3: where the decoder does what FFmpeg's does and the spec leaves open, or what only some streams reach.
     # A frame whose main data starts before the reservoir does (a stream cut from a longer one): its granules are
     # skipped, silent, by their lengths until the data is there (mp3-cut).

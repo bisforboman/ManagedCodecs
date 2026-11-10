@@ -1,4 +1,11 @@
 #nullable enable
+ManagedCodecs.ImaAdpcmDecoder
+ManagedCodecs.ImaAdpcmDecoder.Channels.get -> int
+ManagedCodecs.ImaAdpcmDecoder.Decode(ManagedCodecs.Packet packet) -> ManagedCodecs.AudioFrame!
+ManagedCodecs.ImaAdpcmDecoder.Decode(System.ReadOnlySpan<byte> packet) -> ManagedCodecs.AudioFrame!
+ManagedCodecs.ImaAdpcmDecoder.ImaAdpcmDecoder(ManagedCodecs.AudioStreamInfo! stream) -> void
+ManagedCodecs.ImaAdpcmDecoder.SampleRate.get -> int
+const ManagedCodecs.CodecIds.AdpcmImaWav = "ADPCM_IMA_WAV" -> string!
 const ManagedCodecs.CodecIds.PcmF32Be = "PCM_F32BE" -> string!
 const ManagedCodecs.CodecIds.PcmF32Le = "PCM_F32LE" -> string!
 const ManagedCodecs.CodecIds.PcmF64Be = "PCM_F64BE" -> string!

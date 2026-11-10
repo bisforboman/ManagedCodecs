@@ -97,8 +97,9 @@ and code that reproduces FFmpeg's reading where it differs from the spec), and n
   either byte order, exactly FFmpeg's float output; from AVI (8 and 16 bits), QuickTime ('raw ', 'sowt', 'twos', 'in24',
   'in32', 'fl32', 'fl64') and Matroska (A_PCM by BitDepth). `MediaPlayer` plays it. Not yet: ISO MP4's `ipcm`/`fpcm`
   and `.wav` files (docs/decisions/2026-11-10-pcm-containers.md).
-- **Containers**: AVI (video, and the first audio stream: MP3 in both its chunk layouts, AAC, 8- and 16-bit PCM, others
-  by their format tag such as `0x0001` for 24-bit PCM; docs/decisions/2026-11-08-avi-audio.md), MP4 (video and audio tracks, fragmented files too, edit lists of several edits),
+- **Containers**: AVI (video, and the first audio stream: MP3 in both its chunk layouts, AAC, 8- and 16-bit PCM and
+  4-bit IMA ADPCM, which `PcmDecoder` and `ImaAdpcmDecoder` decode exactly as FFmpeg, others by their format tag such as
+  `0x0002` for Microsoft ADPCM; docs/decisions/2026-11-08-avi-audio.md), MP4 (video and audio tracks, fragmented files too, edit lists of several edits),
   Matroska and WebM (video and audio tracks, every kind of lacing, BlockGroups, live files of unknown size, header
   stripping and zlib, the display rotation, DiscardPadding; VP9, AV1, Opus and other codecs this library doesn't decode
   by their Codec IDs; MP3 as `CodecIds.Mp3` in MP4 and Matroska), raw AAC (ADTS), raw MP3 (gapless by the LAME
@@ -453,8 +454,8 @@ while (player.TakeAudio() is { } audio) { /* audio.Samples at audio.SampleRate t
   FFmpeg's scaler (tools/ManagedCodecs.MonoGame.Sample/README.md); the fast path is checked against the formula on random
   samples of every 8-bit layout.
 - **Speed:** on 4 vCPUs at 2.1 GHz, 1080p24 and 1080p30 keep up, decoding and conversion included (mcplay's README).
-- **Audio it doesn't decode** (Opus, Vorbis, IMA ADPCM, ...; AAC, MP3 and PCM play) plays as none: `Audio` is null and
-  `SkippedAudioCodec` names it (the container's Codec ID, such as `A_OPUS`, or AVI's format tag, `0x0001`), for a warning; the Godot, Unity and
+- **Audio it doesn't decode** (Opus, Vorbis, Microsoft ADPCM, ...; AAC, MP3, PCM and AVI's IMA ADPCM play) plays as none: `Audio` is null and
+  `SkippedAudioCodec` names it (the container's Codec ID, such as `A_OPUS`, or AVI's format tag, `0x0002`), for a warning; the Godot, Unity and
   mcplay samples print one.
 - **Not a media player:** no seeking and no clock of its own (pause by stopping the clock you pass); `Loop` plays the
   file again from its start, its frames' times running on.

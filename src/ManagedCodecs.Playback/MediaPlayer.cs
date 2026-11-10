@@ -104,7 +104,7 @@ public sealed class MediaPlayer : IDisposable
             }
 
             Video = video;
-            Audio = demuxer.Audio is { } audio && (audio.Codec is CodecIds.Aac or CodecIds.Mp3 || PcmDecoder.CanDecode(audio.Codec)) ? audio : null;
+            Audio = demuxer.Audio is { } audio && (audio.Codec is CodecIds.Aac or CodecIds.Mp3 or CodecIds.AdpcmImaWav || PcmDecoder.CanDecode(audio.Codec)) ? audio : null;
             SkippedAudioCodec = Audio is null ? demuxer.Audio?.Codec : null;
         }
         catch
@@ -121,7 +121,7 @@ public sealed class MediaPlayer : IDisposable
 
     /// <summary>
     /// The audio stream played, or null for none: the file has no audio, or audio this library doesn't decode (only
-    /// AAC, MP3 and AVI's 8- and 16-bit PCM), and plays silent.
+    /// AAC, MP3, PCM in AVI, QuickTime and Matroska, and AVI's IMA ADPCM), and plays silent.
     /// </summary>
     public AudioStreamInfo? Audio { get; }
 
@@ -300,6 +300,7 @@ public sealed class MediaPlayer : IDisposable
             null => null,
             { Codec: CodecIds.Mp3 } => new Mp3Decoder(Audio),
             { Codec: var codec } when PcmDecoder.CanDecode(codec) => new PcmDecoder(Audio),
+            { Codec: CodecIds.AdpcmImaWav } => new ImaAdpcmDecoder(Audio),
             _ => new AacDecoder(Audio),
         };
         long shown = Interlocked.Read(ref _converted);

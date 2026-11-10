@@ -138,6 +138,7 @@ for (int loop = 0; loop < loops; loop++)
     {
         CodecIds.Aac => new AacDecoder(audio) { Threads = threads },
         CodecIds.Mp3 => new Mp3Decoder(audio),
+        CodecIds.AdpcmImaWav => new ImaAdpcmDecoder(audio),
         var codec when PcmDecoder.CanDecode(codec) => new PcmDecoder(audio!),
         _ => null,
     };

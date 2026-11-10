@@ -1339,6 +1339,17 @@ row's first half. One-list weighting (`WeightOne`) clips with `packuswb` too. `V
 both against the definition (a wrong shift fails it). On the same 1080p frames the weighting kernels fell from 0.27 to
 0.32 of the untouched set to 0.17 to 0.19 (perf, six runs each, the order alternating, every branch run below every
 base run): from about 2.6 to 1.6% of the frame.
+The luma 6-tap filter across (`HalfHorizontal`, and `Center`'s first pass) loaded each row six times, at samples -2
+to 3, widened every load to 16 bits (24 widenings a 16-wide row) and summed the taps there. With SSSE3 it now takes
+one 16-byte load for each half of a row: shuffles pair its samples as (E, F), (G, H) and (I, J), and `pmaddubsw`
+multiplies and adds each pair with (1, -5), (20, 20) and (-5, 1); no pair or sum leaves 16 bits (-2550 to 10710), so
+the sums are exact. A row's second half loads from sample 3, so the furthest byte read is the one the filter already
+read (sample 18). The half-sample rounding clips by `packuswb` and `Center`'s 32-bit sums by `packssdw` and
+`packuswb`, instead of a minimum, a maximum and a narrowing. `FastLumaAndChroma_MatchReference` fails with a wrong tap
+weight or a wrong offset for the second half. On the same 1080p frames the luma functions (`PredictLuma`,
+`HalfHorizontal`, `HalfVertical`, `Center`) fell from 0.83 to 0.90 of an untouched set (`FilterMacroblock420`,
+`PredictChromaPair`, `Cabac.ResidualBlock`) to 0.73 to 0.77 (perf, six runs each, the order alternating, every branch
+run below every base run): from about 12.2 to 10.6% of the frame.
 
 ## AAC
 

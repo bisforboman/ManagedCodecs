@@ -9,7 +9,8 @@ public static class Demuxer
 
     /// <summary>
     /// An <see cref="AviDemuxer"/>, <see cref="Mp4Demuxer"/>, <see cref="MatroskaDemuxer"/> (Matroska or WebM),
-    /// <see cref="H264Demuxer"/>, <see cref="AdtsDemuxer"/> or <see cref="Mp3Demuxer"/>, by the stream's first bytes.
+    /// <see cref="WavDemuxer"/>, <see cref="H264Demuxer"/>, <see cref="AdtsDemuxer"/> or <see cref="Mp3Demuxer"/>, by the
+    /// stream's first bytes.
     /// </summary>
     /// <param name="stream">A seekable stream holding the file; it is read from its start.</param>
     /// <param name="leaveOpen">Whether disposing the demuxer (or a failure here) leaves <paramref name="stream"/> open.</param>
@@ -27,6 +28,11 @@ public static class Demuxer
             if (read >= 12 && head[..4].SequenceEqual("RIFF"u8) && head[8..12].SequenceEqual("AVI "u8))
             {
                 return new AviDemuxer(stream, leaveOpen);
+            }
+
+            if (read >= 12 && head[..4].SequenceEqual("RIFF"u8) && head[8..12].SequenceEqual("WAVE"u8))
+            {
+                return new WavDemuxer(stream, leaveOpen);
             }
 
             // MP4 and QuickTime files start with a box; these are the usual first ones.

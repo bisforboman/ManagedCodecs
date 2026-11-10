@@ -61,6 +61,19 @@ ff -f lavfi -i testsrc2=size=160x120:rate=25:d=1 -f lavfi -i "aevalsrc=0.4*sin(2
 ff -f lavfi -i testsrc2=size=160x120:rate=25:d=1 \
   -f lavfi -i "aevalsrc=0.95*sin(2*PI*440*t)|0.5*sin(2*PI*3000*t)*lt(t\,0.5)+0.01*sin(2*PI*90*t):s=22050:d=1" \
   -c:v mjpeg -q:v 5 -c:a adpcm_ima_wav -block_size 512 samples/avi-mjpeg-ima.avi
+# 24- and 32-bit and float PCM in AVI (format tags 1 and 3 by wBitsPerSample, as FFmpeg's muxer writes them; WaveFormat).
+ff -f lavfi -i testsrc2=size=160x120:rate=25:d=1 -f lavfi -i "sine=frequency=440:sample_rate=22050:d=1" \
+  -c:v mjpeg -q:v 5 -c:a pcm_s24le -ac 2 samples/avi-mjpeg-pcm-s24.avi
+ff -f lavfi -i testsrc2=size=160x120:rate=25:d=1 -f lavfi -i "sine=frequency=440:sample_rate=22050:d=1" \
+  -c:v mjpeg -q:v 5 -c:a pcm_f32le samples/avi-mjpeg-pcm-f32.avi
+# .wav files (WavDemuxer), one per layout FFmpeg's muxer writes, each with its 'LIST' chunk before 'data': PCM with
+# format tag 1 (8-bit mono, 16-bit stereo), WAVE_FORMAT_EXTENSIBLE (24-bit stereo, float, 16-bit 5.1, whose blocks of
+# 12 bytes make packets of 4092), IMA ADPCM in 1024-byte blocks (packets of 4), and MP3 (tag 0x55, cut into frames).
+for spec in pcm_u8:1:8000:pcm-u8 pcm_s16le:2:44100:pcm-s16 pcm_s24le:2:48000:pcm-s24 pcm_f32le:2:44100:pcm-f32 \
+  pcm_s16le:6:48000:pcm-s16-6ch adpcm_ima_wav:2:22050:ima libmp3lame:2:44100:mp3; do
+  IFS=: read -r codec channels rate name <<< "$spec"
+  ff -f lavfi -i "sine=frequency=440:sample_rate=$rate:d=1.3" -ac "$channels" -c:a "$codec" "samples/wav-$name.wav"
+done
 # H.264 in AVI: Annex B (start codes, the SPS and PPS in the stream, no avcC), which H264Decoder reads without a
 # configuration record: libx264's High with B pictures and a keyframe every 12 frames (its 'idx1' index flags them, which
 # Seek starts from), and Constrained Baseline beside MP3 (FFmpeg's muxer drops its second video frame while
@@ -73,6 +86,11 @@ ff -f lavfi -i testsrc2=size=176x144:rate=25 -f lavfi -i "sine=frequency=440:sam
 # Baseline at 24 fps under the other extension.
 ff -f lavfi -i testsrc2=size=176x100:rate=30 -t 1 -c:v libx264 -g 12 -f h264 samples/h264-raw.h264
 ff -f lavfi -i testsrc2=size=160x120:rate=24 -t 1 -c:v libx264 -profile:v baseline -f h264 samples/h264-raw-baseline.264
+# Open GOPs: after the first IDR picture, I pictures behind a recovery point SEI, which FFmpeg's parser flags as
+# keyframes (packets 11, 22, 35) but H264Demuxer.Seek doesn't start at (the B pictures shown before each need the GOP
+# before it), so a seek anywhere starts at the stream's start.
+ff -f lavfi -i testsrc2=size=176x100:rate=30 -t 1.5 -c:v libx264 -bf 3 -x264-params open-gop=1:keyint=12:min-keyint=12:scenecut=0 \
+  -f h264 samples/h264-raw-open-gop.h264
 avicbr=$(mktemp --suffix=.avi)
 ff -f lavfi -i testsrc2=size=160x120:rate=25 -f lavfi -i "aevalsrc=0.4*sin(2*PI*440*t)|0.3*sin(2*PI*660*t):s=44100:d=2" \
   -t 2 -c:v mjpeg -q:v 5 -c:a libmp3lame -b:a 64k "$avicbr"
@@ -987,6 +1005,13 @@ for s in h264-bframes.mp4:1200 h264-bframes.mp4:960 h264-bframes.mp4:1000 fmp4-b
   ff -seek_timestamp 1 -ss "$(printf '%d.%03d' $((ms / 1000)) $((ms % 1000)))" -idct simple -noautorotate -i "$f" -map 0:v:0 \
     -frames:v 1 -f framemd5 "${f%.*}.seek$ms.framemd5"
 done
+# The same for raw H.264, where FFmpeg can't seek (-ss before -i fails): its -ss after -i decodes from the start and
+# drops the frames before the time, the frame H264Demuxer.Seek's read shows there. On an IDR picture, between two, and
+# in an open GOP between recovery points.
+for s in h264-raw.h264:400 h264-raw.h264:500 h264-raw-open-gop.h264:900; do
+  f=samples/${s%%:*}; ms=${s##*:}
+  ff -i "$f" -ss "$(printf '%d.%03d' $((ms / 1000)) $((ms % 1000)))" -map 0:v:0 -frames:v 1 -f framemd5 "${f%.*}.seek$ms.framemd5"
+done
 # Raw AAC: packets as FFmpeg's demuxer gives them (whole ADTS frames), and every decoded sample (no edit list).
 for f in samples/*.aac; do
   ff -copyts -i "$f" -c copy -f framemd5 "${f%.aac}.packets.framemd5"
@@ -1015,19 +1040,24 @@ for f in samples/*faac*.aac; do ff -i "$f" -f f32le "${f%.*}.delay.f32"; done
 # by default (MP4: the edit list's priming skipped; Matroska: the end's DiscardPadding dropped; a raw .mp3: its LAME
 # tag's delay and padding; AVI: every frame, in either layout). Raw .mp3 files' packets too, as FFmpeg's demuxer gives
 # them (name.packets.framemd5). Suffixes of their own, since AacConformanceTests decodes every name.f32.
-for f in samples/*.mp4 samples/*.mkv samples/*.mp3 samples/*.avi; do
+for f in samples/*.mp4 samples/*.mkv samples/*.mp3 samples/*.avi samples/*.wav; do
   [ "$(ffprobe -v error -select_streams a:0 -show_entries stream=codec_name -of csv=p=0 "$f")" = mp3 ] || continue
   [[ $f == *.mp4 ]] && ff -ignore_editlist 1 -i "$f" -map 0:a:0 -f f32le "${f%.*}.mp3.f32"
   ff -i "$f" -map 0:a:0 -f f32le "${f%.*}.mp3.trim.f32"
 done
 # PCM and IMA ADPCM: name.pcm.f32 and name.ima.f32, the decoded audio as FFmpeg gives it (PcmDecoder's and
 # ImaAdpcmDecoder's values exactly), for the formats they decode.
-for f in samples/*.avi samples/*.mp4 samples/*.mkv; do
+for f in samples/*.avi samples/*.mp4 samples/*.mkv samples/*.wav; do
   case "$(ffprobe -v error -select_streams a:0 -show_entries stream=codec_name -of csv=p=0 "$f")" in
     pcm_u8 | pcm_s16le | pcm_s16be | pcm_s24le | pcm_s24be | pcm_s32le | pcm_s32be | pcm_f32le | pcm_f32be | pcm_f64le | pcm_f64be)
       ff -i "$f" -map 0:a:0 -f f32le "${f%.*}.pcm.f32" ;;
     adpcm_ima_wav) ff -i "$f" -map 0:a:0 -f f32le "${f%.*}.ima.f32" ;;
   esac
+done
+# .wav files: packets as FFmpeg's wav demuxer gives them (name.packets.csv).
+for f in samples/*.wav; do
+  ffprobe -v error -show_packets -show_data_hash MD5 -show_entries packet=stream_index,pts,dts,duration,size,flags,data_hash \
+    -of csv=p=0 "$f" > "${f%.wav}.packets.csv"
 done
 # Raw MP3: packets as FFmpeg's demuxer gives them, and in .packets.csv with their skip-samples side data (the gapless
 # trim at both ends).

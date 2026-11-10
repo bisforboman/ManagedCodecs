@@ -195,6 +195,12 @@ MUTATIONS = [
          find="if (TryFromFooter(stream, runIn, header, out partitions))", replace="if (false)",
          tests="FullyQualifiedName~MxfPartitionTests"),
 
+    # ---- Raw H.264: a seek starts at an IDR picture, not at the recovery points FFmpeg's parser also flags as keyframes
+    # (an open GOP's pictures shown before one need the GOP before; h264-raw-open-gop).
+    dict(file="src/ManagedCodecs.Containers/H264/H264Demuxer.cs",
+         find="if (_units[i].Idr)", replace="if (_units[i].Keyframe)",
+         tests="DisplayName~h264-raw-open-gop"),
+
     # ---- MP4 (as FFmpeg reads it)
     # Negative composition offsets in 'ctts': FFmpeg leaves the last two entries out of the shift.
     dict(file="src/ManagedCodecs.Containers/Mp4/Mp4Demuxer.cs",
@@ -579,6 +585,14 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.Containers/Mp4/Mp4Demuxer.cs",
          find="int piece = (int)Math.Min(1024, left);", replace="int piece = (int)left;",
          tests="FullyQualifiedName~CutsQuickTimePcmChunksAsFfmpeg"),
+    # ---- .wav files: packets of 4096 bytes rounded down to whole blocks, as FFmpeg's wav demuxer reads them ...
+    dict(file="src/ManagedCodecs.Containers/Wav/WavDemuxer.cs",
+         find="int size = block <= PacketBytes ? PacketBytes / block * block : block;", replace="int size = PacketBytes;",
+         tests="FullyQualifiedName~WavDemuxerTests"),
+    # ... and a 'data' chunk sized 0 runs to the end of the file (checked with ffprobe on a hand-built file).
+    dict(file="src/ManagedCodecs.Containers/Wav/WavDemuxer.cs",
+         find="long end = size == 0 || start + size", replace="long end = start + size",
+         tests="FullyQualifiedName~SkipsOtherChunksAndBoundsTheData"),
     # ---- PCM: bytes after a packet's last whole sample frame are ignored, as FFmpeg's decoder ignores them (no spec).
     dict(file="src/ManagedCodecs.Core/PcmDecoder.cs",
          find="if (packet.Length > 0 && packet.Length < frameBytes)", replace="if (packet.Length % frameBytes != 0)",

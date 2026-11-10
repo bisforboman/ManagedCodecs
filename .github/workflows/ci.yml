@@ -107,6 +107,7 @@ jobs:
             samples/*.webm
             samples/*.aac
             samples/*.mp3
+            samples/*.wav
             samples/*.h264
             samples/*.264
             samples/jm/*.mp4

@@ -15,7 +15,8 @@ namespace ManagedCodecs.Containers;
 /// The file has no timestamps (FFmpeg gives its packets none): packets are a tick each in decoding order, in a time
 /// base of 1 / the frame rate, the SPS's VUI timing's (time_scale / 2 num_units_in_tick) or 25 without it, as FFmpeg's
 /// raw H.264 demuxer assumes; the decoder numbers its frames from 0 in output order, as FFmpeg's command line does
-/// (docs/decisions/2026-11-09-raw-h264.md). The size is the first SPS's. There is no seeking (no index).
+/// (docs/decisions/2026-11-09-raw-h264.md). The size is the first SPS's. <see cref="Seek"/> starts at an IDR picture
+/// from the access units found when opening.
 /// </para>
 /// </remarks>
 public sealed class H264Demuxer : IDemuxer
@@ -26,8 +27,11 @@ public sealed class H264Demuxer : IDemuxer
     private readonly Stream _stream;
     private readonly bool _leaveOpen;
 
-    // The access units found when opening: position, length and whether it is a keyframe.
-    private readonly List<(long Position, int Length, bool Keyframe)> _units = [];
+    // The access units found when opening: position, length, whether it is a keyframe, and whether an IDR picture.
+    private readonly List<(long Position, int Length, bool Keyframe, bool Idr)> _units = [];
+
+    // The first access unit a read gives: 0 until a Seek moves it.
+    private int _start;
 
     /// <summary>Reads the stream to find its SPS and access units; packets are read from the stream later.</summary>
     /// <param name="stream">A seekable stream holding the file.</param>
@@ -112,10 +116,33 @@ public sealed class H264Demuxer : IDemuxer
     public IEnumerable<PacketInfo> ReadPacketInfo() => Units().Select(u => u.Info);
 
     /// <inheritdoc/>
-    /// <remarks>A raw stream has no index to seek by: always throws.</remarks>
-    /// <exception cref="NotSupportedException">Always.</exception>
-    public void Seek(long pts, int streamIndex) =>
-        throw new NotSupportedException("Seeking in a raw H.264 stream is not supported: it has no index.");
+    /// <remarks>
+    /// Reading starts at the last IDR picture whose packet is at or before <paramref name="pts"/> (the access units found
+    /// when opening: no read of the file), and before the first IDR picture at the stream's start. A recovery point,
+    /// though a keyframe, is no place to start: the pictures shown before it in an open GOP need the ones before it,
+    /// and the decoder times its frames by their place in output order from the start of the read. Frame k from the
+    /// start is at time k, so the frames at and after the time follow an IDR picture at or before it. FFmpeg can't
+    /// seek in a raw stream at all (<c>-ss</c> before <c>-i</c> fails): its <c>-ss</c> after <c>-i</c>, which decodes from
+    /// the start and drops the frames before the time, shows the same frame.
+    /// </remarks>
+    public void Seek(long pts, int streamIndex)
+    {
+        if (streamIndex != Video.StreamIndex)
+        {
+            throw new ArgumentOutOfRangeException(nameof(streamIndex), streamIndex, "A raw H.264 stream has one stream, of index 0.");
+        }
+
+        int start = 0;
+        for (int i = 0; i < _units.Count && i <= pts; i++)
+        {
+            if (_units[i].Idr)
+            {
+                start = i;
+            }
+        }
+
+        _start = start;
+    }
 
     /// <summary>Disposes the stream, unless the demuxer was made to leave it open.</summary>
     public void Dispose()
@@ -177,14 +204,14 @@ public sealed class H264Demuxer : IDemuxer
         }
     }
 
-    // Each access unit's position and packet description: a tick each, in decoding order.
+    // Each access unit's position and packet description, from where a Seek put the start: a tick each, in decoding
+    // order, numbered from the stream's start.
     private IEnumerable<(long Position, PacketInfo Info)> Units()
     {
-        long sequence = 0;
-        foreach (var (position, length, keyframe) in _units)
+        for (int i = _start; i < _units.Count; i++)
         {
-            yield return (position, new PacketInfo(0, sequence, length, keyframe, sequence, sequence, 1));
-            sequence++;
+            var (position, length, keyframe, _) = _units[i];
+            yield return (position, new PacketInfo(0, i, length, keyframe, i, i, 1));
         }
     }
 
@@ -216,16 +243,18 @@ public sealed class H264Demuxer : IDemuxer
             var (position, first) = starts[u];
             long end = u + 1 < starts.Count ? starts[u + 1].Position : length;
             int last = u + 1 < starts.Count ? starts[u + 1].First : nals.Count;
-            bool keyframe = false;
+            bool idr = false;
+            bool recovery = false;
             for (int i = first; i < last; i++)
             {
                 // An IDR slice, or an SEI whose first message is a recovery point (payloadType 6).
-                keyframe |= nals[i].Type == 5 || (nals[i].Type == 6 && nals[i].NextByte == 6);
+                idr |= nals[i].Type == 5;
+                recovery |= nals[i].Type == 6 && nals[i].NextByte == 6;
             }
 
             if (end > position)
             {
-                _units.Add((position, checked((int)(end - position)), keyframe));
+                _units.Add((position, checked((int)(end - position)), idr || recovery, idr));
             }
         }
     }

@@ -50,6 +50,8 @@ run time.
 - H.264: weighted prediction (libx264's default weighted P and implicit B weights) multiplies both predictions'
   samples by their weights in one step and clips by saturating packs: about 1% faster under the JIT on the same
   stream. The output is unchanged.
+- H.264: the luma interpolation filter sums each row's six taps by multiply-adds of paired samples (SSSE3) and clips by
+  saturating packs: about 1.5% faster under the JIT on the same stream. The output is unchanged.
 
 ## 0.11.0 – 2026-11-09
 

@@ -120,4 +120,18 @@ internal static class Klv
         length = ReadLength(stream, out int size);
         return checked(position + KeyLength + size);
     }
+
+    /// <summary>Upper-case hex digits of <paramref name="bytes"/> (Convert.ToHexString, which .NET Standard 2.1 lacks).</summary>
+    public static string Hex(ReadOnlySpan<byte> bytes)
+    {
+        const string Digits = "0123456789ABCDEF";
+        char[] chars = new char[bytes.Length * 2];
+        for (int i = 0; i < bytes.Length; i++)
+        {
+            chars[2 * i] = Digits[bytes[i] >> 4];
+            chars[(2 * i) + 1] = Digits[bytes[i] & 0xF];
+        }
+
+        return new string(chars);
+    }
 }

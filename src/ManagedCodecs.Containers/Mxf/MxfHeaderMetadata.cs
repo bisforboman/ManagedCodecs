@@ -135,7 +135,7 @@ internal readonly struct Label : IEquatable<Label>
     public override int GetHashCode() => HashCode.Combine(_high, _low);
 
     /// <inheritdoc/>
-    public override string ToString() => Convert.ToHexString(ToArray());
+    public override string ToString() => Klv.Hex(ToArray());
 }
 
 /// <summary>

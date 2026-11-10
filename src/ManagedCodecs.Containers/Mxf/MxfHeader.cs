@@ -186,7 +186,7 @@ internal sealed class MxfHeader
         {
             if (data.Get(MxfLabels.LinkedPackageUid) is { } linked)
             {
-                streams.TryAdd(Convert.ToHexString(linked), (data.UInt32(MxfLabels.BodySid) ?? 0, data.UInt32(MxfLabels.IndexSid) ?? 0));
+                streams.TryAdd(Klv.Hex(linked), (data.UInt32(MxfLabels.BodySid) ?? 0, data.UInt32(MxfLabels.IndexSid) ?? 0));
             }
         }
 
@@ -195,7 +195,7 @@ internal sealed class MxfHeader
         {
             if (package.Get(MxfLabels.PackageUid) is { } umid)
             {
-                filePackages.TryAdd(Convert.ToHexString(umid), package);
+                filePackages.TryAdd(Klv.Hex(umid), package);
             }
         }
 
@@ -241,7 +241,7 @@ internal sealed class MxfHeader
         long? duration = sequence.Int64(MxfLabels.Duration) is { } d and >= 0 ? d : null;
         byte[]? umid = clip?.Get(MxfLabels.SourcePackageId);
         uint fileTrackId = clip?.UInt32(MxfLabels.SourceTrackId) ?? 0;
-        string? umidKey = umid is null ? null : Convert.ToHexString(umid);
+        string? umidKey = umid is null ? null : Klv.Hex(umid);
 
         uint trackNumber = 0;
         MxfSet? descriptor = null;

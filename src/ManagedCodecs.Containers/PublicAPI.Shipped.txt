@@ -60,6 +60,7 @@ ManagedCodecs.Containers.WavDemuxer.Dispose() -> void
 ManagedCodecs.Containers.WavDemuxer.ReadPacketInfo() -> System.Collections.Generic.IEnumerable<ManagedCodecs.PacketInfo>!
 ManagedCodecs.Containers.WavDemuxer.ReadPackets() -> System.Collections.Generic.IEnumerable<ManagedCodecs.Packet>!
 ManagedCodecs.Containers.WavDemuxer.ReadPacketsAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerable<ManagedCodecs.Packet>!
+ManagedCodecs.Containers.WavDemuxer.Seek(long pts, int streamIndex) -> void
 ManagedCodecs.Containers.WavDemuxer.Video.get -> ManagedCodecs.VideoStreamInfo?
 ManagedCodecs.Containers.WavDemuxer.WavDemuxer(System.IO.Stream! stream, bool leaveOpen = false) -> void
 static ManagedCodecs.Containers.AdtsDemuxer.Open(string! path) -> ManagedCodecs.Containers.AdtsDemuxer!

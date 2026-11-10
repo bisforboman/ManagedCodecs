@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- mclive-wpf: shows a camera's MJPEG over HTTP in a WPF window with ManagedCodecs.Playback's LivePlayer (issue #462,
+       docs/decisions/2026-11-10-live-mjpeg-over-http.md). Code only, no XAML. Windows only to run; CI builds it on Linux
+       (EnableWindowsTargeting brings the Windows Desktop reference assemblies from nuget.org). -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <AssemblyName>mclive-wpf</AssemblyName>
+    <RootNamespace>ManagedCodecs.WpfSample</RootNamespace>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\ManagedCodecs.Playback\ManagedCodecs.Playback.csproj" />
+  </ItemGroup>
+
+</Project>

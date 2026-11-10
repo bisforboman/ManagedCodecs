@@ -73,8 +73,16 @@ mostly reach the whole-coefficient entries. Its speed: docs/notes/mjpeg-entropy-
 a loopback HTTP server and compares each frame it shows with `MjpegDecoder`'s output for that JPEG (checked against
 FFmpeg above), bit for bit, in every layout `MultipartReaderTests` reads (with and without `Content-Length`, LF line
 ends, the boundary quirks), with damaged parts, a stream that ends, stalls or is refused (on a fake clock). No real
-camera is in CI, and none has been tried yet: mjpg-streamer, an ESP32-CAM and FFmpeg's `-f mpjpeg` are to be, and listed
-here with what they showed.
+camera is in CI.
+
+Real streams, by hand:
+
+- FFmpeg 6.1 serving `-f mpjpeg -listen 1` (testsrc2, 640x480 at 25 fps, `-re`) to `mclive` under Xvfb (2026-11-10):
+  100 and 120 frames shown at the stream's rate, none damaged, no reconnects, about 1 ms to decode and 1 ms to convert
+  a frame; a screenshot showed testsrc2's bars in order and its frame counter. Its HTTP server sends the body as
+  `Content-Type: application/octet-stream`, not multipart, so `LivePlayer` reads that type as multipart too (it refused
+  it at first); its parts carry `Content-type` and `Content-length` in lower case and the boundary `ffmpeg`.
+- Not tried yet: mjpg-streamer, an ESP32-CAM, an IP camera.
 
 ## Real films
 
@@ -350,6 +358,12 @@ one padded; a 'data' size of 0xFFFFFFFF (a recording never closed) or 0, which r
 than 4096 bytes, a packet each. Formats FFmpeg names otherwise keep their tag (`0x0002` for Microsoft ADPCM), timed by
 nAvgBytesPerSec, unchecked; AAC in WAV is named but no sample has it. RF64 and Wave64 are not read. AVI shares the
 naming: `avi-mjpeg-pcm-s24` and `avi-mjpeg-pcm-f32` (format tags 1 and 3) decode exactly too.
+
+`Seek` starts at the packet whose samples hold the time (every packet is a keyframe), among the packets listed when
+opening: the tail of a read from the start, as `IDemuxer.Seek` asks and `SeekTests` checks on every .wav sample.
+FFmpeg's own wav seek starts a packet at the exact sample instead (ffprobe `-read_intervals 0.5%` on 16-bit stereo at
+22.05 kHz: a packet at 11025, where a read from the start has them at 10240 and 11264), so its packets after a seek
+are not a read's; the samples before the time are dropped by whoever wants it, as for the other demuxers.
 
 ## Matroska and WebM demuxing
 

@@ -688,7 +688,7 @@ internal static partial class InterPrediction
     /// wide. With SSSE3 one 16-byte load a half gives every tap: its samples paired by shuffles, (E, F), (G, H) and
     /// (I, J), and each pair multiplied and added by <c>pmaddubsw</c> with (1, -5), (20, 20) and (-5, 1); no pair or sum
     /// leaves 16 bits (-2550 .. 10710), so it is exact. The high half loads from p + 5, the furthest byte the taps read
-    /// being p + 20. Else every sample is widened and <see cref="Tap"/> sums them.
+    /// being p + 20. Else every sample is widened and the vector Tap sums them.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static (Vector128<short> Low, Vector128<short> High) TapAcross(ref byte source, int p, int width)

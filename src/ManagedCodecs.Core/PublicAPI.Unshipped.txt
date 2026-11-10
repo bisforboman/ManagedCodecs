@@ -1,1 +1,8 @@
 #nullable enable
+const ManagedCodecs.CodecIds.AdpcmMs = "ADPCM_MS" -> string!
+ManagedCodecs.MsAdpcmDecoder
+ManagedCodecs.MsAdpcmDecoder.Channels.get -> int
+ManagedCodecs.MsAdpcmDecoder.Decode(ManagedCodecs.Packet packet) -> ManagedCodecs.AudioFrame!
+ManagedCodecs.MsAdpcmDecoder.Decode(System.ReadOnlySpan<byte> packet) -> ManagedCodecs.AudioFrame!
+ManagedCodecs.MsAdpcmDecoder.MsAdpcmDecoder(ManagedCodecs.AudioStreamInfo! stream) -> void
+ManagedCodecs.MsAdpcmDecoder.SampleRate.get -> int

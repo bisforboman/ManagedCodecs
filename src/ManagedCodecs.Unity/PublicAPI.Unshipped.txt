@@ -9,3 +9,10 @@ ManagedCodecs.Containers.MxfDemuxer.ReadPacketsAsync(System.Threading.Cancellati
 ManagedCodecs.Containers.MxfDemuxer.Seek(long pts, int streamIndex) -> void
 ManagedCodecs.Containers.MxfDemuxer.Video.get -> ManagedCodecs.VideoStreamInfo?
 static ManagedCodecs.Containers.MxfDemuxer.Open(string! path) -> ManagedCodecs.Containers.MxfDemuxer!
+const ManagedCodecs.CodecIds.AdpcmMs = "ADPCM_MS" -> string!
+ManagedCodecs.MsAdpcmDecoder
+ManagedCodecs.MsAdpcmDecoder.Channels.get -> int
+ManagedCodecs.MsAdpcmDecoder.Decode(ManagedCodecs.Packet packet) -> ManagedCodecs.AudioFrame!
+ManagedCodecs.MsAdpcmDecoder.Decode(System.ReadOnlySpan<byte> packet) -> ManagedCodecs.AudioFrame!
+ManagedCodecs.MsAdpcmDecoder.MsAdpcmDecoder(ManagedCodecs.AudioStreamInfo! stream) -> void
+ManagedCodecs.MsAdpcmDecoder.SampleRate.get -> int

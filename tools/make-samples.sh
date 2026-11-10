@@ -61,6 +61,11 @@ ff -f lavfi -i testsrc2=size=160x120:rate=25:d=1 -f lavfi -i "aevalsrc=0.4*sin(2
 ff -f lavfi -i testsrc2=size=160x120:rate=25:d=1 \
   -f lavfi -i "aevalsrc=0.95*sin(2*PI*440*t)|0.5*sin(2*PI*3000*t)*lt(t\,0.5)+0.01*sin(2*PI*90*t):s=22050:d=1" \
   -c:v mjpeg -q:v 5 -c:a adpcm_ima_wav -block_size 512 samples/avi-mjpeg-ima.avi
+# Microsoft ADPCM (MsAdpcmDecoder) the same way: stereo (a code of each channel a byte), 512-byte blocks, a loud tone
+# beside a quiet one and a low one, so the step runs from its floor (16) to large values and the predictors change.
+ff -f lavfi -i testsrc2=size=160x120:rate=25:d=1 \
+  -f lavfi -i "aevalsrc=0.95*sin(2*PI*440*t)|0.5*sin(2*PI*3000*t)*lt(t\,0.5)+0.01*sin(2*PI*90*t):s=22050:d=1" \
+  -c:v mjpeg -q:v 5 -c:a adpcm_ms -block_size 512 samples/avi-mjpeg-ms-adpcm.avi
 # 24- and 32-bit and float PCM in AVI (format tags 1 and 3 by wBitsPerSample, as FFmpeg's muxer writes them; WaveFormat).
 ff -f lavfi -i testsrc2=size=160x120:rate=25:d=1 -f lavfi -i "sine=frequency=440:sample_rate=22050:d=1" \
   -c:v mjpeg -q:v 5 -c:a pcm_s24le -ac 2 samples/avi-mjpeg-pcm-s24.avi
@@ -68,9 +73,10 @@ ff -f lavfi -i testsrc2=size=160x120:rate=25:d=1 -f lavfi -i "sine=frequency=440
   -c:v mjpeg -q:v 5 -c:a pcm_f32le samples/avi-mjpeg-pcm-f32.avi
 # .wav files (WavDemuxer), one per layout FFmpeg's muxer writes, each with its 'LIST' chunk before 'data': PCM with
 # format tag 1 (8-bit mono, 16-bit stereo), WAVE_FORMAT_EXTENSIBLE (24-bit stereo, float, 16-bit 5.1, whose blocks of
-# 12 bytes make packets of 4092), IMA ADPCM in 1024-byte blocks (packets of 4), and MP3 (tag 0x55, cut into frames).
+# 12 bytes make packets of 4092), IMA ADPCM in 1024-byte blocks (packets of 4), Microsoft ADPCM in mono (two codes a
+# byte, 1024-byte blocks: packets of 4), and MP3 (tag 0x55, cut into frames).
 for spec in pcm_u8:1:8000:pcm-u8 pcm_s16le:2:44100:pcm-s16 pcm_s24le:2:48000:pcm-s24 pcm_f32le:2:44100:pcm-f32 \
-  pcm_s16le:6:48000:pcm-s16-6ch adpcm_ima_wav:2:22050:ima libmp3lame:2:44100:mp3; do
+  pcm_s16le:6:48000:pcm-s16-6ch adpcm_ima_wav:2:22050:ima adpcm_ms:1:11025:ms-adpcm libmp3lame:2:44100:mp3; do
   IFS=: read -r codec channels rate name <<< "$spec"
   ff -f lavfi -i "sine=frequency=440:sample_rate=$rate:d=1.3" -ac "$channels" -c:a "$codec" "samples/wav-$name.wav"
 done
@@ -1086,13 +1092,14 @@ for f in samples/*.mp4 samples/*.mkv samples/*.mp3 samples/*.avi samples/*.wav; 
   [[ $f == *.mp4 ]] && ff -ignore_editlist 1 -i "$f" -map 0:a:0 -f f32le "${f%.*}.mp3.f32"
   ff -i "$f" -map 0:a:0 -f f32le "${f%.*}.mp3.trim.f32"
 done
-# PCM and IMA ADPCM: name.pcm.f32 and name.ima.f32, the decoded audio as FFmpeg gives it (PcmDecoder's and
-# ImaAdpcmDecoder's values exactly), for the formats they decode.
+# PCM, IMA and Microsoft ADPCM: name.pcm.f32, name.ima.f32 and name.msadpcm.f32, the decoded audio as FFmpeg gives it
+# (PcmDecoder's, ImaAdpcmDecoder's and MsAdpcmDecoder's values exactly), for the formats they decode.
 for f in samples/*.avi samples/*.mp4 samples/*.mkv samples/*.wav; do
   case "$(ffprobe -v error -select_streams a:0 -show_entries stream=codec_name -of csv=p=0 "$f")" in
     pcm_u8 | pcm_s16le | pcm_s16be | pcm_s24le | pcm_s24be | pcm_s32le | pcm_s32be | pcm_f32le | pcm_f32be | pcm_f64le | pcm_f64be)
       ff -i "$f" -map 0:a:0 -f f32le "${f%.*}.pcm.f32" ;;
     adpcm_ima_wav) ff -i "$f" -map 0:a:0 -f f32le "${f%.*}.ima.f32" ;;
+    adpcm_ms) ff -i "$f" -map 0:a:0 -f f32le "${f%.*}.msadpcm.f32" ;;
   esac
 done
 # .wav files: packets as FFmpeg's wav demuxer gives them (name.packets.csv).

@@ -271,6 +271,7 @@ FFmpeg gives them) and its codec private data with FFmpeg's extradata, on every 
 | avi-mjpeg-pcm | 16-bit PCM (dwSampleSize 2): a packet a chunk of 1024 samples, timed in samples; `CodecIds.PcmS16Le` |
 | avi-mjpeg-pcm-u8 | 8-bit unsigned PCM at 11.025 kHz, stereo (dwSampleSize 2); `CodecIds.PcmU8` |
 | avi-mjpeg-ima | 4-bit IMA ADPCM at 22.05 kHz, stereo, in 512-byte blocks: a packet a block, timed in blocks (dwScale wSamplesPerBlock); `CodecIds.AdpcmImaWav` |
+| avi-mjpeg-ms-adpcm | Microsoft ADPCM at 22.05 kHz, stereo, in 512-byte blocks, timed as IMA's; `CodecIds.AdpcmMs` |
 | avi-mjpeg-mp3-cbr | MP3 in the CBR layout of VirtualDub and older muxers, written by `tools/avi-mp3-cbr.py` |
 
 The CBR layout (dwScale 1, dwRate the bytes a second, dwSampleSize 1) cuts its chunks anywhere in a frame:
@@ -340,24 +341,33 @@ in flags) and 'twos' at 8 bits (signed 8-bit), which keep their entry's name, un
 ## .wav files
 
 `WavDemuxer` reads RIFF WAVE files: the 'fmt ' chunk's WAVEFORMATEX named as AVI's audio (`WaveFormat`, shared: integer
-PCM by wBitsPerSample, float PCM, WAVE_FORMAT_EXTENSIBLE by its sub-format's tag, IMA ADPCM, MP3), other chunks
+PCM by wBitsPerSample, float PCM, WAVE_FORMAT_EXTENSIBLE by its sub-format's tag, IMA and Microsoft ADPCM, MP3), other chunks
 skipped. `WavDemuxerTests.MatchesFfmpegPacketByPacket` compares every samples/*.wav with ffprobe's packets (size, MD5,
 pts, dts, duration): FFmpeg's wav demuxer reads 4096 bytes a packet rounded down to whole blocks (nBlockAlign), timed in
 samples, and MP3 by frames, as its parser cuts them. Their decoded audio is checked as the other samples' are
-(name.pcm.f32, name.ima.f32 exactly; name.mp3.trim.f32 within 2^-17).
+(name.pcm.f32, name.ima.f32, name.msadpcm.f32 exactly; name.mp3.trim.f32 within 2^-17).
 
 | Sample | What |
 | --- | --- |
 | wav-pcm-u8, wav-pcm-s16 | Format tag 1: 8-bit mono (4096-byte packets), 16-bit stereo |
 | wav-pcm-s24, wav-pcm-f32, wav-pcm-s16-6ch | WAVE_FORMAT_EXTENSIBLE (FFmpeg's muxer writes it above 16 bits, for float and above 2 channels): blocks of 6 and 12 bytes make packets of 4092 |
 | wav-ima | IMA ADPCM, stereo, 1024-byte blocks: packets of 4, the last 1 |
+| wav-ms-adpcm | Microsoft ADPCM, mono, 1024-byte blocks: packets of 4 |
 | wav-mp3 | MP3 (tag 0x55), a packet a frame |
 
 Built by hand (`WavDemuxerTests`), since FFmpeg's muxer writes neither: chunks before and after 'data', an odd-sized
 one padded; a 'data' size of 0xFFFFFFFF (a recording never closed) or 0, which runs to the end of the file (as ffprobe reads it); blocks longer
-than 4096 bytes, a packet each. Formats FFmpeg names otherwise keep their tag (`0x0002` for Microsoft ADPCM), timed by
+than 4096 bytes, a packet each. Formats FFmpeg names otherwise keep their tag (`0x0006` for A-law), timed by
 nAvgBytesPerSec, unchecked; AAC in WAV is named but no sample has it. RF64 and Wave64 are not read. AVI shares the
 naming: `avi-mjpeg-pcm-s24` and `avi-mjpeg-pcm-f32` (format tags 1 and 3) decode exactly too.
+
+Microsoft ADPCM (`MsAdpcmDecoder`, docs/decisions/2026-11-10-ms-adpcm.md): `wav-ms-adpcm` and `avi-mjpeg-ms-adpcm`
+(stereo, 512-byte blocks, a loud tone beside quiet ones) decode exactly as FFmpeg (name.msadpcm.f32). FFmpeg's rules
+the format lacks: the standard coefficient table whatever the file lists (a file with an altered table decodes to
+FFmpeg's same samples, a unit test), a predictor index past 6 refused, and the step capped at INT_MAX / 768 (a mutation
+entry). Hand-built blocks decode as FFmpeg decodes them in a WAV file: predictors 0, 1, 3 and 6, a negative step, a
+step driven to the cap, a block cut short (its header's two samples and two a byte), stereo's pairing of the channels
+in each byte.
 
 `Seek` starts at the packet whose samples hold the time (every packet is a keyframe), among the packets listed when
 opening: the tail of a read from the start, as `IDemuxer.Seek` asks and `SeekTests` checks on every .wav sample.
@@ -1390,6 +1400,14 @@ weight or a wrong offset for the second half. On the same 1080p frames the luma 
 `HalfHorizontal`, `HalfVertical`, `Center`) fell from 0.83 to 0.90 of an untouched set (`FilterMacroblock420`,
 `PredictChromaPair`, `Cabac.ResidualBlock`) to 0.73 to 0.77 (perf, six runs each, the order alternating, every branch
 run below every base run): from about 12.2 to 10.6% of the frame.
+The chroma filter's row loop (`BilinearRows`) now takes the block's width as a type argument, so the row store is
+chosen once a block rather than by a switch every row, steps its source and output down by a row instead of
+multiplying, and narrows by one `packuswb` (the rounded sums are 0 to 255) where `Vector128.Narrow` took three
+instructions: 15 instructions a row, about 25 before. Callgrind (Native AOT, as above) counts 19.30 against 19.66 M
+instructions a frame on the first 360 frames of the 480p Sintel trailer (-1.8%). The time gained is smaller: the
+chroma functions fell from 0.70 to 0.81 of the untouched set (`FilterMacroblock420`, `HalfHorizontal`,
+`Cabac.ResidualBlock`) to 0.67 to 0.73 on the 1080p frames (perf, six runs each, the order alternating, lower in every
+pair), about 0.5% of the frame: at 1080p chroma's time is mostly reference reads and per-block setup, not the loop.
 
 ## AAC
 

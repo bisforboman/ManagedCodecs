@@ -21,6 +21,10 @@ run time.
   FFmpeg's, its packets' times are decode times where the index gives no temporal offsets) and PCM (AES3 and Broadcast
   Wave mappings) `CodecIds.PcmS16Le`, `PcmS24Le` or `PcmS32Le`, which `PcmDecoder` decodes exactly as FFmpeg; ProRes,
   DNxHR and MPEG-2 are named (`prores`, `dnxhd`, `mpeg2video`) but not decoded (issue #469).
+- `MsAdpcmDecoder` (ManagedCodecs.Core) and `CodecIds.AdpcmMs`: Microsoft ADPCM (the WAVE format tag 0x02), mono and
+  stereo, exactly FFmpeg's output (its standard coefficient table whatever the file lists, and its cap on the step).
+  `.wav` and AVI files name such streams `CodecIds.AdpcmMs` where they named them `"0x0002"`, and `MediaPlayer` plays
+  them (docs/decisions/2026-11-10-ms-adpcm.md).
 
 ## 0.12.0 – 2026-11-10
 

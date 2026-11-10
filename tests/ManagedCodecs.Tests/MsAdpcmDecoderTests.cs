@@ -77,6 +77,20 @@ public class MsAdpcmDecoderTests
     }
 
     /// <summary>
+    /// The step is capped at int.MaxValue / 768, as FFmpeg caps it: predictor 2 (coefficients 0, 0) makes each sample the
+    /// code times the step; six codes of -8 drive the step past the cap, 46 of 0 shrink it (by 230 / 256 each), and the
+    /// codes of 1 then show it: FFmpeg's 20273 from the capped step, where an uncapped one would still clamp to 32767.
+    /// </summary>
+    [Fact]
+    public void CapsTheStepAsFfmpeg()
+    {
+        byte[] codes = [0x88, 0x88, 0x88, .. new byte[23], 0x11, 0x11];
+        var frame = new MsAdpcmDecoder(Stream(1, 0)).Decode(Block(2, 32767, 0, 0, codes));
+        Assert.Equal(58, frame.SampleCount);
+        Assert.Equal(new[] { 20273, 18214, 16364, 14702 }.Select(x => x / 32768f), frame.Samples[0][^4..]);
+    }
+
+    /// <summary>
     /// The coefficients are always the standard pairs: a file's own table (here pair 1 changed) is not read, as FFmpeg
     /// doesn't read it (its output on such a file is the same).
     /// </summary>

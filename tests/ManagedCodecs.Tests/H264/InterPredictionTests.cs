@@ -189,11 +189,6 @@ public class InterPredictionTests
 
 #if !UNITY_BUILD
     /// <summary>
-    /// The 8-bit vector weighted prediction (<see cref="InterPrediction.WeightOne"/>, <see cref="InterPrediction.WeightBoth"/>)
-    /// against the definition, on random samples, weights and offsets over their whole ranges (explicit weights -128 to
-    /// 127, implicit -64 to 128, denominators 0 to 7), every block width, and the extremes.
-    /// </summary>
-    /// <summary>
     /// The window copy by rows (inside copied, outside its edge sample repeated) against clamping each sample, for
     /// windows left of, across and right of the picture, and wider than it.
     /// </summary>
@@ -223,6 +218,11 @@ public class InterPredictionTests
 #endif
 
 #if !UNITY_BUILD
+    /// <summary>
+    /// The 8-bit vector weighted prediction (<see cref="InterPrediction.WeightOne"/>, <see cref="InterPrediction.WeightBoth"/>)
+    /// against the definition, on random samples, weights and offsets over their whole ranges (explicit weights -128 to
+    /// 127, implicit -64 to 128, denominators 0 to 7), every block width, and the extremes.
+    /// </summary>
     [Fact]
     public void VectorWeights_MatchReference()
     {

@@ -47,6 +47,9 @@ run time.
 
 - H.264: the chroma motion compensation filter's rows are inlined, no longer a call each: about 1.7% faster under the
   JIT on a 1080p High profile stream with B pictures. The output is unchanged.
+- H.264: weighted prediction (libx264's default weighted P and implicit B weights) multiplies both predictions'
+  samples by their weights in one step and clips by saturating packs: about 1% faster under the JIT on the same
+  stream. The output is unchanged.
 
 ## 0.11.0 – 2026-11-09
 

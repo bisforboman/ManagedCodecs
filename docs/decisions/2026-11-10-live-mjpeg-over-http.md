@@ -1,6 +1,6 @@
 # Live camera viewing, step 1: MJPEG over HTTP (2026-11-10)
 
-A plan for the owner to decide on (below). Nothing here is built yet. It is step 1 of #462, whose demand survey
+A plan, decided on by the owner (below). Nothing here is built yet. It is step 1 of #462, whose demand survey
 ([comment](https://github.com/bisforboman/ManagedCodecs/issues/462#issuecomment-6760330647)) recommended building it in this
 repository, scoped small: first a live player and MJPEG over HTTP, then RTSP with H.264 (RFC 6184). Avalonia and WPF
 come as samples, not packages.
@@ -47,8 +47,8 @@ pool, and nothing else.
 4. **Reconnecting**: on a dropped connection, an error status or a **stall** (no part for `StallTimeout`, 5 s by
    default), the source reconnects with backoff (0.5 s, doubling, capped at 10 s, reset after the first frame).
    `State` (`Connecting`, `Playing`, `Reconnecting`, `Stopped`, `Failed`) and `Error` (the last error) say what is
-   happening. 401/403/404 are `Failed` at once, as retrying won't help. Timers go through `TimeProvider`, so tests run
-   without waiting.
+   happening. 401/403/404 are `Failed` at once, as retrying won't help. Timers go through an internal clock with a
+   test double (decision 3), so tests run without waiting.
 5. **`LiveStatistics`**: frames received, decoded, shown (taken), dropped as late, skipped as damaged, reconnects, and
    the decode and conversion milliseconds as in `PlaybackStatistics`.
 6. **Not in step 1**: audio (MJPEG over HTTP has none), RTSP, ONVIF discovery, PTZ, recording, snapshot polling,
@@ -61,16 +61,16 @@ pool, and nothing else.
   mid-JPEG; a garbage part; a stall; a dropped connection; a 401. Decoded frames are compared by MD5 with
   `MjpegDecoder`'s output on the same JPEGs, which is itself checked against FFmpeg, so the network layer adds no
   second oracle.
-- **Late frames and reconnects** on a fake `TimeProvider`: a slow consumer sees only the newest frame and the counts
+- **Late frames and reconnects** on the fake clock: a slow consumer sees only the newest frame and the counts
   add up (received = decoded + late-before-decode + damaged). Each guard (the slot's replacement, the skip before
   decoding, the stall timer, no retry on 401) gets an entry in `tools/mutation/mutations.py`.
 - **Real devices**, by hand, not CI: mjpg-streamer on a Raspberry Pi, an ESP32-CAM, and `ffmpeg -f mpjpeg` served over
   HTTP. Each is listed in docs/conformance.md with what it showed.
 - **AOT, WASM, Unity**: the AOT check covers the player on the test server. On WebAssembly, `HttpClient` streams
   a response only with browser streaming enabled, and the camera must allow CORS. Both are documented, and a
-  WASM test is out of step 1. For Unity, `TimeProvider` isn't in netstandard2.1: the Unity build takes the
-  `Microsoft.Bcl.TimeProvider` package or a small internal clock (see the decisions). Mono's `HttpClient`
-  streaming is to be checked in CI's `unity` job.
+  WASM test is out of step 1. Unity's build compiles Playback's sources, so the
+  player is there too: its clock needs no `TimeProvider` (decision 3), and Mono's `HttpClient` streaming is to be
+  checked in CI's `unity` job.
 
 ## Samples
 
@@ -80,17 +80,17 @@ pool, and nothing else.
 - **WPF** (`tools/ManagedCodecs.Wpf.Sample`): the same with `CompositionTarget.Rendering`. It builds in CI with
   `EnableWindowsTargeting` and runs only on Windows.
 
-## Questions for the owner
+## Decided
 
-1. **Where the player lives.** Proposed: in `ManagedCodecs.Playback`, beside `MediaPlayer`. It shares `RgbaFrame`, the
-   conversion and the pool, and needs nothing new (`System.Net.Http` is in the runtime). The alternative is a new
-   package, `ManagedCodecs.Live`, which keeps networking out of a package that game engines take.
-2. **Pull or push.** Proposed: pull only (`TakeLatest()` on the UI's render tick), as `MediaPlayer` does. It needs no
-   marshalling to the UI thread and drops naturally. The alternative adds a `FrameAvailable` event, raised on the
-   decoding thread, which UI code must dispatch.
-3. **`TimeProvider` in the Unity build.** Proposed: a small internal clock interface with a test double, so no new
-   package reaches Unity. The alternative is the `Microsoft.Bcl.TimeProvider` package for netstandard2.1.
-4. **Samples.** Proposed: Avalonia and WPF together. The alternative is Avalonia first (it runs on Linux and ARM,
-   where the survey found the pain), then WPF.
+Asked with the multiple-choice prompt; the owner took each proposal (2026-11-10).
+
+1. **Where the player lives. Decided:** in `ManagedCodecs.Playback`, beside `MediaPlayer`. It shares `RgbaFrame`, the
+   conversion and the pool, and needs nothing new (`System.Net.Http` is in the runtime). A separate
+   `ManagedCodecs.Live` package was the alternative.
+2. **Pull or push. Decided:** pull only. The UI calls `TakeLatest()` on its render tick, as with `MediaPlayer`, so
+   there is no marshalling to the UI thread and late frames drop naturally. No `FrameAvailable` event.
+3. **The clock. Decided:** a small internal clock interface with a test double in place of `TimeProvider`, which
+   netstandard2.1 lacks. No new package reaches the Unity build.
+4. **Samples. Decided:** Avalonia and WPF together.
 
 A public API change, so a new minor version, with a CHANGELOG line under "Unreleased" when it is built.

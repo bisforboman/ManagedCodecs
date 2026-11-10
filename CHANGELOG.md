@@ -22,6 +22,10 @@ run time.
 
 - PCM in ISO MP4 files: `Mp4Demuxer` names 'ipcm' and 'fpcm' (ISO/IEC 23003-5, as FFmpeg's mp4 muxer writes PCM) by
   their 'pcmC' box, so `PcmDecoder` decodes them, exactly as FFmpeg does.
+- Live cameras: `LivePlayer` (Playback, and the Unity package) shows a camera serving MJPEG over HTTP
+  (`MjpegHttpSource`), handing the UI the newest decoded frame each render (`TakeLatest`), dropping older ones, and
+  connecting again after a drop or a stall, with `State`, `Error` and `LiveStatistics` to say what is happening
+  (issue #462).
 - PCM in QuickTime and Matroska files: `PcmDecoder` decodes signed 16-, 24- and 32-bit PCM in either byte order and
   32- and 64-bit float PCM, exactly as FFmpeg does, named by new `CodecIds` constants (`PcmS16Be`, `PcmS24Le`,
   `PcmS24Be`, `PcmS32Le`, `PcmS32Be`, `PcmF32Le`, `PcmF32Be`, `PcmF64Le`, `PcmF64Be`). `Mp4Demuxer` names QuickTime's

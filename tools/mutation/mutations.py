@@ -580,6 +580,39 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.Playback/MediaPlayer.cs",
          find="if (_next.Time - _next.Lead > position)", replace="if (_next.Time > position)",
          tests="DisplayName~ClockAtTheFrameRate"),
+    # ---- LivePlayer (docs/decisions/2026-11-10-live-mjpeg-over-http.md): the newest frame wins, both while waiting to be
+    # decoded and while waiting to be taken ...
+    dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
+         find="if (Interlocked.Exchange(ref _pending, received) is not null)",
+         replace="if (Interlocked.CompareExchange(ref _pending, received, null) is not null)",
+         tests="FullyQualifiedName~LivePlayerTests.ShowsTheNewestFrame"),
+    dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
+         find="if (Interlocked.Exchange(ref _latest, rgba) is { } old)",
+         replace="if (Interlocked.CompareExchange(ref _latest, rgba, null) is { } old)",
+         tests="FullyQualifiedName~LivePlayerTests.DropsFramesNotTakenBeforeANewerOne"),
+    # ... 401, 403 and 404 are final, not retried ...
+    dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
+         find="if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden or HttpStatusCode.NotFound)",
+         replace="if (response.StatusCode is HttpStatusCode.Unauthorized)",
+         tests="FullyQualifiedName~LivePlayerTests.GivesUpOnAnswersARetryWontChange"),
+    # ... a stall counts from the last part, not from the connection ...
+    dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
+         find="                Touch();\n                Interlocked.Increment(ref _receivedCount);",
+         replace="                Interlocked.Increment(ref _receivedCount);",
+         tests="FullyQualifiedName~LivePlayerTests.ConnectsAgainWhenTheStreamStalls"),
+    # ... the wait between connections doubles up to 10 s, and starts again at 0.5 s once a connection played a frame.
+    dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
+         find="backoff = backoff + backoff < MaxBackoff ? backoff + backoff : MaxBackoff;",
+         replace="backoff = backoff + backoff;",
+         tests="FullyQualifiedName~LivePlayerTests.WaitsLongerAfterEachRefusal"),
+    dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
+         find="                backoff = FirstBackoff;\n            }",
+         replace="            }",
+         tests="FullyQualifiedName~LivePlayerTests.StartsTheWaitAgainOnceAFramePlays"),
+    # MJPEG over HTTP: the first delimiter line names the boundary, whatever the header said (cameras get it wrong).
+    dict(file="src/ManagedCodecs.Playback/MultipartReader.cs",
+         find="            if (_first)\n", replace="            if (_boundary is null)\n",
+         tests="FullyQualifiedName~MultipartReaderTests.TakesTheBoundaryFromTheFirstDelimiter"),
     # ---- QuickTime PCM with one tick a sample: each chunk in pieces of up to 1024 frames, as FFmpeg's mov demuxer cuts
     # them (FFmpeg's muxer writes chunks of 1024, so only a hand-built file shows it).
     dict(file="src/ManagedCodecs.Containers/Mp4/Mp4Demuxer.cs",

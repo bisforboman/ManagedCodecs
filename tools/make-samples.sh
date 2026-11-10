@@ -896,6 +896,26 @@ python3 -I tools/mxf-rewrite.py samples/mxf-h264-pcm.mxf samples/mxf-h264-pcm-ru
 cp samples/mxf-h264-pcm.partitions.csv samples/mxf-h264-pcm-norip.partitions.csv
 cp samples/mxf-h264-pipe.partitions.csv samples/mxf-h264-pipe-norip.partitions.csv
 cp samples/mxf-h264-pcm.partitions.csv samples/mxf-h264-pcm-runin.partitions.csv
+# The header metadata's descriptors, for MxfHeader: ProRes 422 HQ (10-bit 4:2:2, CDCI) with a 16:9 picture over
+# 160x120 (sample aspect 4:3), two stereo 16-bit PCM tracks (AES3 descriptors in a multiple descriptor) and a start
+# timecode; DNxHR SQ (VC-3, at its smallest size) with 24-bit PCM; interlaced H.264 (High 4:2:2 10-bit, FrameLayout
+# separate fields, so the stored height is a field's) at 29.97 with a drop-frame timecode; and MPEG-2, a coding label
+# of another family. No essence of these is decoded yet.
+ff "${mxf_src[@]}" -f lavfi -i sine=sample_rate=48000:frequency=660 -t 1 -map 0 -map 1 -map 2 -c:v prores_ks -profile:v 3 \
+  -pix_fmt yuv422p10le -aspect 16:9 -c:a pcm_s16le -ac 2 -timecode 01:00:00:00 samples/mxf-prores-pcm16.mxf
+ff -f lavfi -i testsrc2=s=256x144:r=25 -f lavfi -i sine=sample_rate=48000 -t 1 -c:v dnxhd -profile:v dnxhr_sq \
+  -pix_fmt yuv422p -c:a pcm_s24le samples/mxf-dnxhr-pcm24.mxf
+ff -f lavfi -i testsrc2=s=160x120:r=30000/1001 -t 1 -c:v libx264 -pix_fmt yuv422p10le -flags +ildct+ilme -x264opts tff=1 \
+  -timecode '01:00:00;02' samples/mxf-h264-interlaced.mxf
+ff -f lavfi -i testsrc2=s=160x120:r=25 -t 1 -c:v mpeg2video samples/mxf-mpeg2.mxf
+# name.headers.json: the streams as FFmpeg's demuxer reads them from the header metadata, nothing decoded
+# (ffprobe -nofind_stream_info: with probing, the size and aspect ratio are the decoder's), and the file's operational
+# pattern, material package and start timecode.
+for f in samples/mxf-*.mxf; do
+  ffprobe -v error -nofind_stream_info -of json -show_entries \
+    stream=index,codec_name,codec_type,width,height,field_order,time_base,duration_ts,sample_rate,channels,bits_per_sample:stream_tags=file_package_umid:format_tags=operational_pattern_ul,material_package_umid,timecode \
+    "$f" > "${f%.mxf}.headers.json"
+done
 
 # ---- FFmpeg's references ----
 # name.framemd5: decoded frames. name.packets.csv: demuxed packets as ffprobe lists them (the demuxer's own timestamps,

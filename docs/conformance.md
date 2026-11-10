@@ -409,10 +409,10 @@ file (FFmpeg's muxer writes no DefaultDuration for AAC; libavformat fills in 102
 to the track's next frame, which the test checks against FFmpeg's next pts; Opus's durations come from FFmpeg's
 parser, which reads the packets, so they too are compared that way.
 
-## MXF demuxing (partitions so far)
+## MXF demuxing (partitions and header metadata so far)
 
-The MXF demuxer is being built in slices (#469); so far it finds a file's partitions (SMPTE ST 377-1 6.2, 7, 12), with
-nothing public yet. `MxfPartitionTests` compares every samples/*.mxf with the partition packs FFmpeg's demuxer reads
+The MXF demuxer is being built in slices (#469); so far it finds a file's partitions (SMPTE ST 377-1 6.2, 7, 12) and
+reads its header metadata (9, Annexes A, B, F, G), with nothing public yet. `MxfPartitionTests` compares every samples/*.mxf with the partition packs FFmpeg's demuxer reads
 (`ffprobe -v trace -show_packets`, its "PartitionPack:" lines: ThisPartition, PreviousPartition, FooterPartition,
 IndexSID and BodySID, in name.partitions.csv), and checks that the three ways of finding them (the random index pack,
 the chain back from the footer by PreviousPartition, and a walk over every KLV item) agree on each. The samples, from
@@ -425,6 +425,20 @@ footer; mxf-h264-pipe-norip, found by the walk, where FFmpeg's demuxer never rea
 nine bytes refused), keys whose version byte differs (the fill item's two keys), partition packs whose essence
 container batch doesn't hold together, a random index pack that lists a partition that isn't there or gives a wrong
 BodySID, a PreviousPartition chain that loops, the run-in's 64 KiB limit, and a KLV item past the end of the file.
+
+`MxfHeaderTests` reads every sample's header metadata (the primer pack, the local sets, the strong references from the
+preface to the material package's tracks, their source clips, the file package's tracks and its descriptors, and the
+EssenceContainerData's stream IDs) and compares it with the streams FFmpeg's demuxer reads without decoding
+(`ffprobe -nofind_stream_info`, name.headers.json): codec, width and height, progressive or not, edit rate, duration,
+sample rate, channels, bits per sample, the file package's UMID, and the file's operational pattern, material package
+and start timecode. The samples add ProRes 422 HQ with a 16:9 picture over 160x120 and two stereo 16-bit PCM tracks
+(AES3 descriptors in a multiple descriptor) and a start timecode, DNxHR SQ, interlaced H.264 (separate fields: the
+stored height is a field's) with a drop-frame timecode, and MPEG-2. FFmpeg's demuxer reports the stored height (128
+for 120 coded in 16-row macroblocks: the decoder crops), so does MxfHeader; it gives no sample aspect ratio and no
+field order for separate fields (its decoder does, from the bitstream), so those are checked by hand-made header
+metadata instead: the aspect ratio over the display rectangle (4:3 over 720x576 is 16:15), BER local lengths, a tag
+the primer doesn't map, an unknown duration (-1), header metadata without a preface or a primer pack or with a
+property past its set, which partition's header metadata is read (closed first), and drop-frame timecodes.
 
 ## H.264
 

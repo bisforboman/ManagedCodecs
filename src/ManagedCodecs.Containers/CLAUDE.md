@@ -59,3 +59,8 @@ The repository's CLAUDE.md (process, core idea, cross-cutting gotchas) applies t
   each partition pack it reads under `ffprobe -v trace` (make-samples.sh's `.partitions.csv`), but never reads the
   footer of a pipe-written file whose random index pack is gone: `tools/mxf-rewrite.py` files take their source's
   reference instead (`--strip-rip`, `--run-in N`).
+- MXF stream facts: `ffprobe -find_stream_info` keeps decoder probing on (it is a boolean, on by default); only
+  `-nofind_stream_info` shows what FFmpeg's demuxer reads from the header metadata: the stored height (128 for H.264's
+  120 coded in macroblocks), no sample aspect ratio and no field order for separate fields, which come from the
+  decoder otherwise (make-samples.sh's `.headers.json`). Its codec names follow the descriptor's coding label, else the
+  essence container's; PCM in the AES3 and Broadcast Wave mappings is `pcm_s<bits>le` (ST 382: little-endian).

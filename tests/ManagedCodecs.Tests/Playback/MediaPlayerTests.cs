@@ -164,13 +164,16 @@ public class MediaPlayerTests
         Assert.Null(player.TakeFrame(TimeSpan.MaxValue));
     }
 
-    [Fact]
-    public void Loop_PlaysTheFileAgainAfterItsLastFrame()
+    /// <summary>Loop seeks back to the start: in MP4, and in a raw H.264 file, whose demuxer seeks to IDR pictures.</summary>
+    [Theory]
+    [InlineData("h264-audio-edits.mp4")]
+    [InlineData("h264-raw.h264")]
+    public void Loop_PlaysTheFileAgainAfterItsLastFrame(string name)
     {
-        var (frames, _) = Expected("h264-audio-edits.mp4", null);
+        var (frames, _) = Expected(name, null);
         var interval = frames[1].Time - frames[0].Time;
         var length = frames[^1].Time + interval;
-        using var player = new MediaPlayer(TestSamples.PathOf("h264-audio-edits.mp4"), new PlaybackOptions { Loop = true });
+        using var player = new MediaPlayer(TestSamples.PathOf(name), new PlaybackOptions { Loop = true });
         player.Start();
         var samples = new List<float>();
         for (int pass = 0; pass < 3; pass++)

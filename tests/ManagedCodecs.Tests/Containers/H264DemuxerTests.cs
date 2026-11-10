@@ -36,7 +36,6 @@ public class H264DemuxerTests
         }
 
         Assert.Equal(packets.Select(ReadCountingStream.InfoOf), ((H264Demuxer)demuxer).ReadPacketInfo());
-        Assert.Throws<NotSupportedException>(() => demuxer.Seek(0, 0));
     }
 
     /// <summary>The size is ffprobe's, the time base FFmpeg's frames' (the VUI's frame rate, a tick a frame).</summary>

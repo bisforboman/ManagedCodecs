@@ -349,6 +349,15 @@ cropping, VUI timing), which gives the decoder's size on every MP4 and Matroska 
 covered by a sample: field pictures in a raw stream (a field a packet, as FFmpeg's parser cuts them), and a stream
 without VUI timing (libx264 always writes it), which takes 25 frames a second.
 
+FFmpeg can't seek in a raw stream (`-ss` before `-i`: "could not seek"). `H264Demuxer.Seek` starts at the last IDR
+picture at or before the time, from the access units found when opening; the frame then shown at the time is FFmpeg's
+`-ss` after `-i` (which decodes from the start and drops the frames before it): on an IDR picture and between two
+(h264-raw at 400 and 500 ms), and in an open GOP (h264-raw-open-gop: libx264's `open-gop`, recovery points FFmpeg's
+parser flags as keyframes after the first IDR picture) at 900 ms (`SeekFrameTests`). A recovery point is no place to
+start: the B pictures shown before it need the GOP before, and the decoder times its frames by their place in output
+order from the read's start, so the read starts at the stream's start there (`SeekTests`, which checks every raw
+sample's reads after a seek; a mutation entry starts at the keyframes instead).
+
 ### Annex B (AVI)
 
 H.264 in AVI is Annex B: NAL units behind start codes, the SPS and PPS among them, no avcC. A decoder made without

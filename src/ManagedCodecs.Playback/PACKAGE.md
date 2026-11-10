@@ -40,5 +40,24 @@ if (player.IsFinished) { /* the video has ended; player.Error says why if it end
 - **Not a media player:** no seeking. `PlaybackOptions.Loop` plays the file again from its start, the frames' times
   running on.
 
+## Live cameras
+
+`LivePlayer` shows a camera serving MJPEG over HTTP (ESP32-CAM, mjpg-streamer, OctoPrint, most IP cameras'
+`video.mjpg`): the UI takes the newest frame on its render tick, older ones are dropped and counted, and a dropped or
+stalled connection is made again.
+
+```csharp
+using var player = new LivePlayer(new MjpegHttpSource(new Uri("http://camera.local/video.mjpg")));
+player.Start();
+
+// On each render tick:
+if (player.TakeLatest() is { } frame)
+{
+    // frame.Pixels: frame.Width x frame.Height, R, G, B, A from the top row, into the UI's bitmap
+    player.Return(frame);
+}
+// player.State (Connecting, Playing, Reconnecting, Failed) and player.Error for a status line.
+```
+
 Samples for MonoGame, Godot 4 .NET and Unity are in the repository's `tools/` folder. The
 [README](https://github.com/bisforboman/ManagedCodecs#in-game-video) has the rest.

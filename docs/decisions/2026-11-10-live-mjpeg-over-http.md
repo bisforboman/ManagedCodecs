@@ -28,10 +28,11 @@ pool, and nothing else.
 1. **`LivePlayer`**: a thread of its own reads the source, decodes, converts to RGBA and keeps **one slot**, the
    newest frame. `TakeLatest()` returns it (or null when nothing is newer than what was last taken), and `Return(frame)`
    gives the array back, as with `MediaPlayer`. A frame replaced before anyone took it counts as dropped.
-2. **Dropping before decoding**: MJPEG frames are independent, so when the slot is still full the reader skips a
-   part's decoding altogether and counts it (a camera at 30 fps on a panel that draws 10 costs 10 decodes, not 30).
-   H.264 can't skip decoding (later frames refer to earlier ones), so for RTSP the drop comes after decoding, before
-   conversion. The difference stays inside the source.
+2. **Dropping before decoding**: superseded by decision 5 (newest wins). As proposed: MJPEG frames are independent,
+   so when the slot is still full the reader skips a part's decoding altogether and counts it (a camera at 30 fps on
+   a panel that draws 10 costs 10 decodes, not 30). H.264 can't skip decoding (later frames refer to earlier ones),
+   so for RTSP the drop comes after decoding, before conversion.
+
 3. **`MjpegHttpSource(Uri, …)`** with an `HttpClient` the caller may pass in (proxies, certificates, a handler with
    `Credentials` for Basic or Digest, which `SocketsHttpHandler` answers). It reads
    `HttpCompletionOption.ResponseHeadersRead` and splits parts by the boundary:
@@ -66,11 +67,13 @@ pool, and nothing else.
   decoding, the stall timer, no retry on 401) gets an entry in `tools/mutation/mutations.py`.
 - **Real devices**, by hand, not CI: mjpg-streamer on a Raspberry Pi, an ESP32-CAM, and `ffmpeg -f mpjpeg` served over
   HTTP. Each is listed in docs/conformance.md with what it showed.
-- **AOT, WASM, Unity**: the AOT check covers the player on the test server. On WebAssembly, `HttpClient` streams
-  a response only with browser streaming enabled, and the camera must allow CORS. Both are documented, and a
-  WASM test is out of step 1. Unity's build compiles Playback's sources, so the
-  player is there too: its clock needs no `TimeProvider` (decision 3), and Mono's `HttpClient` streaming is to be
-  checked in CI's `unity` job.
+- **AOT, WASM, Unity**: Playback is `IsAotCompatible`, so the trimming and AOT analyzers check the player on every
+  build; running it under Native AOT waits for the samples (`tools/aot-check.sh` decodes samples, it doesn't run a
+  player). On WebAssembly, `HttpClient` streams a response only with browser streaming enabled, and the camera must
+  allow CORS: to be documented with the samples, and a WASM test is out of step 1. Unity's build compiles Playback's
+  sources, so the player is there too, its clock needing no `TimeProvider` (decision 3); whether Mono's `HttpClient`
+  streams a multipart response is not checked yet (`tools/unity-check.sh` decodes samples on Mono, it doesn't run the
+  player).
 
 ## Samples
 
@@ -92,5 +95,19 @@ Asked with the multiple-choice prompt; the owner took each proposal (2026-11-10)
 3. **The clock. Decided:** a small internal clock interface with a test double in place of `TimeProvider`, which
    netstandard2.1 lacks. No new package reaches the Unity build.
 4. **Samples. Decided:** Avalonia and WPF together.
+5. **Which frames to drop. Decided** (the owner, 2026-11-10, while building it): newest wins, in place of proposal 2.
+   The decoder decodes the newest JPEG received whenever it is free and replaces the slot; older JPEGs are dropped
+   undecoded only while it is busy (`SkippedFrames`), and a decoded frame replaced before it was taken counts as
+   `DroppedFrames`. Proposal 2's rule keeps the CPU at the UI's rate, but a UI slower than the camera (10 fps against
+   30) then takes a frame decoded right after its previous take, up to one UI interval old; newest wins shows the
+   freshest frame for a decode per camera frame.
 
 A public API change, so a new minor version, with a CHANGELOG line under "Unreleased" when it is built.
+
+## Since
+
+- `LivePlayer`, `MjpegHttpSource`, `LiveState` and `LiveStatistics` in Playback (and the Unity package), with
+  `MultipartReaderTests` and `LivePlayerTests` (a loopback server, a fake clock) and an entry in
+  `tools/mutation/mutations.py` for each guard: the two newest-wins slots, the final statuses, the stall counted from
+  the last part, the backoff's doubling and its reset, the first delimiter's boundary. The samples and a real camera
+  are next.

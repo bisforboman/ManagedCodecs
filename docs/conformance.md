@@ -67,6 +67,15 @@ from 11 bits on) are checked against T.81's Figure F.16 read bit by bit (`Huffma
 `HuffmanTableTests`, on the Annex K tables and on random ones, complete or not, with invalid DC sizes; the samples
 mostly reach the whole-coefficient entries. Its speed: docs/notes/mjpeg-entropy-2026-11.md.
 
+### MJPEG over HTTP
+
+`LivePlayer` adds no decoding of its own, so it has no second oracle: `LivePlayerTests` serves testsrc-420's JPEGs from
+a loopback HTTP server and compares each frame it shows with `MjpegDecoder`'s output for that JPEG (checked against
+FFmpeg above), bit for bit, in every layout `MultipartReaderTests` reads (with and without `Content-Length`, LF line
+ends, the boundary quirks), with damaged parts, a stream that ends, stalls or is refused (on a fake clock). No real
+camera is in CI, and none has been tried yet: mjpg-streamer, an ESP32-CAM and FFmpeg's `-f mpjpeg` are to be, and listed
+here with what they showed.
+
 ## Real films
 
 Every sample above is a test pattern encoded to isolate a feature. `tools/realworld.py` (nightly, `realworld.yml`, a job

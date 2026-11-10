@@ -8,7 +8,7 @@ public static class Demuxer
     public static IDemuxer Open(string path) => Open(File.OpenRead(path));
 
     /// <summary>
-    /// An <see cref="AviDemuxer"/>, <see cref="Mp4Demuxer"/>, <see cref="MatroskaDemuxer"/> (Matroska or WebM),
+    /// An <see cref="AviDemuxer"/>, <see cref="Mp4Demuxer"/>, <see cref="MatroskaDemuxer"/> (Matroska or WebM), <see cref="MxfDemuxer"/>,
     /// <see cref="WavDemuxer"/>, <see cref="H264Demuxer"/>, <see cref="AdtsDemuxer"/> or <see cref="Mp3Demuxer"/>, by the
     /// stream's first bytes.
     /// </summary>
@@ -45,6 +45,12 @@ public static class Demuxer
             if (read >= 4 && head[..4].SequenceEqual((ReadOnlySpan<byte>)[0x1A, 0x45, 0xDF, 0xA3]))
             {
                 return new MatroskaDemuxer(stream, leaveOpen);
+            }
+
+            // MXF: a header partition pack, after a run-in of under 64 KiB.
+            if (MxfDemuxer.Probe(stream))
+            {
+                return new MxfDemuxer(stream, leaveOpen);
             }
 
             // Raw H.264: Annex B, a start code and a parameter set, delimiter or SEI first.

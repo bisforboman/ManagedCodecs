@@ -64,3 +64,9 @@ The repository's CLAUDE.md (process, core idea, cross-cutting gotchas) applies t
   120 coded in macroblocks), no sample aspect ratio and no field order for separate fields, which come from the
   decoder otherwise (make-samples.sh's `.headers.json`). Its codec names follow the descriptor's coding label, else the
   essence container's; PCM in the AES3 and Broadcast Wave mappings is `pcm_s<bits>le` (ST 382: little-endian).
+- MXF packets: FFmpeg's demuxer itself gives no keyframe flags (libavformat's parsers and its intra-only rule add
+  them), no durations, and no video times where it reads no index entries (DNxHR's constant-size index; the footer's
+  index of a pipe-written file without a random index pack, which it never reaches); compare against `.packets.csv`
+  and the demuxer's own `.packets.nofillin.csv` as `MxfConformanceTests` does. Its H.264 packets' pts are their dts
+  (FFmpeg's muxer writes no temporal offsets), so `ffmpeg -f framemd5` drops a frame and retimes the rest: no H.264
+  frame reference for MXF yet.

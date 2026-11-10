@@ -55,6 +55,15 @@ internal sealed record MxfTrack
     /// <summary>The picture's height: a frame's, twice the stored field height for separate fields (ST 377-1 G.2.1); or 0.</summary>
     public int Height { get; init; }
 
+    /// <summary>
+    /// The sampled rectangle's width and height (ST 377-1 G.2.7, G.2.8): the picture a decoder gives, the stored rectangle
+    /// less its padding (a macroblock row's), the height a frame's as <see cref="Height"/> is; the stored size where the
+    /// descriptor gives none.
+    /// </summary>
+    public int SampledWidth { get; init; }
+
+    public int SampledHeight { get; init; }
+
     /// <summary>The sample aspect ratio the descriptor's AspectRatio and display size give, reduced; or null without one.</summary>
     public (int Numerator, int Denominator)? SampleAspectRatio { get; init; }
 
@@ -328,6 +337,8 @@ internal sealed class MxfHeader
             Codec = MxfLabels.PictureCodec(coding, common.EssenceContainer ?? []),
             Width = width,
             Height = height,
+            SampledWidth = (int)Math.Min(descriptor.UInt32(MxfLabels.SampledWidth) ?? (uint)width, int.MaxValue),
+            SampledHeight = descriptor.UInt32(MxfLabels.SampledHeight) is { } sampled ? (int)Math.Min(sampled * (ulong)fields, int.MaxValue) : height,
             SampleAspectRatio = sampleAspect,
             FrameLayout = layout,
             FieldDominance = descriptor.UInt8(MxfLabels.FieldDominance),

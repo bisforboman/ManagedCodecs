@@ -11,6 +11,17 @@ share internals, so each depends on the others at exactly its own version (`[X]`
 then reports a mix of versions (NU1107, or NU1608 for a newer one referenced directly) rather than letting it fail at
 run time.
 
+## Unreleased
+
+### Added
+
+- Containers: `MxfDemuxer` reads MXF files (SMPTE ST 377-1), and `Demuxer.Open` detects them: OP1a with frame-wrapped
+  essence in the generic container, the first picture and sound tracks, packets as FFmpeg's MXF demuxer gives them
+  (times from the edit units and the index table, keyframes from it), and `Seek`. H.264 is `CodecIds.H264` (as in
+  FFmpeg's, its packets' times are decode times where the index gives no temporal offsets) and PCM (AES3 and Broadcast
+  Wave mappings) `CodecIds.PcmS16Le`, `PcmS24Le` or `PcmS32Le`, which `PcmDecoder` decodes exactly as FFmpeg; ProRes,
+  DNxHR and MPEG-2 are named (`prores`, `dnxhd`, `mpeg2video`) but not decoded (issue #469).
+
 ## 0.12.0 – 2026-11-10
 
 PCM everywhere: `PcmDecoder` takes every integer and float PCM format in both byte orders, from AVI, QuickTime, ISO

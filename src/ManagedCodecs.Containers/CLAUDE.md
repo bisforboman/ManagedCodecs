@@ -1,4 +1,4 @@
-# Containers: notes for working on the AVI, MP4, Matroska, ADTS and MP3 demuxers
+# Containers: notes for working on the AVI, MP4, Matroska, ADTS, MP3 and MXF demuxers
 
 The repository's CLAUDE.md (process, core idea, cross-cutting gotchas) applies too.
 
@@ -54,3 +54,8 @@ The repository's CLAUDE.md (process, core idea, cross-cutting gotchas) applies t
   times the reorder delay later: frame k at k + 2 for libx264's B pictures. Seek by the index's keyframes therefore
   backs off H.264's largest delay (16 frames); a seek-frame reference shows the frame FFmpeg's `-ss` gives, from the
   keyframe before the one at the time.
+- MXF: FFmpeg's `-f mxf` muxer writes OP1a, frame-wrapped (`mxf_opatom` and `mxf_d10` are muxers of their own), audio
+  at 48 kHz only ("only 48khz is implemented"), and always a random index pack; written to a pipe, the header and body partition packs leave FooterPartition 0. Its demuxer logs
+  each partition pack it reads under `ffprobe -v trace` (make-samples.sh's `.partitions.csv`), but never reads the
+  footer of a pipe-written file whose random index pack is gone: `tools/mxf-rewrite.py` files take their source's
+  reference instead (`--strip-rip`, `--run-in N`).

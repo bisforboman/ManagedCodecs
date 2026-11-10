@@ -115,7 +115,7 @@ internal static partial class InterPrediction
         var weights = Vector128.Create((w0 & 0xFFFF) | (w1 << 16)).AsInt16();
         var offset = Vector128.Create(o);
         var round = Vector128.Create(1 << logWd);
-        byte shift = (byte)(logWd + 1);
+        int shift = logWd + 1;
         for (int j = 0; j < height; j++)
         {
             var p0 = Load(ref source0, j * stride);
@@ -137,8 +137,8 @@ internal static partial class InterPrediction
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        static Vector128<int> Weigh(Vector128<short> pairs, Vector128<short> weights, Vector128<int> round, byte shift, Vector128<int> offset) =>
-            Sse2.Add(Sse2.ShiftRightArithmetic(Sse2.Add(Sse2.MultiplyAddAdjacent(pairs, weights), round), shift), offset);
+        static Vector128<int> Weigh(Vector128<short> pairs, Vector128<short> weights, Vector128<int> round, int shift, Vector128<int> offset) =>
+            ((Sse2.MultiplyAddAdjacent(pairs, weights) + round) >> shift) + offset;
     }
 #endif
 

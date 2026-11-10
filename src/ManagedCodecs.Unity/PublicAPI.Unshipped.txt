@@ -1,4 +1,5 @@
 #nullable enable
+const ManagedCodecs.CodecIds.AdpcmImaWav = "ADPCM_IMA_WAV" -> string!
 ManagedCodecs.Containers.H264Demuxer
 ManagedCodecs.Containers.H264Demuxer.Audio.get -> ManagedCodecs.AudioStreamInfo?
 ManagedCodecs.Containers.H264Demuxer.Dispose() -> void
@@ -8,4 +9,10 @@ ManagedCodecs.Containers.H264Demuxer.ReadPackets() -> System.Collections.Generic
 ManagedCodecs.Containers.H264Demuxer.ReadPacketsAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerable<ManagedCodecs.Packet>!
 ManagedCodecs.Containers.H264Demuxer.Seek(long pts, int streamIndex) -> void
 ManagedCodecs.Containers.H264Demuxer.Video.get -> ManagedCodecs.VideoStreamInfo!
+ManagedCodecs.ImaAdpcmDecoder
+ManagedCodecs.ImaAdpcmDecoder.Channels.get -> int
+ManagedCodecs.ImaAdpcmDecoder.Decode(ManagedCodecs.Packet packet) -> ManagedCodecs.AudioFrame!
+ManagedCodecs.ImaAdpcmDecoder.Decode(System.ReadOnlySpan<byte> packet) -> ManagedCodecs.AudioFrame!
+ManagedCodecs.ImaAdpcmDecoder.ImaAdpcmDecoder(ManagedCodecs.AudioStreamInfo! stream) -> void
+ManagedCodecs.ImaAdpcmDecoder.SampleRate.get -> int
 static ManagedCodecs.Containers.H264Demuxer.Open(string! path) -> ManagedCodecs.Containers.H264Demuxer!

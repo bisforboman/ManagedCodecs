@@ -253,6 +253,7 @@ FFmpeg gives them) and its codec private data with FFmpeg's extradata, on every 
 | avi-mjpeg-aac | AAC, a frame a chunk, its AudioSpecificConfig in the WAVEFORMATEX's extra bytes |
 | avi-mjpeg-pcm | 16-bit PCM (dwSampleSize 2): a packet a chunk of 1024 samples, timed in samples; `CodecIds.PcmS16Le` |
 | avi-mjpeg-pcm-u8 | 8-bit unsigned PCM at 11.025 kHz, stereo (dwSampleSize 2); `CodecIds.PcmU8` |
+| avi-mjpeg-ima | 4-bit IMA ADPCM at 22.05 kHz, stereo, in 512-byte blocks: a packet a block, timed in blocks (dwScale wSamplesPerBlock); `CodecIds.AdpcmImaWav` |
 | avi-mjpeg-mp3-cbr | MP3 in the CBR layout of VirtualDub and older muxers, written by `tools/avi-mp3-cbr.py` |
 
 The CBR layout (dwScale 1, dwRate the bytes a second, dwSampleSize 1) cuts its chunks anywhere in a frame:
@@ -268,7 +269,12 @@ own output. `PcmDecoderTests` decodes the two PCM samples exactly as FFmpeg does
 output, compared bit for bit: (x - 128) / 128 and x / 32768) and `MediaPlayerTests` plays them; a packet's bytes after
 its last whole sample frame are ignored and one shorter than a frame refused, as FFmpeg's decoder does (checked on raw
 `-f s16le` input; a unit test and a mutation entry, since AVI chunks are whole frames in every sample). PCM of other
-depths (24 and 32 bits, WAVE_FORMAT_EXTENSIBLE) stays `0x0001`, not decoded. After a `Seek` (in either stream) the audio starts at its last packet at or before the time asked for,
+depths (24 and 32 bits, WAVE_FORMAT_EXTENSIBLE) stays `0x0001`, not decoded. `ImaAdpcmDecoderTests` decodes the IMA ADPCM sample exactly as
+FFmpeg does (name.ima.f32), and hand-built blocks as FFmpeg decodes the same blocks in a WAV file: its difference
+rounded once, (2 * magnitude + 1) * step / 8, up to 2 above IMA's recommended practice's shifts; a packet of several
+blocks; a block cut short, which gives its whole groups of 4 bytes a channel (a mutation entry each); the channels'
+turns. IMA ADPCM at 2, 3 and 5 bits (FFmpeg decodes them; its encoder writes 4) stays `0x0011`, not decoded
+(docs/decisions/2026-11-10-ima-adpcm.md). After a `Seek` (in either stream) the audio starts at its last packet at or before the time asked for,
 as `SeekTests` checks for every demuxer's streams.
 
 Audio with a dwSampleSize comes in pieces of chunks, as FFmpeg's demuxer cuts them: 1024 blocks below 32 bytes a block,
@@ -278,7 +284,7 @@ one block from 32 bytes up (IMA and MS ADPCM's 1024-byte blocks, 8-channel 32-bi
 sample shows the cutting: ffprobe did, on FFmpeg AVIs whose PCM chunks were merged into larger and odd-sized ones
 (16-bit mono and stereo, 24-bit stereo, 16-bit 5.1, 8-bit mono, 32-bit 7.1, IMA and MS ADPCM), and
 `AviDemuxerTests.CutsAudioChunksAsFfmpeg` checks its sizes and times on hand-built files. Not checked against FFmpeg:
-format tag 0x50 (MPEG Layer I and II) with Layer III frames, IMA ADPCM, AC-3. H.264 in AVI: see H.264, Annex B.
+format tag 0x50 (MPEG Layer I and II) with Layer III frames, Microsoft ADPCM, AC-3. H.264 in AVI: see H.264, Annex B.
 
 ## Matroska and WebM demuxing
 

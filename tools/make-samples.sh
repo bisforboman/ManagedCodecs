@@ -55,6 +55,12 @@ ff -f lavfi -i testsrc2=size=160x120:rate=25 -f lavfi -i "sine=frequency=440:sam
 # The audio runs 0.2 s past the video, as cameras' often does a little: ffprobe's duration is still the video's (VideoProbe).
 ff -f lavfi -i testsrc2=size=160x120:rate=25:d=1 -f lavfi -i "aevalsrc=0.4*sin(2*PI*440*t)|0.3*sin(2*PI*660*t):s=11025:d=1.2" \
   -c:v mjpeg -q:v 5 -c:a pcm_u8 samples/avi-mjpeg-pcm-u8.avi
+# IMA ADPCM, as cameras write it beside MJPEG (ImaAdpcmDecoder): stereo, for the channels' turns of 4 bytes, in blocks of
+# 512 bytes (FFmpeg's default is 1024), a loud tone beside a quiet one and a low one, so the step index runs from one
+# end of its table to the other.
+ff -f lavfi -i testsrc2=size=160x120:rate=25:d=1 \
+  -f lavfi -i "aevalsrc=0.95*sin(2*PI*440*t)|0.5*sin(2*PI*3000*t)*lt(t\,0.5)+0.01*sin(2*PI*90*t):s=22050:d=1" \
+  -c:v mjpeg -q:v 5 -c:a adpcm_ima_wav -block_size 512 samples/avi-mjpeg-ima.avi
 # H.264 in AVI: Annex B (start codes, the SPS and PPS in the stream, no avcC), which H264Decoder reads without a
 # configuration record: libx264's High with B pictures and a keyframe every 12 frames (its 'idx1' index flags them, which
 # Seek starts from), and Constrained Baseline beside MP3 (FFmpeg's muxer drops its second video frame while
@@ -970,10 +976,12 @@ for f in samples/*.mp4 samples/*.mkv samples/*.mp3 samples/*.avi; do
   [[ $f == *.mp4 ]] && ff -ignore_editlist 1 -i "$f" -map 0:a:0 -f f32le "${f%.*}.mp3.f32"
   ff -i "$f" -map 0:a:0 -f f32le "${f%.*}.mp3.trim.f32"
 done
-# PCM in AVI: name.pcm.f32, the decoded audio as FFmpeg gives it (PcmDecoder's values exactly).
+# PCM and IMA ADPCM in AVI: name.pcm.f32 and name.ima.f32, the decoded audio as FFmpeg gives it (PcmDecoder's and
+# ImaAdpcmDecoder's values exactly).
 for f in samples/*.avi; do
   case "$(ffprobe -v error -select_streams a:0 -show_entries stream=codec_name -of csv=p=0 "$f")" in
     pcm_u8 | pcm_s16le) ff -i "$f" -map 0:a:0 -f f32le "${f%.avi}.pcm.f32" ;;
+    adpcm_ima_wav) ff -i "$f" -map 0:a:0 -f f32le "${f%.avi}.ima.f32" ;;
   esac
 done
 # Raw MP3: packets as FFmpeg's demuxer gives them, and in .packets.csv with their skip-samples side data (the gapless

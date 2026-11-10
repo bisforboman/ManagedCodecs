@@ -49,6 +49,12 @@ public static class CodecIds
 
     /// <summary>PCM, signed 16-bit little-endian samples, channels interleaved (AVI's format tag 1 at 16 bits); <see cref="PcmDecoder"/>.</summary>
     public const string PcmS16Le = "PCM_S16LE";
+
+    /// <summary>
+    /// IMA ADPCM at 4 bits as Microsoft's WAVE format stores it, in blocks with a header a channel (AVI's format tag 0x11
+    /// at 4 bits; FFmpeg's adpcm_ima_wav); <see cref="ImaAdpcmDecoder"/>.
+    /// </summary>
+    public const string AdpcmImaWav = "ADPCM_IMA_WAV";
 }
 
 /// <summary>One compressed unit of data pulled out of a container, e.g. one MJPEG frame.</summary>

@@ -109,5 +109,9 @@ A public API change, so a new minor version, with a CHANGELOG line under "Unrele
 - `LivePlayer`, `MjpegHttpSource`, `LiveState` and `LiveStatistics` in Playback (and the Unity package), with
   `MultipartReaderTests` and `LivePlayerTests` (a loopback server, a fake clock) and an entry in
   `tools/mutation/mutations.py` for each guard: the two newest-wins slots, the final statuses, the stall counted from
-  the last part, the backoff's doubling and its reset, the first delimiter's boundary. The samples and a real camera
-  are next.
+  the last part, the backoff's doubling and its reset, the first delimiter's boundary.
+- The samples: `tools/ManagedCodecs.Avalonia.Sample` (`mclive`, with `--frames N` to exit after N frames) and
+  `tools/ManagedCodecs.Wpf.Sample` (`mclive-wpf`, RGBA swapped to BGRA, WPF having no RGBA format); CI builds both,
+  the WPF one through `EnableWindowsTargeting`. `mclive` ran under Xvfb against FFmpeg's `-f mpjpeg` HTTP server
+  (docs/conformance.md), which found that server's `application/octet-stream`: now read as multipart. Nobody has run
+  the WPF sample. A real camera is next.

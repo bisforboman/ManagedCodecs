@@ -16,11 +16,13 @@
     <Project Path="tests/ManagedCodecs.Tests/ManagedCodecs.Tests.csproj" />
   </Folder>
   <Folder Name="/tools/">
+    <Project Path="tools/ManagedCodecs.Avalonia.Sample/ManagedCodecs.Avalonia.Sample.csproj" />
     <Project Path="tools/ManagedCodecs.Cli/ManagedCodecs.Cli.csproj" />
     <Project Path="tools/ManagedCodecs.Godot/ManagedCodecs.Godot.csproj" />
     <Project Path="tools/ManagedCodecs.MonoGame.Sample/ManagedCodecs.MonoGame.Sample.csproj" />
     <Project Path="tools/ManagedCodecs.Unity.Sample/ManagedCodecs.Unity.Sample.csproj" />
     <Project Path="tools/ManagedCodecs.Fuzz/ManagedCodecs.Fuzz.csproj" />
+    <Project Path="tools/ManagedCodecs.Wpf.Sample/ManagedCodecs.Wpf.Sample.csproj" />
   </Folder>
   <Folder Name="/benchmarks/">
     <Project Path="benchmarks/ManagedCodecs.Benchmarks/ManagedCodecs.Benchmarks.csproj" />

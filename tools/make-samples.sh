@@ -926,6 +926,10 @@ ff -f lavfi -i testsrc2=s=256x144:r=25 -f lavfi -i sine=sample_rate=48000 -t 1 -
 ff -f lavfi -i testsrc2=s=160x120:r=30000/1001 -t 1 -c:v libx264 -pix_fmt yuv422p10le -flags +ildct+ilme -x264opts tff=1 \
   -timecode '01:00:00;02' samples/mxf-h264-interlaced.mxf
 ff -f lavfi -i testsrc2=s=160x120:r=25 -t 1 -c:v mpeg2video samples/mxf-mpeg2.mxf
+# mxf-h264-small: 8 frames of 64x48 H.264 (two GOPs) and 16-bit PCM, about 50 KB: the fuzzer's seed (it takes whole
+# files under 64 KiB, tools/ManagedCodecs.Fuzz), the other MXF samples being larger.
+ff -f lavfi -i testsrc2=s=64x48:r=25 -f lavfi -i sine=sample_rate=48000 -t 0.32 -c:v libx264 -pix_fmt yuv420p -g 4 \
+  -c:a pcm_s16le samples/mxf-h264-small.mxf
 # name.headers.json: the streams as FFmpeg's demuxer reads them from the header metadata, nothing decoded
 # (ffprobe -nofind_stream_info: with probing, the size and aspect ratio are the decoder's), and the file's operational
 # pattern, material package and start timecode.

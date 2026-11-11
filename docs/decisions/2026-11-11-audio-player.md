@@ -25,6 +25,9 @@ This record decides how such files play. Built in the PR after this record.
    So `Loop` works on every audio-only file, and `SeekTests` covers the two demuxers.
 3. **Scope:** the player only, with its tests (each sample's audio as the decoders give it) and `mcdec`. VideoTexture,
    the Godot node and the Unity sample keep needing video; playing sound-only files there is a later step.
+4. **The samples (the owner, later the same day):** mcplay, the Godot node and the Unity sample fall back to
+   `AudioPlayer` when a file has no video, each with its own sound output (a dynamic sound, an `AudioStreamGenerator`,
+   an `AudioClip`). `VideoTexture`, public in ManagedCodecs.MonoGame, stays video-only: no API change.
 
 ## Checks
 

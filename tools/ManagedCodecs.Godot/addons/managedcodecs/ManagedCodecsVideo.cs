@@ -8,6 +8,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Reflection;
 using Godot;
+using ManagedCodecs.Containers;
 using ManagedCodecs.H264;
 using ManagedCodecs.Playback;
 
@@ -17,13 +18,15 @@ namespace ManagedCodecs.GodotAddon;
 /// Plays a video file (H.264 or MJPEG, AAC or MP3 audio; MP4, Matroska or AVI) into this rectangle's texture, decoded by
 /// ManagedCodecs.Playback: a thread of its own decodes ahead (<see cref="MediaPlayer"/>), <see cref="_Process"/> shows
 /// the newest frame due by a clock started at the first frame (late ones are dropped), and the audio streams through
-/// an <see cref="AudioStreamGenerator"/>. Not a media player: no seeking, no pause. A global class, so the editor's Add
-/// Node dialog lists it once the project has built.
+/// an <see cref="AudioStreamGenerator"/>. A file without video (.wav, raw MP3 or AAC) plays its sound alone through
+/// <see cref="AudioPlayer"/>, the rectangle left empty. Not a media player: no seeking, no pause. A global class, so the
+/// editor's Add Node dialog lists it once the project has built.
 /// </summary>
 [GlobalClass]
 public partial class ManagedCodecsVideo : TextureRect
 {
     private MediaPlayer? _player;
+    private AudioPlayer? _audioOnly;
     private ImageTexture? _texture;
     private Image? _image;
     private double _clock = -1;
@@ -56,6 +59,19 @@ public partial class ManagedCodecsVideo : TextureRect
 
         try
         {
+            bool hasVideo;
+            using (var demuxer = Demuxer.Open(new MemoryStream(bytes, writable: false)))
+            {
+                hasVideo = demuxer.Video is not null;
+            }
+
+            if (!hasVideo)
+            {
+                _audioOnly = new AudioPlayer(new MemoryStream(bytes, writable: false), new PlaybackOptions { Loop = Loop });
+                _audioOnly.Start();
+                return;
+            }
+
             _player = new MediaPlayer(new MemoryStream(bytes, writable: false), new PlaybackOptions { Loop = Loop });
         }
         catch (Exception e) when (e is NotSupportedException or InvalidDataException)
@@ -79,6 +95,23 @@ public partial class ManagedCodecsVideo : TextureRect
     /// <inheritdoc/>
     public override void _Process(double delta)
     {
+        if (_audioOnly is not null)
+        {
+            // Sound only: the generator takes what it has room for; done once the player is and the buffer ran dry.
+            PushAudio();
+            if (_audioOnly.IsFinished && _pending is null)
+            {
+                if (_audioOnly.Error is { } audioError)
+                {
+                    GD.PrintErr($"ManagedCodecsVideo: {FilePath} stopped early: {audioError.Message}");
+                }
+
+                SetProcess(false);
+            }
+
+            return;
+        }
+
         if (_player is null)
         {
             return;
@@ -131,6 +164,8 @@ public partial class ManagedCodecsVideo : TextureRect
 
         _player?.Dispose();
         _player = null;
+        _audioOnly?.Dispose();
+        _audioOnly = null;
     }
 
     // A project reference to the decoders built in Godot's configuration (Debug, ExportDebug or ExportRelease: the .NET
@@ -176,22 +211,22 @@ public partial class ManagedCodecsVideo : TextureRect
     // the first frame is shown, so that the sound starts with the picture's clock (the first audio comes out of the
     // decoder before the first frame, by frame threading's delay and more), at the rate the first audio gives (HE-AAC's
     // output is twice its core's). Until then the audio is held here rather than in the player's bounded queue, which
-    // would stop the decoding before the first frame.
+    // would stop the decoding before the first frame. A sound-only file has no first frame to wait for: it starts at once.
     private void PushAudio()
     {
         if (_playback is null)
         {
-            while (_player!.TakeAudio() is { } early)
+            while (TakeAudio() is { } early)
             {
                 _early.Enqueue(early);
             }
 
-            if (_shown == 0)
+            if (_shown == 0 && _audioOnly is null)
             {
                 return;
             }
 
-            if (_pending is null && (_early.TryDequeue(out var first) || (first = _player.TakeAudio()) is not null))
+            if (_pending is null && (_early.TryDequeue(out var first) || (first = TakeAudio()) is not null))
             {
                 var player = new AudioStreamPlayer { Stream = new AudioStreamGenerator { MixRate = first.SampleRate, BufferLength = 0.5f } };
                 AddChild(player);
@@ -211,7 +246,7 @@ public partial class ManagedCodecsVideo : TextureRect
         {
             if (_pending is null)
             {
-                if (!_early.TryDequeue(out var chunk) && (chunk = _player!.TakeAudio()) is null)
+                if (!_early.TryDequeue(out var chunk) && (chunk = TakeAudio()) is null)
                 {
                     return;
                 }
@@ -233,4 +268,7 @@ public partial class ManagedCodecsVideo : TextureRect
             _pending = used < samples.Length ? (samples, used) : null;
         }
     }
+
+    // The next decoded audio, from the video's player or the sound-only one.
+    private AudioChunk? TakeAudio() => _player?.TakeAudio() ?? _audioOnly?.TakeAudio();
 }

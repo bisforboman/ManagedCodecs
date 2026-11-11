@@ -84,6 +84,28 @@ Real streams, by hand:
   it at first); its parts carry `Content-type` and `Content-length` in lower case and the boundary `ffmpeg`.
 - Not tried yet: mjpg-streamer, an ESP32-CAM, an IP camera.
 
+### H.264 over RTP
+
+`RtpH264Depacketizer` (RFC 6184, non-interleaved mode) is checked against FFmpeg 6.1's packetizer. make-samples.sh
+records the RTP that `ffmpeg -c copy -f rtp` sends for two MP4s (tools/rtp-record.py, which fails on a missing
+packet):
+- `h264-main-slices`: 4 slices a picture, B pictures. STAP-A carries the parameter sets and small slices, beside
+  single NAL units and FU-A.
+- `h264-bench-720p`: nearly every packet is an FU-A fragment.
+
+`RtpH264DepacketizerTests` depacketizes each and gets back the MP4's samples NAL unit for NAL unit, the SDP's
+`sprop-parameter-sets` (the avcC's SPS and PPS) before the first. None is marked damaged, the IDR flags match, and
+h264-main-slices decodes to the MP4's frames (MD5).
+
+FFmpeg never sends a lost packet, a cut fragment, a sequence number's wrap, a repeated packet, padding, CSRCs or a
+header extension, or the interleaved mode's types, so hand-built packets cover those.
+
+Losses, in the 720p recording with every 37th packet dropped (50 access units): 34 units are marked damaged, and 18
+keep no picture, since a 720p picture is one slice in many fragments and losing one drops the slice. Those 18 are
+skipped (`HasPicture`), since the decoder refuses a unit with no slice. With `ConcealErrors` the rest decode without an
+exception to 32 frames, 31 of them marked damaged until the stream's next IDR picture: the decoder conceals a lost
+picture as a reference but gives no frame for it.
+
 ## Real films
 
 Every sample above is a test pattern encoded to isolate a feature. `tools/realworld.py` (nightly, `realworld.yml`, a job

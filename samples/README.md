@@ -48,6 +48,9 @@ references:
 - `name.packets.csv`, `name.packets.nofillin.csv` and `name.pcm.f32` for MXF too (`MxfConformanceTests`, `PcmDecoderTests`).
 - `name.headers.json` (`ffprobe -nofind_stream_info -of json`): an MXF file's streams as FFmpeg's demuxer reads them from
   the header metadata, nothing decoded, and its operational pattern, material package and start timecode.
+- `name.rtp` and `name.sdp` (`ffmpeg -c copy -f rtp -sdp_file`, recorded by tools/rtp-record.py): FFmpeg's RTP for an
+  H.264 MP4, each packet as a 16-bit big-endian length then the packet, and its SDP (`sprop-parameter-sets` from the
+  avcC). `h264-main-slices` and `h264-bench-720p` only (`RtpH264DepacketizerTests`).
 - `name.f32`: decoded AAC as 32-bit floats, edit list ignored so it holds 1024 samples for every packet (raw AAC
   has no edit list); AAC is compared by value, within a tolerance.
 - `name.trim.f32`: the same as FFmpeg decodes it by default, trimmed by the edit list (`aac-edit-trim` has an edit

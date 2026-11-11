@@ -653,6 +653,24 @@ MUTATIONS = [
          find="                && !media.Equals(\"application/octet-stream\", StringComparison.OrdinalIgnoreCase))",
          replace="                && true)",
          tests="DisplayName~application/octet-stream"),
+    # ---- RTP H.264 (RtpH264Depacketizer, docs/decisions/2026-11-10-live-rtsp-h264.md): what FFmpeg's packetizer never
+    # sends. A new timestamp ends a unit whose marker packet was lost ...
+    dict(file="src/ManagedCodecs.Playback/RtpH264Depacketizer.cs",
+         find="if (_inUnit && header.Timestamp != _timestamp)", replace="if (false)",
+         tests="FullyQualifiedName~RtpH264DepacketizerTests.EndsAUnitAtANewTimestampWhenItsMarkerWasLost"),
+    # ... a gap damages the next unit too (it may have held its start) ...
+    dict(file="src/ManagedCodecs.Playback/RtpH264Depacketizer.cs",
+         find="            _damaged = _gapBeforeNext;\n", replace="            _damaged = false;\n",
+         tests="FullyQualifiedName~RtpH264DepacketizerTests.AGapBetweenUnitsDamagesOnlyTheNextOne"),
+    # ... fragments whose start was lost are dropped, not glued to nothing ...
+    dict(file="src/ManagedCodecs.Playback/RtpH264Depacketizer.cs",
+         find="            _damaged = true; // its start was lost: the rest of it is no use\n            return;\n",
+         replace="            _damaged = true; // its start was lost: the rest of it is no use\n",
+         tests="FullyQualifiedName~RtpH264DepacketizerTests.IgnoresFragmentsWhoseStartWasLost"),
+    # ... and a packet from before the expected one (repeated) is skipped, the sequence number compared modulo 2^16.
+    dict(file="src/ManagedCodecs.Playback/RtpH264Depacketizer.cs",
+         find="if (gap >= 0x8000)", replace="if (gap < 0)",
+         tests="FullyQualifiedName~RtpH264DepacketizerTests.IgnoresARepeatedPacket"),
     # MJPEG over HTTP: the first delimiter line names the boundary, whatever the header said (cameras get it wrong).
     dict(file="src/ManagedCodecs.Playback/MultipartReader.cs",
          find="            if (_first)\n", replace="            if (_boundary is null)\n",

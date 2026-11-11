@@ -419,10 +419,11 @@ file (FFmpeg's muxer writes no DefaultDuration for AAC; libavformat fills in 102
 to the track's next frame, which the test checks against FFmpeg's next pts; Opus's durations come from FFmpeg's
 parser, which reads the packets, so they too are compared that way.
 
-## MXF demuxing (partitions and header metadata so far)
+## MXF demuxing
 
-The MXF demuxer is being built in slices (#469); so far it finds a file's partitions (SMPTE ST 377-1 6.2, 7, 12) and
-reads its header metadata (9, Annexes A, B, F, G), with nothing public yet. `MxfPartitionTests` compares every samples/*.mxf with the partition packs FFmpeg's demuxer reads
+`MxfDemuxer` (#469) finds a file's partitions (SMPTE ST 377-1 6.2, 7, 12), reads its header metadata (9, Annexes A,
+B, F, G) and its index tables (11), and gives the frame-wrapped essence of the first picture and sound tracks as
+packets. `MxfPartitionTests` compares every samples/*.mxf with the partition packs FFmpeg's demuxer reads
 (`ffprobe -v trace -show_packets`, its "PartitionPack:" lines: ThisPartition, PreviousPartition, FooterPartition,
 IndexSID and BodySID, in name.partitions.csv), and checks that the three ways of finding them (the random index pack,
 the chain back from the footer by PreviousPartition, and a walk over every KLV item) agree on each. The samples, from
@@ -450,6 +451,31 @@ metadata instead: the aspect ratio over the display rectangle (4:3 over 720x576 
 the primer doesn't map, an unknown duration (-1), header metadata without a preface or a primer pack or with a
 property past its set, which partition's header metadata is read (closed first), and drop-frame timecodes.
 
+
+`MxfConformanceTests` compares every packet of every sample's video and first audio stream with FFmpeg's (`ffprobe
+-show_packets -show_data_hash MD5`, name.packets.csv): file order, pts, size, MD5, keyframe flag and duration, and the
+decode times with FFmpeg's MXF demuxer's own (`-fflags +nofillin+noparse`, name.packets.nofillin.csv). Video ticks are
+edit units; audio ticks are samples, a packet's duration its bytes over the block alignment. Where FFmpeg differs from
+what the file says, the file is followed and the test says so:
+
+- Keyframes: libavformat marks every packet of an intra-only codec (ProRes, DNxHR) a keyframe, while FFmpeg's muxer
+  leaves their index entries without the random access flag; `MxfDemuxer` does the same for those codecs, and takes the
+  index's flag for the others (H.264 and MPEG-2's first packet).
+- Times without an index FFmpeg reads: DNxHR's index has a constant edit unit size and no entries, and FFmpeg's demuxer
+  gives its video no times (libavformat fills in 0, 1, 2, which `MxfDemuxer`'s are); a pipe-written file without a
+  random index pack (mxf-h264-pipe-norip) has its index in the footer, which FFmpeg's demuxer never reaches, so it gives
+  no video times at all, where `MxfDemuxer` walks to the footer and times the packets by edit unit.
+- Decode times: libavformat moves MPEG-2's back a frame (its parser's reorder delay); FFmpeg's demuxer's own are the
+  edit units, which `MxfDemuxer`'s are.
+- Temporal offsets: FFmpeg's muxer writes H.264 unreordered (PosTableIndex 0, offsets 0), so its packets' pts are their
+  dts though libx264 writes B pictures. `MxfConformanceTests` rewrites an index to check that offsets are applied only
+  to an element the index says is reordered, and that the random access flag sets the keyframes.
+
+`PcmDecoderTests` decodes every sample's audio exactly as FFmpeg does (name.pcm.f32), and `SeekTests` seeks in every
+sample. H.264 frames are not yet compared with FFmpeg's: their packets carry decode times as presentation times, which
+FFmpeg's command line answers by dropping a frame and retiming the rest (the frames themselves match up to there); AVI
+had the same, and handling it for MXF is a later slice. The picture size is the sampled rectangle's (120 rows for
+H.264's 128 stored), which is what the decoders give; FFmpeg's demuxer reports the stored size.
 ## H.264
 
 ### Raw H.264 files

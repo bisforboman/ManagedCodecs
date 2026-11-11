@@ -194,6 +194,20 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.Containers/Mxf/MxfPartitions.cs",
          find="if (TryFromFooter(stream, runIn, header, out partitions))", replace="if (false)",
          tests="FullyQualifiedName~MxfPartitionTests"),
+    # ---- MXF demuxer (packets as FFmpeg's)
+    # An intra-only codec's packets are all keyframes, whatever the index says (FFmpeg's muxer leaves ProRes without
+    # the random access flag: mxf-prores-pcm16).
+    dict(file="src/ManagedCodecs.Containers/Mxf/MxfDemuxer.cs",
+         find="bool keyframe = intra || (entry", replace="bool keyframe = (entry",
+         tests="FullyQualifiedName~MxfConformanceTests"),
+    # The temporal offset applies only where the index says the element is reordered (11.2.3, PosTableIndex -1).
+    dict(file="src/ManagedCodecs.Containers/Mxf/MxfDemuxer.cs",
+         find="entry is { } e && index!.FirstElementReordered ? e.TemporalOffset : 0", replace="entry is { } e ? e.TemporalOffset : 0",
+         tests="FullyQualifiedName~MxfConformanceTests"),
+    # Each stream starts at its own keyframe at or before the time (the audio's every packet).
+    dict(file="src/ManagedCodecs.Containers/Mxf/MxfDemuxer.cs",
+         find="_audioStart = Start(audio.StreamIndex, Rescale(pts, timeBase, audio.TimeBase));", replace="",
+         tests="FullyQualifiedName~MxfConformanceTests|DisplayName~mxf"),
     # ---- MXF header metadata (SMPTE ST 377-1 9, Annexes B, F, G)
     # One fill item may come between the partition pack and the primer pack (9.1), as FFmpeg's muxer writes.
     dict(file="src/ManagedCodecs.Containers/Mxf/MxfHeaderMetadata.cs",

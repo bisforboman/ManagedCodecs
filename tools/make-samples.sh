@@ -922,6 +922,19 @@ for f in samples/mxf-*.mxf; do
     stream=index,codec_name,codec_type,width,height,field_order,time_base,duration_ts,sample_rate,channels,bits_per_sample:stream_tags=file_package_umid:format_tags=operational_pattern_ul,material_package_umid,timecode \
     "$f" > "${f%.mxf}.headers.json"
 done
+# MxfDemuxer's packets: name.packets.csv as ffprobe lists them (keyframe flags from libavformat's parsers, durations it
+# fills in), and name.packets.nofillin.csv as FFmpeg's MXF demuxer itself gives them (decode times are its own there;
+# libavformat moves MPEG-2's back a frame).
+for f in samples/mxf-*.mxf; do
+  ffprobe -v error -show_packets -show_data_hash MD5 -show_entries packet=stream_index,pts,dts,duration,size,flags,data_hash \
+    -of csv=p=0 "$f" > "${f%.mxf}.packets.csv"
+  ffprobe -v error -fflags +nofillin+noparse -show_packets -show_entries packet=stream_index,pts,dts,duration,size,flags \
+    -of csv=p=0 "$f" > "${f%.mxf}.packets.nofillin.csv"
+  # name.pcm.f32: the first audio stream decoded, for PcmDecoder on MXF's little-endian PCM.
+  if [ -n "$(ffprobe -v error -select_streams a:0 -show_entries stream=index -of csv=p=0 "$f")" ]; then
+    ff -i "$f" -map 0:a:0 -f f32le "${f%.mxf}.pcm.f32"
+  fi
+done
 
 # ---- FFmpeg's references ----
 # name.framemd5: decoded frames. name.packets.csv: demuxed packets as ffprobe lists them (the demuxer's own timestamps,

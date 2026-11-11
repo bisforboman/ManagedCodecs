@@ -206,7 +206,9 @@ public class LiveRtspTests
             await Task.Delay(Timeout.Infinite, play.Token);
         });
 
-        using var player = new LivePlayer(new RtspSource(server.Uri));
+        // The whole recording arrives at once on the real clock: a slow runner (ARM64 without SIMD) falls more than the
+        // default MaxLag behind and rightly skips, which isn't what this test is about.
+        using var player = new LivePlayer(new RtspSource(server.Uri) { MaxLag = TimeSpan.FromHours(1) });
         player.Start();
         WaitFor(player, () => player.Statistics.ReceivedFrames == 50 && player.Statistics.DecodedFrames > 0 ? player : null);
         Assert.NotNull(WaitFor(player, player.TakeLatest));

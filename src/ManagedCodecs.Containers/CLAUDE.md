@@ -69,5 +69,6 @@ The repository's CLAUDE.md (process, core idea, cross-cutting gotchas) applies t
   index of a pipe-written file without a random index pack, which it never reaches); compare against `.packets.csv`
   and the demuxer's own `.packets.nofillin.csv` as `MxfConformanceTests` does. Its H.264 packets' pts are their dts
   (FFmpeg's muxer writes no temporal offsets), so `ffmpeg -f framemd5` drops a frame and retimes the rest; with
-  `-fps_mode passthrough` it keeps every frame (`.h264.framemd5`), guessing the first one's time and repeating the last
-  one's, and numbers them from 0 where its packets have no times.
+  `-fps_mode passthrough` it keeps every frame (`.h264.framemd5`). Its frame times there are a guess, not a reference:
+  k + D on the 2-second samples, 0 2 3 5 6 7 7 7 on mxf-h264-small, and from 0 where its packets have no times;
+  compare the MD5s only.

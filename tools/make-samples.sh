@@ -1143,4 +1143,19 @@ for f in samples/*.mp4 samples/*.aac; do
   fi
 done
 
+# name.rtp and name.sdp: FFmpeg's RTP packetizer (RFC 6184, packetization-mode 1) on an H.264 sample, the packets
+# recorded as sent (tools/rtp-record.py: a 16-bit length, then the packet; it fails on a missing packet), for
+# RtpH264DepacketizerTests: depacketized, they must give back the MP4's samples NAL unit for NAL unit. h264-main-slices
+# puts the parameter sets and small slices into STAP-A and sends single NAL units; h264-bench-720p cuts most slices into
+# FU-A. The MP4's avcC goes to the SDP as sprop-parameter-sets (docs/decisions/2026-11-10-live-rtsp-h264.md).
+port=5040
+for f in samples/h264-main-slices.mp4 samples/h264-bench-720p.mp4; do
+  python3 tools/rtp-record.py "$port" "${f%.mp4}.rtp" &
+  recorder=$!
+  sleep 0.5
+  ffmpeg -nostdin -hide_banner -loglevel error -y -i "$f" -an -c:v copy -f rtp -sdp_file "${f%.mp4}.sdp" "rtp://127.0.0.1:$port"
+  wait "$recorder"
+  port=$((port + 2))
+done
+
 echo "Samples and references written to samples/."

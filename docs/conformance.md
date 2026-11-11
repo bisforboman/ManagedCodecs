@@ -84,6 +84,28 @@ Real streams, by hand:
   it at first); its parts carry `Content-type` and `Content-length` in lower case and the boundary `ffmpeg`.
 - Not tried yet: mjpg-streamer, an ESP32-CAM, an IP camera.
 
+### H.264 over RTP
+
+`RtpH264Depacketizer` (RFC 6184, non-interleaved mode) is checked against FFmpeg 6.1's packetizer. make-samples.sh
+records the RTP that `ffmpeg -c copy -f rtp` sends for two MP4s (tools/rtp-record.py, which fails on a missing
+packet):
+- `h264-main-slices`: 4 slices a picture, B pictures. STAP-A carries the parameter sets and small slices, beside
+  single NAL units and FU-A.
+- `h264-bench-720p`: nearly every packet is an FU-A fragment.
+
+`RtpH264DepacketizerTests` depacketizes each and gets back the MP4's samples NAL unit for NAL unit, the SDP's
+`sprop-parameter-sets` (the avcC's SPS and PPS) before the first. None is marked damaged, the IDR flags match, and
+h264-main-slices decodes to the MP4's frames (MD5).
+
+FFmpeg never sends a lost packet, a cut fragment, a sequence number's wrap, a repeated packet, padding, CSRCs or a
+header extension, or the interleaved mode's types, so hand-built packets cover those.
+
+Losses, in the 720p recording with every 37th packet dropped (50 access units): 34 units are marked damaged, and 18
+keep no picture, since a 720p picture is one slice in many fragments and losing one drops the slice. Those 18 are
+skipped (`HasPicture`), since the decoder refuses a unit with no slice. With `ConcealErrors` the rest decode without an
+exception to 32 frames, 31 of them marked damaged until the stream's next IDR picture: the decoder conceals a lost
+picture as a reference but gives no frame for it.
+
 ## Real films
 
 Every sample above is a test pattern encoded to isolate a feature. `tools/realworld.py` (nightly, `realworld.yml`, a job
@@ -1421,6 +1443,15 @@ instructions a frame on the first 360 frames of the 480p Sintel trailer (-1.8%).
 chroma functions fell from 0.70 to 0.81 of the untouched set (`FilterMacroblock420`, `HalfHorizontal`,
 `Cabac.ResidualBlock`) to 0.67 to 0.73 on the 1080p frames (perf, six runs each, the order alternating, lower in every
 pair), about 0.5% of the frame: at 1080p chroma's time is mostly reference reads and per-block setup, not the loop.
+Spatial direct's colZeroFlag (8.4.1.2.2) read each 8x8 block's co-located motion through `CoLocated`, which handles
+every layout (field pictures, MBAFF, frames over field pairs) and returns the reference's Id, parity and vertical scale
+as well, all of which colZeroFlag ignores. `ColZero` now reads a frame over a frame (no MBAFF, the co-located picture
+not coded as fields: the macroblock at the same address, no rescaling) straight from its arrays, after the same wait
+for the co-located motion; other layouts still go through `CoLocated`. Widening its vector range by one fails 144
+conformance tests. On the 1080p Sintel frames spatial direct's functions (`DirectMotion`, `CoLocated`, `ColZero`) fell
+from 0.23 to 0.26 of an untouched set (`FilterMacroblock420`, `HalfHorizontal`, `Cabac.ResidualBlock`,
+`PredictChromaPair`) to 0.21 to 0.23 (perf, six runs each, the order alternating, every branch run below every base
+run): about 3.15 to 2.75% of the frame.
 
 ## AAC
 
@@ -1799,6 +1830,13 @@ of 1024 samples a block, decoded block after block into one frame; with CRCs, th
 the blocks but the first, and each block has its own. No encoder at hand writes them, so the tests join a sample's
 frames, 1 to 4 under one header, with and without CRCs, AAC LC and HE-AAC (the SBR state runs on across blocks), and
 require the same samples as the frames one by one.
+
+Both raw demuxers (ADTS here, raw MP3 below) seek, for `AudioPlayer`'s `Loop` (docs/decisions/2026-11-11-audio-player.md):
+a read starts at the frame holding the time, from the frames found when opening, its times and sequence numbers the
+file's. `SeekTests` checks each sample's reads after a seek as the tail of a read from the start, and that MP3's encoder
+delay (the first packet's SkipSamples) comes only with a read from the first frame; a mutation entry each. FFmpeg's
+`-ss` on such files is not compared (it seeks by bitrate or its parser, not by frames). `AudioPlayerTests` plays every
+.wav, raw MP3 and AAC sample: its decoders' own output, interleaved as stereo, and again on `Loop`.
 
 ## Raw MP3
 

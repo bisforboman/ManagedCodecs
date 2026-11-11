@@ -33,7 +33,7 @@ in between. That comparison is not measured here.
 | `src/ManagedCodecs.Mjpeg` | `MjpegDecoder`: baseline/extended Huffman JPEG, interlaced AVI1, bit-exact with FFmpeg |
 | `src/ManagedCodecs.H264` | `H264Decoder`: Constrained Baseline, Main, High, High 10, High 4:2:2 and High 4:4:4 Predictive profile H.264 (CAVLC, CABAC, I/P/B, weighted prediction, 8x8 transform, scaling matrices, deblocking, monochrome, 4:2:0, 4:2:2 and 4:4:4, also as separate colour planes, 8 to 14 bits, lossless, progressive and interlaced), bit-exact |
 | `src/ManagedCodecs.Thumbnails` | `VideoProbe`: a video file's duration, displayed size, codecs and rotation as ffprobe reports them, without decoding; `VideoThumbnail`: a frame as a small upright RGBA image, PNG or JPEG; the `ManagedCodecs.Thumbnails` package (see Probing a video, Thumbnails; docs/decisions/2026-10-31-thumbnails.md) |
-| `src/ManagedCodecs.Playback` | `MediaPlayer`: plays a video file for a game engine, decoding on a thread of its own into RGBA frames and float stereo, and handing the game loop the frame due by its clock; `LivePlayer`: shows a camera's MJPEG over HTTP, the newest frame each render; the `ManagedCodecs.Playback` package (see In-game video, Live cameras) |
+| `src/ManagedCodecs.Playback` | `MediaPlayer`: plays a video file for a game engine, decoding on a thread of its own into RGBA frames and float stereo, and handing the game loop the frame due by its clock; `AudioPlayer`: the same for a file's audio alone (.wav, raw MP3 and AAC); `LivePlayer`: shows a camera's MJPEG over HTTP, the newest frame each render; the `ManagedCodecs.Playback` package (see In-game video, Live cameras) |
 | `src/ManagedCodecs.MonoGame` | `VideoTexture`: `MediaPlayer` for MonoGame, into a `Texture2D` and a `DynamicSoundEffectInstance`, drawn letterboxed and upright; the `ManagedCodecs.MonoGame` package (see In-game video) |
 | `src/ManagedCodecs.Unity` | The netstandard2.1 build for Unity (Mono, IL2CPP): every decoder's sources (and Thumbnails' and Playback's) in one assembly, without the vector paths, 1 to 3.4 times slower on CoreCLR; the `ManagedCodecs.Unity` package (see Unity) |
 | `src/ManagedCodecs.Aac` | `AacDecoder`: AAC LC (mono to 7.1, M/S, intensity, PNS, TNS), within 5e-7 of FFmpeg's float output; HE-AAC (spectral band replication) |
@@ -46,6 +46,7 @@ in between. That comparison is not measured here.
 | `tools/ManagedCodecs.MonoGame.Sample` | `mcplay`: a MonoGame `Game` around `VideoTexture` (`ManagedCodecs.MonoGame`) (its README has the 1080p measurements; issue #254) |
 | `tools/ManagedCodecs.Unity.Sample` | A Unity `MonoBehaviour` that plays a video into a `Texture2D` and an `AudioClip` with the `ManagedCodecs.Unity` package (its `MediaPlayer`); CI compiles it against stubs of UnityEngine, Unity has not run it |
 | `tools/make-samples.sh` | Generates the test samples and FFmpeg's references |
+| `tools/rtp-record.py` | Records the RTP packets FFmpeg sends to a loopback UDP port, for the RTP depacketizer's tests (make-samples.sh) |
 | `tools/compare.sh` | Times mcdec and FFmpeg on the same file |
 | `tools/h264-stages.py` | Shares of H.264 decoding by stage, for mcdec and FFmpeg, from perf and callgrind profiles (docs/notes/h264-stages-2026-11.md) |
 | `tools/realworld.py` | Decodes real public films with mcdec and FFmpeg and compares them (nightly, `realworld.yml`) |
@@ -473,6 +474,10 @@ while (player.TakeAudio() is { } audio) { /* audio.Samples at audio.SampleRate t
 - **Samples:** `tools/ManagedCodecs.MonoGame.Sample` (mcplay, around `VideoTexture`), `tools/ManagedCodecs.Godot` (a Godot 4 .NET node) and
   `tools/ManagedCodecs.Unity.Sample` (a `MonoBehaviour`; `ManagedCodecs.Unity` holds `MediaPlayer` too). Only mcplay
   has been run; CI builds the others.
+- **Audio-only files:** `MediaPlayer` needs video; `AudioPlayer` plays a file's audio alone (`.wav`, raw MP3 and AAC,
+  or the audio of any file the demuxers open), the same way: `Start()`, then `TakeAudio()` as the sound has room, with
+  `Loop`, `IsFinished` and `Error` (docs/decisions/2026-11-11-audio-player.md). The samples and `VideoTexture` don't
+  use it yet.
 
 ### Live cameras
 

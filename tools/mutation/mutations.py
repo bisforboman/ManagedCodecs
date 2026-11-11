@@ -9,8 +9,9 @@ DELAYED_THREADS = "DisplayName~MatchesFfmpegWithDelayedThreads"
 
 MUTATIONS = [
     # ---- Frame threading: a picture reads only what an earlier one has reported final (src/ManagedCodecs.H264/CLAUDE.md, Frame threading).
-    # Not listed, because breaking them alone fails no test: the co-located motion wait (PictureDecoder.Direct.cs), which
-    # the motion compensation waits before it cover in practice, and ListsDamaged's wait for each picture in the lists
+    # Not listed, because breaking them alone fails no test: the co-located motion waits (PictureDecoder.Direct.cs,
+    # CoLocated and ColZero), which the motion compensation waits before them cover in practice, and ListsDamaged's
+    # wait for each picture in the lists
     # (H264Decoder.cs), which the motion compensation waits cover too: a picture reads its references' bottom rows,
     # final only once the reference is done and its Damaged set.
 
@@ -653,6 +654,24 @@ MUTATIONS = [
          find="                && !media.Equals(\"application/octet-stream\", StringComparison.OrdinalIgnoreCase))",
          replace="                && true)",
          tests="DisplayName~application/octet-stream"),
+    # ---- RTP H.264 (RtpH264Depacketizer, docs/decisions/2026-11-10-live-rtsp-h264.md): what FFmpeg's packetizer never
+    # sends. A new timestamp ends a unit whose marker packet was lost ...
+    dict(file="src/ManagedCodecs.Playback/RtpH264Depacketizer.cs",
+         find="if (_inUnit && header.Timestamp != _timestamp)", replace="if (false)",
+         tests="FullyQualifiedName~RtpH264DepacketizerTests.EndsAUnitAtANewTimestampWhenItsMarkerWasLost"),
+    # ... a gap damages the next unit too (it may have held its start) ...
+    dict(file="src/ManagedCodecs.Playback/RtpH264Depacketizer.cs",
+         find="            _damaged = _gapBeforeNext;\n", replace="            _damaged = false;\n",
+         tests="FullyQualifiedName~RtpH264DepacketizerTests.AGapBetweenUnitsDamagesOnlyTheNextOne"),
+    # ... fragments whose start was lost are dropped, not glued to nothing ...
+    dict(file="src/ManagedCodecs.Playback/RtpH264Depacketizer.cs",
+         find="            _damaged = true; // its start was lost: the rest of it is no use\n            return;\n",
+         replace="            _damaged = true; // its start was lost: the rest of it is no use\n",
+         tests="FullyQualifiedName~RtpH264DepacketizerTests.IgnoresFragmentsWhoseStartWasLost"),
+    # ... and a packet from before the expected one (repeated) is skipped, the sequence number compared modulo 2^16.
+    dict(file="src/ManagedCodecs.Playback/RtpH264Depacketizer.cs",
+         find="if (gap >= 0x8000)", replace="if (gap < 0)",
+         tests="FullyQualifiedName~RtpH264DepacketizerTests.IgnoresARepeatedPacket"),
     # MJPEG over HTTP: the first delimiter line names the boundary, whatever the header said (cameras get it wrong).
     dict(file="src/ManagedCodecs.Playback/MultipartReader.cs",
          find="            if (_first)\n", replace="            if (_boundary is null)\n",
@@ -675,6 +694,13 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.Containers/Mp4/Mp4Demuxer.cs",
          find="int frameBytes = _isoPcm && _stsz.Length >= 12", replace="int frameBytes = false && _stsz.Length >= 12",
          tests="DisplayName~mp4-pcm-s24le"),
+    # ---- Raw AAC and MP3 seek (docs/decisions/2026-11-11-audio-player.md): a read starts at the frame a Seek found.
+    dict(file="src/ManagedCodecs.Containers/Adts/AdtsDemuxer.cs",
+         find="if (i >= _start)", replace="if (true)",
+         tests="FullyQualifiedName~SeekTests"),
+    dict(file="src/ManagedCodecs.Containers/Mp3/Mp3Demuxer.cs",
+         find="if (sequence < _start)", replace="if (false)",
+         tests="FullyQualifiedName~SeekTests"),
     # ---- PCM: bytes after a packet's last whole sample frame are ignored, as FFmpeg's decoder ignores them (no spec).
     dict(file="src/ManagedCodecs.Core/PcmDecoder.cs",
          find="if (packet.Length > 0 && packet.Length < frameBytes)", replace="if (packet.Length % frameBytes != 0)",

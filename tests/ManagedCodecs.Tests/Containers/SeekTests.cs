@@ -3,7 +3,7 @@ using ManagedCodecs.Containers;
 namespace ManagedCodecs.Tests.Containers;
 
 /// <summary>
-/// <see cref="IDemuxer.Seek"/> of the MP4, AVI, Matroska, raw H.264, WAVE and MXF demuxers: after a seek, each stream's packets are the tail of a read
+/// <see cref="IDemuxer.Seek"/> of the MP4, AVI, Matroska, raw H.264, WAVE, MXF, ADTS and raw MP3 demuxers: after a seek, each stream's packets are the tail of a read
 /// from the start, from the last keyframe whose pts is at or before the time (the other stream's at the same instant),
 /// for every sample, at each keyframe's time, just after it, between keyframes, before the first and past the last.
 /// The decoded frame at a time is checked against FFmpeg's <c>-ss</c> in <see cref="SeekFrameTests"/>.
@@ -20,7 +20,7 @@ public class SeekTests
 
         foreach (var file in Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories).Order())
         {
-            if (Path.GetExtension(file) is ".avi" or ".mp4" or ".mkv" or ".webm" or ".h264" or ".264" or ".wav" or ".mxf")
+            if (Path.GetExtension(file) is ".avi" or ".mp4" or ".mkv" or ".webm" or ".h264" or ".264" or ".wav" or ".mxf" or ".aac" or ".mp3")
             {
                 files.Add(Path.GetRelativePath(directory, file));
             }
@@ -124,6 +124,10 @@ public class SeekTests
         Assert.Throws<ArgumentOutOfRangeException>(() => raw.Seek(0, 1));
         using var wav = new WavDemuxer(new MemoryStream(File.ReadAllBytes(TestSamples.PathOf("wav-pcm-s16.wav"))));
         Assert.Throws<ArgumentOutOfRangeException>(() => wav.Seek(0, 1));
+        using var adts = Demuxer.Open(TestSamples.PathOf("aac-pulse.aac"));
+        Assert.Throws<ArgumentOutOfRangeException>(() => adts.Seek(0, 1));
+        using var mp3 = Demuxer.Open(TestSamples.PathOf("mp3-raw-cbr.mp3"));
+        Assert.Throws<ArgumentOutOfRangeException>(() => mp3.Seek(0, 1));
     }
 
     [Fact]
@@ -138,11 +142,21 @@ public class SeekTests
         Assert.DoesNotContain(demuxer.ReadPackets(), p => p.StreamIndex == video.StreamIndex);
     }
 
+    /// <summary>
+    /// A raw MP3 file's gapless start (the encoder's delay, the first packet's SkipSamples) is skipped by a read from its
+    /// first frame only: from the start, and after a seek back to it, as Loop does; a later frame skips nothing.
+    /// </summary>
     [Fact]
-    public void AdtsCannotSeek()
+    public void Mp3SkipsTheEncoderDelayFromItsFirstFrameOnly()
     {
-        using var adts = Demuxer.Open(TestSamples.PathOf("aac-pulse.aac"));
-        Assert.Throws<NotSupportedException>(() => adts.Seek(0, adts.Audio!.StreamIndex));
+        using var mp3 = Demuxer.Open(TestSamples.PathOf("mp3-raw-cbr.mp3"));
+        int skip = mp3.ReadPackets().First().SkipSamples;
+        Assert.True(skip > 0);
+        mp3.Seek(1152 * 5, 0);
+        var later = mp3.ReadPackets().First();
+        Assert.Equal((5L, 0), (later.Sequence, later.SkipSamples));
+        mp3.Seek(long.MinValue / 4, 0);
+        Assert.Equal(skip, mp3.ReadPackets().First().SkipSamples);
     }
 
     // The packets from the last keyframe in decode order whose pts is at or before the time, or all of them; with the
@@ -201,8 +215,10 @@ public class SeekTests
         MatroskaDemuxer mkv => mkv.ReadPacketInfo(),
         H264Demuxer raw => raw.ReadPacketInfo(),
         WavDemuxer wav => wav.ReadPacketInfo(),
+        AdtsDemuxer adts => adts.ReadPacketInfo(),
+        Mp3Demuxer mp3 => mp3.ReadPacketInfo(),
         MxfDemuxer mxf => mxf.ReadPacketInfo(),
-        _ => throw new ArgumentException("An MP4, AVI, Matroska, raw H.264, WAVE or MXF demuxer.", nameof(demuxer)),
+        _ => throw new ArgumentException("An MP4, AVI, Matroska, raw H.264, WAVE, MXF, ADTS or raw MP3 demuxer.", nameof(demuxer)),
     };
 
     // Whether an Annex B access unit holds an IDR slice (NAL unit type 5).

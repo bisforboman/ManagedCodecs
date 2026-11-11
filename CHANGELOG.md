@@ -15,6 +15,9 @@ run time.
 
 ### Added
 
+- Matroska: A_MS/ACM tracks are named by the WAVEFORMATEX in their CodecPrivate, as AVI's audio is, with its rate,
+  channels and extra bytes, where they kept the Codec ID: G.711 and IMA and Microsoft ADPCM, as FFmpeg's muxer writes
+  them there, play.
 - Containers: `MxfDemuxer` reads MXF files (SMPTE ST 377-1), and `Demuxer.Open` detects them: OP1a with frame-wrapped
   essence in the generic container, the first picture and sound tracks, packets as FFmpeg's MXF demuxer gives them
   (times from the edit units and the index table, keyframes from it), and `Seek`. H.264 is `CodecIds.H264` (as in

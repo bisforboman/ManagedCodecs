@@ -150,8 +150,10 @@ public sealed class MatroskaDemuxer : IDemuxer
     /// <remarks>
     /// AAC (A_AAC, and the old A_AAC/MPEG2/... and A_AAC/MPEG4/... names, whose AudioSpecificConfig is made from the name
     /// where the CodecPrivate is missing) is <see cref="CodecIds.Aac"/>, its rate and channels from the
-    /// AudioSpecificConfig; other codecs keep Matroska's CodecID (A_OPUS, A_VORBIS, ...), with the track's
-    /// SamplingFrequency and Channels.
+    /// AudioSpecificConfig; PCM (A_PCM/...) by its BitDepth; A_MS/ACM by the WAVEFORMATEX in its CodecPrivate, as AVI's
+    /// and .wav's audio is named (G.711, IMA and Microsoft ADPCM, PCM, MP3; another format by its tag in hex, "0x0031"),
+    /// its rate and channels from it and the WAVEFORMATEX's extra bytes as the codec private data; other codecs keep
+    /// Matroska's CodecID (A_OPUS, A_VORBIS, ...), with the track's SamplingFrequency and Channels.
     /// </remarks>
     public AudioStreamInfo? Audio { get; }
 
@@ -664,6 +666,17 @@ public sealed class MatroskaDemuxer : IDemuxer
             else
             {
                 track.SampleRate = track.SamplingFrequency is > 0 and < int.MaxValue ? (int)track.SamplingFrequency : 0;
+
+                // A_MS/ACM: the CodecPrivate is a WAVEFORMATEX, named as AVI's and .wav's audio is, which gives the rate
+                // and channels and whose extra bytes are the codec's private data, as FFmpeg reads it.
+                if (track.CodecId == "A_MS/ACM" && WaveFormat.TryParse(track.CodecPrivate, out var format))
+                {
+                    track.Codec = format.Codec;
+                    track.CodecPrivate = format.CodecPrivate.ToArray();
+                    track.SampleRate = format.SampleRate > 0 ? format.SampleRate : track.SampleRate;
+                    track.Channels = format.Channels > 0 ? format.Channels : track.Channels;
+                }
+
                 if (track.Codec == CodecIds.Aac)
                 {
                     if (track.CodecPrivate.Length == 0)

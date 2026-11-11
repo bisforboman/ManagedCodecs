@@ -327,8 +327,7 @@ to it on random bytes. `PcmDecoderTests.MatchesFfmpegExactly` decodes every samp
 G.711 (`CodecIds.PcmAlaw`, `CodecIds.PcmMulaw`) expands each byte by the standard's tables, A-law on a 13-bit scale and
 μ-law on a 14-bit one, shifted to 16 bits as FFmpeg's decoders give them; `wav-alaw-codes` and `wav-mulaw-codes` hold
 every code, so every value is checked against FFmpeg, and `PcmDecoderTests.ExpandsG711` names the extremes (A-law ±8 to
-±32256, μ-law 0 to ±32124). In Matroska FFmpeg's muxer writes them as A_MS/ACM (a WAVEFORMATEX in CodecPrivate), which
-the Matroska demuxer doesn't read: such tracks keep their Codec ID, undecoded.
+±32256, μ-law 0 to ±32124). In Matroska FFmpeg's muxer writes them as A_MS/ACM (see Matroska and WebM demuxing).
 
 QuickTime's PCM has one 'stts' tick a sample frame, and FFmpeg's mov demuxer reads it by chunk, each cut in pieces of up
 to 1024 frames (their bytes the frames' whatever 'stsz' says, timed by the frames before them). Its muxer writes chunks of
@@ -384,6 +383,13 @@ FFmpeg's own wav seek starts a packet at the exact sample instead (ffprobe `-rea
 are not a read's; the samples before the time are dropped by whoever wants it, as for the other demuxers.
 
 ## Matroska and WebM demuxing
+
+A_MS/ACM, FFmpeg's Codec ID for audio with no Matroska one of its own, holds a WAVEFORMATEX in its CodecPrivate: the
+track is named by it as AVI's audio is (`WaveFormat`), its rate and channels and its extra bytes (the codec private
+data) taken from it, as FFmpeg reads it; a CodecPrivate too short to be one keeps the Codec ID
+(`MatroskaDemuxerTests.NamesMsAcmByItsWaveFormat`). The samples mkv-acm-alaw, mkv-acm-mulaw, mkv-acm-ima and
+mkv-acm-ms-adpcm decode exactly as FFmpeg (name.pcm.f32, name.ima.f32, name.msadpcm.f32), and their packets and extradata
+are compared as below.
 
 `MatroskaConformanceTests` compares every packet of every samples/*.mkv and *.webm with FFmpeg's demuxer: pts, size,
 MD5 and keyframe flag with `ffprobe -show_packets -show_data_hash MD5` (name.packets.csv), the durations the file gives

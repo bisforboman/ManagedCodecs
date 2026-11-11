@@ -25,6 +25,45 @@ public class MatroskaDemuxerTests
         Assert.Equal(codec, demuxer.Audio!.Codec);
     }
 
+    /// <summary>
+    /// A_MS/ACM is named by the WAVEFORMATEX in its CodecPrivate, as AVI's audio is: its rate and channels win over the
+    /// track's, and its extra bytes are the codec private data (FFmpeg's extradata, IMA ADPCM's wSamplesPerBlock here).
+    /// A CodecPrivate shorter than a WAVEFORMAT keeps the Codec ID.
+    /// </summary>
+    [Fact]
+    public void NamesMsAcmByItsWaveFormat()
+    {
+        // WAVEFORMATEX: tag 0x11, 2 channels, 22050 Hz, 22201 bytes a second, blocks of 1024, 4 bits, 2 extra bytes (1017).
+        byte[] format = [0x11, 0, 2, 0, 0x22, 0x56, 0, 0, 0xB9, 0x56, 0, 0, 0, 4, 4, 0, 2, 0, 0xF9, 0x03];
+        var file = File(
+            Tracks(Video(1, "V_MPEG4/ISO/AVC", [1, 2, 3], defaultDuration: 40_000_000), Audio(2, "A_MS/ACM", 8000, 1, codecPrivate: format)),
+            Cluster(1000, SimpleBlock(1, 0, keyframe: true, [10, 11])));
+        using (var demuxer = new MatroskaDemuxer(new MemoryStream(file)))
+        {
+            var audio = demuxer.Audio!;
+            Assert.Equal((CodecIds.AdpcmImaWav, 22050, 2), (audio.Codec, audio.SampleRate, audio.Channels));
+            Assert.Equal([0xF9, 0x03], audio.CodecPrivate.ToArray());
+        }
+
+        var short_ = File(
+            Tracks(Video(1, "V_MPEG4/ISO/AVC", [1, 2, 3], defaultDuration: 40_000_000), Audio(2, "A_MS/ACM", 8000, 1, codecPrivate: format[..10])),
+            Cluster(1000, SimpleBlock(1, 0, keyframe: true, [10, 11])));
+        using var unread = new MatroskaDemuxer(new MemoryStream(short_));
+        Assert.Equal(("A_MS/ACM", 8000, 1), (unread.Audio!.Codec, unread.Audio.SampleRate, unread.Audio.Channels));
+    }
+
+    /// <summary>FFmpeg's A_MS/ACM tracks keep its extradata as their codec private data (ffprobe -show_data).</summary>
+    [Theory]
+    [InlineData("mkv-acm-ima.mkv", CodecIds.AdpcmImaWav, "F903")]
+    [InlineData("mkv-acm-ms-adpcm.mkv", CodecIds.AdpcmMs, "F403070000010000000200FF00000000C0004000F0000000CC0130FF880118FF")]
+    [InlineData("mkv-acm-alaw.mkv", CodecIds.PcmAlaw, "")]
+    public void KeepsFfmpegsExtradata(string name, string codec, string extradata)
+    {
+        using var demuxer = Demuxer.Open(TestSamples.PathOf(name));
+        Assert.Equal(codec, demuxer.Audio!.Codec);
+        Assert.Equal(extradata, Convert.ToHexString(demuxer.Audio.CodecPrivate.Span));
+    }
+
     [Fact]
     public void ReadsTracksAndBlocks()
     {

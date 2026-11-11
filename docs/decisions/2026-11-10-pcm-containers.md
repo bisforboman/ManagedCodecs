@@ -71,3 +71,10 @@ sample, like the other PCM, expanded by G.711's tables to FFmpeg's 16-bit values
 names them, `CodecIds.PcmAlaw` and `CodecIds.PcmMulaw`: format tags 6 and 7 (.wav, AVI, through `WaveFormat`) and
 QuickTime's 'alaw' and 'ulaw'. Matroska's A_MS/ACM, where FFmpeg's muxer puts them, isn't read yet: a later decision,
 since it would bring every WAVEFORMATEX codec into Matroska at once.
+
+## Later: A_MS/ACM in Matroska (2026-11-11)
+
+The owner chose it next. `MatroskaDemuxer` names an A_MS/ACM track by the WAVEFORMATEX in its CodecPrivate through the
+shared `WaveFormat` (as AVI and .wav do): its codec, rate and channels, and its extra bytes as the codec private data,
+as FFmpeg reads it. So G.711 and IMA and Microsoft ADPCM in Matroska play; a format the library doesn't decode is named
+by its tag in hex, as in AVI. A CodecPrivate too short to be a WAVEFORMAT keeps the Codec ID.

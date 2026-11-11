@@ -880,6 +880,14 @@ for spec in u8:1 s24le:2 s32le:1 s16be:2 s32be:2 f32le:1 f64le:2; do
   ff -f lavfi -i testsrc2=size=160x120:rate=25:d=1 -f lavfi -i "sine=frequency=440:sample_rate=32000:d=1" \
     -c:v mjpeg -q:v 5 -c:a "pcm_$fmt" -ac "$channels" "samples/mkv-pcm-$fmt.mkv"
 done
+# A_MS/ACM (a WAVEFORMATEX in CodecPrivate, named by WaveFormat as AVI's audio is), as FFmpeg's muxer writes what has
+# no Matroska Codec ID of its own: G.711 A-law (mono) and μ-law, IMA and Microsoft ADPCM (stereo; their wSamplesPerBlock
+# and coefficients the WAVEFORMATEX's extra bytes, FFmpeg's extradata).
+for spec in pcm_alaw:1:alaw pcm_mulaw:2:mulaw adpcm_ima_wav:2:ima adpcm_ms:2:ms-adpcm; do
+  IFS=: read -r codec channels name <<< "$spec"
+  ff -f lavfi -i testsrc2=size=160x120:rate=25:d=1 -f lavfi -i "sine=frequency=440:sample_rate=22050:d=1" \
+    -c:v mjpeg -q:v 5 -c:a "$codec" -ac "$channels" "samples/mkv-acm-$name.mkv"
+done
 # The video's frames and CodecPrivate compressed with zlib (ContentCompAlgo 0), as mkvmerge's --compression writes them.
 python3 tools/mkv-rewrite.py samples/mkv-h264-aac.mkv samples/mkv-zlib.mkv --zlib
 # AAC whose last block has a DiscardPadding of 10 ms (480 samples at 48 kHz), which FFmpeg's decoder drops from its end.

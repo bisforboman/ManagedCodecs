@@ -106,7 +106,8 @@ and code that reproduces FFmpeg's reading where it differs from the spec), and n
   FFmpeg, others by their format tag such as `0x0031` for GSM 6.10; docs/decisions/2026-11-08-avi-audio.md), MP4 (video and audio tracks, fragmented files too, edit lists of several edits),
   Matroska and WebM (video and audio tracks, every kind of lacing, BlockGroups, live files of unknown size, header
   stripping and zlib, the display rotation, DiscardPadding; VP9, AV1, Opus and other codecs this library doesn't decode
-  by their Codec IDs; MP3 as `CodecIds.Mp3` in MP4 and Matroska), raw AAC (ADTS), raw MP3 (gapless by the LAME
+  by their Codec IDs; MP3 as `CodecIds.Mp3` in MP4 and Matroska; A_MS/ACM by its WAVEFORMATEX, as AVI's audio: G.711
+  and IMA and Microsoft ADPCM), raw AAC (ADTS), raw MP3 (gapless by the LAME
   tag, as FFmpeg's), `.wav` files (`WavDemuxer`: PCM, IMA ADPCM and MP3, packets as FFmpeg's, seeking by packet), MXF
   (`MxfDemuxer`: OP1a, frame-wrapped essence, H.264 and PCM decoded, ProRes, DNxHR and MPEG-2 named; issue #469) and raw H.264 (`.h264`,
   `.264`: access units as FFmpeg's parser cuts them, timed by the SPS's VUI, seeking to IDR pictures;

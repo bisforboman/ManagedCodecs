@@ -43,7 +43,9 @@ internal sealed class RtpH264Depacketizer
     /// <summary>The NAL units of a <c>sprop-parameter-sets</c> value: base64, comma separated (RFC 6184, 8.1).</summary>
     /// <exception cref="FormatException">Not base64.</exception>
     public static byte[][] ParseParameterSets(string value) =>
-        value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+        value.Split(',')
+            .Select(part => part.Trim())
+            .Where(part => part.Length > 0)
             .Select(Convert.FromBase64String)
             .Where(nal => nal.Length > 0)
             .ToArray();

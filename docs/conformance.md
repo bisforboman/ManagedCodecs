@@ -1452,6 +1452,12 @@ conformance tests. On the 1080p Sintel frames spatial direct's functions (`Direc
 from 0.23 to 0.26 of an untouched set (`FilterMacroblock420`, `HalfHorizontal`, `Cabac.ResidualBlock`,
 `PredictChromaPair`) to 0.21 to 0.23 (perf, six runs each, the order alternating, every branch run below every base
 run): about 3.15 to 2.75% of the frame.
+Tried and dropped (2026-11-11): the luma filter's vertical passes. `HalfVertical` with its six rows sliding down
+already widened (one row widened a row instead of six), and `Center`'s vertical pass by two `pmaddwd` a half, (outer,
+middle) by (1, -5) and (inner, 512) by (20, 1), then the saturating packs. Bit-exact, but callgrind (Native AOT, the
+480p Sintel frames) counted 19.14 against 19.23 M instructions a frame (-0.5%), and perf put `HalfVertical` and
+`Center` at 0.25 to 0.27 of an untouched set against 0.26 to 0.30 on the 1080p frames, lower in five pairs of six:
+about 0.3% of the frame, not worth a second loop in `HalfVertical`.
 
 ## AAC
 

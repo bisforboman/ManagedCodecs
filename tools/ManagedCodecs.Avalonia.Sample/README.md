@@ -1,10 +1,11 @@
 # mclive: a live camera in Avalonia
 
-A sample for issue #462 (docs/decisions/2026-11-10-live-mjpeg-over-http.md): shows a camera serving MJPEG over HTTP
-in an Avalonia window with `ManagedCodecs.Playback`'s `LivePlayer`. One camera, its URL on the command line; not a
-viewer.
+A sample for issue #462 (docs/decisions/2026-11-10-live-mjpeg-over-http.md, docs/decisions/2026-11-10-live-rtsp-h264.md):
+shows a camera serving MJPEG over HTTP or H.264 over RTSP in an Avalonia window with `ManagedCodecs.Playback`'s
+`LivePlayer`. One camera, its URL on the command line; not a viewer.
 
     dotnet run -c Release --project tools/ManagedCodecs.Avalonia.Sample -- http://camera.local/video.mjpg
+    dotnet run -c Release --project tools/ManagedCodecs.Avalonia.Sample -- rtsp://user:password@camera.local/stream1
     dotnet run -c Release --project tools/ManagedCodecs.Avalonia.Sample -- http://camera.local/video.mjpg --frames 100
 
 - Each frame Avalonia renders (`TopLevel.RequestAnimationFrame`), `TakeLatest()` gives the newest decoded frame, if
@@ -19,4 +20,7 @@ viewer.
 
   (`-listen 1` serves one client, then ends.) On the cloud VM (2026-11-10): 100 frames at the stream's 25 fps, about
   1 ms to decode and 1 ms to convert each 640x480 frame (docs/conformance.md, MJPEG over HTTP).
+- RTSP without a camera: `tools/gst-rtsp-server.py digest` (GStreamer's server; user admin, password s3cret), then
+  `rtsp://admin:s3cret@127.0.0.1:8554/cam`. On the cloud VM (2026-11-11), 200 frames at 25 fps, 1080p decoding in
+  about 14 ms a frame (docs/conformance.md, H.264 over RTSP).
 - Code only, no XAML. Avalonia 12; Windows, macOS and Linux (X11).

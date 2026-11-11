@@ -18,7 +18,7 @@ internal sealed record Options(Uri Uri, int Frames)
             {
                 i++;
             }
-            else if (uri is null && Uri.TryCreate(args[i], UriKind.Absolute, out var parsed) && parsed.Scheme is "http" or "https")
+            else if (uri is null && Uri.TryCreate(args[i], UriKind.Absolute, out var parsed) && parsed.Scheme is "http" or "https" or "rtsp")
             {
                 uri = parsed;
             }

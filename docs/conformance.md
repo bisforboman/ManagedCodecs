@@ -106,6 +106,27 @@ skipped (`HasPicture`), since the decoder refuses a unit with no slice. With `Co
 exception to 32 frames, 31 of them marked damaged until the stream's next IDR picture: the decoder conceals a lost
 picture as a reference but gives no frame for it.
 
+### H.264 over RTSP
+
+`LiveRtspTests` runs `LivePlayer` against a loopback RTSP server in the tests that replays the recorded RTP. Its
+Digest check has its own MD5, not the client's, and `RtspProtocolTests` checks Digest against RFC 2617's worked example.
+- In lockstep, every frame shown is `H264Decoder`'s newest for the access units so far, with Digest (with and without
+  `qop`) and Basic, and the URL's user info is never sent.
+- Covered too: control URLs (relative, absolute, `*`), the final answers, SDPs it can't play, keep-alives at half the
+  session's timeout, a stall and a dropped connection, lost packets, and falling behind past `MaxLag` (on a fake
+  clock, decoding held by a test gate).
+
+Real servers, by hand:
+
+- GStreamer 1.24's RTSP server (gst-rtsp-server, tools/gst-rtsp-server.py: a live SMPTE pattern by x264, `tune=zerolatency`,
+  a keyframe every 50) to `mclive` under Xvfb (2026-11-11): Digest, Basic and none at 640x480, and none at 1080p25.
+  - Each showed 150 or 200 frames at the stream's 25 fps, none damaged or skipped, with no reconnects.
+  - 640x480 decoded in about 3 to 4 ms a frame and converted in 1.4 ms. 1080p decoded in 13.7 ms and converted in 7.7 ms,
+    on one thread.
+  - A screenshot showed the SMPTE bars in order.
+  - Its first runs answered DESCRIBE with 503 (its pipeline lacked an element). `LivePlayer` retried, as it should.
+- Not tried yet: mediamtx (to run nightly, decision 4 of the note), live555, an IP camera.
+
 ## Real films
 
 Every sample above is a test pattern encoded to isolate a feature. `tools/realworld.py` (nightly, `realworld.yml`, a job

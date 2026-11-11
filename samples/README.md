@@ -45,7 +45,8 @@ references:
 - `name.partitions.csv` (`ffprobe -v trace -show_packets`, its "PartitionPack:" lines): an MXF file's partition packs as
   FFmpeg's demuxer reads them, one a line as ThisPartition, PreviousPartition, FooterPartition, IndexSID, BodySID, by
   offset. The samples tools/mxf-rewrite.py makes take their source's (the partitions don't move).
-- `name.packets.csv`, `name.packets.nofillin.csv` and `name.pcm.f32` for MXF too (`MxfConformanceTests`, `PcmDecoderTests`).
+- `name.packets.csv`, `name.packets.nofillin.csv` and `name.pcm.f32` for MXF too (`MxfConformanceTests`, `PcmDecoderTests`),
+  and `name.h264.framemd5`: an MXF file's H.264 frames, every one (`-fps_mode passthrough`).
 - `name.headers.json` (`ffprobe -nofind_stream_info -of json`): an MXF file's streams as FFmpeg's demuxer reads them from
   the header metadata, nothing decoded, and its operational pattern, material package and start timecode.
 - `name.rtp` and `name.sdp` (`ffmpeg -c copy -f rtp -sdp_file`, recorded by tools/rtp-record.py): FFmpeg's RTP for an

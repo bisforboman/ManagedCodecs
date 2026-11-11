@@ -942,6 +942,11 @@ for f in samples/mxf-*.mxf; do
     -of csv=p=0 "$f" > "${f%.mxf}.packets.csv"
   ffprobe -v error -fflags +nofillin+noparse -show_packets -show_entries packet=stream_index,pts,dts,duration,size,flags \
     -of csv=p=0 "$f" > "${f%.mxf}.packets.nofillin.csv"
+  # name.h264.framemd5: the H.264 frames, every one (-fps_mode passthrough: FFmpeg's MXF packets carry decode times as
+  # presentation times, and its command line would drop a frame and retime the rest otherwise).
+  if [ "$(ffprobe -v error -select_streams v:0 -show_entries stream=codec_name -of csv=p=0 "$f")" = h264 ]; then
+    ff -idct simple -noautorotate -i "$f" -fps_mode passthrough -map 0:v -f framemd5 "${f%.mxf}.h264.framemd5"
+  fi
   # name.pcm.f32: the first audio stream decoded, for PcmDecoder on MXF's little-endian PCM.
   if [ -n "$(ffprobe -v error -select_streams a:0 -show_entries stream=index -of csv=p=0 "$f")" ]; then
     ff -i "$f" -map 0:a:0 -f f32le "${f%.mxf}.pcm.f32"

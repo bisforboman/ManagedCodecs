@@ -619,11 +619,7 @@ public sealed class LivePlayer : IDisposable
         Interlocked.Add(ref _decodeTicks, decoded - start);
         Interlocked.Add(ref _convertTicks, Stopwatch.GetTimestamp() - decoded);
         Interlocked.Add(ref _decoded, frames.Count);
-        if (Interlocked.Exchange(ref _latest, rgba) is { } old)
-        {
-            Interlocked.Increment(ref _dropped);
-            Return(old);
-        }
+        Publish(rgba);
     }
 
     private void Show(MjpegDecoder decoder, Received received)
@@ -653,6 +649,12 @@ public sealed class LivePlayer : IDisposable
         Interlocked.Add(ref _decodeTicks, decoded - start);
         Interlocked.Add(ref _convertTicks, Stopwatch.GetTimestamp() - decoded);
         Interlocked.Increment(ref _decoded);
+        Publish(rgba);
+    }
+
+    // The newest frame wins the slot TakeLatest takes from; one replaced before it was taken is dropped.
+    private void Publish(RgbaFrame rgba)
+    {
         if (Interlocked.Exchange(ref _latest, rgba) is { } old)
         {
             Interlocked.Increment(ref _dropped);

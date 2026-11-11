@@ -30,6 +30,9 @@ run time.
   stereo, exactly FFmpeg's output (its standard coefficient table whatever the file lists, and its cap on the step).
   `.wav` and AVI files name such streams `CodecIds.AdpcmMs` where they named them `"0x0002"`, and `MediaPlayer` plays
   them (docs/decisions/2026-11-10-ms-adpcm.md).
+- G.711 A-law and μ-law: `PcmDecoder` decodes them exactly as FFmpeg, named by new `CodecIds.PcmAlaw` and
+  `CodecIds.PcmMulaw`. `.wav` and AVI files (format tags 6 and 7, where they gave `"0x0006"` and `"0x0007"`) and
+  QuickTime ('alaw', 'ulaw') name them so, and `MediaPlayer` plays them.
 
 ## 0.12.0 – 2026-11-10
 

@@ -655,6 +655,18 @@ for spec in u8:raw:1 s16le:sowt:1 s16be:twos:2 s24le:in24:2 s32be:in32:1 f32le:f
   ff -f lavfi -i testsrc2=size=160x120:rate=25:d=1 -f lavfi -i "sine=frequency=440:sample_rate=22050:d=1" \
     -c:v mjpeg -q:v 5 -c:a "pcm_$fmt" -ac "$channels" -f mov "samples/mov-pcm-$fmt.mp4"
 done
+# G.711 (PcmDecoder): A-law and μ-law in QuickTime ('alaw', 'ulaw', a byte a sample), and in .wav files (format tags
+# 6 and 7) holding every one of the 256 codes four times over (mono A-law, stereo μ-law), so that FFmpeg's output
+# checks each code's value.
+for spec in alaw:alaw:1 mulaw:ulaw:2; do
+  IFS=: read -r fmt entry channels <<< "$spec"
+  ff -f lavfi -i testsrc2=size=160x120:rate=25:d=1 -f lavfi -i "sine=frequency=440:sample_rate=8000:d=1" \
+    -c:v mjpeg -q:v 5 -c:a "pcm_$fmt" -ac "$channels" -f mov "samples/mov-pcm-$fmt.mp4"
+  codes=$(mktemp)
+  python3 -c "import sys; sys.stdout.buffer.write(bytes(range(256)) * 4)" > "$codes"
+  ff -f "$fmt" -ar 8000 -ac "$channels" -i "$codes" -c:a copy "samples/wav-$fmt-codes.wav"
+  rm "$codes"
+done
 # PCM in ISO MP4 files (ISO/IEC 23003-5; FFmpeg's mp4 muxer): 'ipcm' and 'fpcm', depth and byte order in a 'pcmC' box.
 # FFmpeg 6.1 writes 24-bit samples under a 'pcmC' of 32 bits and reads them back so, 'stsz''s 3 bytes a piece:
 # mp4-pcm-s24le holds Mp4Demuxer to that (pieces by 'stsz').
@@ -1096,7 +1108,8 @@ done
 # (PcmDecoder's, ImaAdpcmDecoder's and MsAdpcmDecoder's values exactly), for the formats they decode.
 for f in samples/*.avi samples/*.mp4 samples/*.mkv samples/*.wav; do
   case "$(ffprobe -v error -select_streams a:0 -show_entries stream=codec_name -of csv=p=0 "$f")" in
-    pcm_u8 | pcm_s16le | pcm_s16be | pcm_s24le | pcm_s24be | pcm_s32le | pcm_s32be | pcm_f32le | pcm_f32be | pcm_f64le | pcm_f64be)
+    pcm_u8 | pcm_s16le | pcm_s16be | pcm_s24le | pcm_s24be | pcm_s32le | pcm_s32be | pcm_f32le | pcm_f32be | pcm_f64le | pcm_f64be \
+      | pcm_alaw | pcm_mulaw)
       ff -i "$f" -map 0:a:0 -f f32le "${f%.*}.pcm.f32" ;;
     adpcm_ima_wav) ff -i "$f" -map 0:a:0 -f f32le "${f%.*}.ima.f32" ;;
     adpcm_ms) ff -i "$f" -map 0:a:0 -f f32le "${f%.*}.msadpcm.f32" ;;

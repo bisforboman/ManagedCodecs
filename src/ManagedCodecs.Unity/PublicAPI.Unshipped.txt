@@ -1,6 +1,8 @@
 #nullable enable
 ManagedCodecs.Containers.AdtsDemuxer.Seek(long pts, int streamIndex) -> void
 ManagedCodecs.Containers.Mp3Demuxer.Seek(long pts, int streamIndex) -> void
+const ManagedCodecs.CodecIds.PcmAlaw = "PCM_ALAW" -> string!
+const ManagedCodecs.CodecIds.PcmMulaw = "PCM_MULAW" -> string!
 ManagedCodecs.Containers.MxfDemuxer
 ManagedCodecs.Containers.MxfDemuxer.Audio.get -> ManagedCodecs.AudioStreamInfo?
 ManagedCodecs.Containers.MxfDemuxer.Dispose() -> void

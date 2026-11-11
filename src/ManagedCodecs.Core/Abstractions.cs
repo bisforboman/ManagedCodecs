@@ -90,6 +90,18 @@ public static class CodecIds
     public const string AdpcmImaWav = "ADPCM_IMA_WAV";
 
     /// <summary>
+    /// ITU-T G.711 A-law, a byte a sample, channels interleaved (the WAVE format tag 0x06 in .wav and AVI files,
+    /// QuickTime's 'alaw'; FFmpeg's pcm_alaw); <see cref="PcmDecoder"/>.
+    /// </summary>
+    public const string PcmAlaw = "PCM_ALAW";
+
+    /// <summary>
+    /// ITU-T G.711 μ-law, a byte a sample, channels interleaved (the WAVE format tag 0x07 in .wav and AVI files,
+    /// QuickTime's 'ulaw'; FFmpeg's pcm_mulaw); <see cref="PcmDecoder"/>.
+    /// </summary>
+    public const string PcmMulaw = "PCM_MULAW";
+
+    /// <summary>
     /// Microsoft ADPCM at 4 bits, in blocks with a header a channel (the WAVE format tag 0x02 at 4 bits, in .wav and AVI
     /// files; FFmpeg's adpcm_ms); <see cref="MsAdpcmDecoder"/>.
     /// </summary>

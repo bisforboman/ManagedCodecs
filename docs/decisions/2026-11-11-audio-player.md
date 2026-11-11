@@ -3,7 +3,7 @@
 0.12.0 reads audio-only files (`.wav` through `WavDemuxer`, raw MP3 and AAC), but nothing plays them:
 `MediaPlayer` throws `NotSupportedException` ("The file has no video stream") when a file has no video, and its
 `Video` property is non-nullable. VideoTexture (ManagedCodecs.MonoGame), the Godot node and the Unity sample read it.
-This record decides how such files play. Nothing is built yet.
+This record decides how such files play. Built in the PR after this record.
 
 ## What there is
 
@@ -16,7 +16,8 @@ This record decides how such files play. Nothing is built yet.
 ## Decided (the owner, 2026-11-11)
 
 1. **API:** a new class, `AudioPlayer` (ManagedCodecs.Playback): `Start`, `TakeAudio`, `IsFinished`, `Error`,
-   `Statistics`, `Dispose`, and `PlaybackOptions.Loop`, as `MediaPlayer` has them. `MediaPlayer` stays as it is, so
+   `Dispose`, and `PlaybackOptions.Loop`, as `MediaPlayer` has them. (Built without `Statistics`: `PlaybackStatistics`
+   counts video frames, decoded, converted and dropped, none of which an audio player has.) `MediaPlayer` stays as it is, so
    nothing breaks. The decoding thread's audio path (decoder choice, interleaving to stereo, the bounded queue) is
    shared between the two.
 2. **Seeking:** `Mp3Demuxer` and `AdtsDemuxer` seek, to the packet holding the time, from the frames they find when

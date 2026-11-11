@@ -1,4 +1,6 @@
 #nullable enable
+ManagedCodecs.Containers.AdtsDemuxer.Seek(long pts, int streamIndex) -> void
+ManagedCodecs.Containers.Mp3Demuxer.Seek(long pts, int streamIndex) -> void
 ManagedCodecs.Containers.MxfDemuxer
 ManagedCodecs.Containers.MxfDemuxer.Audio.get -> ManagedCodecs.AudioStreamInfo?
 ManagedCodecs.Containers.MxfDemuxer.Dispose() -> void
@@ -8,6 +10,17 @@ ManagedCodecs.Containers.MxfDemuxer.ReadPackets() -> System.Collections.Generic.
 ManagedCodecs.Containers.MxfDemuxer.ReadPacketsAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerable<ManagedCodecs.Packet>!
 ManagedCodecs.Containers.MxfDemuxer.Seek(long pts, int streamIndex) -> void
 ManagedCodecs.Containers.MxfDemuxer.Video.get -> ManagedCodecs.VideoStreamInfo?
+ManagedCodecs.Playback.AudioPlayer
+ManagedCodecs.Playback.AudioPlayer.Audio.get -> ManagedCodecs.AudioStreamInfo!
+ManagedCodecs.Playback.AudioPlayer.AudioPlayer(string! path) -> void
+ManagedCodecs.Playback.AudioPlayer.AudioPlayer(string! path, ManagedCodecs.Playback.PlaybackOptions? options) -> void
+ManagedCodecs.Playback.AudioPlayer.AudioPlayer(System.IO.Stream! stream) -> void
+ManagedCodecs.Playback.AudioPlayer.AudioPlayer(System.IO.Stream! stream, ManagedCodecs.Playback.PlaybackOptions? options) -> void
+ManagedCodecs.Playback.AudioPlayer.Dispose() -> void
+ManagedCodecs.Playback.AudioPlayer.Error.get -> System.Exception?
+ManagedCodecs.Playback.AudioPlayer.IsFinished.get -> bool
+ManagedCodecs.Playback.AudioPlayer.Start() -> void
+ManagedCodecs.Playback.AudioPlayer.TakeAudio() -> ManagedCodecs.Playback.AudioChunk?
 static ManagedCodecs.Containers.MxfDemuxer.Open(string! path) -> ManagedCodecs.Containers.MxfDemuxer!
 const ManagedCodecs.CodecIds.AdpcmMs = "ADPCM_MS" -> string!
 ManagedCodecs.MsAdpcmDecoder

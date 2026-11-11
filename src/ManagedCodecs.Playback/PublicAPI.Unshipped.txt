@@ -1,1 +1,12 @@
 #nullable enable
+ManagedCodecs.Playback.AudioPlayer
+ManagedCodecs.Playback.AudioPlayer.Audio.get -> ManagedCodecs.AudioStreamInfo!
+ManagedCodecs.Playback.AudioPlayer.AudioPlayer(string! path) -> void
+ManagedCodecs.Playback.AudioPlayer.AudioPlayer(string! path, ManagedCodecs.Playback.PlaybackOptions? options) -> void
+ManagedCodecs.Playback.AudioPlayer.AudioPlayer(System.IO.Stream! stream) -> void
+ManagedCodecs.Playback.AudioPlayer.AudioPlayer(System.IO.Stream! stream, ManagedCodecs.Playback.PlaybackOptions? options) -> void
+ManagedCodecs.Playback.AudioPlayer.Dispose() -> void
+ManagedCodecs.Playback.AudioPlayer.Error.get -> System.Exception?
+ManagedCodecs.Playback.AudioPlayer.IsFinished.get -> bool
+ManagedCodecs.Playback.AudioPlayer.Start() -> void
+ManagedCodecs.Playback.AudioPlayer.TakeAudio() -> ManagedCodecs.Playback.AudioChunk?

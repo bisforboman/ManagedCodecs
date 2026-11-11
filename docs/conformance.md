@@ -1787,6 +1787,13 @@ the blocks but the first, and each block has its own. No encoder at hand writes 
 frames, 1 to 4 under one header, with and without CRCs, AAC LC and HE-AAC (the SBR state runs on across blocks), and
 require the same samples as the frames one by one.
 
+Both raw demuxers (ADTS here, raw MP3 below) seek, for `AudioPlayer`'s `Loop` (docs/decisions/2026-11-11-audio-player.md):
+a read starts at the frame holding the time, from the frames found when opening, its times and sequence numbers the
+file's. `SeekTests` checks each sample's reads after a seek as the tail of a read from the start, and that MP3's encoder
+delay (the first packet's SkipSamples) comes only with a read from the first frame; a mutation entry each. FFmpeg's
+`-ss` on such files is not compared (it seeks by bitrate or its parser, not by frames). `AudioPlayerTests` plays every
+.wav, raw MP3 and AAC sample: its decoders' own output, interleaved as stereo, and again on `Loop`.
+
 ## Raw MP3
 
 Raw MP3 files (`Mp3Demuxer`) demux packet by packet as FFmpeg's demuxer does (`Mp3DemuxerTests` against

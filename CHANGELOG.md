@@ -15,6 +15,11 @@ run time.
 
 ### Added
 
+- Playback: `AudioPlayer` plays a file's audio alone, as `MediaPlayer` plays it beside video (which `MediaPlayer`
+  needs): `.wav`, raw MP3 and AAC, or the audio of any file the demuxers open, decoded on a thread of its own into
+  float stereo for `TakeAudio()`, with `Loop`, `IsFinished` and `Error`. For `Loop`, `Mp3Demuxer` and `AdtsDemuxer`
+  now seek, to the frame holding the time (MP3's encoder delay skipped from its first frame only)
+  (docs/decisions/2026-11-11-audio-player.md).
 - Containers: `MxfDemuxer` reads MXF files (SMPTE ST 377-1), and `Demuxer.Open` detects them: OP1a with frame-wrapped
   essence in the generic container, the first picture and sound tracks, packets as FFmpeg's MXF demuxer gives them
   (times from the edit units and the index table, keyframes from it), and `Seek`. H.264 is `CodecIds.H264` (as in

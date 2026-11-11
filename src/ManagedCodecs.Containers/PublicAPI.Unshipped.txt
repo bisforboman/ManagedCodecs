@@ -1,4 +1,6 @@
 #nullable enable
+ManagedCodecs.Containers.AdtsDemuxer.Seek(long pts, int streamIndex) -> void
+ManagedCodecs.Containers.Mp3Demuxer.Seek(long pts, int streamIndex) -> void
 ManagedCodecs.Containers.MxfDemuxer
 ManagedCodecs.Containers.MxfDemuxer.Audio.get -> ManagedCodecs.AudioStreamInfo?
 ManagedCodecs.Containers.MxfDemuxer.Dispose() -> void

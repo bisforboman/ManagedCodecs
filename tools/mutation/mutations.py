@@ -675,6 +675,13 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.Containers/Mp4/Mp4Demuxer.cs",
          find="int frameBytes = _isoPcm && _stsz.Length >= 12", replace="int frameBytes = false && _stsz.Length >= 12",
          tests="DisplayName~mp4-pcm-s24le"),
+    # ---- Raw AAC and MP3 seek (docs/decisions/2026-11-11-audio-player.md): a read starts at the frame a Seek found.
+    dict(file="src/ManagedCodecs.Containers/Adts/AdtsDemuxer.cs",
+         find="if (i >= _start)", replace="if (true)",
+         tests="FullyQualifiedName~SeekTests"),
+    dict(file="src/ManagedCodecs.Containers/Mp3/Mp3Demuxer.cs",
+         find="if (sequence < _start)", replace="if (false)",
+         tests="FullyQualifiedName~SeekTests"),
     # ---- PCM: bytes after a packet's last whole sample frame are ignored, as FFmpeg's decoder ignores them (no spec).
     dict(file="src/ManagedCodecs.Core/PcmDecoder.cs",
          find="if (packet.Length > 0 && packet.Length < frameBytes)", replace="if (packet.Length % frameBytes != 0)",

@@ -505,10 +505,11 @@ what the file says, the file is followed and the test says so:
 sample. `MxfConformanceTests` decodes the H.264 samples' frames with one and four threads and compares each with
 FFmpeg's (name.h264.framemd5, `-fps_mode passthrough`): FFmpeg's packets carry decode times as presentation times, which
 its decoder's frames take out of order, so by default its command line drops a frame and retimes the rest; with
-passthrough it keeps every frame, guesses the first one's time (0) and repeats the last one's. `H264Decoder` times them
-as an AVI's Annex B stream, the k-th frame shown at the decode time D packets later (D the SPS's reorder depth, 2 for
-libx264's B pictures): k + D, which equals FFmpeg's for every frame between its guessed ones. Where FFmpeg's packets have
-no times (mxf-h264-pipe-norip), it numbers its frames from 0, and only the MD5s are compared. `MediaPlayerTests` plays
+passthrough it keeps every frame. The file gives no frame its presentation time, and FFmpeg's frame times are its
+command line's guess, so only the MD5s are compared with FFmpeg's: on 2-second samples the guess is k + D between a
+guessed first time and a repeated last one, on mxf-h264-small's two 4-frame GOPs it is 0 2 3 5 6 7 7 7. `H264Decoder`
+times them as an AVI's Annex B stream, the k-th frame shown at the decode time D packets later (D the SPS's reorder
+depth, 2 for libx264's B pictures): k + D, which the test checks. `MediaPlayerTests` plays
 mxf-h264-pcm and mxf-h264-index, frames and audio. The picture size is the sampled rectangle's (120 rows for
 H.264's 128 stored), which is what the decoders give; FFmpeg's demuxer reports the stored size.
 ## H.264

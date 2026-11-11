@@ -672,6 +672,23 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.Playback/RtpH264Depacketizer.cs",
          find="if (gap >= 0x8000)", replace="if (gap < 0)",
          tests="FullyQualifiedName~RtpH264DepacketizerTests.IgnoresARepeatedPacket"),
+    # ---- LivePlayer over RTSP (docs/decisions/2026-11-10-live-rtsp-h264.md): past MaxLag, skip to the next IDR picture ...
+    dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
+         find="else if (waitForIdr || _clock.Elapsed - _origin - queued.Time > maxLag)", replace="else if (waitForIdr)",
+         tests="FullyQualifiedName~LiveRtspTests.SkipsToTheNextIdrPictureWhenDecodingFallsBehind"),
+    # ... pass over a unit whose slices were all lost, rather than feed the decoder what it refuses ...
+    dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
+         find="                    if (!unit.HasPicture)\n                    {\n                        continue;\n                    }\n",
+         replace="",
+         tests="FullyQualifiedName~LiveRtspTests.ConcealsLostPacketsAndCountsThem"),
+    # ... 403, 404 and 454 are final as 401 is ...
+    dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
+         find="if (response.Status is 401 or 403 or 404 or 454)", replace="if (response.Status is 401)",
+         tests="FullyQualifiedName~LiveRtspTests.GivesUpOnAnswersARetryWontChange"),
+    # ... and the session is kept alive at half its timeout.
+    dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
+         find="TimeSpan.FromTicks(timeout.Ticks / 2)", replace="timeout",
+         tests="FullyQualifiedName~LiveRtspTests.KeepsTheSessionAliveAtHalfItsTimeout"),
     # MJPEG over HTTP: the first delimiter line names the boundary, whatever the header said (cameras get it wrong).
     dict(file="src/ManagedCodecs.Playback/MultipartReader.cs",
          find="            if (_first)\n", replace="            if (_boundary is null)\n",

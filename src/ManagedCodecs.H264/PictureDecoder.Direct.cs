@@ -82,8 +82,7 @@ internal sealed partial class PictureDecoder<TPixel>
         {
             if (checkStill)
             {
-                var col = CoLocated(colPic, mbAddr, x / 4, y / 4);
-                colZero |= col.RefIdx == 0 && col.MvX is >= -1 and <= 1 && col.MvY is >= -1 and <= 1 ? 1u << blocks : 0;
+                colZero |= ColZero(colPic, mbAddr, x / 4, y / 4) ? 1u << blocks : 0;
             }
 
             blocks++;
@@ -103,6 +102,37 @@ internal sealed partial class PictureDecoder<TPixel>
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// colZeroFlag's test of the co-located block of 4x4 block (bx, by) (8.4.1.2.2): reference index 0 and both vector
+    /// components within -1 .. 1. A frame over a frame (no MBAFF, the co-located picture not coded as fields), where
+    /// <see cref="CoLocated"/> takes the macroblock at the same address with no rescaling, reads its motion directly,
+    /// after the same wait; every other layout goes through <see cref="CoLocated"/>.
+    /// </summary>
+    private bool ColZero(Picture colPic, int mbAddr, int bx, int by)
+    {
+        if (_fieldParity < 0 && !_mbaff)
+        {
+            int cx = Sps.Direct8x8Inference ? (bx >> 1) * 3 : bx;
+            int cy = Sps.Direct8x8Inference ? (by >> 1) * 3 : by;
+            colPic.WaitForMotion(FrameMbRow(mbAddr) + 1);
+            if (!colPic.Whole.CodedAsFields)
+            {
+                int part = (mbAddr * 4) + ((cy >> 1) * 2) + (cx >> 1);
+                int list = colPic.RefIdx[0][part] >= 0 ? 0 : 1;
+                if (colPic.RefIdx[list][part] != 0)
+                {
+                    return false;
+                }
+
+                int block = (mbAddr * 16) + (cy * 4) + cx;
+                return colPic.MvX[list][block] is >= -1 and <= 1 && colPic.MvY[list][block] is >= -1 and <= 1;
+            }
+        }
+
+        var col = CoLocated(colPic, mbAddr, bx, by);
+        return col.RefIdx == 0 && col.MvX is >= -1 and <= 1 && col.MvY is >= -1 and <= 1;
     }
 
     /// <summary>Spatial direct motion of a size x size area: zero in a list whose reference is 0 where the co-located block is still.</summary>

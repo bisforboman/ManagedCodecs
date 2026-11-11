@@ -9,8 +9,9 @@ DELAYED_THREADS = "DisplayName~MatchesFfmpegWithDelayedThreads"
 
 MUTATIONS = [
     # ---- Frame threading: a picture reads only what an earlier one has reported final (src/ManagedCodecs.H264/CLAUDE.md, Frame threading).
-    # Not listed, because breaking them alone fails no test: the co-located motion wait (PictureDecoder.Direct.cs), which
-    # the motion compensation waits before it cover in practice, and ListsDamaged's wait for each picture in the lists
+    # Not listed, because breaking them alone fails no test: the co-located motion waits (PictureDecoder.Direct.cs,
+    # CoLocated and ColZero), which the motion compensation waits before them cover in practice, and ListsDamaged's
+    # wait for each picture in the lists
     # (H264Decoder.cs), which the motion compensation waits cover too: a picture reads its references' bottom rows,
     # final only once the reference is done and its Damaged set.
 

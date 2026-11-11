@@ -63,3 +63,11 @@ The owner chose that `WavDemuxer` seeks, before its first release. Every packet 
 listed when opening, so `Seek` starts at the one whose samples hold the time, with no read of the file. FFmpeg's wav
 seek starts a packet at the exact sample instead; ours keep the packets of a read from the start, as `IDemuxer.Seek`
 asks of every demuxer (docs/conformance.md, .wav files).
+
+## Later: G.711 (2026-11-11)
+
+The owner chose A-law and μ-law next, the last common WAV audio played silent. They join `PcmDecoder` (a byte a
+sample, like the other PCM, expanded by G.711's tables to FFmpeg's 16-bit values) under two new constants as FFmpeg
+names them, `CodecIds.PcmAlaw` and `CodecIds.PcmMulaw`: format tags 6 and 7 (.wav, AVI, through `WaveFormat`) and
+QuickTime's 'alaw' and 'ulaw'. Matroska's A_MS/ACM, where FFmpeg's muxer puts them, isn't read yet: a later decision,
+since it would bring every WAVEFORMATEX codec into Matroska at once.

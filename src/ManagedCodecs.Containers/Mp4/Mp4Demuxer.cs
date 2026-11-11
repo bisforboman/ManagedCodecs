@@ -1602,7 +1602,7 @@ public sealed class Mp4Demuxer : IDemuxer
         /// QuickTime's PCM entries, as FFmpeg's mov demuxer names them: 'raw ' unsigned 8-bit, 'sowt' and 'twos' signed
         /// 16-bit little- and big-endian (at a samplesize of 16; 'twos' at 8 is signed 8-bit, not decoded), and 'in24',
         /// 'in32', 'fl32' and 'fl64' by their names, big-endian unless an 'enda' box (in the 'wave' box, or among the
-        /// entry's children) says 1. Null for any other entry.
+        /// entry's children) says 1; 'alaw' and 'ulaw' (G.711, a byte a sample). Null for any other entry.
         /// </summary>
         private static string? PcmCodec(uint format, int sampleSize, ReadOnlySpan<byte> children)
         {
@@ -1622,6 +1622,8 @@ public sealed class Mp4Demuxer : IDemuxer
                 Box.In32 => little ? CodecIds.PcmS32Le : CodecIds.PcmS32Be,
                 Box.Fl32 => little ? CodecIds.PcmF32Le : CodecIds.PcmF32Be,
                 Box.Fl64 => little ? CodecIds.PcmF64Le : CodecIds.PcmF64Be,
+                Box.Alaw => CodecIds.PcmAlaw,
+                Box.Ulaw => CodecIds.PcmMulaw,
                 _ => null,
             };
         }
@@ -1832,6 +1834,8 @@ public sealed class Mp4Demuxer : IDemuxer
         public const uint In32 = 0x696E3332;
         public const uint Fl32 = 0x666C3332;
         public const uint Fl64 = 0x666C3634;
+        public const uint Alaw = 0x616C6177;
+        public const uint Ulaw = 0x756C6177;
         public const uint Ipcm = 0x6970636D;
         public const uint Fpcm = 0x6670636D;
         public const uint PcmC = 0x70636D43;

@@ -20,6 +20,8 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="ManagedCodecs.Tests" />
+    <!-- mcdec live mode (tools/ManagedCodecs.Cli/LiveCheck.cs) converts a file's frames as LivePlayer does, to compare. -->
+    <InternalsVisibleTo Include="mcdec" />
   </ItemGroup>
 
   <ItemGroup>

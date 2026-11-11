@@ -125,7 +125,16 @@ Real servers, by hand:
     on one thread.
   - A screenshot showed the SMPTE bars in order.
   - Its first runs answered DESCRIBE with 503 (its pipeline lacked an element). `LivePlayer` retried, as it should.
-- Not tried yet: mediamtx (to run nightly, decision 4 of the note), live555, an IP camera.
+
+Nightly, `realworld.yml`'s `rtsp` job (tools/rtsp-nightly.py): mediamtx 1.21.3 serves FFmpeg's push (`-re -stream_loop -1
+-c copy`) of a 10 s 720p25 libx264 clip (B pictures, an IDR picture every 2 s, so FU-A fragments), once with Basic and
+once with Digest. `mcdec --live` (tools/ManagedCodecs.Cli/LiveCheck.cs) plays it with `LivePlayer` and fails unless each
+of 250 frames shown is one of the clip's own (`H264Decoder` and the player's conversion, by MD5), with no lost packet,
+damaged frame or reconnect. The first run, in the cloud sandbox (2026-11-11): 150 frames a method, all the clip's, about
+40 units skipped while waiting for the first IDR picture after joining, 5.8 ms to decode and 1.0 ms to convert a frame.
+A clip other than the one streamed fails it from the first frame.
+
+- Not tried yet: live555, an IP camera.
 
 ## Real films
 

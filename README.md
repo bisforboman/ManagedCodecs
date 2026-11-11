@@ -46,6 +46,8 @@ in between. That comparison is not measured here.
 | `tools/ManagedCodecs.MonoGame.Sample` | `mcplay`: a MonoGame `Game` around `VideoTexture` (`ManagedCodecs.MonoGame`) (its README has the 1080p measurements; issue #254) |
 | `tools/ManagedCodecs.Unity.Sample` | A Unity `MonoBehaviour` that plays a video into a `Texture2D` and an `AudioClip` with the `ManagedCodecs.Unity` package (its `MediaPlayer`); CI compiles it against stubs of UnityEngine, Unity has not run it |
 | `tools/make-samples.sh` | Generates the test samples and FFmpeg's references |
+| `tools/gst-rtsp-server.py` | A GStreamer RTSP server with a live H.264 test pattern (no auth, Basic or Digest), for trying `LivePlayer` by hand |
+| `tools/rtsp-nightly.py` | `LivePlayer` against mediamtx serving FFmpeg's push of a clip, each frame checked against the clip's (`mcdec --live`); nightly in `realworld.yml` |
 | `tools/rtp-record.py` | Records the RTP packets FFmpeg sends to a loopback UDP port, for the RTP depacketizer's tests (make-samples.sh) |
 | `tools/compare.sh` | Times mcdec and FFmpeg on the same file |
 | `tools/h264-stages.py` | Shares of H.264 decoding by stage, for mcdec and FFmpeg, from perf and callgrind profiles (docs/notes/h264-stages-2026-11.md) |
@@ -508,9 +510,22 @@ if (player.TakeLatest() is { } frame)
 - **What cameras get wrong:** a part without `Content-Length` (split at the next delimiter), LF line ends, a header's
   boundary written with its `--`, or one the body doesn't use (the first delimiter line's wins), none at all. Parts
   that aren't JPEGs, and JPEGs the decoder refuses, are counted and skipped.
-- **Samples:** `tools/ManagedCodecs.Avalonia.Sample` (`mclive`) and `tools/ManagedCodecs.Wpf.Sample` (`mclive-wpf`).
-- **Cost:** a software decoder's: a wall of cameras wants their low-resolution substreams. RTSP (H.264) is next
-  (issue #462); docs/decisions/2026-11-10-live-mjpeg-over-http.md has the plan.
+- **RTSP:** `new LivePlayer(new RtspSource(new Uri("rtsp://user:password@camera/stream1")))` shows H.264 over RTSP 1.0.
+  It authenticates with Digest or Basic, takes RTP over the RTSP connection (no UDP ports, through NAT), and sends
+  keep-alives at half the session's timeout.
+  - Every picture is decoded, as later ones are predicted from it, with concealment for lost packets
+    (`LiveStatistics.LostPackets`).
+  - If decoding falls more than `MaxLag` (1 s) behind the camera, pictures are skipped up to the next IDR picture
+    (`SkippedFrames`).
+  - Final answers: 401 after the challenge's answer, 403, 404, 454, 461 (the camera wants RTP over UDP, not
+    supported yet), and an SDP with no H.264 track or with RTP's interleaved mode.
+  - Checked against GStreamer's RTSP server by hand, and nightly against mediamtx (docs/conformance.md, H.264 over RTSP).
+  - Not yet: RTP over UDP, RTSPS, H.265, JPEG over RTP.
+- **Samples:** `tools/ManagedCodecs.Avalonia.Sample` (`mclive`) and `tools/ManagedCodecs.Wpf.Sample` (`mclive-wpf`)
+  take either kind of URL.
+- **Cost:** a software decoder's. 1080p25 H.264 decodes in about 14 ms a frame on one thread (with 8 ms to convert),
+  so a wall of cameras wants their low-resolution substreams. docs/decisions/2026-11-10-live-mjpeg-over-http.md and
+  docs/decisions/2026-11-10-live-rtsp-h264.md have the plans.
 
 ### Unity
 

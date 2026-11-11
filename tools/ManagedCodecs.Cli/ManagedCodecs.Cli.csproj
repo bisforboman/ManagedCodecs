@@ -10,6 +10,9 @@
     <!-- ThumbnailOutput.cs and the thumbnail hash mode: not in the Unity build of mcdec (tools/ManagedCodecs.Cli.Unity), which
          compiles these sources against a package without Thumbnails. -->
     <DefineConstants>$(DefineConstants);THUMBNAILS</DefineConstants>
+    <!-- LiveCheck.cs and mcdec live mode: LivePlayer, and Playback's frame conversion (InternalsVisibleTo mcdec), which the Unity
+         build of mcdec can't see. -->
+    <DefineConstants>$(DefineConstants);LIVE</DefineConstants>
   </PropertyGroup>
 
   <ItemGroup>
@@ -19,6 +22,7 @@
     <ProjectReference Include="..\..\src\ManagedCodecs.Aac\ManagedCodecs.Aac.csproj" />
     <ProjectReference Include="..\..\src\ManagedCodecs.Mp3\ManagedCodecs.Mp3.csproj" />
     <ProjectReference Include="..\..\src\ManagedCodecs.Thumbnails\ManagedCodecs.Thumbnails.csproj" />
+    <ProjectReference Include="..\..\src\ManagedCodecs.Playback\ManagedCodecs.Playback.csproj" />
   </ItemGroup>
 
   <!-- A static PGO profile for a Native AOT publish (-p:McdecMibc=<file>.mibc, made with dotnet-pgo from a trace): ILC's

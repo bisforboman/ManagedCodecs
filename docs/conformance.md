@@ -106,6 +106,36 @@ skipped (`HasPicture`), since the decoder refuses a unit with no slice. With `Co
 exception to 32 frames, 31 of them marked damaged until the stream's next IDR picture: the decoder conceals a lost
 picture as a reference but gives no frame for it.
 
+### H.264 over RTSP
+
+`LiveRtspTests` runs `LivePlayer` against a loopback RTSP server in the tests that replays the recorded RTP. Its
+Digest check has its own MD5, not the client's, and `RtspProtocolTests` checks Digest against RFC 2617's worked example.
+- In lockstep, every frame shown is `H264Decoder`'s newest for the access units so far, with Digest (with and without
+  `qop`) and Basic, and the URL's user info is never sent.
+- Covered too: control URLs (relative, absolute, `*`), the final answers, SDPs it can't play, keep-alives at half the
+  session's timeout, a stall and a dropped connection, lost packets, and falling behind past `MaxLag` (on a fake
+  clock, decoding held by a test gate).
+
+Real servers, by hand:
+
+- GStreamer 1.24's RTSP server (gst-rtsp-server, tools/gst-rtsp-server.py: a live SMPTE pattern by x264, `tune=zerolatency`,
+  a keyframe every 50) to `mclive` under Xvfb (2026-11-11): Digest, Basic and none at 640x480, and none at 1080p25.
+  - Each showed 150 or 200 frames at the stream's 25 fps, none damaged or skipped, with no reconnects.
+  - 640x480 decoded in about 3 to 4 ms a frame and converted in 1.4 ms. 1080p decoded in 13.7 ms and converted in 7.7 ms,
+    on one thread.
+  - A screenshot showed the SMPTE bars in order.
+  - Its first runs answered DESCRIBE with 503 (its pipeline lacked an element). `LivePlayer` retried, as it should.
+
+Nightly, `realworld.yml`'s `rtsp` job (tools/rtsp-nightly.py): mediamtx 1.21.3 serves FFmpeg's push (`-re -stream_loop -1
+-c copy`) of a 10 s 720p25 libx264 clip (B pictures, an IDR picture every 2 s, so FU-A fragments), once with Basic and
+once with Digest. `mcdec --live` (tools/ManagedCodecs.Cli/LiveCheck.cs) plays it with `LivePlayer` and fails unless each
+of 250 frames shown is one of the clip's own (`H264Decoder` and the player's conversion, by MD5), with no lost packet,
+damaged frame or reconnect. The first run, in the cloud sandbox (2026-11-11): 150 frames a method, all the clip's, about
+40 units skipped while waiting for the first IDR picture after joining, 5.8 ms to decode and 1.0 ms to convert a frame.
+A clip other than the one streamed fails it from the first frame.
+
+- Not tried yet: live555, an IP camera.
+
 ## Real films
 
 Every sample above is a test pattern encoded to isolate a feature. `tools/realworld.py` (nightly, `realworld.yml`, a job
@@ -1453,6 +1483,12 @@ conformance tests. On the 1080p Sintel frames spatial direct's functions (`Direc
 from 0.23 to 0.26 of an untouched set (`FilterMacroblock420`, `HalfHorizontal`, `Cabac.ResidualBlock`,
 `PredictChromaPair`) to 0.21 to 0.23 (perf, six runs each, the order alternating, every branch run below every base
 run): about 3.15 to 2.75% of the frame.
+Tried and dropped (2026-11-11): the luma filter's vertical passes. `HalfVertical` with its six rows sliding down
+already widened (one row widened a row instead of six), and `Center`'s vertical pass by two `pmaddwd` a half, (outer,
+middle) by (1, -5) and (inner, 512) by (20, 1), then the saturating packs. Bit-exact, but callgrind (Native AOT, the
+480p Sintel frames) counted 19.14 against 19.23 M instructions a frame (-0.5%), and perf put `HalfVertical` and
+`Center` at 0.25 to 0.27 of an untouched set against 0.26 to 0.30 on the 1080p frames, lower in five pairs of six:
+about 0.3% of the frame, not worth a second loop in `HalfVertical`.
 
 ## AAC
 

@@ -264,8 +264,23 @@ jobs:
 
       - name: Install Mono 6.12
         run: |
-          sudo gpg --homedir /tmp --no-default-keyring --keyring /usr/share/keyrings/mono-official-archive-keyring.gpg \
-            --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys 3FA7E0328081BFF6A14DA29AA6A19B38D3D831EF
+          # Mono's signing key, pinned by its full fingerprint. First from Mono's own host over HTTPS (the one apt then
+          # downloads the packages from), else from key servers, which failed for hours from the runners on 2026-11-11.
+          # Whatever the source, only the key with that fingerprint goes into the keyring apt trusts.
+          key=3FA7E0328081BFF6A14DA29AA6A19B38D3D831EF
+          keyring=/usr/share/keyrings/mono-official-archive-keyring.gpg
+          scratch=$(mktemp -d)
+          scratch_gpg() { gpg --homedir "$scratch" --batch "$@"; }
+          if ! (curl -fsSL --retry 3 https://download.mono-project.com/repo/xamarin.gpg -o "$scratch/xamarin.gpg" \
+                && scratch_gpg --import "$scratch/xamarin.gpg" && scratch_gpg --list-keys "$key"); then
+            for server in hkp://keyserver.ubuntu.com:80 hkps://keyserver.ubuntu.com hkp://pgp.mit.edu:80; do
+              if scratch_gpg --keyserver "$server" --recv-keys "$key"; then
+                break
+              fi
+            done
+          fi
+          scratch_gpg --export "$key" | sudo tee "$keyring" > /dev/null
+          scratch_gpg --no-default-keyring --keyring "$keyring" --list-keys --with-colons | grep -q "^fpr:::::::::$key:"
           echo "deb [signed-by=/usr/share/keyrings/mono-official-archive-keyring.gpg] https://download.mono-project.com/repo/ubuntu stable-focal main" \
             | sudo tee /etc/apt/sources.list.d/mono-official-stable.list
           sudo apt-get update -q

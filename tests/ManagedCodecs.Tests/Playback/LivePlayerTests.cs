@@ -11,6 +11,12 @@ namespace ManagedCodecs.Tests.Playback;
 /// </summary>
 public class LivePlayerTests
 {
+    // The real-clock tests serve their parts behind a gate the test opens, so a loaded runner (CI's tests without hardware
+    // intrinsics, every class in parallel) can go past the default 5 s stall between two parts: the player then reconnects
+    // and the server starts its parts over, showing frame 0 where the test waits for a later one. Stalls are tested on
+    // the fake clock; here no stall may end a connection.
+    private static MjpegHttpSource Unstalled(Uri uri) => new(uri) { StallTimeout = TimeSpan.FromMinutes(10) };
+
     private const string Sample = "testsrc-420.avi";
     private const string Multipart = "multipart/x-mixed-replace; boundary=frame";
 
@@ -51,7 +57,7 @@ public class LivePlayerTests
             await Task.Delay(Timeout.Infinite, token);
         });
 
-        using var player = new LivePlayer(new MjpegHttpSource(server.Uri));
+        using var player = new LivePlayer(Unstalled(server.Uri));
         player.Start();
         foreach (var jpeg in jpegs)
         {
@@ -79,7 +85,7 @@ public class LivePlayerTests
             await Task.Delay(Timeout.Infinite, token);
         });
 
-        using var player = new LivePlayer(new MjpegHttpSource(server.Uri));
+        using var player = new LivePlayer(Unstalled(server.Uri));
         player.Start();
         WaitFor(player, () => player.Statistics is { ReceivedFrames: 40 } s && s.DecodedFrames + s.SkippedFrames == 40 ? player : null);
         var frame = player.TakeLatest();
@@ -150,7 +156,7 @@ public class LivePlayerTests
             await Task.Delay(Timeout.Infinite, token);
         });
 
-        using var player = new LivePlayer(new MjpegHttpSource(server.Uri));
+        using var player = new LivePlayer(Unstalled(server.Uri));
         player.Start();
         Assert.Equal(LiveSamples.Rgba(jpegs[0]), WaitFor(player, player.TakeLatest).Pixels);
         for (int damaged = 1; damaged <= 3; damaged++)

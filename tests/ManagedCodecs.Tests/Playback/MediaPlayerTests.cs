@@ -27,7 +27,7 @@ public class MediaPlayerTests
 
     // PCM in QuickTime and Matroska, one stereo format of each kind: 24-bit little-endian ('in24' and an 'enda'), 16-bit
     // big-endian (A_PCM/INT/BIG) and 64-bit float (A_PCM/FLOAT/IEEE).
-    public static TheoryData<string> PcmSamples() => ["mov-pcm-s24le.mp4", "mkv-pcm-s16be.mkv", "mkv-pcm-f64le.mkv"];
+    public static TheoryData<string> PcmSamples() => ["mov-pcm-s24le.mp4", "mkv-pcm-s16be.mkv", "mkv-pcm-f64le.mkv", "mxf-h264-pcm.mxf", "mxf-h264-index.mxf"];
 
     [Theory]
     [MemberData(nameof(Samples))]

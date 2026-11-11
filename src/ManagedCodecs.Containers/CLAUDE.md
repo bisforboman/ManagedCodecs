@@ -68,5 +68,6 @@ The repository's CLAUDE.md (process, core idea, cross-cutting gotchas) applies t
   them), no durations, and no video times where it reads no index entries (DNxHR's constant-size index; the footer's
   index of a pipe-written file without a random index pack, which it never reaches); compare against `.packets.csv`
   and the demuxer's own `.packets.nofillin.csv` as `MxfConformanceTests` does. Its H.264 packets' pts are their dts
-  (FFmpeg's muxer writes no temporal offsets), so `ffmpeg -f framemd5` drops a frame and retimes the rest: no H.264
-  frame reference for MXF yet.
+  (FFmpeg's muxer writes no temporal offsets), so `ffmpeg -f framemd5` drops a frame and retimes the rest; with
+  `-fps_mode passthrough` it keeps every frame (`.h264.framemd5`), guessing the first one's time and repeating the last
+  one's, and numbers them from 0 where its packets have no times.

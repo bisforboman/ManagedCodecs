@@ -1,5 +1,6 @@
 using System.Globalization;
 using ManagedCodecs.Containers;
+using ManagedCodecs.H264;
 
 namespace ManagedCodecs.Tests.Containers;
 
@@ -67,6 +68,79 @@ public class MxfConformanceTests
             Assert.Equal(new Rational(1, audio.SampleRate), audio.TimeBase);
             var last = packets.Last(p => p.StreamIndex == audio.StreamIndex);
             Assert.Equal(last.Pts + last.Duration, audio.Duration);
+        }
+    }
+
+    public static TheoryData<string, int> H264Samples()
+    {
+        var rows = new TheoryData<string, int>();
+        if (TestSamples.Directory is null)
+        {
+            return rows;
+        }
+
+        foreach (string file in Directory.EnumerateFiles(TestSamples.Directory, "*.mxf").Order())
+        {
+            string name = Path.GetFileName(file);
+            if (File.Exists(TestSamples.ReferenceOf(name, ".h264.framemd5")))
+            {
+                rows.Add(name, 1);
+                rows.Add(name, 4);
+            }
+        }
+
+        return rows;
+    }
+
+    /// <summary>
+    /// The H.264 frames, against FFmpeg's (name.h264.framemd5, <c>ffmpeg -fps_mode passthrough -f framemd5</c>: every frame,
+    /// none dropped): each frame's MD5, one and four threads. FFmpeg's MXF packets carry decode times as presentation
+    /// times (its muxer writes no temporal offsets), which its decoder's frames then take out of order; its command line
+    /// guesses the first frame's time (0) and repeats the last one's. The decoder times frames as for any Annex B stream
+    /// (an AVI's): the k-th shown at the decode time of the packet the SPS's reorder depth D later, so k + D in edit
+    /// units, which equal FFmpeg's for every frame between the guessed ones (where FFmpeg's packets have times).
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(H264Samples))]
+    public void DecodesTheH264AsFfmpegDoes(string sampleName, int threads)
+    {
+        var lines = File.ReadAllLines(TestSamples.ReferenceOf(sampleName, ".h264.framemd5"));
+        var expected = FrameMd5.Parse(lines).Where(e => e.StreamIndex == 0).ToList();
+
+        using var demuxer = Demuxer.Open(TestSamples.PathOf(sampleName));
+        var video = demuxer.Video!;
+        Assert.Equal(CodecIds.H264, video.Codec);
+        var decoder = new H264Decoder(video) { Threads = threads };
+        var frames = new List<(long Pts, string Md5)>();
+        foreach (var packet in demuxer.ReadPackets().Where(p => p.StreamIndex == video.StreamIndex))
+        {
+            foreach (var frame in decoder.Decode(packet))
+            {
+                frames.Add((frame.Pts, FrameMd5.Hash(frame)));
+                frame.Dispose();
+            }
+        }
+
+        foreach (var frame in decoder.Flush())
+        {
+            frames.Add((frame.Pts, FrameMd5.Hash(frame)));
+            frame.Dispose();
+        }
+
+        // Where FFmpeg's packets have no times (mxf-h264-pipe-norip: an index it doesn't reach), it numbers its frames
+        // from 0 instead: only the MD5s and the decoder's own times are checked there.
+        bool timed = !Parse(TestSamples.ReferenceOf(sampleName, ".packets.csv")).Any(p => p.StreamIndex == video.StreamIndex && p.Pts is null);
+
+        Assert.Equal(expected.Count, frames.Count);
+        long depth = frames[0].Pts;
+        for (int k = 0; k < frames.Count; k++)
+        {
+            Assert.True(expected[k].Md5 == frames[k].Md5, $"Frame {k} differs from FFmpeg's.");
+            Assert.True(frames[k].Pts == k + depth, $"Frame {k}: pts {frames[k].Pts}, not {k + depth}.");
+            if (timed && k > 0 && k < frames.Count - depth)
+            {
+                Assert.True(expected[k].Pts == frames[k].Pts, $"Frame {k}: pts {frames[k].Pts}, FFmpeg's {expected[k].Pts}.");
+            }
         }
     }
 

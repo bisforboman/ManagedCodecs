@@ -375,7 +375,8 @@ frame of 16384x14336 whose concealment took 30 s a picture; a longer one conceal
 hour each of `mjpeg` and `aac` after that (17 and 18 million inputs) found nothing. Field pictures' long-term marking (after 0.2.0): 40
 minutes of `h264` seeded with the long-term field samples alone (4.4 million inputs, with and without concealment)
 found nothing, and `ReferenceListTests` marks random field pictures with random memory management operations and
-checks the lists after each.
+checks the lists after each. MXF (#469): 30 minutes of `file` seeded with the MXF samples small enough
+(mxf-h264-small, made for it, and mxf-h264-interlaced; 3.3 million inputs) found nothing.
 
 ### Probing a video
 

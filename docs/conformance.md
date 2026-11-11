@@ -1416,6 +1416,15 @@ instructions a frame on the first 360 frames of the 480p Sintel trailer (-1.8%).
 chroma functions fell from 0.70 to 0.81 of the untouched set (`FilterMacroblock420`, `HalfHorizontal`,
 `Cabac.ResidualBlock`) to 0.67 to 0.73 on the 1080p frames (perf, six runs each, the order alternating, lower in every
 pair), about 0.5% of the frame: at 1080p chroma's time is mostly reference reads and per-block setup, not the loop.
+Spatial direct's colZeroFlag (8.4.1.2.2) read each 8x8 block's co-located motion through `CoLocated`, which handles
+every layout (field pictures, MBAFF, frames over field pairs) and returns the reference's Id, parity and vertical scale
+as well, all of which colZeroFlag ignores. `ColZero` now reads a frame over a frame (no MBAFF, the co-located picture
+not coded as fields: the macroblock at the same address, no rescaling) straight from its arrays, after the same wait
+for the co-located motion; other layouts still go through `CoLocated`. Widening its vector range by one fails 144
+conformance tests. On the 1080p Sintel frames spatial direct's functions (`DirectMotion`, `CoLocated`, `ColZero`) fell
+from 0.23 to 0.26 of an untouched set (`FilterMacroblock420`, `HalfHorizontal`, `Cabac.ResidualBlock`,
+`PredictChromaPair`) to 0.21 to 0.23 (perf, six runs each, the order alternating, every branch run below every base
+run): about 3.15 to 2.75% of the frame.
 
 ## AAC
 

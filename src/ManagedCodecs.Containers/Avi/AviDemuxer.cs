@@ -19,7 +19,7 @@ namespace ManagedCodecs.Containers;
 /// data), PCM by its depth (<see cref="CodecIds.PcmU8"/>, <see cref="CodecIds.PcmS16Le"/>, <see cref="CodecIds.PcmS24Le"/>,
 /// <see cref="CodecIds.PcmS32Le"/>; float <see cref="CodecIds.PcmF32Le"/> and <see cref="CodecIds.PcmF64Le"/>), IMA ADPCM at
 /// 4 bits <see cref="CodecIds.AdpcmImaWav"/> (wSamplesPerBlock as the codec private data); other audio is named by its
-/// WAVEFORMATEX format tag in hex ("0x0006" for A-law, "0x0011" for IMA ADPCM at 2, 3 or 5 bits), as
+/// WAVEFORMATEX format tag in hex ("0x0031" for GSM 6.10, "0x0011" for IMA ADPCM at 2, 3 or 5 bits), as
 /// <c>WaveFormat</c> reads it, for .wav files too.
 /// </para>
 /// <para>

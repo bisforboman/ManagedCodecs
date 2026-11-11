@@ -321,6 +321,14 @@ to it on random bytes. `PcmDecoderTests.MatchesFfmpegExactly` decodes every samp
 | mkv-pcm-s16be, mkv-pcm-s32be | A_PCM/INT/BIG at 16 and 32 |
 | mkv-pcm-f32le, mkv-pcm-f64le | A_PCM/FLOAT/IEEE at 32 and 64 |
 | mkv-lace-fixed | A_PCM/INT/LIT at 16, in fixed-size lacing |
+| mov-pcm-alaw, mov-pcm-mulaw | G.711 A-law and μ-law (stereo), QuickTime's 'alaw' and 'ulaw' |
+| wav-alaw-codes, wav-mulaw-codes | G.711 in .wav files (format tags 6 and 7), each of the 256 codes four times (μ-law in stereo) |
+
+G.711 (`CodecIds.PcmAlaw`, `CodecIds.PcmMulaw`) expands each byte by the standard's tables, A-law on a 13-bit scale and
+μ-law on a 14-bit one, shifted to 16 bits as FFmpeg's decoders give them; `wav-alaw-codes` and `wav-mulaw-codes` hold
+every code, so every value is checked against FFmpeg, and `PcmDecoderTests.ExpandsG711` names the extremes (A-law ±8 to
+±32256, μ-law 0 to ±32124). In Matroska FFmpeg's muxer writes them as A_MS/ACM (a WAVEFORMATEX in CodecPrivate), which
+the Matroska demuxer doesn't read: such tracks keep their Codec ID, undecoded.
 
 QuickTime's PCM has one 'stts' tick a sample frame, and FFmpeg's mov demuxer reads it by chunk, each cut in pieces of up
 to 1024 frames (their bytes the frames' whatever 'stsz' says, timed by the frames before them). Its muxer writes chunks of
@@ -357,7 +365,7 @@ samples, and MP3 by frames, as its parser cuts them. Their decoded audio is chec
 
 Built by hand (`WavDemuxerTests`), since FFmpeg's muxer writes neither: chunks before and after 'data', an odd-sized
 one padded; a 'data' size of 0xFFFFFFFF (a recording never closed) or 0, which runs to the end of the file (as ffprobe reads it); blocks longer
-than 4096 bytes, a packet each. Formats FFmpeg names otherwise keep their tag (`0x0006` for A-law), timed by
+than 4096 bytes, a packet each. Formats FFmpeg names otherwise keep their tag (`0x0031` for GSM 6.10), timed by
 nAvgBytesPerSec, unchecked; AAC in WAV is named but no sample has it. RF64 and Wave64 are not read. AVI shares the
 naming: `avi-mjpeg-pcm-s24` and `avi-mjpeg-pcm-f32` (format tags 1 and 3) decode exactly too.
 

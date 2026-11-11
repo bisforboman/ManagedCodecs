@@ -53,6 +53,23 @@ public class PcmDecoderTests
     }
 
     /// <summary>
+    /// G.711's extremes as the standard's tables give them, scaled to 16 bits: A-law (even bits inverted, sign bit set
+    /// positive) from the smallest steps, ±8 (1 on its 13-bit scale), to ±32256; μ-law (all bits inverted, sign bit
+    /// set negative) from 0 (both of its zeros) to ±32124. wav-alaw-codes and wav-mulaw-codes check every code against
+    /// FFmpeg.
+    /// </summary>
+    [Fact]
+    public void ExpandsG711()
+    {
+        var alaw = new PcmDecoder(Stream(CodecIds.PcmAlaw, 1)).Decode([0xD5, 0x55, 0xAA, 0x2A]);
+        Assert.Equal([8 / 32768f, -8 / 32768f, 32256 / 32768f, -32256 / 32768f], alaw.Samples[0]);
+
+        var mulaw = new PcmDecoder(Stream(CodecIds.PcmMulaw, 2)).Decode([0xFF, 0x7F, 0x80, 0x00]);
+        Assert.Equal([0f, 32124 / 32768f], mulaw.Samples[0]);
+        Assert.Equal([0f, -32124 / 32768f], mulaw.Samples[1]);
+    }
+
+    /// <summary>
     /// Every format against the definition on random bytes: integers over 2^(bits - 1), floats as they are and doubles
     /// rounded to float, little- and big-endian; and each one's extremes.
     /// </summary>

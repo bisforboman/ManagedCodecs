@@ -31,13 +31,17 @@ public enum LiveState
 /// <param name="TakenFrames">Frames <see cref="LivePlayer.TakeLatest"/> returned.</param>
 /// <param name="SkippedFrames">
 /// JPEGs never decoded because a newer one arrived while the decoder was busy: the camera sends faster than this machine
-/// decodes.
+/// decodes. H.264: access units skipped while waiting for an IDR picture, after a new connection or when decoding fell
+/// <see cref="RtspSource.MaxLag"/> behind.
 /// </param>
 /// <param name="DroppedFrames">
 /// Frames decoded but replaced by a newer one before <see cref="LivePlayer.TakeLatest"/> took them: the camera sends
 /// faster than the caller takes.
 /// </param>
-/// <param name="DamagedFrames">Parts that weren't a JPEG, or a JPEG the decoder rejected: skipped, not fatal.</param>
+/// <param name="DamagedFrames">
+/// Parts that weren't a JPEG, or a JPEG the decoder rejected: skipped, not fatal. H.264: access units missing packets
+/// (decoded with concealment where they still hold a picture), or ones the decoder rejected.
+/// </param>
 /// <param name="Reconnects">Connections made after the first.</param>
 /// <param name="DecodeMilliseconds">The decoder's time a frame, the mean over the run.</param>
 /// <param name="ConvertMilliseconds">The conversion to RGBA's time a frame, the mean over the run.</param>
@@ -50,4 +54,8 @@ public readonly record struct LiveStatistics(
     long DamagedFrames,
     long Reconnects,
     double DecodeMilliseconds,
-    double ConvertMilliseconds);
+    double ConvertMilliseconds)
+{
+    /// <summary>RTP packets the sequence numbers say never arrived (RTSP); 0 for MJPEG over HTTP.</summary>
+    public long LostPackets { get; init; }
+}

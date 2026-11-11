@@ -15,6 +15,8 @@ run time.
 
 ### Added
 
+- Samples: mcplay, the Godot node and the Unity sample play a file without video (.wav, raw MP3 or AAC) through
+  `AudioPlayer`, its sound alone; `VideoTexture` stays video-only (docs/decisions/2026-11-11-audio-player.md).
 - Playback: `AudioPlayer` plays a file's audio alone, as `MediaPlayer` plays it beside video (which `MediaPlayer`
   needs): `.wav`, raw MP3 and AAC, or the audio of any file the demuxers open, decoded on a thread of its own into
   float stereo for `TakeAudio()`, with `Loop`, `IsFinished` and `Error`. For `Loop`, `Mp3Demuxer` and `AdtsDemuxer`

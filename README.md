@@ -479,8 +479,8 @@ while (player.TakeAudio() is { } audio) { /* audio.Samples at audio.SampleRate t
   has been run; CI builds the others.
 - **Audio-only files:** `MediaPlayer` needs video; `AudioPlayer` plays a file's audio alone (`.wav`, raw MP3 and AAC,
   or the audio of any file the demuxers open), the same way: `Start()`, then `TakeAudio()` as the sound has room, with
-  `Loop`, `IsFinished` and `Error` (docs/decisions/2026-11-11-audio-player.md). The samples and `VideoTexture` don't
-  use it yet.
+  `Loop`, `IsFinished` and `Error` (docs/decisions/2026-11-11-audio-player.md). mcplay, the Godot node and the Unity
+  sample fall back to it for a file without video, playing its sound alone; `VideoTexture` itself stays video-only.
 
 ### Live cameras
 

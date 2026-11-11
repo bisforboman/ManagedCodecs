@@ -34,7 +34,9 @@ internal sealed class LiveWindow : Window
         _status.Foreground = Brushes.White;
         Content = new DockPanel { Background = Brushes.Black, Children = { status, _image } };
 
-        _player = new LivePlayer(new MjpegHttpSource(options.Uri));
+        _player = options.Uri.Scheme == "rtsp"
+            ? new LivePlayer(new RtspSource(options.Uri))
+            : new LivePlayer(new MjpegHttpSource(options.Uri));
         _player.Start();
         RequestAnimationFrame(OnFrame);
     }

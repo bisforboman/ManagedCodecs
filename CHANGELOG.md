@@ -31,6 +31,12 @@ run time.
   stereo, exactly FFmpeg's output (its standard coefficient table whatever the file lists, and its cap on the step).
   `.wav` and AVI files name such streams `CodecIds.AdpcmMs` where they named them `"0x0002"`, and `MediaPlayer` plays
   them (docs/decisions/2026-11-10-ms-adpcm.md).
+- Live cameras over RTSP: `RtspSource` and a `LivePlayer` constructor taking it show H.264 over RTSP 1.0 (Digest or
+  Basic, RTP over the RTSP connection), decoding every picture with concealment for lost packets and skipping to the
+  next IDR picture when decoding falls `MaxLag` behind. `LiveStatistics.LostPackets` counts lost RTP packets, and
+  `LivePlayer.RtspSource` gives the source. `LivePlayer.Source` is now nullable (null for an RTSP player), which
+  callers that dereference it see as a nullable warning; it is binary compatible (issue #462,
+  docs/decisions/2026-11-10-live-rtsp-h264.md).
 - G.711 A-law and μ-law: `PcmDecoder` decodes them exactly as FFmpeg, named by new `CodecIds.PcmAlaw` and
   `CodecIds.PcmMulaw`. `.wav` and AVI files (format tags 6 and 7, where they gave `"0x0006"` and `"0x0007"`) and
   QuickTime ('alaw', 'ulaw') name them so, and `MediaPlayer` plays them.

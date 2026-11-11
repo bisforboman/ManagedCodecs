@@ -32,7 +32,9 @@ internal sealed class LiveWindow : Window
         panel.Children.Add(_image);
         Content = panel;
 
-        _player = new LivePlayer(new MjpegHttpSource(uri));
+        _player = uri.Scheme == "rtsp"
+            ? new LivePlayer(new RtspSource(uri))
+            : new LivePlayer(new MjpegHttpSource(uri));
         _player.Start();
         CompositionTarget.Rendering += OnRendering;
     }

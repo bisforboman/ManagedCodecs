@@ -20,6 +20,8 @@ samples/*.wav
 samples/*.h264
 samples/*.264
 samples/*.mjpeg
+samples/*.rtp
+samples/*.sdp
 samples/*.framemd5
 samples/*.picttypes
 samples/*.interlacing

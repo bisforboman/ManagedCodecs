@@ -47,6 +47,7 @@ in between. That comparison is not measured here.
 | `tools/ManagedCodecs.Unity.Sample` | A Unity `MonoBehaviour` that plays a video into a `Texture2D` and an `AudioClip` with the `ManagedCodecs.Unity` package (its `MediaPlayer`); CI compiles it against stubs of UnityEngine, Unity has not run it |
 | `tools/make-samples.sh` | Generates the test samples and FFmpeg's references |
 | `tools/gst-rtsp-server.py` | A GStreamer RTSP server with a live H.264 test pattern (no auth, Basic or Digest), for trying `LivePlayer` by hand |
+| `tools/rtsp-nightly.py` | `LivePlayer` against mediamtx serving FFmpeg's push of a clip, each frame checked against the clip's (`mcdec --live`); nightly in `realworld.yml` |
 | `tools/rtp-record.py` | Records the RTP packets FFmpeg sends to a loopback UDP port, for the RTP depacketizer's tests (make-samples.sh) |
 | `tools/compare.sh` | Times mcdec and FFmpeg on the same file |
 | `tools/h264-stages.py` | Shares of H.264 decoding by stage, for mcdec and FFmpeg, from perf and callgrind profiles (docs/notes/h264-stages-2026-11.md) |
@@ -517,7 +518,7 @@ if (player.TakeLatest() is { } frame)
     (`SkippedFrames`).
   - Final answers: 401 after the challenge's answer, 403, 404, 454, 461 (the camera wants RTP over UDP, not
     supported yet), and an SDP with no H.264 track or with RTP's interleaved mode.
-  - Checked against GStreamer's RTSP server (docs/conformance.md, H.264 over RTSP).
+  - Checked against GStreamer's RTSP server by hand, and nightly against mediamtx (docs/conformance.md, H.264 over RTSP).
   - Not yet: RTP over UDP, RTSPS, H.265, JPEG over RTP.
 - **Samples:** `tools/ManagedCodecs.Avalonia.Sample` (`mclive`) and `tools/ManagedCodecs.Wpf.Sample` (`mclive-wpf`)
   take either kind of URL.

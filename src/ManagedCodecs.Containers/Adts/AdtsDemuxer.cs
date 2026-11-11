@@ -31,6 +31,9 @@ public sealed class AdtsDemuxer : IDemuxer
     private readonly List<(long Position, int Length, int Blocks)> _frames = [];
     private readonly long _truncatedFrame = -1;
 
+    // The first frame a read gives: 0 until a Seek moves it.
+    private int _start;
+
     /// <summary>Reads the file's headers (and finds every frame); packets are read from the stream later, by <see cref="ReadPackets"/>.</summary>
     /// <param name="stream">A seekable stream holding the file.</param>
     /// <param name="leaveOpen">Whether <see cref="Dispose"/> leaves <paramref name="stream"/> open.</param>
@@ -121,6 +124,30 @@ public sealed class AdtsDemuxer : IDemuxer
     /// <exception cref="InvalidDataException">A frame runs past the end of the file (after the packets before it).</exception>
     public IEnumerable<PacketInfo> ReadPacketInfo() => Frames().Select(f => f.Info);
 
+    /// <inheritdoc/>
+    /// <remarks>
+    /// Every packet is a keyframe: reading starts at the last frame whose pts is at or before <paramref name="pts"/> (in
+    /// samples), among the frames found when opening, with no read of the file; before the first at the first, past the
+    /// last at the last. The frames keep their times and sequence numbers from the file's start.
+    /// </remarks>
+    public void Seek(long pts, int streamIndex)
+    {
+        if (streamIndex != Audio.StreamIndex)
+        {
+            throw new ArgumentOutOfRangeException(nameof(streamIndex), streamIndex, "An ADTS file has one stream, of index 0.");
+        }
+
+        int start = 0;
+        long time = 0;
+        for (int i = 0; i < _frames.Count && time <= pts; i++)
+        {
+            start = i;
+            time += (long)SamplesPerBlock * _frames[i].Blocks;
+        }
+
+        _start = start;
+    }
+
     /// <summary>Disposes the stream, unless the demuxer was made to leave it open.</summary>
     public void Dispose()
     {
@@ -170,12 +197,16 @@ public sealed class AdtsDemuxer : IDemuxer
     // Each frame's position and packet description, then the error for a frame that runs past the end of the file.
     private IEnumerable<(long Position, PacketInfo Info)> Frames()
     {
-        long sequence = 0;
         long time = 0;
-        foreach (var (pos, length, blocks) in _frames)
+        for (int i = 0; i < _frames.Count; i++)
         {
+            var (pos, length, blocks) = _frames[i];
             long duration = (long)SamplesPerBlock * blocks;
-            yield return (pos, new PacketInfo(0, sequence++, length, IsKeyframe: true, time, time, duration));
+            if (i >= _start)
+            {
+                yield return (pos, new PacketInfo(0, i, length, IsKeyframe: true, time, time, duration));
+            }
+
             time += duration;
         }
 

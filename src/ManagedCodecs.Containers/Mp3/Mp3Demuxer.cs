@@ -38,6 +38,9 @@ public sealed class Mp3Demuxer : IDemuxer
     private readonly List<(long Position, int Length)> _frames = [];
     private readonly long _truncatedFrame = -1;
 
+    // The first frame a read gives: 0 until a Seek moves it.
+    private int _start;
+
     // Gapless playback from the LAME tag: samples to skip at the start, and the first sample (from the first packet's
     // start) cut from the end, or long.MaxValue for none.
     private readonly int _startSkip;
@@ -143,6 +146,34 @@ public sealed class Mp3Demuxer : IDemuxer
     /// <exception cref="InvalidDataException">A frame runs past the end of the file (after the packets before it).</exception>
     public IEnumerable<PacketInfo> ReadPacketInfo() => Frames().Select(f => f.Info);
 
+    /// <inheritdoc/>
+    /// <remarks>
+    /// Every packet is a keyframe: reading starts at the last frame whose pts is at or before <paramref name="pts"/> (in
+    /// samples), among the frames found when opening, with no read of the file; before the first at the first, past the
+    /// last at the last. The frames keep their times and sequence numbers from the file's start.
+    /// The gapless trim stays the file's: the encoder's delay is skipped only by a read from the first frame (a seek to
+    /// its time, as <c>Loop</c> does), the padding still cut from the end. A frame read without the ones before it may
+    /// reach back into them for its main data (the bit reservoir); its granules there come out silent, as a cut
+    /// stream's do.
+    /// </remarks>
+    public void Seek(long pts, int streamIndex)
+    {
+        if (streamIndex != Audio.StreamIndex)
+        {
+            throw new ArgumentOutOfRangeException(nameof(streamIndex), streamIndex, "A raw MP3 file has one stream, of index 0.");
+        }
+
+        int start = 0;
+        long time = 0;
+        for (int i = 0; i < _frames.Count && time <= pts; i++)
+        {
+            start = i;
+            time += _samplesPerFrame;
+        }
+
+        _start = start;
+    }
+
     /// <summary>Disposes the stream, unless the demuxer was made to leave it open.</summary>
     public void Dispose()
     {
@@ -199,6 +230,13 @@ public sealed class Mp3Demuxer : IDemuxer
         long time = 0;
         foreach (var (pos, length) in _frames)
         {
+            if (sequence < _start)
+            {
+                sequence++;
+                time += _samplesPerFrame;
+                continue;
+            }
+
             // The samples from the gapless end on: the end of the last packet, or every sample of packets past it (all of
             // them skipped from its end, not a discarded packet, as FFmpeg gives them).
             long cut = Math.Clamp(time + _samplesPerFrame - _firstDiscarded, 0, _samplesPerFrame);

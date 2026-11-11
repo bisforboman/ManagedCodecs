@@ -1,9 +1,11 @@
 # mclive-wpf: a live camera in WPF
 
 A sample for issue #462 (docs/decisions/2026-11-10-live-mjpeg-over-http.md): shows a camera serving MJPEG over HTTP
-in a WPF window with `ManagedCodecs.Playback`'s `LivePlayer`. One camera, its URL on the command line; not a viewer.
+in a WPF window with `ManagedCodecs.Playback`'s `LivePlayer`, or H.264 over RTSP. One camera, its URL on the command
+line; not a viewer.
 
     dotnet run -c Release --project tools/ManagedCodecs.Wpf.Sample -- http://camera.local/video.mjpg
+    dotnet run -c Release --project tools/ManagedCodecs.Wpf.Sample -- rtsp://user:password@camera.local/stream1
 
 - On each frame WPF renders (`CompositionTarget.Rendering`), `TakeLatest()` gives the newest decoded frame, if one
   arrived since. WPF has no RGBA pixel format, so its red and blue are swapped in place (the frame is the window's

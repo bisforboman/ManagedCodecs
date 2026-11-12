@@ -930,6 +930,14 @@ ff -f lavfi -i testsrc2=s=160x120:r=25 -t 1 -c:v mpeg2video samples/mxf-mpeg2.mx
 # files under 64 KiB, tools/ManagedCodecs.Fuzz), the other MXF samples being larger.
 ff -f lavfi -i testsrc2=s=64x48:r=25 -f lavfi -i sine=sample_rate=48000 -t 0.32 -c:v libx264 -pix_fmt yuv420p -g 4 \
   -c:a pcm_s16le samples/mxf-h264-small.mxf
+# Clip-wrapped essence, from FFmpeg's OP-Atom muxer (-f mxf_opatom, ST 390: one track a file, the whole clip one
+# essence element, though its essence container labels say frame wrapping): H.264 found by the index entries' stream
+# offsets, DNxHR SQ by the index's constant EditUnitByteCount (no entries), and 24-bit PCM (48 kHz mono, all it writes)
+# whose index edit unit is a sample, which FFmpeg's demuxer reads in pieces of 1920 samples.
+ff -f lavfi -i testsrc2=s=160x120:r=25 -t 1 -c:v libx264 -pix_fmt yuv420p -g 10 -f mxf_opatom samples/mxf-opatom-h264.mxf
+ff -f lavfi -i testsrc2=s=256x144:r=25 -t 0.4 -c:v dnxhd -profile:v dnxhr_sq -pix_fmt yuv422p -f mxf_opatom \
+  samples/mxf-opatom-dnxhr.mxf
+ff -f lavfi -i sine=sample_rate=48000 -t 0.5 -c:a pcm_s24le -f mxf_opatom samples/mxf-opatom-pcm.mxf
 # name.headers.json: the streams as FFmpeg's demuxer reads them from the header metadata, nothing decoded
 # (ffprobe -nofind_stream_info: with probing, the size and aspect ratio are the decoder's), and the file's operational
 # pattern, material package and start timecode.

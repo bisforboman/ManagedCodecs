@@ -11,6 +11,14 @@ share internals, so each depends on the others at exactly its own version (`[X]`
 then reports a mix of versions (NU1107, or NU1608 for a newer one referenced directly) rather than letting it fail at
 run time.
 
+## Unreleased
+
+### Added
+
+- Containers: `MxfDemuxer` reads clip-wrapped essence (OP-Atom files, SMPTE ST 390), cut into edit units by the index
+  table: pictures by the index entries' stream offsets or the constant edit unit size, sound in pieces of a 25th of a
+  second, as FFmpeg's demuxer gives them.
+
 ## 0.13.0 – 2026-11-12
 
 Audio-only playback (`AudioPlayer`, raw AAC and MP3 seeking, and the samples), MXF files (`MxfDemuxer`), live cameras over

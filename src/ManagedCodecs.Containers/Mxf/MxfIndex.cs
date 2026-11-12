@@ -4,14 +4,19 @@ namespace ManagedCodecs.Containers;
 
 /// <summary>
 /// An essence container's index table (SMPTE ST 377-1 11): its segments' entries by edit unit, each with its temporal
-/// offset and flags. Byte offsets are not kept: <see cref="MxfDemuxer"/> finds the essence elements by walking the file.
+/// offset, flags and stream offset, or the constant size of an edit unit where a segment has no entries.
+/// <see cref="MxfDemuxer"/> finds frame-wrapped essence elements by walking the file, and splits a clip-wrapped one
+/// into edit units by <see cref="EditUnits"/>.
 /// </summary>
 internal sealed class MxfIndex
 {
     /// <summary>An index entry's random access flag (Table 28, bit 7).</summary>
     public const byte RandomAccess = 0x80;
 
-    private readonly List<(long Start, (sbyte TemporalOffset, byte Flags)[] Entries)> _segments = [];
+    private readonly List<(long Start, (sbyte TemporalOffset, byte Flags, long StreamOffset)[] Entries)> _segments = [];
+
+    /// <summary>The size of every edit unit (Edit Unit Byte Count, 3F05), where a segment gives one other than 0; else 0.</summary>
+    public long EditUnitByteCount { get; private set; }
 
     /// <summary>Whether the first delta entry (the edit unit's first element) has PosTableIndex -1: it is reordered (11.2.3).</summary>
     public bool FirstElementReordered { get; private set; }
@@ -23,11 +28,52 @@ internal sealed class MxfIndex
         {
             if (editUnit >= start && editUnit - start < entries.Length)
             {
-                return entries[editUnit - start];
+                var (temporalOffset, flags, _) = entries[editUnit - start];
+                return (temporalOffset, flags);
             }
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Where each edit unit starts in a clip-wrapped essence element whose value is <paramref name="size"/> bytes, and
+    /// its length: by the entries' stream offsets, which count from the value's first byte (the next entry's offset, or
+    /// the value's end, closes each), else by the constant <see cref="EditUnitByteCount"/> (whole edit units only).
+    /// Empty where the index gives neither.
+    /// </summary>
+    /// <exception cref="InvalidDataException">The stream offsets don't start at 0, go back, or run past the element.</exception>
+    public List<(long Offset, long Length)> EditUnits(long size)
+    {
+        var units = new List<(long Offset, long Length)>();
+        var offsets = _segments.OrderBy(s => s.Start).SelectMany(s => s.Entries.Select(e => e.StreamOffset)).ToList();
+        if (offsets.Count > 0)
+        {
+            if (offsets[0] != 0)
+            {
+                throw new InvalidDataException($"A clip-wrapped MXF element's first index entry is at byte {offsets[0]}, not at its start.");
+            }
+
+            for (int i = 0; i < offsets.Count; i++)
+            {
+                long end = i + 1 < offsets.Count ? offsets[i + 1] : size;
+                if (end < offsets[i] || end > size)
+                {
+                    throw new InvalidDataException($"A clip-wrapped MXF element's index entry {i} runs from byte {offsets[i]} to {end}, outside its {size} bytes.");
+                }
+
+                units.Add((offsets[i], end - offsets[i]));
+            }
+        }
+        else if (EditUnitByteCount > 0)
+        {
+            for (long offset = 0; size - offset >= EditUnitByteCount; offset += EditUnitByteCount)
+            {
+                units.Add((offset, EditUnitByteCount));
+            }
+        }
+
+        return units;
     }
 
     /// <summary>Whether <paramref name="key"/> is an index table segment's (Table 25: byte 6, the length coding, and byte 8 aside).</summary>
@@ -44,6 +90,7 @@ internal sealed class MxfIndex
     {
         long start = 0;
         uint bodySid = 0;
+        uint editUnitByteCount = 0;
         ReadOnlySpan<byte> entries = default;
         ReadOnlySpan<byte> deltas = default;
         int offset = 0;
@@ -82,6 +129,9 @@ internal sealed class MxfIndex
             var property = value.Slice(offset, length);
             switch (tag)
             {
+                case 0x3F05 when length == 4: // Edit Unit Byte Count
+                    editUnitByteCount = BinaryPrimitives.ReadUInt32BigEndian(property);
+                    break;
                 case 0x3F0C when length == 8: // Index Start Position
                     start = BinaryPrimitives.ReadInt64BigEndian(property);
                     break;
@@ -105,6 +155,11 @@ internal sealed class MxfIndex
             indexes[bodySid] = index;
         }
 
+        if (editUnitByteCount > 0)
+        {
+            index.EditUnitByteCount = editUnitByteCount;
+        }
+
         // Delta entries (Table 27): PosTableIndex (Int8), Slice, Element Delta.
         if (deltas.Length >= 8 + 6 && BinaryPrimitives.ReadUInt32BigEndian(deltas) > 0 && BinaryPrimitives.ReadUInt32BigEndian(deltas[4..]) >= 6)
         {
@@ -124,11 +179,12 @@ internal sealed class MxfIndex
             throw new InvalidDataException("An MXF index table segment's entries do not hold together.");
         }
 
-        var list = new (sbyte, byte)[count];
+        var list = new (sbyte, byte, long)[count];
         for (int i = 0; i < list.Length; i++)
         {
             var entry = entries.Slice(8 + (int)(i * entryLength), (int)entryLength);
-            list[i] = ((sbyte)entry[0], entry[2]);
+            ulong streamOffset = BinaryPrimitives.ReadUInt64BigEndian(entry[3..]);
+            list[i] = ((sbyte)entry[0], entry[2], streamOffset > long.MaxValue ? -1 : (long)streamOffset);
         }
 
         index._segments.Add((start, list));

@@ -209,6 +209,26 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.Containers/Mxf/MxfDemuxer.cs",
          find="_audioStart = Start(audio.StreamIndex, Rescale(pts, timeBase, audio.TimeBase));", replace="",
          tests="FullyQualifiedName~MxfConformanceTests|DisplayName~mxf"),
+    # Clip-wrapped sound comes in pieces of a 25th of a second, FFmpeg's reading (mxf-opatom-pcm: 1920 samples).
+    dict(file="src/ManagedCodecs.Containers/Mxf/MxfDemuxer.cs",
+         find="audio.AudioSamplingRate.Numerator / 25)", replace="audio.AudioSamplingRate.Numerator / 50)",
+         tests="FullyQualifiedName~MxfConformanceTests"),
+    # Clip-wrapped pictures are cut by the index entries' stream offsets (mxf-opatom-h264) ...
+    dict(file="src/ManagedCodecs.Containers/Mxf/MxfIndex.cs",
+         find="long end = i + 1 < offsets.Count ? offsets[i + 1] : size;", replace="long end = size;",
+         tests="FullyQualifiedName~MxfConformanceTests|FullyQualifiedName~MxfIndexTests"),
+    # ... or by the constant edit unit size where the index has no entries (mxf-opatom-dnxhr).
+    dict(file="src/ManagedCodecs.Containers/Mxf/MxfIndex.cs",
+         find="else if (EditUnitByteCount > 0)", replace="else if (false)",
+         tests="FullyQualifiedName~MxfConformanceTests|FullyQualifiedName~MxfIndexTests"),
+    # Only a track's single element is clip-wrapped: frame-wrapped elements stay whole (every OP1a sample).
+    dict(file="src/ManagedCodecs.Containers/Mxf/MxfDemuxer.cs",
+         find="""                if (at >= 0)
+                {
+                    return;
+                }
+""", replace="",
+         tests="FullyQualifiedName~MxfConformanceTests"),
     # ---- MXF header metadata (SMPTE ST 377-1 9, Annexes B, F, G)
     # One fill item may come between the partition pack and the primer pack (9.1), as FFmpeg's muxer writes.
     dict(file="src/ManagedCodecs.Containers/Mxf/MxfHeaderMetadata.cs",

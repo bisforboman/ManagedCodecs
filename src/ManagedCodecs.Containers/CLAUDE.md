@@ -54,6 +54,11 @@ The repository's CLAUDE.md (process, core idea, cross-cutting gotchas) applies t
   times the reorder delay later: frame k at k + 2 for libx264's B pictures. Seek by the index's keyframes therefore
   backs off H.264's largest delay (16 frames); a seek-frame reference shows the frame FFmpeg's `-ss` gives, from the
   keyframe before the one at the time.
+- MXF clip wrapping: FFmpeg's `-f mxf_opatom` writes the whole clip as one element (H.264 with index entries, DNxHR
+  and DV with a constant edit unit size, PCM 48 kHz mono only, with an edit unit a sample) but labels its essence
+  container frame-wrapped: the index, not the label, says an element holds several edit units. Its demuxer reads
+  clip-wrapped sound in 1920-sample pieces whatever `-mxf_audio_edit_rate`. `-f mxf_d10` (D-10, MPEG-2 IMX) works
+  too, but its sound element (AES3, 8 channels) is not read yet.
 - MXF: FFmpeg's `-f mxf` muxer writes OP1a, frame-wrapped (`mxf_opatom` and `mxf_d10` are muxers of their own), audio
   at 48 kHz only ("only 48khz is implemented"), and always a random index pack; written to a pipe, the header and body partition packs leave FooterPartition 0. Its demuxer logs
   each partition pack it reads under `ffprobe -v trace` (make-samples.sh's `.partitions.csv`), but never reads the

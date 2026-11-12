@@ -57,8 +57,9 @@ The repository's CLAUDE.md (process, core idea, cross-cutting gotchas) applies t
 - MXF clip wrapping: FFmpeg's `-f mxf_opatom` writes the whole clip as one element (H.264 with index entries, DNxHR
   and DV with a constant edit unit size, PCM 48 kHz mono only, with an edit unit a sample) but labels its essence
   container frame-wrapped: the index, not the label, says an element holds several edit units. Its demuxer reads
-  clip-wrapped sound in 1920-sample pieces whatever `-mxf_audio_edit_rate`. `-f mxf_d10` (D-10, MPEG-2 IMX) works
-  too, but its sound element (AES3, 8 channels) is not read yet.
+  clip-wrapped sound in 1920-sample pieces whatever `-mxf_audio_edit_rate`. `-f mxf_d10` (D-10, MPEG-2 IMX) takes
+  only 30, 40 or 50 Mb/s and a whole number of bytes a frame (50 Mb/s at 29.97 isn't: the 525 sample is 30 Mb/s);
+  FFmpeg's demuxer gives its 8-channel AES3 sound elements as PCM, so their packets' MD5s are the PCM's.
 - MXF: FFmpeg's `-f mxf` muxer writes OP1a, frame-wrapped (`mxf_opatom` and `mxf_d10` are muxers of their own), audio
   at 48 kHz only ("only 48khz is implemented"), and always a random index pack; written to a pipe, the header and body partition packs leave FooterPartition 0. Its demuxer logs
   each partition pack it reads under `ffprobe -v trace` (make-samples.sh's `.partitions.csv`), but never reads the

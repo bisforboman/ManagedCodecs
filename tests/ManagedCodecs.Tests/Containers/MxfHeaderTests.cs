@@ -68,8 +68,9 @@ public class MxfHeaderTests
                 Assert.Equal(expected.GetProperty("channels").GetInt32(), track.Channels);
                 Assert.Equal(expected.GetProperty("bits_per_sample").GetInt32(), track.QuantizationBits);
 
-                // The track counts edit units; FFmpeg's audio duration counts samples.
-                long? samples = track.Duration * rate.Numerator * track.EditRate.Denominator / track.EditRate.Numerator;
+                // The track counts edit units; FFmpeg's audio duration counts samples, rescaled to the nearest
+                // (6 frames at 29.97 are 9609.6 samples: 9610, mxf-d10-525).
+                long? samples = ((2 * track.Duration * rate.Numerator * track.EditRate.Denominator) + track.EditRate.Numerator) / (2L * track.EditRate.Numerator);
                 Assert.Equal(DurationTs(expected), samples);
             }
         }

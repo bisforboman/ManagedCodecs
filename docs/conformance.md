@@ -530,6 +530,14 @@ what the file says, the file is followed and the test says so:
 - Temporal offsets: FFmpeg's muxer writes H.264 unreordered (PosTableIndex 0, offsets 0), so its packets' pts are their
   dts though libx264 writes B pictures. `MxfConformanceTests` rewrites an index to check that offsets are applied only
   to an element the index says is reordered, and that the random access flag sets the keyframes.
+- Clip-wrapped essence (FFmpeg's OP-Atom muxer, `-f mxf_opatom`: one track a file, the whole clip one element, though
+  its essence container labels say frame wrapping): mxf-opatom-h264 is cut by the index entries' stream offsets,
+  mxf-opatom-dnxhr by the index's constant edit unit size (no entries), each packet an edit unit as FFmpeg's;
+  mxf-opatom-pcm's index edit unit is a sample, and FFmpeg's demuxer reads it in pieces of 1920 samples (a 25th of a
+  second at 48 kHz, the only rate its muxer writes, whatever `-mxf_audio_edit_rate`; tried at 25, 24, 50 and 30000/1001),
+  the last one shorter, which `MxfDemuxer` follows. `MxfIndexTests` cuts hand-made segments: entries across segments,
+  a constant size with a partial edit unit left over, and stream offsets that don't start at 0, go back, or run past
+  the element.
 
 `PcmDecoderTests` decodes every sample's audio exactly as FFmpeg does (name.pcm.f32), and `SeekTests` seeks in every
 sample. `MxfConformanceTests` decodes the H.264 samples' frames with one and four threads and compares each with

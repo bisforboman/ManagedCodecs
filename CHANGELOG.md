@@ -23,7 +23,7 @@ run time.
   now seek, to the frame holding the time (MP3's encoder delay skipped from its first frame only)
   (docs/decisions/2026-11-11-audio-player.md).
 - Containers: `MxfDemuxer` reads MXF files (SMPTE ST 377-1), and `Demuxer.Open` detects them: OP1a with frame-wrapped
-  essence in the generic container, the first picture and sound tracks, packets as FFmpeg's MXF demuxer gives them
+  essence in the generic container, and clip-wrapped essence (OP-Atom files) cut into edit units by the index table, the first picture and sound tracks, packets as FFmpeg's MXF demuxer gives them
   (times from the edit units and the index table, keyframes from it), and `Seek`. H.264 is `CodecIds.H264`, which
   `H264Decoder` decodes exactly as FFmpeg (as in FFmpeg's, the packets' times are decode times where the index gives no
   temporal offsets, and the frames are timed as an AVI's), and PCM (AES3 and Broadcast Wave mappings)

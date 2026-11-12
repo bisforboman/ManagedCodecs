@@ -1,8 +1,9 @@
 namespace ManagedCodecs.Containers;
 
 /// <summary>
-/// An MXF file (SMPTE ST 377-1) with frame-wrapped essence in the generic container (ST 379-1), as FFmpeg's demuxer reads
-/// it: the material package's first picture track and first sound track, a packet an essence element.
+/// An MXF file (SMPTE ST 377-1) with frame-wrapped or clip-wrapped essence in the generic container (ST 379-1), as
+/// FFmpeg's demuxer reads it: the material package's first picture track and first sound track, a packet an essence
+/// element, or an edit unit of a clip-wrapped one.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -19,8 +20,15 @@ namespace ManagedCodecs.Containers;
 /// reordered, and it is a keyframe where the index entry has its random access flag (without an index, the first), or
 /// always for an intra-only codec (ProRes, VC-3, JPEG 2000), whose index entries FFmpeg's muxer leaves without it. A sound packet's times count samples, its duration its bytes over the block
 /// alignment. The essence elements are found by walking the file's KLV items once, when opening; partition packs,
-/// header metadata, index segments and fill items between them are skipped. Clip-wrapped essence and essence in other
-/// files (OP-Atom's separate files) are not read.
+/// header metadata, index segments and fill items between them are skipped.
+/// </para>
+/// <para>
+/// A track whose essence is a single element that its index table puts two or more edit units in is clip-wrapped (an
+/// OP-Atom file's, ST 390, whatever its essence container label says: FFmpeg's OP-Atom muxer labels clip-wrapped essence
+/// as frame-wrapped). Its pictures are cut by the index entries' stream offsets, which count from the element's value,
+/// or by the index's constant edit unit size; its sound, whose edit unit is a sample, into pieces of a 25th of a second
+/// (1920 samples at 48 kHz), as FFmpeg's demuxer reads it, the last one shorter. Essence in other files (an OP-Atom
+/// clip's other tracks) is not read.
 /// </para>
 /// <para>
 /// The size is the sampled rectangle's (the picture a decoder gives, without the stored padding of a macroblock row),
@@ -77,6 +85,15 @@ public sealed class MxfDemuxer : IDemuxer
             }
 
             var indexes = Walk(partitions.Header.End, video, videoIndex, audio, audioIndex);
+            if (video is not null && indexes.TryGetValue(video.BodySid, out var videoTable))
+            {
+                SplitClip(videoIndex, videoTable, 0);
+            }
+
+            if (audio is not null && indexes.TryGetValue(audio.BodySid, out var audioTable))
+            {
+                SplitClip(audioIndex, audioTable, Math.Max(1, audio.AudioSamplingRate.Numerator / 25) * (long)BlockAlign(audio));
+            }
 
             if (video is not null)
             {
@@ -303,11 +320,78 @@ public sealed class MxfDemuxer : IDemuxer
         return indexes;
     }
 
+    // A sound sample's size: the descriptor's block alignment, else the channels' samples.
+    private static int BlockAlign(MxfTrack track) => track.BlockAlign > 0 ? track.BlockAlign : track.Channels * ((track.QuantizationBits + 7) / 8);
+
+    /// <summary>
+    /// Cuts the stream's essence into packets where it is a single element that <paramref name="index"/> puts two or
+    /// more edit units in (clip-wrapped, the class remarks say how): pictures an edit unit a packet; sound, whose index
+    /// edit unit is a sample, in pieces of <paramref name="pieceBytes"/>, the last shorter, whole samples only.
+    /// </summary>
+    private void SplitClip(int stream, MxfIndex index, long pieceBytes)
+    {
+        int at = -1;
+        for (int i = 0; i < _packets.Count; i++)
+        {
+            if (_packets[i].StreamIndex == stream)
+            {
+                if (at >= 0)
+                {
+                    return;
+                }
+
+                at = i;
+            }
+        }
+
+        if (at < 0)
+        {
+            return;
+        }
+
+        var element = _packets[at];
+        long position = _positions[at];
+        var pieces = new List<(long Offset, long Length)>();
+        if (pieceBytes > 0)
+        {
+            // Sound: an edit unit a sample, so the index's constant size is under the element's.
+            long blockAlign = index.EditUnitByteCount;
+            if (blockAlign <= 0 || blockAlign >= element.Size)
+            {
+                return;
+            }
+
+            long whole = element.Size - (element.Size % blockAlign);
+            long piece = Math.Max(blockAlign, pieceBytes - (pieceBytes % blockAlign));
+            for (long offset = 0; offset < whole; offset += piece)
+            {
+                pieces.Add((offset, Math.Min(piece, whole - offset)));
+            }
+        }
+        else
+        {
+            pieces = index.EditUnits(element.Size);
+        }
+
+        if (pieces.Count < 2)
+        {
+            return;
+        }
+
+        _packets.RemoveAt(at);
+        _positions.RemoveAt(at);
+        for (int k = 0; k < pieces.Count; k++)
+        {
+            _packets.Insert(at + k, element with { Sequence = k, Size = (int)pieces[k].Length });
+            _positions.Insert(at + k, position + pieces[k].Offset);
+        }
+    }
+
     /// <summary>Gives the track's packets their times, durations and keyframe flags (the class remarks say how).</summary>
     private void Time(MxfTrack track, int stream, MxfIndex? index)
     {
         bool intra = track.Codec is "prores" or "dnxhd" or "jpeg2000";
-        int blockAlign = track.BlockAlign > 0 ? track.BlockAlign : track.Channels * ((track.QuantizationBits + 7) / 8);
+        int blockAlign = BlockAlign(track);
         long samples = 0;
         for (int i = 0; i < _packets.Count; i++)
         {

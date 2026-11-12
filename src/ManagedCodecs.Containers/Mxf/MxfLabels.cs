@@ -230,9 +230,12 @@ internal static class MxfLabels
     public static string? SoundCodec(ReadOnlySpan<byte> container, int bits) =>
         IsGenericContainer(container) && container[13] == 0x06 && bits is 8 or 16 or 24 or 32
             ? bits == 8 ? "pcm_u8" : $"pcm_s{bits}le"
-            : IsGenericContainer(container) && container[13] == 0x01 && bits is 16 or 24
+            : IsD10Container(container) && bits is 16 or 24
             ? $"pcm_s{bits}le"
             : null;
+
+    /// <summary>Whether <paramref name="container"/> is the D-10 mapping (SMPTE ST 386: generic container byte 14 01h).</summary>
+    public static bool IsD10Container(ReadOnlySpan<byte> container) => IsGenericContainer(container) && container[13] == 0x01;
 
     private static bool IsLabel(ReadOnlySpan<byte> label) =>
         label.Length == Klv.KeyLength && label[..5].SequenceEqual((ReadOnlySpan<byte>)[0x06, 0x0E, 0x2B, 0x34, 0x04]);

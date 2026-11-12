@@ -238,7 +238,11 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.Containers/Mxf/MxfDemuxer.cs",
          find="if (bytes == 3)", replace="if (true)",
          tests="FullyQualifiedName~MxfConformanceTests|FullyQualifiedName~MxfAes3Tests"),
-    # ... and each element's sample count from its header's two little-endian bytes (1920 is 0x0780).
+    # ... and each element's sample count from its header's two little-endian bytes (1920 is 0x0780). D-10's pictures
+    # are all keyframes (I pictures only, SMPTE ST 356), its index having no entries.
+    dict(file="src/ManagedCodecs.Containers/Mxf/MxfDemuxer.cs",
+         find=' || MxfLabels.IsD10Container(track.EssenceContainer ?? []);', replace=';',
+         tests="FullyQualifiedName~MxfConformanceTests"),
     dict(file="src/ManagedCodecs.Containers/Mxf/MxfDemuxer.cs",
          find="int count = header[1] | (header[2] << 8);", replace="int count = header[1];",
          tests="FullyQualifiedName~MxfConformanceTests"),

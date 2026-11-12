@@ -20,7 +20,7 @@ namespace ManagedCodecs.Containers;
 /// A picture packet is an edit unit: its decode time counts them (<see cref="VideoStreamInfo.TimeBase"/> is one over the
 /// edit rate), its presentation time adds the index table's temporal offset where the index says the element is
 /// reordered, and it is a keyframe where the index entry has its random access flag (without an index, the first), or
-/// always for an intra-only codec (ProRes, VC-3, JPEG 2000), whose index entries FFmpeg's muxer leaves without it. A sound packet's times count samples, its duration its bytes over the block
+/// always for an intra-only codec (ProRes, VC-3, JPEG 2000, and D-10's MPEG-2, I pictures only by SMPTE ST 356), whose index entries FFmpeg's muxer leaves without it. A sound packet's times count samples, its duration its bytes over the block
 /// alignment. The essence elements are found by walking the file's KLV items once, when opening; partition packs,
 /// header metadata, index segments and fill items between them are skipped.
 /// </para>
@@ -476,7 +476,7 @@ public sealed class MxfDemuxer : IDemuxer
     /// <summary>Gives the track's packets their times, durations and keyframe flags (the class remarks say how).</summary>
     private void Time(MxfTrack track, int stream, MxfIndex? index)
     {
-        bool intra = track.Codec is "prores" or "dnxhd" or "jpeg2000";
+        bool intra = track.Codec is "prores" or "dnxhd" or "jpeg2000" || MxfLabels.IsD10Container(track.EssenceContainer ?? []);
         int blockAlign = _aes3Channels > 0 && track.Kind == MxfTrackKind.Sound ? _aes3Channels * _aes3Bytes : BlockAlign(track);
         long samples = 0;
         for (int i = 0; i < _packets.Count; i++)

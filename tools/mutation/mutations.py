@@ -229,6 +229,23 @@ MUTATIONS = [
                 }
 """, replace="",
          tests="FullyQualifiedName~MxfConformanceTests"),
+    # D-10's sound is an 8-channel AES3 element (SMPTE ST 331 7.1: a CP sound item, element type 10h), given as PCM
+    # (mxf-d10-pcm24, mxf-d10-525) ...
+    dict(file="src/ManagedCodecs.Containers/Mxf/MxfDemuxer.cs",
+         find="=> (trackNumber >> 24) == 0x06 && ((trackNumber >> 8) & 0xFF) == 0x10;", replace="=> false;",
+         tests="FullyQualifiedName~MxfConformanceTests"),
+    # ... its 16-bit samples the audio's top 16 bits (mxf-d10-525) ...
+    dict(file="src/ManagedCodecs.Containers/Mxf/MxfDemuxer.cs",
+         find="if (bytes == 3)", replace="if (true)",
+         tests="FullyQualifiedName~MxfConformanceTests|FullyQualifiedName~MxfAes3Tests"),
+    # ... and each element's sample count from its header's two little-endian bytes (1920 is 0x0780). D-10's pictures
+    # are all keyframes (I pictures only, SMPTE ST 356), its index having no entries.
+    dict(file="src/ManagedCodecs.Containers/Mxf/MxfDemuxer.cs",
+         find=' || MxfLabels.IsD10Container(track.EssenceContainer ?? []);', replace=';',
+         tests="FullyQualifiedName~MxfConformanceTests"),
+    dict(file="src/ManagedCodecs.Containers/Mxf/MxfDemuxer.cs",
+         find="int count = header[1] | (header[2] << 8);", replace="int count = header[1];",
+         tests="FullyQualifiedName~MxfConformanceTests"),
     # ---- MXF header metadata (SMPTE ST 377-1 9, Annexes B, F, G)
     # One fill item may come between the partition pack and the primer pack (9.1), as FFmpeg's muxer writes.
     dict(file="src/ManagedCodecs.Containers/Mxf/MxfHeaderMetadata.cs",

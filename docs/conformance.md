@@ -520,13 +520,17 @@ what the file says, the file is followed and the test says so:
 
 - Keyframes: libavformat marks every packet of an intra-only codec (ProRes, DNxHR) a keyframe, while FFmpeg's muxer
   leaves their index entries without the random access flag; `MxfDemuxer` does the same for those codecs, and takes the
-  index's flag for the others (H.264 and MPEG-2's first packet).
+  index's flag for the others (H.264 and MPEG-2's first packet). D-10's MPEG-2 is I pictures only (SMPTE ST 356), and
+  every packet of it is a keyframe, as libavformat's parser marks them.
 - Times without an index FFmpeg reads: DNxHR's index has a constant edit unit size and no entries, and FFmpeg's demuxer
   gives its video no times (libavformat fills in 0, 1, 2, which `MxfDemuxer`'s are); a pipe-written file without a
   random index pack (mxf-h264-pipe-norip) has its index in the footer, which FFmpeg's demuxer never reaches, so it gives
   no video times at all, where `MxfDemuxer` walks to the footer and times the packets by edit unit.
 - Decode times: libavformat moves MPEG-2's back a frame (its parser's reorder delay); FFmpeg's demuxer's own are the
-  edit units, which `MxfDemuxer`'s are.
+  edit units, which `MxfDemuxer`'s are. D-10's index has a constant size and no entries, so FFmpeg's demuxer gives its
+  MPEG-2 no decode times, and libavformat's start at -1; the test compares them a frame on.
+- Audio duration in the header: FFmpeg rescales the track's edit units to samples, rounded to the nearest (6 frames at
+  29.97 are 9609.6 samples: 9610).
 - Temporal offsets: FFmpeg's muxer writes H.264 unreordered (PosTableIndex 0, offsets 0), so its packets' pts are their
   dts though libx264 writes B pictures. `MxfConformanceTests` rewrites an index to check that offsets are applied only
   to an element the index says is reordered, and that the random access flag sets the keyframes.
@@ -538,6 +542,12 @@ what the file says, the file is followed and the test says so:
   the last one shorter, which `MxfDemuxer` follows. `MxfIndexTests` cuts hand-made segments: entries across segments,
   a constant size with a partial edit unit left over, and stream offsets that don't start at 0, go back, or run past
   the element.
+- D-10 sound (FFmpeg's `-f mxf_d10`, SMPTE ST 386): each content package's sound is an 8-channel AES3 element (ST 331
+  7.1: a 4-byte header with the sample count, then a 32-bit word a channel a sample, all 8 channels whatever the
+  descriptor says), which FFmpeg's demuxer gives as PCM of the descriptor's channels and bits, and so does
+  `MxfDemuxer`: mxf-d10-pcm24 (625/50, 24-bit, 4 channels) and mxf-d10-525 (525/59.94, 16-bit stereo, elements of 1602
+  and 1601 samples by the five-frame sequence) match FFmpeg's packets and decode as its PCM. `MxfAes3Tests` unpacks
+  hand-made elements whose words set every bit around the audio (channel number, F, V, U, C, P).
 
 `PcmDecoderTests` decodes every sample's audio exactly as FFmpeg does (name.pcm.f32), and `SeekTests` seeks in every
 sample. `MxfConformanceTests` decodes the H.264 samples' frames with one and four threads and compares each with

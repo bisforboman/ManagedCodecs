@@ -136,6 +136,57 @@ A clip other than the one streamed fails it from the first frame.
 
 - Not tried yet: live555, an IP camera.
 
+### JPEG over RTP
+
+`RtpJpegDepacketizer` rebuilds each frame's JPEG from RFC 2435's packets: DQT, T.81 K.3's Huffman tables, SOF0, DRI and
+SOS, around the scan the packets carry (docs/decisions/2026-11-12-live-rtsp-jpeg.md). `RtpJpegDepacketizerTests`
+checks every rebuilt JPEG decodes to exactly what the JPEG that was packetized decodes to.
+
+| Recording | Packetizer | RTP/JPEG type | Q |
+|---|---|---|---|
+| `testsrc-stdhuff.rtp` (make-samples.sh, from `testsrc-stdhuff.avi`) | FFmpeg 6.1, `-c copy -f rtp` | 1 (4:2:0) | 255 |
+| `gstreamer/jpeg-422.rtp` | GStreamer 1.24's `rtpjpegpay` | 0 (4:2:2) | 255 |
+| `gstreamer/jpeg-420-restart.rtp` | GStreamer, JPEGs with a restart marker every MCU row | 65 | 255 |
+| `gstreamer/jpeg-422-restart.rtp` | GStreamer, the same in 4:2:2 | 64 | 255 |
+
+- **GStreamer's recordings are committed** (decision 2), with the JPEGs that went in: 320x240, 5 frames each, made by
+  tools/gst-jpeg-record.py from Pillow's JPEGs (quality 50, standard Huffman tables), about 230 KB.
+- **FFmpeg sends one table, not two.** Its quantization header's length is 64: its encoder wrote one DQT table for all
+  three components. RFC 2435 allows that, and the depacketizer uses the one table for both.
+- **Neither packetizer sends Q below 128 or a table length of 0.** So the recordings are rewritten:
+  - Q 50 with the in-band tables taken out must give the same frames. Pillow's quality 50 is libjpeg's scaling,
+    which is RFC 2435 Appendix A's, and leaves K.1's tables as they are.
+  - Q 200 with the tables sent only in the first frame must give the same frames.
+  - At Q 255, a length of 0 drops the frame: tables at 255 change every frame, so none are kept.
+- **Unit tests:** `ScalesK1sTablesAsAppendixADoes` checks Appendix A's arithmetic at its ends (Q 1 clamps to 255, Q 99
+  rounds to 1).
+- **Loss:** a frame missing its first, a middle or its last packet is dropped and the others are kept.
+- **Refused:** reserved types, dynamic types and reserved Q values throw `NotSupportedException`.
+- **Tables:** the depacketizer's copies of T.81's tables equal `ManagedCodecs.Mjpeg`'s.
+- **Mutation entries:** Q below 128, the reused tables, and the fragment offset check.
+
+`LiveRtspJpegTests` plays GStreamer's recordings through `LivePlayer`:
+- In lockstep, every frame shown is the JPEG that was sent, decoded and converted. One case has payload type 26 with
+  no `a=rtpmap`, one has `a=rtpmap:96 JPEG/90000`.
+- An incomplete frame is dropped and counted (`DamagedFrames`, `LostPackets`).
+- A reserved type ends the player with `NotSupportedException`.
+
+`RtspProtocolTests` checks the SDP choice: the first H.264 or JPEG video track in SDP order (decision 3).
+
+Real servers:
+
+- **GStreamer 1.24's RTSP server, by hand** (2026-11-12): tools/gst-rtsp-server.py with `JPEG=420` and `JPEG=422`
+  (`jpegenc ! rtpjpegpay`, 640x480), with Digest.
+  - Each played 100 frames at 25 fps, with none damaged or lost and no reconnects.
+  - Decoding took 0.7 to 0.8 ms a frame and converting 0.6 ms.
+- **mediamtx 1.21.3, nightly** (tools/rtsp-nightly.py, with Digest).
+  - mediamtx drops every frame of FFmpeg's own JPEG push ("received wrong fragment"). The same packets with the one
+    table sent as two pass, so it seems to need two tables. Its source wasn't read to confirm.
+  - So the script records FFmpeg's packets for a 640x480 MJPEG clip, sends the one table as two (the decoded frames
+    are the same), and publishes them itself (ANNOUNCE, SETUP, RECORD).
+  - `mcdec --live` checks each frame shown against the clip's. The first run (2026-11-12) showed 100 frames, all the
+    clip's, none damaged.
+
 ## Real films
 
 Every sample above is a test pattern encoded to isolate a feature. `tools/realworld.py` (nightly, `realworld.yml`, a job

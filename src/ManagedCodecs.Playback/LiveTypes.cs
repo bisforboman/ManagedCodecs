@@ -40,7 +40,8 @@ public enum LiveState
 /// </param>
 /// <param name="DamagedFrames">
 /// Parts that weren't a JPEG, or a JPEG the decoder rejected: skipped, not fatal. H.264: access units missing packets
-/// (decoded with concealment where they still hold a picture), or ones the decoder rejected.
+/// (decoded with concealment where they still hold a picture), or ones the decoder rejected. JPEG over RTSP: frames
+/// missing packets (dropped), or ones the decoder rejected.
 /// </param>
 /// <param name="Reconnects">Connections made after the first.</param>
 /// <param name="DecodeMilliseconds">The decoder's time a frame, the mean over the run.</param>

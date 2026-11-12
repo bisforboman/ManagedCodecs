@@ -1170,4 +1170,14 @@ for f in samples/h264-main-slices.mp4 samples/h264-bench-720p.mp4; do
   port=$((port + 2))
 done
 
+# testsrc-stdhuff.rtp: FFmpeg's RFC 2435 packetizer on that AVI's JPEGs as they are (-c copy: RFC 2435 needs T.81's
+# standard Huffman tables, which -huffman default wrote), type 1 (4:2:0) with Q 255 and the tables in every frame, for
+# RtpJpegDepacketizerTests: each JPEG rebuilt from RTP must decode to what the AVI's decodes to. The other types come
+# from GStreamer, committed in samples/gstreamer/ (tools/gst-jpeg-record.py; docs/decisions/2026-11-12-live-rtsp-jpeg.md).
+python3 tools/rtp-record.py "$port" samples/testsrc-stdhuff.rtp &
+recorder=$!
+sleep 0.5
+ffmpeg -nostdin -hide_banner -loglevel error -y -i samples/testsrc-stdhuff.avi -an -c:v copy -f rtp -sdp_file samples/testsrc-stdhuff.sdp "rtp://127.0.0.1:$port"
+wait "$recorder"
+
 echo "Samples and references written to samples/."

@@ -51,6 +51,19 @@ public class RtspProtocolTests
         Assert.Equal(0x67, track.ParameterSets[0][0]);
     }
 
+    [Theory]
+    [InlineData("m=video 0 RTP/AVP 26\n", "Jpeg", 26)] // JPEG's static payload type needs no a=rtpmap
+    [InlineData("m=video 0 RTP/AVP 97\na=rtpmap:97 jpeg/90000\n", "Jpeg", 97)]
+    [InlineData("m=video 0 RTP/AVP 26 96\na=rtpmap:96 H264/90000\n", "Jpeg", 26)] // the first in SDP order (decision 3)
+    [InlineData("m=video 0 RTP/AVP 96 26\na=rtpmap:96 H264/90000\n", "H264", 96)]
+    [InlineData("m=video 0 RTP/AVP 96\na=rtpmap:96 H264/90000\nm=video 0 RTP/AVP 26\n", "H264", 96)]
+    [InlineData("m=video 0 RTP/AVP 26\na=rtpmap:26 H265/90000\nm=video 0 RTP/AVP 26\n", "Jpeg", 26)] // 26 mapped to another codec isn't JPEG
+    public void ChoosesTheFirstVideoTrackItCanPlay(string media, string codec, int payloadType)
+    {
+        var track = Sdp.Parse("v=0\n" + media).Track!;
+        Assert.Equal((codec, payloadType), (track.Codec.ToString(), track.PayloadType));
+    }
+
     [Fact]
     public void ToleratesParameterSetsThatArentBase64()
     {

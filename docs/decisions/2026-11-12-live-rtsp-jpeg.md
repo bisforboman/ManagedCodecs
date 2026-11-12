@@ -127,3 +127,15 @@ Asked with the multiple-choice prompt; the owner took each recommendation (2026-
 
 A consumer-visible change (a camera that was refused now plays), so a CHANGELOG line under "Unreleased" when it is
 built. No public API changes.
+
+## Since
+
+- Built (2026-11-12): `RtpJpegDepacketizer`, `Sdp`'s choice of the first H.264 or JPEG track, and `LivePlayer`'s JPEG
+  path. GStreamer's recordings are in samples/gstreamer/ (tools/gst-jpeg-record.py), FFmpeg's in make-samples.sh. The
+  checks are in docs/conformance.md, JPEG over RTP.
+- FFmpeg's packetizer sends one quantization table (a length of 64), its encoder having written one DQT table for all
+  three components. The depacketizer takes it for both.
+- mediamtx 1.21.3 drops FFmpeg's JPEG push ("received wrong fragment"); with the one table sent as two it passes. So the
+  nightly run publishes FFmpeg's packets itself, with the one table sent as two.
+- Types 64 and 65 come from GStreamer when the JPEGs it is given have restart markers (Pillow 12's
+  `restart_marker_rows`): `jpegenc` writes none.

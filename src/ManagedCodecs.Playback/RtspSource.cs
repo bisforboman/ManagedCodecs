@@ -3,10 +3,10 @@ using System.Net;
 namespace ManagedCodecs.Playback;
 
 /// <summary>
-/// A camera serving H.264 over RTSP (RTSP 1.0, RTP over the RTSP connection): what a <see cref="LivePlayer"/> connects
-/// to. Most IP cameras serve it, at a URL their manual gives (<c>rtsp://camera/stream1</c>, often with a substream at
-/// a lower resolution: show a wall of cameras from those). The first H.264 video track of the camera's SDP plays.
-/// docs/decisions/2026-11-10-live-rtsp-h264.md.
+/// A camera serving H.264 or JPEG over RTSP (RTSP 1.0, RTP over the RTSP connection): what a <see cref="LivePlayer"/>
+/// connects to. Most IP cameras serve it, at a URL their manual gives (<c>rtsp://camera/stream1</c>, often with a
+/// substream at a lower resolution: show a wall of cameras from those). The first H.264 or JPEG video track of the
+/// camera's SDP plays. docs/decisions/2026-11-10-live-rtsp-h264.md, docs/decisions/2026-11-12-live-rtsp-jpeg.md.
 /// </summary>
 public sealed class RtspSource
 {

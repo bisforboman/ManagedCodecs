@@ -18,6 +18,9 @@ run time.
 - Containers: `MxfDemuxer` reads clip-wrapped essence (OP-Atom files, SMPTE ST 390), cut into edit units by the index
   table: pictures by the index entries' stream offsets or the constant edit unit size, sound in pieces of a 25th of a
   second, as FFmpeg's demuxer gives them.
+- Playback: `LivePlayer` plays RTSP cameras that send JPEG (RFC 2435: 4:2:0 and 4:2:2, restart markers, in-band or
+  computed quantization tables), which it refused before; the first H.264 or JPEG video track in the camera's SDP
+  plays. An incomplete frame is dropped and counted in `DamagedFrames`.
 
 ## 0.13.0 – 2026-11-12
 

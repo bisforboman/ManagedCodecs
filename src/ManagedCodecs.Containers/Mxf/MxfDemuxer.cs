@@ -11,7 +11,9 @@ namespace ManagedCodecs.Containers;
 /// names a file package track, whose TrackNumber is the last four bytes of its essence element keys, and whose
 /// descriptor gives the codec, the picture size or the sound's rate, channels and sample size. H.264 is
 /// <see cref="CodecIds.H264"/> (an Annex B byte stream, no configuration record), PCM in the AES3 and Broadcast Wave
-/// mappings (ST 382) <see cref="CodecIds.PcmS16Le"/>, <see cref="CodecIds.PcmS24Le"/> or <see cref="CodecIds.PcmS32Le"/>;
+/// mappings (ST 382) <see cref="CodecIds.PcmS16Le"/>, <see cref="CodecIds.PcmS24Le"/> or <see cref="CodecIds.PcmS32Le"/>,
+/// and D-10's sound (ST 386: 8-channel AES3 elements, ST 331 7.1) the same PCM, the descriptor's channels and 16 or 24
+/// bits taken from each element's words, a packet's duration its element's sample count (1602 or 1601 at 29.97);
 /// other pictures keep ffprobe's name (<c>prores</c>, <c>dnxhd</c>, <c>mpeg2video</c>), which no decoder here reads yet.
 /// </para>
 /// <para>
@@ -45,6 +47,13 @@ public sealed class MxfDemuxer : IDemuxer
     private readonly bool _leaveOpen;
     private readonly List<PacketInfo> _packets = [];
     private readonly List<long> _positions = [];
+
+    // Each packet's bytes in the file: its size, but an 8-channel AES3 element's whole value.
+    private readonly List<int> _lengths = [];
+
+    // The sound track's 8-channel AES3 elements (D-10's): its channels and bytes a sample, or 0 where it has none.
+    private int _aes3Channels;
+    private int _aes3Bytes;
 
     // Where each stream's read starts, as a sequence: 0 until a Seek moves it.
     private long _videoStart;
@@ -84,13 +93,19 @@ public sealed class MxfDemuxer : IDemuxer
                 video = null;
             }
 
+            if (audio is not null && IsAes3Element(audio.TrackNumber) && audio.QuantizationBits is 16 or 24 && audio.Channels is >= 1 and <= 8)
+            {
+                _aes3Channels = audio.Channels;
+                _aes3Bytes = audio.QuantizationBits / 8;
+            }
+
             var indexes = Walk(partitions.Header.End, video, videoIndex, audio, audioIndex);
             if (video is not null && indexes.TryGetValue(video.BodySid, out var videoTable))
             {
                 SplitClip(videoIndex, videoTable, 0);
             }
 
-            if (audio is not null && indexes.TryGetValue(audio.BodySid, out var audioTable))
+            if (audio is not null && _aes3Channels == 0 && indexes.TryGetValue(audio.BodySid, out var audioTable))
             {
                 SplitClip(audioIndex, audioTable, Math.Max(1, audio.AudioSamplingRate.Numerator / 25) * (long)BlockAlign(audio));
             }
@@ -252,7 +267,17 @@ public sealed class MxfDemuxer : IDemuxer
             }
 
             var data = new byte[info.Size];
-            yield return ReadStep.Read(_positions[i], data);
+            if (_aes3Channels > 0 && info.StreamIndex == Audio?.StreamIndex)
+            {
+                var element = new byte[_lengths[i]];
+                yield return ReadStep.Read(_positions[i], element);
+                Aes3ToPcm(element, data, _aes3Channels, _aes3Bytes);
+            }
+            else
+            {
+                yield return ReadStep.Read(_positions[i], data);
+            }
+
             yield return ReadStep.Yield(new Packet(info.StreamIndex, info.Sequence, data, info.IsKeyframe, info.Dts, info.Pts, info.Duration));
         }
     }
@@ -290,11 +315,14 @@ public sealed class MxfDemuxer : IDemuxer
                 {
                     _packets.Add(new PacketInfo(videoIndex, videoCount++, (int)size, false, 0, 0, 0));
                     _positions.Add(valueStart);
+                    _lengths.Add((int)size);
                 }
                 else if (audio is not null && number == audio.TrackNumber)
                 {
-                    _packets.Add(new PacketInfo(audioIndex, audioCount++, (int)size, true, 0, 0, 0));
+                    int pcm = _aes3Channels > 0 ? Aes3PcmSize(valueStart, size) : (int)size;
+                    _packets.Add(new PacketInfo(audioIndex, audioCount++, pcm, true, 0, 0, 0));
                     _positions.Add(valueStart);
+                    _lengths.Add((int)size);
                 }
             }
             else if (MxfIndex.IsSegmentKey(key))
@@ -318,6 +346,62 @@ public sealed class MxfDemuxer : IDemuxer
         }
 
         return indexes;
+    }
+
+    // Whether a generic container element numbered trackNumber (its key's bytes 13 to 16) is an 8-channel AES3 element:
+    // the content package's sound item (item type 06h, ST 379-1 7.1) with element type 10h (SMPTE ST 331 7.1), as D-10's
+    // sound is (ST 386).
+    private static bool IsAes3Element(uint trackNumber) => (trackNumber >> 24) == 0x06 && ((trackNumber >> 8) & 0xFF) == 0x10;
+
+    /// <summary>
+    /// The PCM an 8-channel AES3 element at <paramref name="valueStart"/> (its value, <paramref name="size"/> bytes)
+    /// gives: its audio sample count (header bytes 1 and 2, little-endian, ST 331 Figure 2) times the descriptor's
+    /// channels and sample size. The element holds all 8 channels' words whether valid or not.
+    /// </summary>
+    private int Aes3PcmSize(long valueStart, long size)
+    {
+        Span<byte> header = stackalloc byte[4];
+        if (size < header.Length)
+        {
+            throw new InvalidDataException($"An 8-channel AES3 element at byte {valueStart} is {size} bytes, under its 4-byte header.");
+        }
+
+        _stream.Position = valueStart;
+        _stream.ReadExactly(header);
+        int count = header[1] | (header[2] << 8);
+        if (size < header.Length + (count * 8L * 4))
+        {
+            throw new InvalidDataException($"An 8-channel AES3 element at byte {valueStart} holds {size} bytes, under its {count} samples of 8 channels.");
+        }
+
+        return count * _aes3Channels * _aes3Bytes;
+    }
+
+    /// <summary>
+    /// The little-endian PCM of an 8-channel AES3 element (SMPTE ST 331 7.1): after the 4-byte header, a 32-bit
+    /// little-endian word per channel per sample, channels 1 to 8 in turn, each holding the AES3 audio bits a0 to a23 in
+    /// bits 4 to 27 (the channel number and the F bit below, V, U, C and P above). The first <paramref name="channels"/>
+    /// channels are kept, the 24 bits whole or their top 16.
+    /// </summary>
+    internal static void Aes3ToPcm(ReadOnlySpan<byte> element, Span<byte> pcm, int channels, int bytes)
+    {
+        int samples = pcm.Length / (channels * bytes);
+        int o = 0;
+        for (int s = 0; s < samples; s++)
+        {
+            for (int c = 0; c < channels; c++)
+            {
+                uint word = System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(element[(4 + (((s * 8) + c) * 4))..]);
+                uint audio = (word >> 4) & 0xFFFFFF;
+                if (bytes == 3)
+                {
+                    pcm[o++] = (byte)audio;
+                }
+
+                pcm[o++] = (byte)(audio >> 8);
+                pcm[o++] = (byte)(audio >> 16);
+            }
+        }
     }
 
     // A sound sample's size: the descriptor's block alignment, else the channels' samples.
@@ -380,10 +464,12 @@ public sealed class MxfDemuxer : IDemuxer
 
         _packets.RemoveAt(at);
         _positions.RemoveAt(at);
+        _lengths.RemoveAt(at);
         for (int k = 0; k < pieces.Count; k++)
         {
             _packets.Insert(at + k, element with { Sequence = k, Size = (int)pieces[k].Length });
             _positions.Insert(at + k, position + pieces[k].Offset);
+            _lengths.Insert(at + k, (int)pieces[k].Length);
         }
     }
 
@@ -391,7 +477,7 @@ public sealed class MxfDemuxer : IDemuxer
     private void Time(MxfTrack track, int stream, MxfIndex? index)
     {
         bool intra = track.Codec is "prores" or "dnxhd" or "jpeg2000";
-        int blockAlign = BlockAlign(track);
+        int blockAlign = _aes3Channels > 0 && track.Kind == MxfTrackKind.Sound ? _aes3Channels * _aes3Bytes : BlockAlign(track);
         long samples = 0;
         for (int i = 0; i < _packets.Count; i++)
         {

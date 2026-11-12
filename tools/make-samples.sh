@@ -938,6 +938,16 @@ ff -f lavfi -i testsrc2=s=160x120:r=25 -t 1 -c:v libx264 -pix_fmt yuv420p -g 10 
 ff -f lavfi -i testsrc2=s=256x144:r=25 -t 0.4 -c:v dnxhd -profile:v dnxhr_sq -pix_fmt yuv422p -f mxf_opatom \
   samples/mxf-opatom-dnxhr.mxf
 ff -f lavfi -i sine=sample_rate=48000 -t 0.5 -c:a pcm_s24le -f mxf_opatom samples/mxf-opatom-pcm.mxf
+# D-10 (MPEG-2 IMX, -f mxf_d10, SMPTE ST 386): the content package's sound item is an 8-channel AES3 element (ST 331
+# 7.1), whatever the descriptor's channel count, which FFmpeg's demuxer gives as PCM. mxf-d10-pcm24: 625/50 at 50 Mb/s,
+# 24-bit, 4 channels, 1920 samples a frame; mxf-d10-525: 525/59.94 at 30 Mb/s (a whole number of bytes a frame, which
+# the muxer needs), 16-bit stereo, the element's sample count 1602 and 1601 by its five-frame sequence.
+ff -f lavfi -i testsrc2=s=720x608:r=25 -f lavfi -i sine=sample_rate=48000 -t 0.2 -c:v mpeg2video -pix_fmt yuv422p -g 1 \
+  -b:v 50M -minrate 50M -maxrate 50M -bufsize 2000000 -rc_init_occupancy 2000000 -flags +ildct+ilme -top 1 \
+  -c:a pcm_s24le -ac 4 -f mxf_d10 samples/mxf-d10-pcm24.mxf
+ff -f lavfi -i testsrc2=s=720x512:r=30000/1001 -f lavfi -i sine=sample_rate=48000 -t 0.2 -c:v mpeg2video -pix_fmt yuv422p \
+  -g 1 -b:v 30M -minrate 30M -maxrate 30M -bufsize 1001000 -rc_init_occupancy 1001000 -flags +ildct+ilme -top 0 \
+  -c:a pcm_s16le -ac 2 -f mxf_d10 samples/mxf-d10-525.mxf
 # name.headers.json: the streams as FFmpeg's demuxer reads them from the header metadata, nothing decoded
 # (ffprobe -nofind_stream_info: with probing, the size and aspect ratio are the decoder's), and the file's operational
 # pattern, material package and start timecode.

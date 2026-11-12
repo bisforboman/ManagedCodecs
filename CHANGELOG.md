@@ -18,6 +18,9 @@ run time.
 - Containers: `MxfDemuxer` reads clip-wrapped essence (OP-Atom files, SMPTE ST 390), cut into edit units by the index
   table: pictures by the index entries' stream offsets or the constant edit unit size, sound in pieces of a 25th of a
   second, as FFmpeg's demuxer gives them.
+- Containers: `MxfDemuxer` reads D-10's sound (SMPTE ST 386, the 8-channel AES3 element of ST 331) as little-endian PCM
+  of the descriptor's channels and 16 or 24 bits (`CodecIds.PcmS16Le`, `PcmS24Le`), as FFmpeg's demuxer gives it, so
+  `PcmDecoder` decodes it exactly as FFmpeg; its MPEG-2 video is named, not decoded.
 
 ## 0.13.0 – 2026-11-12
 

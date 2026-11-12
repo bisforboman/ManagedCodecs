@@ -538,6 +538,12 @@ what the file says, the file is followed and the test says so:
   the last one shorter, which `MxfDemuxer` follows. `MxfIndexTests` cuts hand-made segments: entries across segments,
   a constant size with a partial edit unit left over, and stream offsets that don't start at 0, go back, or run past
   the element.
+- D-10 sound (FFmpeg's `-f mxf_d10`, SMPTE ST 386): each content package's sound is an 8-channel AES3 element (ST 331
+  7.1: a 4-byte header with the sample count, then a 32-bit word a channel a sample, all 8 channels whatever the
+  descriptor says), which FFmpeg's demuxer gives as PCM of the descriptor's channels and bits, and so does
+  `MxfDemuxer`: mxf-d10-pcm24 (625/50, 24-bit, 4 channels) and mxf-d10-525 (525/59.94, 16-bit stereo, elements of 1602
+  and 1601 samples by the five-frame sequence) match FFmpeg's packets and decode as its PCM. `MxfAes3Tests` unpacks
+  hand-made elements whose words set every bit around the audio (channel number, F, V, U, C, P).
 
 `PcmDecoderTests` decodes every sample's audio exactly as FFmpeg does (name.pcm.f32), and `SeekTests` seeks in every
 sample. `MxfConformanceTests` decodes the H.264 samples' frames with one and four threads and compares each with

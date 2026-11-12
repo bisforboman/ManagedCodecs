@@ -223,11 +223,15 @@ internal static class MxfLabels
 
     /// <summary>
     /// ffprobe's name for sound in the essence container <paramref name="container"/> at <paramref name="bits"/> a sample:
-    /// the AES3 and Broadcast Wave mappings (SMPTE ST 382) hold little-endian PCM. Null for another container.
+    /// the AES3 and Broadcast Wave mappings (SMPTE ST 382) hold little-endian PCM, and the D-10 mapping (ST 386, byte 14
+    /// 01h) 8-channel AES3 elements, whose 16 or 24 bits <see cref="MxfDemuxer"/> gives as little-endian PCM. Null for
+    /// another container.
     /// </summary>
     public static string? SoundCodec(ReadOnlySpan<byte> container, int bits) =>
         IsGenericContainer(container) && container[13] == 0x06 && bits is 8 or 16 or 24 or 32
             ? bits == 8 ? "pcm_u8" : $"pcm_s{bits}le"
+            : IsGenericContainer(container) && container[13] == 0x01 && bits is 16 or 24
+            ? $"pcm_s{bits}le"
             : null;
 
     private static bool IsLabel(ReadOnlySpan<byte> label) =>

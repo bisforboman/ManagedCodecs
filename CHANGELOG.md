@@ -11,7 +11,11 @@ share internals, so each depends on the others at exactly its own version (`[X]`
 then reports a mix of versions (NU1107, or NU1608 for a newer one referenced directly) rather than letting it fail at
 run time.
 
-## Unreleased
+## 0.13.0 – 2026-11-12
+
+Audio-only playback (`AudioPlayer`, raw AAC and MP3 seeking, and the samples), MXF files (`MxfDemuxer`), live cameras over
+RTSP (`RtspSource`, H.264), and two more audio codecs: Microsoft ADPCM (`MsAdpcmDecoder`) and G.711 A-law and μ-law.
+New public API, hence a minor version; code built against 0.12 keeps working.
 
 ### Added
 

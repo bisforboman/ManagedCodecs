@@ -124,6 +124,12 @@ ManagedCodecs.MediaTypes.All = ManagedCodecs.MediaTypes.Video | ManagedCodecs.Me
 ManagedCodecs.MediaTypes.Audio = 2 -> ManagedCodecs.MediaTypes
 ManagedCodecs.MediaTypes.None = 0 -> ManagedCodecs.MediaTypes
 ManagedCodecs.MediaTypes.Video = 1 -> ManagedCodecs.MediaTypes
+ManagedCodecs.MsAdpcmDecoder
+ManagedCodecs.MsAdpcmDecoder.Channels.get -> int
+ManagedCodecs.MsAdpcmDecoder.Decode(ManagedCodecs.Packet packet) -> ManagedCodecs.AudioFrame!
+ManagedCodecs.MsAdpcmDecoder.Decode(System.ReadOnlySpan<byte> packet) -> ManagedCodecs.AudioFrame!
+ManagedCodecs.MsAdpcmDecoder.MsAdpcmDecoder(ManagedCodecs.AudioStreamInfo! stream) -> void
+ManagedCodecs.MsAdpcmDecoder.SampleRate.get -> int
 ManagedCodecs.Packet
 ManagedCodecs.Packet.Data.get -> System.ReadOnlyMemory<byte>
 ManagedCodecs.Packet.Data.init -> void
@@ -286,14 +292,17 @@ ManagedCodecs.VideoStreamInfo.Width.get -> int
 ManagedCodecs.VideoStreamInfo.Width.init -> void
 const ManagedCodecs.CodecIds.Aac = "AAC" -> string!
 const ManagedCodecs.CodecIds.AdpcmImaWav = "ADPCM_IMA_WAV" -> string!
+const ManagedCodecs.CodecIds.AdpcmMs = "ADPCM_MS" -> string!
 const ManagedCodecs.CodecIds.H264 = "H264" -> string!
 const ManagedCodecs.CodecIds.Mjpeg = "MJPG" -> string!
 const ManagedCodecs.CodecIds.Mp3 = "MP3" -> string!
 const ManagedCodecs.CodecIds.Mpeg4Visual = "MP4V" -> string!
+const ManagedCodecs.CodecIds.PcmAlaw = "PCM_ALAW" -> string!
 const ManagedCodecs.CodecIds.PcmF32Be = "PCM_F32BE" -> string!
 const ManagedCodecs.CodecIds.PcmF32Le = "PCM_F32LE" -> string!
 const ManagedCodecs.CodecIds.PcmF64Be = "PCM_F64BE" -> string!
 const ManagedCodecs.CodecIds.PcmF64Le = "PCM_F64LE" -> string!
+const ManagedCodecs.CodecIds.PcmMulaw = "PCM_MULAW" -> string!
 const ManagedCodecs.CodecIds.PcmS16Be = "PCM_S16BE" -> string!
 const ManagedCodecs.CodecIds.PcmS16Le = "PCM_S16LE" -> string!
 const ManagedCodecs.CodecIds.PcmS24Be = "PCM_S24BE" -> string!

@@ -70,8 +70,8 @@ Recorded with tools/rtp-record.py, 640x480, and replayed into FFmpeg 6.1's depac
    - The error for an SDP with neither becomes "no H.264 or JPEG video track".
    - `LivePlayer` sends a JPEG track's frames to its MJPEG path. Their time is when the frame's last packet arrived,
      as for MJPEG over HTTP.
-3. **Loss**: a sequence-number gap or a hole in the fragment offsets means the frame is incomplete. Decision 1 says
-   says: it is dropped. Either way it counts in `LostPackets` and `DamagedFrames`.
+3. **Loss**: a sequence-number gap or a hole in the fragment offsets means the frame is incomplete. It is dropped
+   (decision 1), and counts in `LostPackets` and `DamagedFrames`.
 4. **Statistics**: no new members. `ReceivedFrames` counts the frames rebuilt, and `LostPackets` and `DamagedFrames`
    mean what they mean for H.264.
 5. **Not in step 3**:

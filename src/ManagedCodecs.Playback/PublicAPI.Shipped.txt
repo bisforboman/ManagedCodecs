@@ -2,12 +2,25 @@
 ManagedCodecs.Playback.AudioChunk
 ManagedCodecs.Playback.AudioChunk.SampleRate.get -> int
 ManagedCodecs.Playback.AudioChunk.Samples.get -> float[]!
+ManagedCodecs.Playback.AudioPlayer
+ManagedCodecs.Playback.AudioPlayer.Audio.get -> ManagedCodecs.AudioStreamInfo!
+ManagedCodecs.Playback.AudioPlayer.AudioPlayer(System.IO.Stream! stream) -> void
+ManagedCodecs.Playback.AudioPlayer.AudioPlayer(System.IO.Stream! stream, ManagedCodecs.Playback.PlaybackOptions? options) -> void
+ManagedCodecs.Playback.AudioPlayer.AudioPlayer(string! path) -> void
+ManagedCodecs.Playback.AudioPlayer.AudioPlayer(string! path, ManagedCodecs.Playback.PlaybackOptions? options) -> void
+ManagedCodecs.Playback.AudioPlayer.Dispose() -> void
+ManagedCodecs.Playback.AudioPlayer.Error.get -> System.Exception?
+ManagedCodecs.Playback.AudioPlayer.IsFinished.get -> bool
+ManagedCodecs.Playback.AudioPlayer.Start() -> void
+ManagedCodecs.Playback.AudioPlayer.TakeAudio() -> ManagedCodecs.Playback.AudioChunk?
 ManagedCodecs.Playback.LivePlayer
 ManagedCodecs.Playback.LivePlayer.Dispose() -> void
 ManagedCodecs.Playback.LivePlayer.Error.get -> System.Exception?
 ManagedCodecs.Playback.LivePlayer.LivePlayer(ManagedCodecs.Playback.MjpegHttpSource! source) -> void
+ManagedCodecs.Playback.LivePlayer.LivePlayer(ManagedCodecs.Playback.RtspSource! source) -> void
 ManagedCodecs.Playback.LivePlayer.Return(ManagedCodecs.Playback.RgbaFrame! frame) -> void
-ManagedCodecs.Playback.LivePlayer.Source.get -> ManagedCodecs.Playback.MjpegHttpSource!
+ManagedCodecs.Playback.LivePlayer.RtspSource.get -> ManagedCodecs.Playback.RtspSource?
+ManagedCodecs.Playback.LivePlayer.Source.get -> ManagedCodecs.Playback.MjpegHttpSource?
 ManagedCodecs.Playback.LivePlayer.Start() -> void
 ManagedCodecs.Playback.LivePlayer.State.get -> ManagedCodecs.Playback.LiveState
 ManagedCodecs.Playback.LivePlayer.Statistics.get -> ManagedCodecs.Playback.LiveStatistics
@@ -33,6 +46,8 @@ ManagedCodecs.Playback.LiveStatistics.DroppedFrames.init -> void
 ManagedCodecs.Playback.LiveStatistics.Equals(ManagedCodecs.Playback.LiveStatistics other) -> bool
 ManagedCodecs.Playback.LiveStatistics.LiveStatistics() -> void
 ManagedCodecs.Playback.LiveStatistics.LiveStatistics(long ReceivedFrames, long DecodedFrames, long TakenFrames, long SkippedFrames, long DroppedFrames, long DamagedFrames, long Reconnects, double DecodeMilliseconds, double ConvertMilliseconds) -> void
+ManagedCodecs.Playback.LiveStatistics.LostPackets.get -> long
+ManagedCodecs.Playback.LiveStatistics.LostPackets.init -> void
 ManagedCodecs.Playback.LiveStatistics.ReceivedFrames.get -> long
 ManagedCodecs.Playback.LiveStatistics.ReceivedFrames.init -> void
 ManagedCodecs.Playback.LiveStatistics.Reconnects.get -> long
@@ -97,6 +112,15 @@ ManagedCodecs.Playback.RgbaFrame.Pixels.get -> byte[]!
 ManagedCodecs.Playback.RgbaFrame.SampleAspectRatio.get -> ManagedCodecs.Rational
 ManagedCodecs.Playback.RgbaFrame.Time.get -> System.TimeSpan
 ManagedCodecs.Playback.RgbaFrame.Width.get -> int
+ManagedCodecs.Playback.RtspSource
+ManagedCodecs.Playback.RtspSource.Credential.get -> System.Net.NetworkCredential?
+ManagedCodecs.Playback.RtspSource.MaxLag.get -> System.TimeSpan
+ManagedCodecs.Playback.RtspSource.MaxLag.init -> void
+ManagedCodecs.Playback.RtspSource.RtspSource(System.Uri! uri) -> void
+ManagedCodecs.Playback.RtspSource.RtspSource(System.Uri! uri, System.Net.NetworkCredential? credential) -> void
+ManagedCodecs.Playback.RtspSource.StallTimeout.get -> System.TimeSpan
+ManagedCodecs.Playback.RtspSource.StallTimeout.init -> void
+ManagedCodecs.Playback.RtspSource.Uri.get -> System.Uri!
 override ManagedCodecs.Playback.LiveStatistics.GetHashCode() -> int
 override ManagedCodecs.Playback.PlaybackOptions.Equals(object? obj) -> bool
 override ManagedCodecs.Playback.PlaybackOptions.GetHashCode() -> int

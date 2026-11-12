@@ -1,13 +1,1 @@
 #nullable enable
-ManagedCodecs.Containers.AdtsDemuxer.Seek(long pts, int streamIndex) -> void
-ManagedCodecs.Containers.Mp3Demuxer.Seek(long pts, int streamIndex) -> void
-ManagedCodecs.Containers.MxfDemuxer
-ManagedCodecs.Containers.MxfDemuxer.Audio.get -> ManagedCodecs.AudioStreamInfo?
-ManagedCodecs.Containers.MxfDemuxer.Dispose() -> void
-ManagedCodecs.Containers.MxfDemuxer.MxfDemuxer(System.IO.Stream! stream, bool leaveOpen = false) -> void
-ManagedCodecs.Containers.MxfDemuxer.ReadPacketInfo() -> System.Collections.Generic.IEnumerable<ManagedCodecs.PacketInfo>!
-ManagedCodecs.Containers.MxfDemuxer.ReadPackets() -> System.Collections.Generic.IEnumerable<ManagedCodecs.Packet>!
-ManagedCodecs.Containers.MxfDemuxer.ReadPacketsAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerable<ManagedCodecs.Packet>!
-ManagedCodecs.Containers.MxfDemuxer.Seek(long pts, int streamIndex) -> void
-ManagedCodecs.Containers.MxfDemuxer.Video.get -> ManagedCodecs.VideoStreamInfo?
-static ManagedCodecs.Containers.MxfDemuxer.Open(string! path) -> ManagedCodecs.Containers.MxfDemuxer!

@@ -16,6 +16,11 @@ public class LiveRtspTests
 
     private static readonly TimeSpan Patience = TimeSpan.FromSeconds(30);
 
+    // For tests on the real clock whose server goes quiet between units (or after the last): the default 5-second
+    // StallTimeout would reconnect on a slow runner, and the test server replays from its first unit (as #495 found in
+    // LivePlayerTests).
+    private static readonly TimeSpan Unstalled = TimeSpan.FromMinutes(10);
+
     [Theory]
     [InlineData(true, true)]
     [InlineData(true, false)]
@@ -46,7 +51,7 @@ public class LiveRtspTests
         };
 
         var uri = new UriBuilder(server.Uri) { UserName = "admin", Password = Uri.EscapeDataString("s3cret:pass") }.Uri;
-        using var player = new LivePlayer(new RtspSource(uri));
+        using var player = new LivePlayer(new RtspSource(uri) { StallTimeout = Unstalled });
         player.Start();
         int shown = 0;
         for (int i = 0; i < units.Count; i++)
@@ -208,7 +213,7 @@ public class LiveRtspTests
 
         // The whole recording arrives at once on the real clock: a slow runner (ARM64 without SIMD) falls more than the
         // default MaxLag behind and rightly skips, which isn't what this test is about.
-        using var player = new LivePlayer(new RtspSource(server.Uri) { MaxLag = TimeSpan.FromHours(1) });
+        using var player = new LivePlayer(new RtspSource(server.Uri) { MaxLag = TimeSpan.FromHours(1), StallTimeout = Unstalled });
         player.Start();
         WaitFor(player, () => player.Statistics.ReceivedFrames == 50 && player.Statistics.DecodedFrames > 0 ? player : null);
         Assert.NotNull(WaitFor(player, player.TakeLatest));

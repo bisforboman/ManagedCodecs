@@ -1,6 +1,6 @@
 # Live camera viewing, step 3: JPEG over RTP (2026-11-12)
 
-A plan, for the owner to decide on (Decisions, below). Nothing here is built yet. It follows step 2, RTSP with H.264
+A plan, decided on by the owner (Decided, below). Nothing here is built yet. It follows step 2, RTSP with H.264
 (docs/decisions/2026-11-10-live-rtsp-h264.md, built), whose decision 5 named JPEG over RTP (RFC 2435) the likeliest
 next step. Cameras that serve MJPEG over HTTP often serve the same JPEGs over RTSP too, and older or cheaper ones serve
 nothing else there. A camera whose RTSP stream is JPEG now gets "The camera's SDP has no H.264 video track."
@@ -71,7 +71,7 @@ Recorded with tools/rtp-record.py, 640x480, and replayed into FFmpeg 6.1's depac
    - `LivePlayer` sends a JPEG track's frames to its MJPEG path. Their time is when the frame's last packet arrived,
      as for MJPEG over HTTP.
 3. **Loss**: a sequence-number gap or a hole in the fragment offsets means the frame is incomplete. Decision 1 says
-   what to do with it. Either way it counts in `LostPackets` and `DamagedFrames`.
+   says: it is dropped. Either way it counts in `LostPackets` and `DamagedFrames`.
 4. **Statistics**: no new members. `ReceivedFrames` counts the frames rebuilt, and `LostPackets` and `DamagedFrames`
    mean what they mean for H.264.
 5. **Not in step 3**:
@@ -102,24 +102,24 @@ Recorded with tools/rtp-record.py, 640x480, and replayed into FFmpeg 6.1's depac
 - **Mutation entries** for the rules FFmpeg's and GStreamer's streams never reach: Q below 128, a table length of 0,
   restart headers on fragments that don't start at a restart interval.
 
-## Decisions
+## Decided
 
-For the owner, with a recommendation each.
+Asked with the multiple-choice prompt; the owner took each recommendation (2026-11-12).
 
-1. **An incomplete frame**:
+1. **An incomplete frame. Decided: (a), drop it.**
    - **(a) Drop it** (recommended). The previous frame stays on screen, as when a JPEG over HTTP fails to decode.
      Simple, and nothing shown is wrong.
    - (b) Rebuild what arrived up to the first hole and let `MjpegDecoder` decode the rest as damaged (its handling
      of truncated JPEGs follows FFmpeg's). That shows a partial frame, and with restart markers the later intervals
      could even be placed. Over TCP losses are rare (the camera dropping packets under load), so this is complexity
      for little.
-2. **GStreamer's recordings**: the 4:2:2 and restart-marker streams can only come from GStreamer, which CI doesn't
+2. **GStreamer's recordings. Decided: (a), commit them.** the 4:2:2 and restart-marker streams can only come from GStreamer, which CI doesn't
    install.
    - **(a) Commit them** (recommended), with the JPEGs that went in, at 320x240 and 10 frames each (about 200 KB), in
      `samples/gstreamer/` beside `samples/jm/` and `samples/openh264/`. The script that made them goes in tools/.
    - (b) Install GStreamer in CI and record them in make-samples.sh. That's more CI time and a second packaged tool
      to keep working for two streams that don't change.
-3. **Mixed tracks**: when a camera's SDP offers H.264 and JPEG video, which plays?
+3. **Mixed tracks. Decided: (a), the first in SDP order.** when a camera's SDP offers H.264 and JPEG video, which plays?
    - **(a) The first in SDP order** (recommended). It is the camera's own order, and cameras put one video track per
      stream URL anyway.
    - (b) H.264 first, whatever the order. That gives less bandwidth for the same picture, but it overrides the camera

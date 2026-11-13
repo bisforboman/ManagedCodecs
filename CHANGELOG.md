@@ -11,7 +11,10 @@ share internals, so each depends on the others at exactly its own version (`[X]`
 then reports a mix of versions (NU1107, or NU1608 for a newer one referenced directly) rather than letting it fail at
 run time.
 
-## Unreleased
+## 0.14.0 – 2026-11-13
+
+More of MXF (clip-wrapped essence, D-10's sound) and live cameras over RTSP that send JPEG. New features with no public
+API change; a minor version, as a patch only fixes.
 
 ### Added
 

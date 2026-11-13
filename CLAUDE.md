@@ -130,4 +130,8 @@ Read the CLAUDE.md beside the code you work on, also for a codec's samples or to
 - ARM64 (CI's `build-arm64`): FFmpeg's default JPEG IDCT there is NEON, which rounds unlike its C one; references
   take `-idct simple` (the same as the default on x64). An `Sse2.`/`Avx2.` call reached behind only
   `Vector128.IsHardwareAccelerated` throws PlatformNotSupportedException on ARM64: dispatch inside the function.
+- global.json pins the .NET 10 SDK (any 10.0.x feature band): runner images with a newer SDK (11.0.100 from November
+  2026) otherwise build with it over setup-dotnet's 10.0.x, and `dotnet workload install wasm-tools` then installs the
+  newer SDK's workload, which a net10.0 wasm project can't use (NETSDK1147, `wasm-tools-net10`). Moving to SDK 11 is a PR
+  of its own.
 - xunit theory rows filter by `DisplayName~<sample>`, not `FullyQualifiedName` (`dotnet test --filter`).

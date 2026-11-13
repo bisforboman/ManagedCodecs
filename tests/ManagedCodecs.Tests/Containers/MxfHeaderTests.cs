@@ -19,6 +19,29 @@ public class MxfHeaderTests
                 .Where(f => File.Exists(Path.ChangeExtension(f, ".headers.json")))
                 .Select(f => Path.GetFileName(f)));
 
+    // MxfDemuxer's streams carry the material package's start timecode as ffprobe reports it (the format's timecode
+    // tag): 01:00:00:00 on mxf-prores-pcm16, 01:00:00;02 drop frame on mxf-h264-interlaced, 00:00:00:00 on the rest.
+    [Theory]
+    [MemberData(nameof(Samples))]
+    public void GivesTheStartTimecodeOnItsStreams(string sampleName)
+    {
+        using var json = JsonDocument.Parse(File.ReadAllText(TestSamples.ReferenceOf(sampleName, ".headers.json")));
+        string? expected = json.RootElement.GetProperty("format").GetProperty("tags").TryGetProperty("timecode", out var tag) ? tag.GetString() : null;
+
+        using var demuxer = MxfDemuxer.Open(TestSamples.PathOf(sampleName));
+
+        Assert.True(demuxer.Video is not null || demuxer.Audio is not null);
+        if (demuxer.Video is { } video)
+        {
+            Assert.Equal(expected, video.StartTimecode?.ToString());
+        }
+
+        if (demuxer.Audio is { } audio)
+        {
+            Assert.Equal(expected, audio.StartTimecode?.ToString());
+        }
+    }
+
     [Theory]
     [MemberData(nameof(Samples))]
     public void MatchesFfmpegsStreams(string sampleName)
@@ -85,7 +108,7 @@ public class MxfHeaderTests
     [InlineData(107894L, 30, true, "01:00:00;02")]
     [InlineData(215784L, 60, true, "01:00:00;00")] // 59.94: four dropped a minute
     public void FormatsTimecodes(long start, int timecodeBase, bool dropFrame, string expected) =>
-        Assert.Equal(expected, new MxfTimecode(start, timecodeBase, dropFrame).ToString());
+        Assert.Equal(expected, new Timecode(start, timecodeBase, dropFrame).ToString());
 
     [Fact]
     public void FollowsTheReferencesToEachTracksDescriptor()

@@ -220,6 +220,12 @@ public sealed record VideoStreamInfo(
     public long Duration { get; init; }
 
     /// <summary>
+    /// The timecode of the stream's first frame as the container gives it, or null where it gives none: an MXF file's
+    /// material package timecode track's start (ffprobe's <c>timecode</c> tag), on its video and its sound alike.
+    /// </summary>
+    public Timecode? StartTimecode { get; init; }
+
+    /// <summary>
     /// An Annex B H.264 stream whose frames are numbered from 0 in output order (a raw stream, as FFmpeg's command line
     /// numbers them), not the reorder delay after its packets' decoding-order times (AVI's, as FFmpeg's frames are).
     /// </summary>
@@ -248,6 +254,9 @@ public sealed record AudioStreamInfo(
     /// 'strh' length in frames. 0 where the container says nothing.
     /// </summary>
     public long Duration { get; init; }
+
+    /// <inheritdoc cref="VideoStreamInfo.StartTimecode"/>
+    public Timecode? StartTimecode { get; init; }
 }
 
 /// <summary>Reads packets out of a container format (AVI, MP4, ...).</summary>

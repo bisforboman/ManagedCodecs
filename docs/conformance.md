@@ -560,7 +560,8 @@ for 120 coded in 16-row macroblocks: the decoder crops), so does MxfHeader; it g
 field order for separate fields (its decoder does, from the bitstream), so those are checked by hand-made header
 metadata instead: the aspect ratio over the display rectangle (4:3 over 720x576 is 16:15), BER local lengths, a tag
 the primer doesn't map, an unknown duration (-1), header metadata without a preface or a primer pack or with a
-property past its set, which partition's header metadata is read (closed first), and drop-frame timecodes.
+property past its set, which partition's header metadata is read (closed first), and drop-frame timecodes. The
+demuxer's streams carry that start timecode (`StartTimecode`), checked against the same tag on every sample.
 
 
 `MxfConformanceTests` compares every packet of every sample's video and first audio stream with FFmpeg's (`ffprobe

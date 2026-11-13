@@ -15,6 +15,9 @@ run time.
 
 ### Added
 
+- `Timecode` (ManagedCodecs.Core), a SMPTE start timecode (frames, rounded base, drop frame; `ToString()` as ffprobe's
+  "01:00:00;02"), and `VideoStreamInfo.StartTimecode` and `AudioStreamInfo.StartTimecode`, which `MxfDemuxer` sets to
+  the material package's start timecode (docs/decisions/2026-11-13-start-timecode.md).
 - Containers: `MxfDemuxer` reads clip-wrapped essence (OP-Atom files, SMPTE ST 390), cut into edit units by the index
   table: pictures by the index entries' stream offsets or the constant edit unit size, sound in pieces of a 25th of a
   second, as FFmpeg's demuxer gives them.

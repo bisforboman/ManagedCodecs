@@ -122,7 +122,10 @@ public sealed class MxfDemuxer : IDemuxer
                     count,
                     new Rational(video.EditRate.Denominator, video.EditRate.Numerator),
                     ReadOnlyMemory<byte>.Empty,
-                    videoIndex);
+                    videoIndex)
+                {
+                    StartTimecode = header.StartTimecode,
+                };
             }
 
             if (audio is not null)
@@ -133,6 +136,7 @@ public sealed class MxfDemuxer : IDemuxer
                 Audio = new AudioStreamInfo(audio.Codec is { } codec ? AudioCodec(codec) : "unknown", rate, audio.Channels, packets.Count, new Rational(1, rate), ReadOnlyMemory<byte>.Empty, audioIndex)
                 {
                     Duration = packets.Count == 0 ? 0 : packets[^1].Pts + packets[^1].Duration,
+                    StartTimecode = header.StartTimecode,
                 };
             }
 

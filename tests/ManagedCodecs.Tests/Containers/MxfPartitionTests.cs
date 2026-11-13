@@ -216,12 +216,18 @@ public class MxfPartitionTests
     }
 
     [Fact]
-    public void RejectsAWalkPastTheEndOfTheFile()
+    public void EndsAWalkAtAnItemCutShort()
     {
-        // No random index pack and no footer offset: the walk meets a KLV item longer than what is left of the file.
+        // No random index pack and no footer offset: the walk meets a KLV item longer than what is left of the file
+        // (a file cut short, or still being written), or a key or length the file breaks off in, and ends there.
         byte[] header = PartitionPack(kind: 2, status: 1, thisPartition: 0);
-        byte[] item = [.. Convert.FromHexString("060E2B34010201010D01030115010501"), 0x83, 0x01, 0x00, 0x00, 1, 2, 3];
-        Assert.Throws<InvalidDataException>(() => MxfPartitions.Read(new MemoryStream([.. header, .. item])));
+        byte[] key = Convert.FromHexString("060E2B34010201010D01030115010501");
+        foreach (byte[] item in new byte[][] { [.. key, 0x83, 0x01, 0x00, 0x00, 1, 2, 3], [.. key, 0x83, 0x01], key[..8] })
+        {
+            var file = MxfPartitions.Read(new MemoryStream([.. header, .. item]));
+            Assert.Equal(MxfPartitionSource.Walk, file.Source);
+            Assert.Single(file.Partitions);
+        }
     }
 
     // The key (16) and a one-byte BER length come before a pack's value in PartitionPack's packs.

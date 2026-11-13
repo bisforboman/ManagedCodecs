@@ -195,6 +195,11 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.Containers/Mxf/MxfPartitions.cs",
          find="if (TryFromFooter(stream, runIn, header, out partitions))", replace="if (false)",
          tests="FullyQualifiedName~MxfPartitionTests"),
+    # A file that breaks off ends its partition walk at the item cut short, not with an error (no random index pack or
+    # footer to start from).
+    dict(file="src/ManagedCodecs.Containers/Mxf/MxfPartitions.cs",
+         find="while (position < fileLength && Klv.HeaderFits(stream, position, fileLength))", replace="while (position < fileLength)",
+         tests="FullyQualifiedName~MxfPartitionTests"),
     # ---- MXF demuxer (packets as FFmpeg's)
     # An intra-only codec's packets are all keyframes, whatever the index says (FFmpeg's muxer leaves ProRes without
     # the random access flag: mxf-prores-pcm16).
@@ -245,6 +250,21 @@ MUTATIONS = [
          tests="FullyQualifiedName~MxfConformanceTests"),
     dict(file="src/ManagedCodecs.Containers/Mxf/MxfDemuxer.cs",
          find="int count = header[1] | (header[2] << 8);", replace="int count = header[1];",
+         tests="FullyQualifiedName~MxfConformanceTests"),
+    # The essence ends at the last whole item of a file that breaks off: an element cut short is no packet
+    # (mxf-h264-pcm-cut; FFmpeg's references drop its corrupt packet, -fflags +discardcorrupt) ...
+    dict(file="src/ManagedCodecs.Containers/Mxf/MxfDemuxer.cs",
+         find="""            if (next > length)
+            {
+                break;
+            }""", replace="""            if (next > length)
+            {
+                next = length;
+            }""",
+         tests="FullyQualifiedName~MxfConformanceTests"),
+    # ... nor a key it breaks off in (mxf-h264-pcm-cutkey).
+    dict(file="src/ManagedCodecs.Containers/Mxf/MxfDemuxer.cs",
+         find="if (!Klv.HeaderFits(_stream, position, length))", replace="if (false)",
          tests="FullyQualifiedName~MxfConformanceTests"),
     # ---- MXF header metadata (SMPTE ST 377-1 9, Annexes B, F, G)
     # One fill item may come between the partition pack and the primer pack (9.1), as FFmpeg's muxer writes.

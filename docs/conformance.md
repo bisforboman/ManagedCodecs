@@ -593,6 +593,13 @@ what the file says, the file is followed and the test says so:
   the last one shorter, which `MxfDemuxer` follows. `MxfIndexTests` cuts hand-made segments: entries across segments,
   a constant size with a partial edit unit left over, and stream offsets that don't start at 0, go back, or run past
   the element.
+- Files that break off (cut short, or still being written; `tools/mxf-rewrite.py --cut-in`): inside an essence element
+  (mxf-h264-pcm-cut), inside a KLV key (mxf-h264-pcm-cutkey) and inside a body partition's index table segment
+  (mxf-h264-index-cut), each without its footer and random index pack. `MxfDemuxer` ends at the last whole item, as
+  `MatroskaDemuxer` ends at its last whole block; FFmpeg's demuxer gives the element cut short as a packet flagged
+  corrupt, which the references drop (`-fflags +discardcorrupt`, which changes nothing on a whole file). Without the
+  footer's index FFmpeg gives the video no times, and `MxfDemuxer` times it by edit unit. `MxfPartitionTests` ends a
+  hand-made walk at an item, a length and a key cut short.
 - D-10 sound (FFmpeg's `-f mxf_d10`, SMPTE ST 386): each content package's sound is an 8-channel AES3 element (ST 331
   7.1: a 4-byte header with the sample count, then a 32-bit word a channel a sample, all 8 channels whatever the
   descriptor says), which FFmpeg's demuxer gives as PCM of the descriptor's channels and bits, and so does

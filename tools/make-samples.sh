@@ -914,6 +914,13 @@ python3 -I tools/mxf-rewrite.py samples/mxf-h264-pcm.mxf samples/mxf-h264-pcm-ru
 cp samples/mxf-h264-pcm.partitions.csv samples/mxf-h264-pcm-norip.partitions.csv
 cp samples/mxf-h264-pipe.partitions.csv samples/mxf-h264-pipe-norip.partitions.csv
 cp samples/mxf-h264-pcm.partitions.csv samples/mxf-h264-pcm-runin.partitions.csv
+# Files that break off (cut short, or still being written; tools/mxf-rewrite.py --cut-in): inside an essence element
+# (mxf-h264-pcm-cut), inside a KLV key (mxf-h264-pcm-cutkey), and inside a body partition's index table segment
+# (mxf-h264-index-cut), each without its footer and random index pack. FFmpeg's demuxer gives an element cut short as
+# a packet flagged corrupt, which the references below drop (-fflags +discardcorrupt), as MxfDemuxer does.
+python3 -I tools/mxf-rewrite.py samples/mxf-h264-pcm.mxf samples/mxf-h264-pcm-cut.mxf --cut-in essence
+python3 -I tools/mxf-rewrite.py samples/mxf-h264-pcm.mxf samples/mxf-h264-pcm-cutkey.mxf --cut-in key
+python3 -I tools/mxf-rewrite.py samples/mxf-h264-index.mxf samples/mxf-h264-index-cut.mxf --cut-in index
 # The header metadata's descriptors, for MxfHeader: ProRes 422 HQ (10-bit 4:2:2, CDCI) with a 16:9 picture over
 # 160x120 (sample aspect 4:3), two stereo 16-bit PCM tracks (AES3 descriptors in a multiple descriptor) and a start
 # timecode; DNxHR SQ (VC-3, at its smallest size) with 24-bit PCM; interlaced H.264 (High 4:2:2 10-bit, FrameLayout
@@ -960,18 +967,19 @@ done
 # fills in), and name.packets.nofillin.csv as FFmpeg's MXF demuxer itself gives them (decode times are its own there;
 # libavformat moves MPEG-2's back a frame).
 for f in samples/mxf-*.mxf; do
-  ffprobe -v error -show_packets -show_data_hash MD5 -show_entries packet=stream_index,pts,dts,duration,size,flags,data_hash \
-    -of csv=p=0 "$f" > "${f%.mxf}.packets.csv"
-  ffprobe -v error -fflags +nofillin+noparse -show_packets -show_entries packet=stream_index,pts,dts,duration,size,flags \
+  ffprobe -v error -fflags +discardcorrupt -show_packets -show_data_hash MD5 \
+    -show_entries packet=stream_index,pts,dts,duration,size,flags,data_hash -of csv=p=0 "$f" > "${f%.mxf}.packets.csv"
+  ffprobe -v error -fflags +nofillin+noparse+discardcorrupt -show_packets -show_entries packet=stream_index,pts,dts,duration,size,flags \
     -of csv=p=0 "$f" > "${f%.mxf}.packets.nofillin.csv"
   # name.h264.framemd5: the H.264 frames, every one (-fps_mode passthrough: FFmpeg's MXF packets carry decode times as
   # presentation times, and its command line would drop a frame and retime the rest otherwise).
   if [ "$(ffprobe -v error -select_streams v:0 -show_entries stream=codec_name -of csv=p=0 "$f")" = h264 ]; then
-    ff -idct simple -noautorotate -i "$f" -fps_mode passthrough -map 0:v -f framemd5 "${f%.mxf}.h264.framemd5"
+    ff -idct simple -noautorotate -fflags +discardcorrupt -i "$f" -fps_mode passthrough -map 0:v -f framemd5 \
+      "${f%.mxf}.h264.framemd5"
   fi
   # name.pcm.f32: the first audio stream decoded, for PcmDecoder on MXF's little-endian PCM.
   if [ -n "$(ffprobe -v error -select_streams a:0 -show_entries stream=index -of csv=p=0 "$f")" ]; then
-    ff -i "$f" -map 0:a:0 -f f32le "${f%.mxf}.pcm.f32"
+    ff -fflags +discardcorrupt -i "$f" -map 0:a:0 -f f32le "${f%.mxf}.pcm.f32"
   fi
 done
 

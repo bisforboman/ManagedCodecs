@@ -198,16 +198,25 @@ internal sealed class MxfPartitions
         return true;
     }
 
-    /// <summary>The partitions found by walking every KLV item from the header partition pack to the end of the file.</summary>
+    /// <summary>
+    /// The partitions found by walking every KLV item from the header partition pack to the end of the file, or to the
+    /// item it breaks off in (a file cut short, or still being written).
+    /// </summary>
     public static List<MxfPartition> Walk(Stream stream, MxfPartition header)
     {
         var partitions = new List<MxfPartition> { header };
         long fileLength = stream.Length;
         long position = header.End;
         Span<byte> key = stackalloc byte[Klv.KeyLength];
-        while (position < fileLength)
+        while (position < fileLength && Klv.HeaderFits(stream, position, fileLength))
         {
             long valueStart = Klv.ReadHeader(stream, position, key, out long length);
+            long next = checked(valueStart + length);
+            if (next > fileLength)
+            {
+                break;
+            }
+
             if (Klv.IsPartitionPack(key, out _, out _))
             {
                 partitions.Add(MxfPartition.Read(stream, position));
@@ -216,12 +225,6 @@ internal sealed class MxfPartitions
             {
                 // The last item (ST 377-1 12): one that did not hold up (TryFromRandomIndexPack) ends the walk too.
                 break;
-            }
-
-            long next = checked(valueStart + length);
-            if (next > fileLength)
-            {
-                throw new InvalidDataException($"A KLV item at byte {position} runs past the end of the MXF file.");
             }
 
             position = next;

@@ -15,6 +15,9 @@ run time.
 
 ### Added
 
+- Containers: `MxfDemuxer` reads an MXF file that breaks off (cut short, or still being written) up to its last whole
+  item, as `MatroskaDemuxer` does, where it threw `InvalidDataException`; FFmpeg's demuxer gives the element cut short
+  as a corrupt packet, which this one leaves out.
 - Containers: `MxfDemuxer` reads clip-wrapped essence (OP-Atom files, SMPTE ST 390), cut into edit units by the index
   table: pictures by the index entries' stream offsets or the constant edit unit size, sound in pieces of a 25th of a
   second, as FFmpeg's demuxer gives them.

@@ -22,7 +22,9 @@ namespace ManagedCodecs.Containers;
 /// reordered, and it is a keyframe where the index entry has its random access flag (without an index, the first), or
 /// always for an intra-only codec (ProRes, VC-3, JPEG 2000, and D-10's MPEG-2, I pictures only by SMPTE ST 356), whose index entries FFmpeg's muxer leaves without it. A sound packet's times count samples, its duration its bytes over the block
 /// alignment. The essence elements are found by walking the file's KLV items once, when opening; partition packs,
-/// header metadata, index segments and fill items between them are skipped.
+/// header metadata, index segments and fill items between them are skipped. A file that breaks off (cut short, or
+/// still being written) ends at its last whole item: the essence element it breaks off in is no packet (FFmpeg's demuxer
+/// gives its bytes as a packet flagged corrupt), and without the footer the video is timed by edit unit, unreordered.
 /// </para>
 /// <para>
 /// A track whose essence is a single element that its index table puts two or more edit units in is clip-wrapped (an
@@ -296,11 +298,18 @@ public sealed class MxfDemuxer : IDemuxer
         long audioCount = 0;
         for (long position = start; position < length;)
         {
+            // A file that breaks off (cut short, or still being written) ends at its last whole item: an essence
+            // element cut short is no packet, as a Matroska block isn't.
+            if (!Klv.HeaderFits(_stream, position, length))
+            {
+                break;
+            }
+
             long valueStart = Klv.ReadHeader(_stream, position, key, out long size);
             long next = checked(valueStart + size);
             if (next > length)
             {
-                throw new InvalidDataException($"A KLV item at byte {position} runs past the end of the MXF file.");
+                break;
             }
 
             if (Klv.Matches(key, EssenceElementPrefix))

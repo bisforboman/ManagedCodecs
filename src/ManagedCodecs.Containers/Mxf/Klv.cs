@@ -121,6 +121,22 @@ internal static class Klv
         return checked(position + KeyLength + size);
     }
 
+    /// <summary>
+    /// Whether a whole KLV header, its key and its BER length, comes before <paramref name="fileLength"/> at
+    /// <paramref name="position"/>: not where a file breaks off inside one.
+    /// </summary>
+    public static bool HeaderFits(Stream stream, long position, long fileLength)
+    {
+        if (fileLength - position < KeyLength + 1)
+        {
+            return false;
+        }
+
+        stream.Position = position + KeyLength;
+        int first = stream.ReadByte();
+        return first < 0x80 || fileLength - position - KeyLength - 1 >= (first & 0x7F);
+    }
+
     /// <summary>Upper-case hex digits of <paramref name="bytes"/> (Convert.ToHexString, which .NET Standard 2.1 lacks).</summary>
     public static string Hex(ReadOnlySpan<byte> bytes)
     {

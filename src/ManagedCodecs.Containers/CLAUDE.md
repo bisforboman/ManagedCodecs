@@ -65,6 +65,10 @@ The repository's CLAUDE.md (process, core idea, cross-cutting gotchas) applies t
   each partition pack it reads under `ffprobe -v trace` (make-samples.sh's `.partitions.csv`), but never reads the
   footer of a pipe-written file whose random index pack is gone: `tools/mxf-rewrite.py` files take their source's
   reference instead (`--strip-rip`, `--run-in N`).
+- MXF files cut short: FFmpeg's demuxer gives the essence element a file breaks off in as a packet flagged corrupt
+  (`K_C` in ffprobe's flags), with the bytes that are there; `-fflags +discardcorrupt` drops it, as `MxfDemuxer` does
+  (make-samples.sh's MXF references all take it). A cut at a fixed byte lands in different items on another machine's
+  samples: `tools/mxf-rewrite.py --cut-in` finds the kind of item to cut.
 - MXF stream facts: `ffprobe -find_stream_info` keeps decoder probing on (it is a boolean, on by default); only
   `-nofind_stream_info` shows what FFmpeg's demuxer reads from the header metadata: the stored height (128 for H.264's
   120 coded in macroblocks), no sample aspect ratio and no field order for separate fields, which come from the

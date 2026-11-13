@@ -24,7 +24,8 @@ namespace ManagedCodecs.Containers;
 /// alignment. The essence elements are found by walking the file's KLV items once, when opening; partition packs,
 /// header metadata, index segments and fill items between them are skipped. A file that breaks off (cut short, or
 /// still being written) ends at its last whole item: the essence element it breaks off in is no packet (FFmpeg's demuxer
-/// gives its bytes as a packet flagged corrupt), and without the footer the video is timed by edit unit, unreordered.
+/// gives its bytes as a packet flagged corrupt), and without the footer the video is timed by edit unit, unreordered,
+/// an H.264 packet the index doesn't list a keyframe by its own NAL units (an IDR slice or a recovery point).
 /// </para>
 /// <para>
 /// A track whose essence is a single element that its index table puts two or more edit units in is clip-wrapped (an
@@ -482,6 +483,16 @@ public sealed class MxfDemuxer : IDemuxer
         }
     }
 
+    // Whether packet i, an H.264 access unit the index doesn't list (a file that broke off before its footer's index),
+    // is a keyframe by its own NAL units, as the raw H.264 demuxer and FFmpeg's parser tell.
+    private bool IsH264Keyframe(int i)
+    {
+        byte[] data = new byte[_packets[i].Size];
+        _stream.Position = _positions[i];
+        _stream.ReadExactly(data);
+        return H264Demuxer.IsKeyframe(data);
+    }
+
     /// <summary>Gives the track's packets their times, durations and keyframe flags (the class remarks say how).</summary>
     private void Time(MxfTrack track, int stream, MxfIndex? index)
     {
@@ -507,7 +518,8 @@ public sealed class MxfDemuxer : IDemuxer
                 long unit = packet.Sequence;
                 var entry = index?.Entry(unit);
                 long pts = unit + (entry is { } e && index!.FirstElementReordered ? e.TemporalOffset : 0);
-                bool keyframe = intra || (entry is { } f ? (f.Flags & MxfIndex.RandomAccess) != 0 : unit == 0);
+                bool keyframe = intra || (entry is { } f ? (f.Flags & MxfIndex.RandomAccess) != 0
+                    : track.Codec == "h264" ? IsH264Keyframe(i) : unit == 0);
                 _packets[i] = packet with { Dts = unit, Pts = pts, Duration = 1, IsKeyframe = keyframe };
             }
         }

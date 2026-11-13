@@ -83,4 +83,16 @@ public class H264DemuxerTests
             Assert.Equal((decoders.Width, decoders.Height), (ours.Value.Width, ours.Value.Height));
         }
     }
+
+    // An access unit is a keyframe with an IDR slice or an SEI whose first message is a recovery point, whatever comes
+    // before them (an access unit delimiter, parameter sets); not with a non-IDR slice or another SEI (MxfDemuxer takes
+    // the same rule for frames its index doesn't list).
+    [Theory]
+    [InlineData("00000109F0 0000000167 0000000168 0000016588", true)] // AUD, SPS, PPS, IDR slice
+    [InlineData("00000109F0 0000010601 0000010605 000001419A", false)] // AUD, SEI buffering period, SEI unregistered, P slice
+    [InlineData("00000109F0 000001060601 000001419A", true)] // AUD, SEI recovery point, P slice
+    [InlineData("000001419A", false)]
+    [InlineData("0000", false)]
+    public void TellsKeyframesByTheirNalUnits(string hex, bool keyframe) =>
+        Assert.Equal(keyframe, H264Demuxer.IsKeyframe(Convert.FromHexString(hex.Replace(" ", ""))));
 }

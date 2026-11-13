@@ -598,7 +598,9 @@ what the file says, the file is followed and the test says so:
   (mxf-h264-index-cut), each without its footer and random index pack. `MxfDemuxer` ends at the last whole item, as
   `MatroskaDemuxer` ends at its last whole block; FFmpeg's demuxer gives the element cut short as a packet flagged
   corrupt, which the references drop (`-fflags +discardcorrupt`, which changes nothing on a whole file). Without the
-  footer's index FFmpeg gives the video no times, and `MxfDemuxer` times it by edit unit. `MxfPartitionTests` ends a
+  footer's index FFmpeg gives the video no times, and `MxfDemuxer` times it by edit unit. An H.264 packet no index entry
+  lists (mxf-h264-index-cut's frames after the segment it breaks off in) is a keyframe by its own NAL units, an IDR
+  slice or a recovery point SEI, as FFmpeg's parser marks it and `H264Demuxer` counts it. `MxfPartitionTests` ends a
   hand-made walk at an item, a length and a key cut short.
 - D-10 sound (FFmpeg's `-f mxf_d10`, SMPTE ST 386): each content package's sound is an 8-channel AES3 element (ST 331
   7.1: a 4-byte header with the sample count, then a 32-bit word a channel a sample, all 8 channels whatever the

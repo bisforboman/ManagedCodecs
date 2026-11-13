@@ -259,6 +259,29 @@ public sealed class H264Demuxer : IDemuxer
         }
     }
 
+    /// <summary>
+    /// Whether an Annex B access unit is a keyframe as this demuxer (and FFmpeg's parser) counts one: it holds an IDR
+    /// slice (NAL unit type 5), or an SEI (type 6) whose first message is a recovery point (payloadType 6).
+    /// </summary>
+    internal static bool IsKeyframe(ReadOnlySpan<byte> unit)
+    {
+        for (int i = 0; i + 3 < unit.Length; i++)
+        {
+            if (unit[i] == 0 && unit[i + 1] == 0 && unit[i + 2] == 1)
+            {
+                int type = unit[i + 3] & 0x1F;
+                if (type == 5 || (type == 6 && i + 4 < unit.Length && unit[i + 4] == 6))
+                {
+                    return true;
+                }
+
+                i += 2;
+            }
+        }
+
+        return false;
+    }
+
     // A NAL unit's start code position (its 0x000001), whether a zero byte comes before it, its type and the byte after
     // its header (a slice's first_mb_in_slice starts there, an SEI's first payloadType).
     private readonly record struct Nal(long StartCode, bool ZeroBefore, int Type, byte NextByte);

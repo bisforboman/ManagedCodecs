@@ -262,6 +262,11 @@ MUTATIONS = [
                 next = length;
             }""",
          tests="FullyQualifiedName~MxfConformanceTests"),
+    # An H.264 packet the index doesn't list (the segment a file broke off in) is a keyframe by its NAL units
+    # (mxf-h264-index-cut's second IDR picture).
+    dict(file="src/ManagedCodecs.Containers/Mxf/MxfDemuxer.cs",
+         find=': track.Codec == "h264" ? IsH264Keyframe(i) : unit == 0);', replace=': unit == 0);',
+         tests="FullyQualifiedName~MxfConformanceTests"),
     # ... nor a key it breaks off in (mxf-h264-pcm-cutkey).
     dict(file="src/ManagedCodecs.Containers/Mxf/MxfDemuxer.cs",
          find="if (!Klv.HeaderFits(_stream, position, length))", replace="if (false)",

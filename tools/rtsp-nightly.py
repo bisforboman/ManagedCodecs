@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """LivePlayer against a real RTSP server (docs/decisions/2026-11-10-live-rtsp-h264.md, decision 4): mediamtx serves
-FFmpeg's push of a libx264 clip in a loop, and `mcdec --live` plays it, checking each frame it shows against the clip's
-own frames (tools/ManagedCodecs.Cli/LiveCheck.cs). Once per authentication method mediamtx offers (Basic, Digest).
+FFmpeg's push of a clip in a loop, and `mcdec --live` plays it, checking each frame it shows against the clip's own
+frames (tools/ManagedCodecs.Cli/LiveCheck.cs). An H.264 clip once per authentication method mediamtx offers (Basic,
+Digest), and an MJPEG one with Digest, which mediamtx sends as JPEG over RTP (RFC 2435;
+docs/decisions/2026-11-12-live-rtsp-jpeg.md).
 Fails on a frame not in the clip, a lost packet, a damaged frame, a reconnect, or too few frames. mediamtx is
 downloaded once, pinned by SHA-256, into samples/realworld/ (gitignored). Nightly (realworld.yml), not on pull
 requests: the required checks use the loopback server in the tests.
@@ -15,6 +17,7 @@ import hashlib
 import os
 import platform
 import socket
+import struct
 import subprocess
 import sys
 import tarfile
@@ -100,6 +103,98 @@ def make_clip(folder):
     return clip
 
 
+def make_mjpeg_clip(folder):
+    """10 s of 640x480 MJPEG at 25 fps, 4:2:0 with T.81's standard Huffman tables, the only ones RFC 2435 can carry
+    (FFmpeg's RTP muxer refuses others)."""
+    clip = os.path.join(folder, "clip.avi")
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=size=640x480:rate=25", "-t", "10",
+                    "-c:v", "mjpeg", "-q:v", "4", "-huffman", "default", "-pix_fmt", "yuvj420p", clip], check=True)
+    return clip
+
+
+def record_rtp(clip):
+    """FFmpeg's RFC 2435 packets for an MJPEG clip (-c copy -f rtp to a loopback UDP port), for publish_jpeg."""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 16 * 1024 * 1024)
+    sock.bind(("127.0.0.1", 0))
+    sock.settimeout(1)
+    port = sock.getsockname()[1]
+    ffmpeg = subprocess.Popen(["ffmpeg", "-v", "error", "-i", clip, "-c:v", "copy", "-f", "rtp", f"rtp://127.0.0.1:{port}"],
+                              stdout=subprocess.DEVNULL)
+    packets = []
+    while True:
+        try:
+            packets.append(sock.recvfrom(65536)[0])
+        except socket.timeout:
+            if ffmpeg.poll() is not None:
+                break  # FFmpeg has finished and nothing came for a second
+    sock.close()
+    return packets
+
+
+def two_tables(packet):
+    """A frame's first packet with FFmpeg's one 64-byte table (luma and chroma alike) sent as two, as mediamtx (1.21.3)
+    needs: given one, it drops every frame ("received wrong fragment"). RFC 2435's Length allows either; the decoded
+    frames are the same."""
+    offset = int.from_bytes(packet[13:16], "big")
+    if offset != 0 or packet[17] < 128 or packet[16] >= 64:
+        return packet
+    at = 12 + 8
+    if struct.unpack(">H", packet[at + 2:at + 4])[0] != 64:
+        return packet
+    table = packet[at + 4:at + 68]
+    return packet[:at + 2] + struct.pack(">H", 128) + table + table + packet[at + 68:]
+
+
+def publish_jpeg(packets, stop):
+    """Publishes the packets to mediamtx in a loop at 25 frames a second: ANNOUNCE, SETUP (RTP over the connection),
+    RECORD (RFC 2326, 10.11), then the packets, their sequence numbers and timestamps going on across loops. FFmpeg's
+    own RTSP push can't be used: its packets need two_tables first."""
+    sock = socket.create_connection(("127.0.0.1", PORT))
+    reader = sock.makefile("rb")
+    url = f"rtsp://127.0.0.1:{PORT}/live"
+
+    def request(method, target, headers="", body=b""):
+        request.cseq += 1
+        length = f"Content-Length: {len(body)}\r\n" if body else ""
+        sock.sendall(f"{method} {target} RTSP/1.0\r\nCSeq: {request.cseq}\r\n{headers}{length}\r\n".encode() + body)
+        status = reader.readline().decode()
+        answer = {}
+        while (line := reader.readline().decode().strip()):
+            name, _, value = line.partition(":")
+            answer[name.lower()] = value.strip()
+        reader.read(int(answer.get("content-length", 0)))
+        if " 200 " not in status:
+            raise RuntimeError(f"{method}: {status.strip()}")
+        return answer
+
+    request.cseq = 0
+    sdp = b"v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\ns=clip\r\nt=0 0\r\nm=video 0 RTP/AVP 26\r\na=control:trackID=0\r\n"
+    request("ANNOUNCE", url, "Content-Type: application/sdp\r\n", sdp)
+    session = request("SETUP", url + "/trackID=0", "Transport: RTP/AVP/TCP;unicast;interleaved=0-1;mode=record\r\n")["session"]
+    request("RECORD", url, f"Session: {session.split(';')[0]}\r\nRange: npt=0.000-\r\n")
+    packets = [bytearray(two_tables(p)) for p in packets]
+    span = (struct.unpack(">I", packets[-1][4:8])[0] - struct.unpack(">I", packets[0][4:8])[0] + 3600) & 0xFFFFFFFF
+    sequence, loop = 0, 0
+    try:
+        while not stop.is_set():
+            for packet in packets:
+                packet[2:4] = struct.pack(">H", sequence & 0xFFFF)
+                sequence += 1
+                timestamp = (struct.unpack(">I", bytes(packet[4:8]))[0] + loop * span) & 0xFFFFFFFF
+                out = bytes(packet[:4]) + struct.pack(">I", timestamp) + bytes(packet[8:])
+                sock.sendall(b"$\x00" + struct.pack(">H", len(out)) + out)
+                if packet[1] & 0x80:
+                    time.sleep(0.04)
+                if stop.is_set():
+                    return
+            loop += 1
+    except OSError:
+        pass
+    finally:
+        sock.close()
+
+
 def wait_for_port(port, seconds=20):
     deadline = time.time() + seconds
     while time.time() < deadline:
@@ -129,12 +224,17 @@ def run(method, binary, clip, folder, frames):
 
     threading.Thread(target=read, daemon=True).start()
     push = None
+    stop = threading.Event()
     try:
         wait_for_port(PORT)
-        push = subprocess.Popen(["ffmpeg", "-v", "error", "-re", "-stream_loop", "-1", "-i", clip, "-c", "copy",
-                                 "-f", "rtsp", "-rtsp_transport", "tcp", f"rtsp://127.0.0.1:{PORT}/live"])
+        if clip.endswith(".avi"):
+            publisher = threading.Thread(target=publish_jpeg, args=(record_rtp(clip), stop), daemon=True)
+            publisher.start()
+        else:
+            push = subprocess.Popen(["ffmpeg", "-v", "error", "-re", "-stream_loop", "-1", "-i", clip, "-c", "copy",
+                                     "-f", "rtsp", "-rtsp_transport", "tcp", f"rtsp://127.0.0.1:{PORT}/live"])
         if not published.wait(20):
-            return "\n".join(["FFmpeg's push never reached mediamtx.", *log[-20:]]), 1
+            return "\n".join(["The push never reached mediamtx.", *log[-20:]]), 1
         url = f"rtsp://{USER}:{PASSWORD}@127.0.0.1:{PORT}/live"
         check = subprocess.run(["dotnet", MCDEC, "--live", url, clip, "--frames", str(frames)],
                                capture_output=True, text=True)
@@ -143,6 +243,7 @@ def run(method, binary, clip, folder, frames):
             output += "\nmediamtx's log:\n" + "\n".join(log[-30:])
         return output.strip(), check.returncode
     finally:
+        stop.set()
         for process in (push, server):
             if process is not None:
                 process.terminate()
@@ -163,14 +264,15 @@ def main():
     binary = mediamtx()
     version = subprocess.run([binary, "--version"], capture_output=True, text=True).stdout.strip()
     failed = 0
-    report = [f"mediamtx {version}, FFmpeg pushing a 720p25 libx264 clip in a loop, {args.frames} frames a method.", ""]
+    report = [f"mediamtx {version}, FFmpeg pushing a clip in a loop (720p25 libx264, 640x480 MJPEG), {args.frames} frames a run.", ""]
     with tempfile.TemporaryDirectory() as folder:
-        clip = make_clip(folder)
-        for method in ("basic", "digest"):
+        h264 = make_clip(folder)
+        mjpeg = make_mjpeg_clip(folder)
+        for label, method, clip in (("H.264, basic", "basic", h264), ("H.264, digest", "digest", h264), ("JPEG, digest", "digest", mjpeg)):
             output, status = run(method, binary, clip, folder, args.frames)
             verdict = "passed" if status == 0 else "FAILED"
-            print(f"== {method}: {verdict}\n{output}\n", flush=True)
-            report += [f"**{method}**: {verdict}", "", "```", output, "```", ""]
+            print(f"== {label}: {verdict}\n{output}\n", flush=True)
+            report += [f"**{label}**: {verdict}", "", "```", output, "```", ""]
             failed += status != 0
 
     if args.report:

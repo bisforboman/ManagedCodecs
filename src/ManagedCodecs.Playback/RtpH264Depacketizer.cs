@@ -109,7 +109,8 @@ internal sealed class RtpH264Depacketizer
     /// <summary>The access unit in progress at the end of the stream, if any, as damaged (its marker never came).</summary>
     public RtpAccessUnit? Flush() => _inUnit ? Complete(damaged: true) : null;
 
-    private static bool TryParse(ReadOnlySpan<byte> packet, out RtpHeader header, out ReadOnlySpan<byte> payload)
+    // Also RtpJpegDepacketizer's: the fixed header (RFC 3550, 5.1), its CSRCs, extension and padding skipped.
+    internal static bool TryParse(ReadOnlySpan<byte> packet, out RtpHeader header, out ReadOnlySpan<byte> payload)
     {
         header = default;
         payload = default;
@@ -298,7 +299,7 @@ internal sealed class RtpH264Depacketizer
         return unit;
     }
 
-    private readonly record struct RtpHeader(bool Marker, int PayloadType, ushort Sequence, uint Timestamp);
+    internal readonly record struct RtpHeader(bool Marker, int PayloadType, ushort Sequence, uint Timestamp);
 }
 
 /// <summary>An access unit rebuilt from RTP: Annex B, its RTP timestamp (90 kHz), and what may be missing.</summary>

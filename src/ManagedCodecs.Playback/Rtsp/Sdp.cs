@@ -1,12 +1,14 @@
 namespace ManagedCodecs.Playback.Rtsp;
 
 /// <summary>
-/// What a live view needs from a camera's SDP (RFC 4566): the session's control URL and the first video track whose
-/// <c>a=rtpmap</c> names H264, with its payload type, control URL and <c>a=fmtp</c> parameters (RFC 6184, 8.1).
+/// What a live view needs from a camera's SDP (RFC 4566): the session's control URL and the first video track it can
+/// play, in the SDP's order: H.264 (an <c>a=rtpmap</c> naming H264, with its <c>a=fmtp</c> parameters, RFC 6184, 8.1)
+/// or JPEG (RFC 2435: the static payload type 26, or an <c>a=rtpmap</c> naming JPEG)
+/// (docs/decisions/2026-11-12-live-rtsp-jpeg.md, decision 3).
 /// </summary>
 internal sealed class Sdp
 {
-    private Sdp(string? sessionControl, SdpH264Track? track)
+    private Sdp(string? sessionControl, SdpVideoTrack? track)
     {
         SessionControl = sessionControl;
         Track = track;
@@ -15,13 +17,13 @@ internal sealed class Sdp
     /// <summary>The session's <c>a=control</c>, before any media line; null when it has none.</summary>
     public string? SessionControl { get; }
 
-    /// <summary>The first H.264 video track, or null when there is none.</summary>
-    public SdpH264Track? Track { get; }
+    /// <summary>The first H.264 or JPEG video track, or null when there is none.</summary>
+    public SdpVideoTrack? Track { get; }
 
     public static Sdp Parse(string text)
     {
         string? sessionControl = null;
-        SdpH264Track? found = null;
+        SdpVideoTrack? found = null;
         var media = new List<Media>();
         Media? current = null;
         foreach (var raw in text.Split('\n'))
@@ -71,11 +73,22 @@ internal sealed class Sdp
 
             foreach (var format in m.Fields.Skip(3))
             {
-                if (int.TryParse(format, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out int type)
-                    && m.RtpMap.TryGetValue(type, out var map)
-                    && map.StartsWith("H264/", StringComparison.OrdinalIgnoreCase))
+                if (!int.TryParse(format, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out int type))
                 {
-                    found = SdpH264Track.From(type, m.Control, m.Fmtp.TryGetValue(type, out var fmtp) ? fmtp : "");
+                    continue;
+                }
+
+                string? map = m.RtpMap.TryGetValue(type, out var mapped) ? mapped : null;
+                if (map?.StartsWith("H264/", StringComparison.OrdinalIgnoreCase) == true)
+                {
+                    found = SdpVideoTrack.H264(type, m.Control, m.Fmtp.TryGetValue(type, out var fmtp) ? fmtp : "");
+                    break;
+                }
+
+                // 26 is JPEG's static payload type (RFC 3551), which needs no a=rtpmap; mapped, it must say JPEG.
+                if (map is null ? type == 26 : map.StartsWith("JPEG/", StringComparison.OrdinalIgnoreCase))
+                {
+                    found = new SdpVideoTrack(SdpCodec.Jpeg, type, m.Control, 0, []);
                     break;
                 }
             }
@@ -125,14 +138,22 @@ internal sealed class Sdp
     }
 }
 
-/// <summary>An H.264 track of an SDP.</summary>
+/// <summary>What a video track of an SDP carries.</summary>
+internal enum SdpCodec
+{
+    H264,
+    Jpeg,
+}
+
+/// <summary>A video track of an SDP.</summary>
+/// <param name="Codec">H.264 or JPEG.</param>
 /// <param name="PayloadType">Its RTP payload type.</param>
 /// <param name="Control">Its <c>a=control</c>, or null.</param>
-/// <param name="PacketizationMode">The <c>a=fmtp</c>'s <c>packetization-mode</c> (0 when absent).</param>
-/// <param name="ParameterSets">The <c>sprop-parameter-sets</c> NAL units (empty when absent or not base64).</param>
-internal sealed record SdpH264Track(int PayloadType, string? Control, int PacketizationMode, byte[][] ParameterSets)
+/// <param name="PacketizationMode">H.264: the <c>a=fmtp</c>'s <c>packetization-mode</c> (0 when absent).</param>
+/// <param name="ParameterSets">H.264: the <c>sprop-parameter-sets</c> NAL units (empty when absent or not base64).</param>
+internal sealed record SdpVideoTrack(SdpCodec Codec, int PayloadType, string? Control, int PacketizationMode, byte[][] ParameterSets)
 {
-    public static SdpH264Track From(int payloadType, string? control, string fmtp)
+    public static SdpVideoTrack H264(int payloadType, string? control, string fmtp)
     {
         int mode = 0;
         byte[][] parameterSets = [];
@@ -163,6 +184,6 @@ internal sealed record SdpH264Track(int PayloadType, string? Control, int Packet
             }
         }
 
-        return new SdpH264Track(payloadType, control, mode, parameterSets);
+        return new SdpVideoTrack(SdpCodec.H264, payloadType, control, mode, parameterSets);
     }
 }

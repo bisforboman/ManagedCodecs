@@ -9,10 +9,10 @@ namespace ManagedCodecs.Playback;
 
 /// <summary>
 /// Shows a live camera: after <see cref="Start"/>, it reads an MJPEG over HTTP stream (<see cref="MjpegHttpSource"/>)
-/// or H.264 over RTSP (<see cref="Playback.RtspSource"/>) and decodes on threads of its own, and the caller takes the
+/// or H.264 or JPEG over RTSP (<see cref="Playback.RtspSource"/>) and decodes on threads of its own, and the caller takes the
 /// newest frame on its render tick (<see cref="TakeLatest"/>). No clock: a frame older than the newest is never shown,
 /// and a decoded frame not taken before the next is decoded is dropped (<see cref="LiveStatistics.DroppedFrames"/>).
-/// MJPEG: while the decoder is busy, JPEGs that arrive are kept only until a newer one does
+/// MJPEG, and JPEG over RTSP: while the decoder is busy, JPEGs that arrive are kept only until a newer one does
 /// (<see cref="LiveStatistics.SkippedFrames"/>). H.264: every picture is decoded (later ones are predicted from it)
 /// until decoding falls <see cref="RtspSource.MaxLag"/> behind; then pictures are skipped up to the next IDR picture.
 /// A dropped or stalled connection is made again, after 0.5 s and then up to 10 s apart, and <see cref="State"/> and
@@ -21,7 +21,8 @@ namespace ManagedCodecs.Playback;
 /// <remarks>
 /// <see cref="TakeLatest"/> and <see cref="Return"/> are for one thread, the UI's. A software decoder costs CPU a frame:
 /// a wall of cameras wants their low-resolution substreams.
-/// docs/decisions/2026-11-10-live-mjpeg-over-http.md, docs/decisions/2026-11-10-live-rtsp-h264.md.
+/// docs/decisions/2026-11-10-live-mjpeg-over-http.md, docs/decisions/2026-11-10-live-rtsp-h264.md,
+/// docs/decisions/2026-11-12-live-rtsp-jpeg.md.
 /// </remarks>
 public sealed class LivePlayer : IDisposable
 {
@@ -64,7 +65,7 @@ public sealed class LivePlayer : IDisposable
     {
     }
 
-    /// <summary>A player for an RTSP source (H.264); call <see cref="Start"/> to connect.</summary>
+    /// <summary>A player for an RTSP source (H.264 or JPEG, as the camera's SDP says); call <see cref="Start"/> to connect.</summary>
     public LivePlayer(RtspSource source)
         : this(source, new SystemLiveClock())
     {
@@ -85,7 +86,7 @@ public sealed class LivePlayer : IDisposable
         ArgumentNullException.ThrowIfNull(source);
         RtspSource = source;
         _clock = clock;
-        _thread = new Thread(DecodeH264) { IsBackground = true, Name = "ManagedCodecs live decoding" };
+        _thread = new Thread(DecodeRtsp) { IsBackground = true, Name = "ManagedCodecs live decoding" };
     }
 
     /// <summary>The MJPEG over HTTP source played, or null for an RTSP player (<see cref="RtspSource"/>).</summary>
@@ -322,13 +323,7 @@ public sealed class LivePlayer : IDisposable
 
                 connection.Frames = true;
                 SetState(LiveState.Playing);
-                var received = new Received(part.Body, _clock.Elapsed - _origin);
-                if (Interlocked.Exchange(ref _pending, received) is not null)
-                {
-                    Interlocked.Increment(ref _skipped);
-                }
-
-                _received.Set();
+                Offer(new Received(part.Body, _clock.Elapsed - _origin));
             }
         }
         finally
@@ -360,8 +355,8 @@ public sealed class LivePlayer : IDisposable
             var describe = await Request(rtsp, "DESCRIBE", url, [new("Accept", "application/sdp")], cancel.Token).ConfigureAwait(false);
             string baseUrl = describe.Header("Content-Base") ?? describe.Header("Content-Location") ?? url;
             var sdp = Sdp.Parse(describe.Body);
-            var track = sdp.Track ?? throw new FatalException(new NotSupportedException("The camera's SDP has no H.264 video track."));
-            if (track.PacketizationMode == 2)
+            var track = sdp.Track ?? throw new FatalException(new NotSupportedException("The camera's SDP has no H.264 or JPEG video track."));
+            if (track.Codec == SdpCodec.H264 && track.PacketizationMode == 2)
             {
                 throw new FatalException(new NotSupportedException("The camera sends H.264 in RTP's interleaved mode (packetization-mode=2), which isn't supported."));
             }
@@ -386,6 +381,12 @@ public sealed class LivePlayer : IDisposable
             string sessionUrl = Sdp.Resolve(baseUrl, sdp.SessionControl);
             await Request(rtsp, "PLAY", sessionUrl, [new("Range", "npt=0.000-")], cancel.Token).ConfigureAwait(false);
             keepAlive = KeepAliveAsync(rtsp, getParameter ? "GET_PARAMETER" : "OPTIONS", sessionUrl, timeout, cancel.Token);
+
+            if (track.Codec == SdpCodec.Jpeg)
+            {
+                await ReadJpegAsync(rtsp, channel, track.PayloadType, connection, cancel.Token).ConfigureAwait(false);
+                return;
+            }
 
             int generation = Interlocked.Increment(ref _connection);
             var depacketizer = new RtpH264Depacketizer(track.PayloadType, track.ParameterSets);
@@ -427,6 +428,62 @@ public sealed class LivePlayer : IDisposable
                 await keepAlive.ConfigureAwait(false);
             }
         }
+    }
+
+    // JPEG over RTP (RFC 2435): each frame rebuilt as a whole JPEG and offered to decoding as one over HTTP is; an
+    // incomplete one is dropped (docs/decisions/2026-11-12-live-rtsp-jpeg.md, decision 1).
+    private async Task ReadJpegAsync(RtspConnection rtsp, int channel, int payloadType, Connection connection, CancellationToken token)
+    {
+        var depacketizer = new RtpJpegDepacketizer(payloadType);
+        var frames = new List<RtpJpegFrame>();
+        long lost = 0;
+        while (await rtsp.ReadAsync(token).ConfigureAwait(false) is { } message)
+        {
+            if (!message.IsPacket || message.Channel != channel)
+            {
+                continue; // keep-alives' answers, RTCP
+            }
+
+            Touch();
+            try
+            {
+                depacketizer.Add(message.Data, frames);
+            }
+            catch (NotSupportedException e)
+            {
+                throw new FatalException(e); // a type or Q no frame of this camera's can be rebuilt from
+            }
+
+            Interlocked.Add(ref _lost, depacketizer.LostPackets - lost);
+            lost = depacketizer.LostPackets;
+            foreach (var frame in frames)
+            {
+                Interlocked.Increment(ref _receivedCount);
+                connection.Frames = true;
+                SetState(LiveState.Playing);
+                if (frame.Jpeg is null)
+                {
+                    Interlocked.Increment(ref _damaged);
+                }
+                else
+                {
+                    Offer(new Received(frame.Jpeg, _clock.Elapsed - _origin));
+                }
+            }
+
+            frames.Clear();
+        }
+    }
+
+    // A JPEG for decoding: it replaces one still waiting, which is skipped (newest wins before decoding).
+    private void Offer(Received received)
+    {
+        if (Interlocked.Exchange(ref _pending, received) is not null)
+        {
+            Interlocked.Increment(ref _skipped);
+        }
+
+        _received.Set();
     }
 
     // Sends a request and checks its answer: 401 (after the challenge's answer), 403, 404, 454 and 461 are final, as a
@@ -518,14 +575,16 @@ public sealed class LivePlayer : IDisposable
         }
     }
 
-    // H.264: every access unit in order, as later pictures are predicted from earlier ones. A new connection, and a unit
-    // that arrived more than MaxLag ago, start a wait for an IDR picture, skipping the units before it; a unit with no
-    // picture left (all its slices lost a fragment) is skipped, the next picture's frame_num gap telling the decoder.
-    private void DecodeH264()
+    // RTSP: JPEG frames as MJPEG over HTTP's (the newest waiting), and H.264 access units, every one in order, as later
+    // pictures are predicted from earlier ones. A new connection, and a unit that arrived more than MaxLag ago, start a
+    // wait for an IDR picture, skipping the units before it; a unit with no picture left (all its slices lost a
+    // fragment) is skipped, the next picture's frame_num gap telling the decoder.
+    private void DecodeRtsp()
     {
         var token = _stop.Token;
         var maxLag = RtspSource!.MaxLag;
         H264Decoder? decoder = null;
+        MjpegDecoder? jpeg = null;
         int generation = 0;
         bool waitForIdr = true;
         long pts = 0;
@@ -534,6 +593,11 @@ public sealed class LivePlayer : IDisposable
             while (!token.IsCancellationRequested)
             {
                 _received.WaitOne();
+                while (!token.IsCancellationRequested && Interlocked.Exchange(ref _pending, null) is { } received)
+                {
+                    Show(jpeg ??= new MjpegDecoder(), received);
+                }
+
                 while (!token.IsCancellationRequested && _units.TryDequeue(out var queued))
                 {
                     DecodeGate?.Wait(token);

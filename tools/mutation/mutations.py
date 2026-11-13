@@ -726,6 +726,21 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
          find="TimeSpan.FromTicks(timeout.Ticks / 2)", replace="timeout",
          tests="FullyQualifiedName~LiveRtspTests.KeepsTheSessionAliveAtHalfItsTimeout"),
+    # ---- JPEG over RTP (RFC 2435; docs/decisions/2026-11-12-live-rtsp-jpeg.md), rules neither FFmpeg's nor GStreamer's
+    # packetizer reaches (both send Q 255 with the tables in every frame): Q below 128 scales K.1's tables by
+    # Appendix A ...
+    dict(file="src/ManagedCodecs.Playback/RtpJpegDepacketizer.cs",
+         find="int scale = factor < 50 ? 5000 / factor : 200 - (factor * 2);", replace="int scale = 100;",
+         tests="FullyQualifiedName~RtpJpegDepacketizerTests.ScalesK1sTablesAsAppendixADoes"),
+    # ... tables sent once for a Q from 128 to 254 serve its later frames, which send a length of 0 ...
+    dict(file="src/ManagedCodecs.Playback/RtpJpegDepacketizer.cs",
+         find="                    if (q < 255)\n", replace="                    if (false)\n",
+         tests="FullyQualifiedName~RtpJpegDepacketizerTests.ReusesTablesSentOnceForTheSameQ"),
+    # ... and a fragment that doesn't continue the scan (one before it was lost) drops the frame. FFmpeg's one table
+    # for both components (a length of 64) its recording does reach.
+    dict(file="src/ManagedCodecs.Playback/RtpJpegDepacketizer.cs",
+         find="if (_damaged || offset != _scan.Length || ", replace="if (_damaged || ",
+         tests="FullyQualifiedName~RtpJpegDepacketizerTests.DropsAFrameMissingAPacketAndKeepsTheOthers"),
     # MJPEG over HTTP: the first delimiter line names the boundary, whatever the header said (cameras get it wrong).
     dict(file="src/ManagedCodecs.Playback/MultipartReader.cs",
          find="            if (_first)\n", replace="            if (_boundary is null)\n",

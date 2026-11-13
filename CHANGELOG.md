@@ -21,6 +21,9 @@ run time.
 - Containers: `MxfDemuxer` reads D-10's sound (SMPTE ST 386, the 8-channel AES3 element of ST 331) as little-endian PCM
   of the descriptor's channels and 16 or 24 bits (`CodecIds.PcmS16Le`, `PcmS24Le`), as FFmpeg's demuxer gives it, so
   `PcmDecoder` decodes it exactly as FFmpeg; its MPEG-2 video is named, not decoded.
+- Playback: `LivePlayer` plays RTSP cameras that send JPEG (RFC 2435: 4:2:0 and 4:2:2, restart markers, in-band or
+  computed quantization tables), which it refused before; the first H.264 or JPEG video track in the camera's SDP
+  plays. An incomplete frame is dropped and counted in `DamagedFrames`.
 
 ## 0.13.0 – 2026-11-12
 

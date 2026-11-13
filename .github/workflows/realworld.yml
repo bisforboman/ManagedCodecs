@@ -65,8 +65,8 @@ jobs:
           exit $status
 
   # LivePlayer against a real RTSP server (tools/rtsp-nightly.py; docs/decisions/2026-11-10-live-rtsp-h264.md, decision
-  # 4): mediamtx serving FFmpeg's push of a libx264 clip, with Basic and with Digest; every frame shown must be one of
-  # the clip's. The pull requests' checks use the tests' loopback server.
+  # 4): mediamtx serving FFmpeg's push of a libx264 clip, with Basic and with Digest, and an MJPEG clip as JPEG over RTP
+  # (docs/decisions/2026-11-12-live-rtsp-jpeg.md); every frame shown must be one of the clip's. The pull requests' checks use the tests' loopback server.
   rtsp:
     name: RTSP (mediamtx)
     runs-on: ubuntu-24.04

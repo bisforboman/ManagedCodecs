@@ -34,6 +34,8 @@ protected override void Draw(GameTime gameTime)
 
 - **The clock is the game's:** `Update` moves it by `gameTime.ElapsedGameTime` while playing, so `Pause()` stops
   picture and sound together, and frames due while the game was busy are dropped rather than shown late.
+- **Sound-only files:** `AudioTrack` plays a `.wav`, raw MP3 or AAC file (or any file's audio) the same way:
+  `Play()`, then `Update()` once a frame; its `Position` follows the sound.
 - **Requirements:** .NET 10 (the decoders' target) and MonoGame 3.8, any platform package: this one is compiled against
   MonoGame's API and doesn't bring a platform of its own.
 - **Speed:** on 4 vCPUs at 2.1 GHz, 1080p24 and 1080p30 keep up, conversion to RGBA included.

@@ -1,4 +1,4 @@
-# Containers: notes for working on the AVI, MP4, Matroska, ADTS and MP3 demuxers
+# Containers: notes for working on the AVI, MP4, Matroska, ADTS, MP3 and MXF demuxers
 
 The repository's CLAUDE.md (process, core idea, cross-cutting gotchas) applies too.
 
@@ -42,6 +42,9 @@ The repository's CLAUDE.md (process, core idea, cross-cutting gotchas) applies t
   off, so an edit from media time t may run up to t past the media (a raw MP3 remuxed into MP4, whose 1105-sample
   start FFmpeg's muxer copies into the edit: mp3-vbr-22k-remux; aac-fdk-pce-remux starts at 0 and stops at the media).
   Found by rewriting edit lists (`tools/mp4-edit-list.py`, media times 0, 1, 20 and 1105) and reading ffprobe.
+- QuickTime PCM ('sowt', 'twos', 'in24', ...): 'stts' gives one tick a sample frame and 'stsz' a sample a frame, so
+  read sample by sample it is one packet per frame; FFmpeg reads such audio by chunk, in pieces of up to 1024 frames
+  (`Mp4Demuxer.PcmPieces`). Its muxer writes 1024-frame chunks, which hides the cutting: a hand-built file shows it.
 - AVI: FFmpeg's muxer drops the second video frame (an empty chunk) while interleaving audio, so every FFmpeg AVI with
   audio has a pts gap (0, 2, 3, ...): tests that tick at the first frames' spacing can't take them. It writes the
   audio's chunk id ('01wb') in the header's OpenDML 'indx' too: search the 'movi' list for chunks. FFmpeg's muxer
@@ -51,3 +54,27 @@ The repository's CLAUDE.md (process, core idea, cross-cutting gotchas) applies t
   times the reorder delay later: frame k at k + 2 for libx264's B pictures. Seek by the index's keyframes therefore
   backs off H.264's largest delay (16 frames); a seek-frame reference shows the frame FFmpeg's `-ss` gives, from the
   keyframe before the one at the time.
+- MXF clip wrapping: FFmpeg's `-f mxf_opatom` writes the whole clip as one element (H.264 with index entries, DNxHR
+  and DV with a constant edit unit size, PCM 48 kHz mono only, with an edit unit a sample) but labels its essence
+  container frame-wrapped: the index, not the label, says an element holds several edit units. Its demuxer reads
+  clip-wrapped sound in 1920-sample pieces whatever `-mxf_audio_edit_rate`. `-f mxf_d10` (D-10, MPEG-2 IMX) takes
+  only 30, 40 or 50 Mb/s and a whole number of bytes a frame (50 Mb/s at 29.97 isn't: the 525 sample is 30 Mb/s);
+  FFmpeg's demuxer gives its 8-channel AES3 sound elements as PCM, so their packets' MD5s are the PCM's.
+- MXF: FFmpeg's `-f mxf` muxer writes OP1a, frame-wrapped (`mxf_opatom` and `mxf_d10` are muxers of their own), audio
+  at 48 kHz only ("only 48khz is implemented"), and always a random index pack; written to a pipe, the header and body partition packs leave FooterPartition 0. Its demuxer logs
+  each partition pack it reads under `ffprobe -v trace` (make-samples.sh's `.partitions.csv`), but never reads the
+  footer of a pipe-written file whose random index pack is gone: `tools/mxf-rewrite.py` files take their source's
+  reference instead (`--strip-rip`, `--run-in N`).
+- MXF stream facts: `ffprobe -find_stream_info` keeps decoder probing on (it is a boolean, on by default); only
+  `-nofind_stream_info` shows what FFmpeg's demuxer reads from the header metadata: the stored height (128 for H.264's
+  120 coded in macroblocks), no sample aspect ratio and no field order for separate fields, which come from the
+  decoder otherwise (make-samples.sh's `.headers.json`). Its codec names follow the descriptor's coding label, else the
+  essence container's; PCM in the AES3 and Broadcast Wave mappings is `pcm_s<bits>le` (ST 382: little-endian).
+- MXF packets: FFmpeg's demuxer itself gives no keyframe flags (libavformat's parsers and its intra-only rule add
+  them), no durations, and no video times where it reads no index entries (DNxHR's constant-size index; the footer's
+  index of a pipe-written file without a random index pack, which it never reaches); compare against `.packets.csv`
+  and the demuxer's own `.packets.nofillin.csv` as `MxfConformanceTests` does. Its H.264 packets' pts are their dts
+  (FFmpeg's muxer writes no temporal offsets), so `ffmpeg -f framemd5` drops a frame and retimes the rest; with
+  `-fps_mode passthrough` it keeps every frame (`.h264.framemd5`). Its frame times there are a guess, not a reference:
+  k + D on the 2-second samples, 0 2 3 5 6 7 7 7 on mxf-h264-small, and from 0 where its packets have no times;
+  compare the MD5s only.

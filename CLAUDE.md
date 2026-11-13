@@ -77,7 +77,7 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
 - **Timing**: docs/benchmarking.md. Above all: time two builds interleaved, alternating which goes first (an A/A test
   with one always first once showed a 10% "regression"); a gain larger than the changed functions' share of the frame
   is noise, however consistent.
-- **Other workflows**: `realworld.yml` (nightly: real films and MJPEG against FFmpeg, `tools/realworld.py`),
+- **Other workflows**: `realworld.yml` (nightly: real films and MJPEG against FFmpeg, `tools/realworld.py`; LivePlayer against mediamtx, `tools/rtsp-nightly.py`),
   `benchmark.yml` (weekly), `compare.yml` and `profile.yml` (on demand), `upstream.yml` (weekly issues: a newer
   StyleBro, a new release of an encoder behind the committed samples), `vulnerable-packages.yml` (weekly: NuGet
   packages with advisories, direct or transitive, `tools/vulnerable-packages.py`; one issue per streak; every build

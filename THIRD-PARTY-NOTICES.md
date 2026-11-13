@@ -1,8 +1,8 @@
 # Third-party notices
 
 ManagedCodecs is MIT-licensed (LICENSE). Its decoders are written from the specifications (ITU-T T.81, ITU-T H.264,
-ISO/IEC 11172-3, 13818-3, 14496-3 and -12); no other project's code is included. Some of the specifications' constant tables were
-transcribed from the open-source projects below, whose notices follow: the values are the specifications', and each
+ISO/IEC 11172-3, 13818-3, 14496-3 and -12, SMPTE ST 377-1); no other project's code is included. Some of the specifications' constant tables were
+transcribed from the open-source projects and registers below, whose notices follow: the values are the specifications', and each
 table was checked against a second source (README, License). These notices go with the source and with every
 package (the file is packed beside the assemblies).
 
@@ -68,6 +68,34 @@ equal to minimp3's codeword for codeword, the synthesis window (Table B.3, as in
 to minimp3's values, and the scalefactor band edges, equal in both: `src/ManagedCodecs.Mp3/HuffmanTables.cs` and
 `Mp3Tables.cs`. PDMP3 (Krister Lagerström and contributors, https://github.com/technosaurus/PDMP3) is dedicated to the
 public domain under the Unlicense, minimp3 (https://github.com/lieff/minimp3) under CC0 1.0; neither asks for a notice.
+
+## The SMPTE Metadata Registers (BSD-3-Clause)
+
+The universal labels MXF's header metadata is read by (structural metadata set keys, property labels, data
+definitions, picture codings and essence container mappings): `src/ManagedCodecs.Containers/Mxf/MxfLabels.cs`. From
+the SMPTE Metadata Registers (SMPTE ST 2123:2025-03, https://registry.smpte-ra.org), whose XML files carry this
+notice; the set keys were checked against SMPTE ST 377-1:2019 Table 17, the property labels against its Annex H.
+
+```
+Copyright (c) 2025 SMPTE All rights reserved.
+
+Redistribution and use in source and binary forms, with or without modification, are permitted provided that the
+following conditions are met:
+1. Redistributions of source code must retain the above copyright notice, this list of conditions and the following
+   disclaimer.
+2. Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the following
+   disclaimer in the documentation and/or other materials provided with the distribution.
+3. Neither the name of the copyright holder nor the names of its contributors may be used to endorse or promote
+   products derived from this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES,
+INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```
 
 ## Consulted only
 

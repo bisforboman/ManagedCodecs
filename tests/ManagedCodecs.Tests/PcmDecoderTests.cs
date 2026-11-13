@@ -3,7 +3,7 @@ using ManagedCodecs.Containers;
 namespace ManagedCodecs.Tests;
 
 /// <summary>
-/// <see cref="PcmDecoder"/>: every AVI sample with a name.pcm.f32 reference (FFmpeg's pcm_u8 or pcm_s16le output) decoded
+/// <see cref="PcmDecoder"/>: every AVI, QuickTime and Matroska sample with a name.pcm.f32 reference (FFmpeg's pcm_u8 or pcm_s16le output) decoded
 /// exactly, every sample and no more; and its own rules on built input.
 /// </summary>
 public class PcmDecoderTests
@@ -17,7 +17,7 @@ public class PcmDecoderTests
         var reference = File.ReadAllBytes(TestSamples.ReferenceOf(sampleName, ".pcm.f32"));
         using var demuxer = Demuxer.Open(TestSamples.PathOf(sampleName));
         var audio = demuxer.Audio!;
-        Assert.True(audio.Codec is CodecIds.PcmU8 or CodecIds.PcmS16Le, audio.Codec);
+        Assert.True(PcmDecoder.CanDecode(audio.Codec), audio.Codec);
         var decoder = new PcmDecoder(audio);
 
         int position = 0;
@@ -50,6 +50,109 @@ public class PcmDecoderTests
 
         var s16 = new PcmDecoder(Stream(CodecIds.PcmS16Le, 1)).Decode([0x00, 0x80, 0xFF, 0x7F, 0x01, 0x00]);
         Assert.Equal([-1f, 32767 / 32768f, 1 / 32768f], s16.Samples[0]);
+    }
+
+    /// <summary>
+    /// G.711's extremes as the standard's tables give them, scaled to 16 bits: A-law (even bits inverted, sign bit set
+    /// positive) from the smallest steps, ±8 (1 on its 13-bit scale), to ±32256; μ-law (all bits inverted, sign bit
+    /// set negative) from 0 (both of its zeros) to ±32124. wav-alaw-codes and wav-mulaw-codes check every code against
+    /// FFmpeg.
+    /// </summary>
+    [Fact]
+    public void ExpandsG711()
+    {
+        var alaw = new PcmDecoder(Stream(CodecIds.PcmAlaw, 1)).Decode([0xD5, 0x55, 0xAA, 0x2A]);
+        Assert.Equal([8 / 32768f, -8 / 32768f, 32256 / 32768f, -32256 / 32768f], alaw.Samples[0]);
+
+        var mulaw = new PcmDecoder(Stream(CodecIds.PcmMulaw, 2)).Decode([0xFF, 0x7F, 0x80, 0x00]);
+        Assert.Equal([0f, 32124 / 32768f], mulaw.Samples[0]);
+        Assert.Equal([0f, -32124 / 32768f], mulaw.Samples[1]);
+    }
+
+    /// <summary>
+    /// Every format against the definition on random bytes: integers over 2^(bits - 1), floats as they are and doubles
+    /// rounded to float, little- and big-endian; and each one's extremes.
+    /// </summary>
+    [Theory]
+    [InlineData(CodecIds.PcmS16Le, 2, false, false)]
+    [InlineData(CodecIds.PcmS16Be, 2, false, true)]
+    [InlineData(CodecIds.PcmS24Le, 3, false, false)]
+    [InlineData(CodecIds.PcmS24Be, 3, false, true)]
+    [InlineData(CodecIds.PcmS32Le, 4, false, false)]
+    [InlineData(CodecIds.PcmS32Be, 4, false, true)]
+    [InlineData(CodecIds.PcmF32Le, 4, true, false)]
+    [InlineData(CodecIds.PcmF32Be, 4, true, true)]
+    [InlineData(CodecIds.PcmF64Le, 8, true, false)]
+    [InlineData(CodecIds.PcmF64Be, 8, true, true)]
+    public void ConvertsEveryFormatByTheDefinition(string codec, int bytes, bool isFloat, bool bigEndian)
+    {
+        var random = new Random((bytes * 31) + codec.Length);
+        var data = new byte[bytes * 2 * 500];
+        random.NextBytes(data);
+        for (int i = 0; isFloat && i < data.Length; i += bytes)
+        {
+            // Finite values only: a random exponent is often a NaN or an infinity.
+            double value = (random.NextDouble() * 4) - 2;
+            byte[] encoded = bytes == 4 ? BitConverter.GetBytes((float)value) : BitConverter.GetBytes(value);
+            if (bigEndian)
+            {
+                Array.Reverse(encoded);
+            }
+
+            encoded.CopyTo(data, i);
+        }
+
+        var frame = new PcmDecoder(Stream(codec, 2)).Decode(data);
+        Assert.Equal(500, frame.SampleCount);
+        for (int i = 0; i < 1000; i++)
+        {
+            var sample = data.AsSpan(i * bytes, bytes).ToArray();
+            if (bigEndian)
+            {
+                Array.Reverse(sample);
+            }
+
+            float expected = (isFloat, bytes) switch
+            {
+                (true, 4) => BitConverter.ToSingle(sample),
+                (true, _) => (float)BitConverter.ToDouble(sample),
+                _ => (float)(SignedLittleEndian(sample) / Math.Pow(2, (8 * bytes) - 1)),
+            };
+            Assert.Equal(expected, frame.Samples[i % 2][i / 2]);
+        }
+    }
+
+    /// <summary>The extremes of 24 and 32 bits: -1 and just under 1.</summary>
+    [Fact]
+    public void ConvertsTheWiderExtremes()
+    {
+        var s24 = new PcmDecoder(Stream(CodecIds.PcmS24Be, 1)).Decode([0x80, 0x00, 0x00, 0x7F, 0xFF, 0xFF]);
+        Assert.Equal([-1f, 8388607 / 8388608f], s24.Samples[0]);
+        var s32 = new PcmDecoder(Stream(CodecIds.PcmS32Le, 1)).Decode([0x00, 0x00, 0x00, 0x80, 0xFF, 0xFF, 0xFF, 0x7F]);
+        Assert.Equal([-1f, 1f], s32.Samples[0]); // 2147483647 / 2^31 rounds to 1 as a float, as in FFmpeg
+    }
+
+    /// <summary>The PCM formats and nothing else.</summary>
+    [Fact]
+    public void CanDecodeThePcmFormats()
+    {
+        Assert.True(PcmDecoder.CanDecode(CodecIds.PcmU8));
+        Assert.True(PcmDecoder.CanDecode(CodecIds.PcmF64Be));
+        Assert.False(PcmDecoder.CanDecode(CodecIds.Aac));
+        Assert.False(PcmDecoder.CanDecode("0x0001"));
+        Assert.False(PcmDecoder.CanDecode(null));
+    }
+
+    private static long SignedLittleEndian(byte[] sample)
+    {
+        long value = 0;
+        for (int i = sample.Length - 1; i >= 0; i--)
+        {
+            value = (value << 8) | sample[i];
+        }
+
+        int shift = 64 - (8 * sample.Length);
+        return (value << shift) >> shift;
     }
 
     /// <summary>

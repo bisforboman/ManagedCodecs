@@ -3,7 +3,8 @@ name: Real world
 # ManagedCodecs against FFmpeg on real public films (tools/realworld.py: Blender's open movies, real H.264 and AAC from
 # real encoders, where every sample in samples/ is a test pattern): every video frame must be identical and the audio
 # within 2^-17. Nightly and on demand, not on pull requests (minutes of film each); a job per film, so one difference
-# doesn't hide another. The films are cached; the first run downloads about 800 MB.
+# doesn't hide another. The films are cached; the first run downloads about 800 MB. A job of its own plays a real RTSP
+# server's stream (below).
 on:
   workflow_dispatch:
   schedule:
@@ -61,4 +62,36 @@ jobs:
           tools/realworld.py "$FILM" --report realworld.md
           status=$?
           { echo "### $FILM"; echo; cat realworld.md; } >> "$GITHUB_STEP_SUMMARY"
+          exit $status
+
+  # LivePlayer against a real RTSP server (tools/rtsp-nightly.py; docs/decisions/2026-11-10-live-rtsp-h264.md, decision
+  # 4): mediamtx serving FFmpeg's push of a libx264 clip, with Basic and with Digest, and an MJPEG clip as JPEG over RTP
+  # (docs/decisions/2026-11-12-live-rtsp-jpeg.md); every frame shown must be one of the clip's. The pull requests' checks use the tests' loopback server.
+  rtsp:
+    name: RTSP (mediamtx)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6
+        with:
+          dotnet-version: 10.0.x
+
+      - uses: ./.github/actions/ffmpeg
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: samples/realworld/mediamtx-*
+          key: mediamtx-${{ hashFiles('tools/rtsp-nightly.py') }}
+
+      - name: Build
+        run: dotnet build tools/ManagedCodecs.Cli -c Release
+
+      - name: Play mediamtx's stream
+        run: |
+          set +e
+          tools/rtsp-nightly.py --report rtsp.md
+          status=$?
+          { echo "### RTSP (mediamtx)"; echo; cat rtsp.md; } >> "$GITHUB_STEP_SUMMARY"
           exit $status

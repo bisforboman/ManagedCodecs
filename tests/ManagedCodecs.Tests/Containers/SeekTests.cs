@@ -3,7 +3,7 @@ using ManagedCodecs.Containers;
 namespace ManagedCodecs.Tests.Containers;
 
 /// <summary>
-/// <see cref="IDemuxer.Seek"/> of the MP4, AVI and Matroska demuxers: after a seek, each stream's packets are the tail of a read
+/// <see cref="IDemuxer.Seek"/> of the MP4, AVI, Matroska, raw H.264, WAVE, MXF, ADTS and raw MP3 demuxers: after a seek, each stream's packets are the tail of a read
 /// from the start, from the last keyframe whose pts is at or before the time (the other stream's at the same instant),
 /// for every sample, at each keyframe's time, just after it, between keyframes, before the first and past the last.
 /// The decoded frame at a time is checked against FFmpeg's <c>-ss</c> in <see cref="SeekFrameTests"/>.
@@ -20,7 +20,7 @@ public class SeekTests
 
         foreach (var file in Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories).Order())
         {
-            if (Path.GetExtension(file) is ".avi" or ".mp4" or ".mkv" or ".webm")
+            if (Path.GetExtension(file) is ".avi" or ".mp4" or ".mkv" or ".webm" or ".h264" or ".264" or ".wav" or ".mxf" or ".aac" or ".mp3")
             {
                 files.Add(Path.GetRelativePath(directory, file));
             }
@@ -36,6 +36,9 @@ public class SeekTests
         using var demuxer = Demuxer.Open(TestSamples.PathOf(name));
 
         var all = Infos(demuxer).ToList();
+
+        // A raw H.264 stream starts at IDR pictures only, not at the recovery points FFmpeg also flags as keyframes.
+        var idr = demuxer is H264Demuxer raw ? raw.ReadPackets().Where(p => IsIdr(p.Data.Span)).Select(p => p.Sequence).ToHashSet() : null;
         foreach (var (stream, timeBase) in Streams(demuxer))
         {
             var packets = all.Where(p => p.StreamIndex == stream).ToList();
@@ -54,7 +57,7 @@ public class SeekTests
                         time -= 16;
                     }
 
-                    var expected = Tail(all.Where(p => p.StreamIndex == other).ToList(), time);
+                    var expected = Tail(all.Where(p => p.StreamIndex == other).ToList(), time, idr);
                     var actual = read.Where(p => p.StreamIndex == other).ToList();
                     Assert.True(expected.SequenceEqual(actual), $"Seek to {pts} in stream {stream}: stream {other}'s packets are not the tail from its keyframe at or before {time} ({actual.Count} packets, {expected.Count} expected).");
                 }
@@ -67,6 +70,7 @@ public class SeekTests
     [InlineData("testsrc-420.avi")]
     [InlineData("fmp4-base-moof.mp4")]
     [InlineData("h264-edits.mp4")]
+    [InlineData("h264-raw.h264")]
     public async Task GivesThePacketsOfAReadFromTheStart(string name)
     {
         using var demuxer = Demuxer.Open(TestSamples.PathOf(name));
@@ -116,6 +120,14 @@ public class SeekTests
         Assert.Throws<ArgumentOutOfRangeException>(() => mp4.Seek(0, 7));
         using var avi = Demuxer.Open(TestSamples.PathOf("testsrc-420.avi"));
         Assert.Throws<ArgumentOutOfRangeException>(() => avi.Seek(0, avi.Video!.StreamIndex + 1));
+        using var raw = Demuxer.Open(TestSamples.PathOf("h264-raw.h264"));
+        Assert.Throws<ArgumentOutOfRangeException>(() => raw.Seek(0, 1));
+        using var wav = new WavDemuxer(new MemoryStream(File.ReadAllBytes(TestSamples.PathOf("wav-pcm-s16.wav"))));
+        Assert.Throws<ArgumentOutOfRangeException>(() => wav.Seek(0, 1));
+        using var adts = Demuxer.Open(TestSamples.PathOf("aac-pulse.aac"));
+        Assert.Throws<ArgumentOutOfRangeException>(() => adts.Seek(0, 1));
+        using var mp3 = Demuxer.Open(TestSamples.PathOf("mp3-raw-cbr.mp3"));
+        Assert.Throws<ArgumentOutOfRangeException>(() => mp3.Seek(0, 1));
     }
 
     [Fact]
@@ -130,20 +142,31 @@ public class SeekTests
         Assert.DoesNotContain(demuxer.ReadPackets(), p => p.StreamIndex == video.StreamIndex);
     }
 
+    /// <summary>
+    /// A raw MP3 file's gapless start (the encoder's delay, the first packet's SkipSamples) is skipped by a read from its
+    /// first frame only: from the start, and after a seek back to it, as Loop does; a later frame skips nothing.
+    /// </summary>
     [Fact]
-    public void AdtsCannotSeek()
+    public void Mp3SkipsTheEncoderDelayFromItsFirstFrameOnly()
     {
-        using var adts = Demuxer.Open(TestSamples.PathOf("aac-pulse.aac"));
-        Assert.Throws<NotSupportedException>(() => adts.Seek(0, adts.Audio!.StreamIndex));
+        using var mp3 = Demuxer.Open(TestSamples.PathOf("mp3-raw-cbr.mp3"));
+        int skip = mp3.ReadPackets().First().SkipSamples;
+        Assert.True(skip > 0);
+        mp3.Seek(1152 * 5, 0);
+        var later = mp3.ReadPackets().First();
+        Assert.Equal((5L, 0), (later.Sequence, later.SkipSamples));
+        mp3.Seek(long.MinValue / 4, 0);
+        Assert.Equal(skip, mp3.ReadPackets().First().SkipSamples);
     }
 
-    // The packets from the last keyframe in decode order whose pts is at or before the time, or all of them.
-    private static List<PacketInfo> Tail(List<PacketInfo> packets, long pts)
+    // The packets from the last keyframe in decode order whose pts is at or before the time, or all of them; with the
+    // sequences of a raw H.264 stream's IDR pictures, the last of those instead.
+    private static List<PacketInfo> Tail(List<PacketInfo> packets, long pts, HashSet<long>? idr)
     {
         int start = 0;
         for (int i = 0; i < packets.Count; i++)
         {
-            if (packets[i].IsKeyframe && packets[i].Pts <= pts)
+            if ((idr?.Contains(packets[i].Sequence) ?? packets[i].IsKeyframe) && packets[i].Pts <= pts)
             {
                 start = i;
             }
@@ -190,8 +213,27 @@ public class SeekTests
         Mp4Demuxer mp4 => mp4.ReadPacketInfo(),
         AviDemuxer avi => avi.ReadPacketInfo(),
         MatroskaDemuxer mkv => mkv.ReadPacketInfo(),
-        _ => throw new ArgumentException("An MP4, AVI or Matroska demuxer.", nameof(demuxer)),
+        H264Demuxer raw => raw.ReadPacketInfo(),
+        WavDemuxer wav => wav.ReadPacketInfo(),
+        AdtsDemuxer adts => adts.ReadPacketInfo(),
+        Mp3Demuxer mp3 => mp3.ReadPacketInfo(),
+        MxfDemuxer mxf => mxf.ReadPacketInfo(),
+        _ => throw new ArgumentException("An MP4, AVI, Matroska, raw H.264, WAVE, MXF, ADTS or raw MP3 demuxer.", nameof(demuxer)),
     };
+
+    // Whether an Annex B access unit holds an IDR slice (NAL unit type 5).
+    private static bool IsIdr(ReadOnlySpan<byte> unit)
+    {
+        for (int i = 0; i + 3 < unit.Length; i++)
+        {
+            if (unit[i] == 0 && unit[i + 1] == 0 && unit[i + 2] == 1 && (unit[i + 3] & 0x1F) == 5)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     // Rounded down, by the definition, in BigInteger.
     private static long Rescale(long value, Rational from, Rational to)

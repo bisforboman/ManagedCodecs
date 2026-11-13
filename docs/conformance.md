@@ -67,6 +67,126 @@ from 11 bits on) are checked against T.81's Figure F.16 read bit by bit (`Huffma
 `HuffmanTableTests`, on the Annex K tables and on random ones, complete or not, with invalid DC sizes; the samples
 mostly reach the whole-coefficient entries. Its speed: docs/notes/mjpeg-entropy-2026-11.md.
 
+### MJPEG over HTTP
+
+`LivePlayer` adds no decoding of its own, so it has no second oracle: `LivePlayerTests` serves testsrc-420's JPEGs from
+a loopback HTTP server and compares each frame it shows with `MjpegDecoder`'s output for that JPEG (checked against
+FFmpeg above), bit for bit, in every layout `MultipartReaderTests` reads (with and without `Content-Length`, LF line
+ends, the boundary quirks), with damaged parts, a stream that ends, stalls or is refused (on a fake clock). No real
+camera is in CI.
+
+Real streams, by hand:
+
+- FFmpeg 6.1 serving `-f mpjpeg -listen 1` (testsrc2, 640x480 at 25 fps, `-re`) to `mclive` under Xvfb (2026-11-10):
+  100 and 120 frames shown at the stream's rate, none damaged, no reconnects, about 1 ms to decode and 1 ms to convert
+  a frame; a screenshot showed testsrc2's bars in order and its frame counter. Its HTTP server sends the body as
+  `Content-Type: application/octet-stream`, not multipart, so `LivePlayer` reads that type as multipart too (it refused
+  it at first); its parts carry `Content-type` and `Content-length` in lower case and the boundary `ffmpeg`.
+- Not tried yet: mjpg-streamer, an ESP32-CAM, an IP camera.
+
+### H.264 over RTP
+
+`RtpH264Depacketizer` (RFC 6184, non-interleaved mode) is checked against FFmpeg 6.1's packetizer. make-samples.sh
+records the RTP that `ffmpeg -c copy -f rtp` sends for two MP4s (tools/rtp-record.py, which fails on a missing
+packet):
+- `h264-main-slices`: 4 slices a picture, B pictures. STAP-A carries the parameter sets and small slices, beside
+  single NAL units and FU-A.
+- `h264-bench-720p`: nearly every packet is an FU-A fragment.
+
+`RtpH264DepacketizerTests` depacketizes each and gets back the MP4's samples NAL unit for NAL unit, the SDP's
+`sprop-parameter-sets` (the avcC's SPS and PPS) before the first. None is marked damaged, the IDR flags match, and
+h264-main-slices decodes to the MP4's frames (MD5).
+
+FFmpeg never sends a lost packet, a cut fragment, a sequence number's wrap, a repeated packet, padding, CSRCs or a
+header extension, or the interleaved mode's types, so hand-built packets cover those.
+
+Losses, in the 720p recording with every 37th packet dropped (50 access units): 34 units are marked damaged, and 18
+keep no picture, since a 720p picture is one slice in many fragments and losing one drops the slice. Those 18 are
+skipped (`HasPicture`), since the decoder refuses a unit with no slice. With `ConcealErrors` the rest decode without an
+exception to 32 frames, 31 of them marked damaged until the stream's next IDR picture: the decoder conceals a lost
+picture as a reference but gives no frame for it.
+
+### H.264 over RTSP
+
+`LiveRtspTests` runs `LivePlayer` against a loopback RTSP server in the tests that replays the recorded RTP. Its
+Digest check has its own MD5, not the client's, and `RtspProtocolTests` checks Digest against RFC 2617's worked example.
+- In lockstep, every frame shown is `H264Decoder`'s newest for the access units so far, with Digest (with and without
+  `qop`) and Basic, and the URL's user info is never sent.
+- Covered too: control URLs (relative, absolute, `*`), the final answers, SDPs it can't play, keep-alives at half the
+  session's timeout, a stall and a dropped connection, lost packets, and falling behind past `MaxLag` (on a fake
+  clock, decoding held by a test gate).
+
+Real servers, by hand:
+
+- GStreamer 1.24's RTSP server (gst-rtsp-server, tools/gst-rtsp-server.py: a live SMPTE pattern by x264, `tune=zerolatency`,
+  a keyframe every 50) to `mclive` under Xvfb (2026-11-11): Digest, Basic and none at 640x480, and none at 1080p25.
+  - Each showed 150 or 200 frames at the stream's 25 fps, none damaged or skipped, with no reconnects.
+  - 640x480 decoded in about 3 to 4 ms a frame and converted in 1.4 ms. 1080p decoded in 13.7 ms and converted in 7.7 ms,
+    on one thread.
+  - A screenshot showed the SMPTE bars in order.
+  - Its first runs answered DESCRIBE with 503 (its pipeline lacked an element). `LivePlayer` retried, as it should.
+
+Nightly, `realworld.yml`'s `rtsp` job (tools/rtsp-nightly.py): mediamtx 1.21.3 serves FFmpeg's push (`-re -stream_loop -1
+-c copy`) of a 10 s 720p25 libx264 clip (B pictures, an IDR picture every 2 s, so FU-A fragments), once with Basic and
+once with Digest. `mcdec --live` (tools/ManagedCodecs.Cli/LiveCheck.cs) plays it with `LivePlayer` and fails unless each
+of 250 frames shown is one of the clip's own (`H264Decoder` and the player's conversion, by MD5), with no lost packet,
+damaged frame or reconnect. The first run, in the cloud sandbox (2026-11-11): 150 frames a method, all the clip's, about
+40 units skipped while waiting for the first IDR picture after joining, 5.8 ms to decode and 1.0 ms to convert a frame.
+A clip other than the one streamed fails it from the first frame.
+
+- Not tried yet: live555, an IP camera.
+
+### JPEG over RTP
+
+`RtpJpegDepacketizer` rebuilds each frame's JPEG from RFC 2435's packets: DQT, T.81 K.3's Huffman tables, SOF0, DRI and
+SOS, around the scan the packets carry (docs/decisions/2026-11-12-live-rtsp-jpeg.md). `RtpJpegDepacketizerTests`
+checks every rebuilt JPEG decodes to exactly what the JPEG that was packetized decodes to.
+
+| Recording | Packetizer | RTP/JPEG type | Q |
+|---|---|---|---|
+| `testsrc-stdhuff.rtp` (make-samples.sh, from `testsrc-stdhuff.avi`) | FFmpeg 6.1, `-c copy -f rtp` | 1 (4:2:0) | 255 |
+| `gstreamer/jpeg-422.rtp` | GStreamer 1.24's `rtpjpegpay` | 0 (4:2:2) | 255 |
+| `gstreamer/jpeg-420-restart.rtp` | GStreamer, JPEGs with a restart marker every MCU row | 65 | 255 |
+| `gstreamer/jpeg-422-restart.rtp` | GStreamer, the same in 4:2:2 | 64 | 255 |
+
+- **GStreamer's recordings are committed** (decision 2), with the JPEGs that went in: 320x240, 5 frames each, made by
+  tools/gst-jpeg-record.py from Pillow's JPEGs (quality 50, standard Huffman tables), about 230 KB.
+- **FFmpeg sends one table, not two.** Its quantization header's length is 64: its encoder wrote one DQT table for all
+  three components. RFC 2435 allows that, and the depacketizer uses the one table for both.
+- **Neither packetizer sends Q below 128 or a table length of 0.** So the recordings are rewritten:
+  - Q 50 with the in-band tables taken out must give the same frames. Pillow's quality 50 is libjpeg's scaling,
+    which is RFC 2435 Appendix A's, and leaves K.1's tables as they are.
+  - Q 200 with the tables sent only in the first frame must give the same frames.
+  - At Q 255, a length of 0 drops the frame: tables at 255 change every frame, so none are kept.
+- **Unit tests:** `ScalesK1sTablesAsAppendixADoes` checks Appendix A's arithmetic at its ends (Q 1 clamps to 255, Q 99
+  rounds to 1).
+- **Loss:** a frame missing its first, a middle or its last packet is dropped and the others are kept.
+- **Refused:** reserved types, dynamic types and reserved Q values throw `NotSupportedException`.
+- **Tables:** the depacketizer's copies of T.81's tables equal `ManagedCodecs.Mjpeg`'s.
+- **Mutation entries:** Q below 128, the reused tables, and the fragment offset check.
+
+`LiveRtspJpegTests` plays GStreamer's recordings through `LivePlayer`:
+- In lockstep, every frame shown is the JPEG that was sent, decoded and converted. One case has payload type 26 with
+  no `a=rtpmap`, one has `a=rtpmap:96 JPEG/90000`.
+- An incomplete frame is dropped and counted (`DamagedFrames`, `LostPackets`).
+- A reserved type ends the player with `NotSupportedException`.
+
+`RtspProtocolTests` checks the SDP choice: the first H.264 or JPEG video track in SDP order (decision 3).
+
+Real servers:
+
+- **GStreamer 1.24's RTSP server, by hand** (2026-11-12): tools/gst-rtsp-server.py with `JPEG=420` and `JPEG=422`
+  (`jpegenc ! rtpjpegpay`, 640x480), with Digest.
+  - Each played 100 frames at 25 fps, with none damaged or lost and no reconnects.
+  - Decoding took 0.7 to 0.8 ms a frame and converting 0.6 ms.
+- **mediamtx 1.21.3, nightly** (tools/rtsp-nightly.py, with Digest).
+  - mediamtx drops every frame of FFmpeg's own JPEG push ("received wrong fragment"). The same packets with the one
+    table sent as two pass, so it seems to need two tables. Its source wasn't read to confirm.
+  - So the script records FFmpeg's packets for a 640x480 MJPEG clip, sends the one table as two (the decoded frames
+    are the same), and publishes them itself (ANNOUNCE, SETUP, RECORD).
+  - `mcdec --live` checks each frame shown against the clip's. The first run (2026-11-12) showed 100 frames, all the
+    clip's, none damaged.
+
 ## Real films
 
 Every sample above is a test pattern encoded to isolate a feature. `tools/realworld.py` (nightly, `realworld.yml`, a job
@@ -253,6 +373,8 @@ FFmpeg gives them) and its codec private data with FFmpeg's extradata, on every 
 | avi-mjpeg-aac | AAC, a frame a chunk, its AudioSpecificConfig in the WAVEFORMATEX's extra bytes |
 | avi-mjpeg-pcm | 16-bit PCM (dwSampleSize 2): a packet a chunk of 1024 samples, timed in samples; `CodecIds.PcmS16Le` |
 | avi-mjpeg-pcm-u8 | 8-bit unsigned PCM at 11.025 kHz, stereo (dwSampleSize 2); `CodecIds.PcmU8` |
+| avi-mjpeg-ima | 4-bit IMA ADPCM at 22.05 kHz, stereo, in 512-byte blocks: a packet a block, timed in blocks (dwScale wSamplesPerBlock); `CodecIds.AdpcmImaWav` |
+| avi-mjpeg-ms-adpcm | Microsoft ADPCM at 22.05 kHz, stereo, in 512-byte blocks, timed as IMA's; `CodecIds.AdpcmMs` |
 | avi-mjpeg-mp3-cbr | MP3 in the CBR layout of VirtualDub and older muxers, written by `tools/avi-mp3-cbr.py` |
 
 The CBR layout (dwScale 1, dwRate the bytes a second, dwSampleSize 1) cuts its chunks anywhere in a frame:
@@ -268,7 +390,12 @@ own output. `PcmDecoderTests` decodes the two PCM samples exactly as FFmpeg does
 output, compared bit for bit: (x - 128) / 128 and x / 32768) and `MediaPlayerTests` plays them; a packet's bytes after
 its last whole sample frame are ignored and one shorter than a frame refused, as FFmpeg's decoder does (checked on raw
 `-f s16le` input; a unit test and a mutation entry, since AVI chunks are whole frames in every sample). PCM of other
-depths (24 and 32 bits, WAVE_FORMAT_EXTENSIBLE) stays `0x0001`, not decoded. After a `Seek` (in either stream) the audio starts at its last packet at or before the time asked for,
+depths (24 and 32 bits, WAVE_FORMAT_EXTENSIBLE) stays `0x0001`, not decoded. `ImaAdpcmDecoderTests` decodes the IMA ADPCM sample exactly as
+FFmpeg does (name.ima.f32), and hand-built blocks as FFmpeg decodes the same blocks in a WAV file: its difference
+rounded once, (2 * magnitude + 1) * step / 8, up to 2 above IMA's recommended practice's shifts; a packet of several
+blocks; a block cut short, which gives its whole groups of 4 bytes a channel (a mutation entry each); the channels'
+turns. IMA ADPCM at 2, 3 and 5 bits (FFmpeg decodes them; its encoder writes 4) stays `0x0011`, not decoded
+(docs/decisions/2026-11-10-ima-adpcm.md). After a `Seek` (in either stream) the audio starts at its last packet at or before the time asked for,
 as `SeekTests` checks for every demuxer's streams.
 
 Audio with a dwSampleSize comes in pieces of chunks, as FFmpeg's demuxer cuts them: 1024 blocks below 32 bytes a block,
@@ -278,7 +405,86 @@ one block from 32 bytes up (IMA and MS ADPCM's 1024-byte blocks, 8-channel 32-bi
 sample shows the cutting: ffprobe did, on FFmpeg AVIs whose PCM chunks were merged into larger and odd-sized ones
 (16-bit mono and stereo, 24-bit stereo, 16-bit 5.1, 8-bit mono, 32-bit 7.1, IMA and MS ADPCM), and
 `AviDemuxerTests.CutsAudioChunksAsFfmpeg` checks its sizes and times on hand-built files. Not checked against FFmpeg:
-format tag 0x50 (MPEG Layer I and II) with Layer III frames, IMA ADPCM, AC-3. H.264 in AVI: see H.264, Annex B.
+format tag 0x50 (MPEG Layer I and II) with Layer III frames, Microsoft ADPCM, AC-3. H.264 in AVI: see H.264, Annex B.
+
+## PCM in QuickTime and Matroska
+
+`PcmDecoder` takes PCM as FFmpeg's pcm_* decoders name it (docs/decisions/2026-11-10-pcm-containers.md): unsigned
+8-bit; signed 16, 24 and 32 bits, little- and big-endian; 32- and 64-bit float, both orders. FFmpeg's float output is a
+formula for each ((x - 128) / 128, x / 2^15, x / 2^23 and x / 2^31; floats as they are, doubles rounded), checked bit
+for bit on 20000 random values per format, and `PcmDecoderTests.ConvertsEveryFormatByTheDefinition` holds the decoder
+to it on random bytes. `PcmDecoderTests.MatchesFfmpegExactly` decodes every sample with a name.pcm.f32 reference
+(FFmpeg's `-f f32le`) bit for bit, and `MediaPlayerTests` plays three of them:
+
+| Sample | What |
+| --- | --- |
+| mov-pcm-u8, mov-pcm-s16le, mov-pcm-s16be | QuickTime's 'raw ', 'sowt' and 'twos' (stereo) |
+| mov-pcm-s24le, mov-pcm-s32be, mov-pcm-f32le, mov-pcm-f64be | 'in24', 'in32', 'fl32' and 'fl64', their byte order an 'enda' box in the 'wave' box |
+| mkv-pcm-u8, mkv-pcm-s24le, mkv-pcm-s32le | A_PCM/INT/LIT at BitDepth 8 (unsigned, as FFmpeg reads it), 24 and 32 |
+| mkv-pcm-s16be, mkv-pcm-s32be | A_PCM/INT/BIG at 16 and 32 |
+| mkv-pcm-f32le, mkv-pcm-f64le | A_PCM/FLOAT/IEEE at 32 and 64 |
+| mkv-lace-fixed | A_PCM/INT/LIT at 16, in fixed-size lacing |
+| mov-pcm-alaw, mov-pcm-mulaw | G.711 A-law and μ-law (stereo), QuickTime's 'alaw' and 'ulaw' |
+| wav-alaw-codes, wav-mulaw-codes | G.711 in .wav files (format tags 6 and 7), each of the 256 codes four times (μ-law in stereo) |
+
+G.711 (`CodecIds.PcmAlaw`, `CodecIds.PcmMulaw`) expands each byte by the standard's tables, A-law on a 13-bit scale and
+μ-law on a 14-bit one, shifted to 16 bits as FFmpeg's decoders give them; `wav-alaw-codes` and `wav-mulaw-codes` hold
+every code, so every value is checked against FFmpeg, and `PcmDecoderTests.ExpandsG711` names the extremes (A-law ±8 to
+±32256, μ-law 0 to ±32124). In Matroska FFmpeg's muxer writes them as A_MS/ACM (a WAVEFORMATEX in CodecPrivate), which
+the Matroska demuxer doesn't read: such tracks keep their Codec ID, undecoded.
+
+QuickTime's PCM has one 'stts' tick a sample frame, and FFmpeg's mov demuxer reads it by chunk, each cut in pieces of up
+to 1024 frames (their bytes the frames' whatever 'stsz' says, timed by the frames before them). Its muxer writes chunks of
+1024, so the samples' packets show only whole chunks: `Mp4DemuxerTests.CutsQuickTimePcmChunksAsFfmpeg` builds chunks of
+1500, 1500 and 700 frames and checks the packets ffprobe gives that very file (1024 + 476 twice, then 700); a mutation
+entry.
+
+ISO MP4's `ipcm` and `fpcm` (ISO/IEC 23003-5, as FFmpeg's mp4 muxer writes PCM) take their depth and byte order from a
+`pcmC` box (format_flags bit 0 little-endian, PCM_sample_size): `mp4-pcm-s16le`, `-s16be` (stereo), `-s32le`, `-f32le`
+(stereo), `-f32be` and `-f64le` decode exactly. FFmpeg cuts their pieces by 'stsz''s sample size, not the codec's: its
+6.1 muxer writes 24-bit samples (3 bytes in 'stsz') under a `pcmC` of 32 bits and reads them back as 32-bit samples in
+3072-byte pieces. `mp4-pcm-s24le` is that file, which decodes as FFmpeg decodes it (a mutation entry).
+
+Not from FFmpeg's muxers, so not checked against FFmpeg: QuickTime's `lpcm` (sound description version 2, its format
+in flags) and 'twos' at 8 bits (signed 8-bit), which keep their entry's name, undecoded; big-endian float in Matroska
+(FFmpeg's muxer refuses it, and A_PCM/FLOAT/IEEE has no order of its own); `ipcm` at 8 bits.
+
+## .wav files
+
+`WavDemuxer` reads RIFF WAVE files: the 'fmt ' chunk's WAVEFORMATEX named as AVI's audio (`WaveFormat`, shared: integer
+PCM by wBitsPerSample, float PCM, WAVE_FORMAT_EXTENSIBLE by its sub-format's tag, IMA and Microsoft ADPCM, MP3), other chunks
+skipped. `WavDemuxerTests.MatchesFfmpegPacketByPacket` compares every samples/*.wav with ffprobe's packets (size, MD5,
+pts, dts, duration): FFmpeg's wav demuxer reads 4096 bytes a packet rounded down to whole blocks (nBlockAlign), timed in
+samples, and MP3 by frames, as its parser cuts them. Their decoded audio is checked as the other samples' are
+(name.pcm.f32, name.ima.f32, name.msadpcm.f32 exactly; name.mp3.trim.f32 within 2^-17).
+
+| Sample | What |
+| --- | --- |
+| wav-pcm-u8, wav-pcm-s16 | Format tag 1: 8-bit mono (4096-byte packets), 16-bit stereo |
+| wav-pcm-s24, wav-pcm-f32, wav-pcm-s16-6ch | WAVE_FORMAT_EXTENSIBLE (FFmpeg's muxer writes it above 16 bits, for float and above 2 channels): blocks of 6 and 12 bytes make packets of 4092 |
+| wav-ima | IMA ADPCM, stereo, 1024-byte blocks: packets of 4, the last 1 |
+| wav-ms-adpcm | Microsoft ADPCM, mono, 1024-byte blocks: packets of 4 |
+| wav-mp3 | MP3 (tag 0x55), a packet a frame |
+
+Built by hand (`WavDemuxerTests`), since FFmpeg's muxer writes neither: chunks before and after 'data', an odd-sized
+one padded; a 'data' size of 0xFFFFFFFF (a recording never closed) or 0, which runs to the end of the file (as ffprobe reads it); blocks longer
+than 4096 bytes, a packet each. Formats FFmpeg names otherwise keep their tag (`0x0031` for GSM 6.10), timed by
+nAvgBytesPerSec, unchecked; AAC in WAV is named but no sample has it. RF64 and Wave64 are not read. AVI shares the
+naming: `avi-mjpeg-pcm-s24` and `avi-mjpeg-pcm-f32` (format tags 1 and 3) decode exactly too.
+
+Microsoft ADPCM (`MsAdpcmDecoder`, docs/decisions/2026-11-10-ms-adpcm.md): `wav-ms-adpcm` and `avi-mjpeg-ms-adpcm`
+(stereo, 512-byte blocks, a loud tone beside quiet ones) decode exactly as FFmpeg (name.msadpcm.f32). FFmpeg's rules
+the format lacks: the standard coefficient table whatever the file lists (a file with an altered table decodes to
+FFmpeg's same samples, a unit test), a predictor index past 6 refused, and the step capped at INT_MAX / 768 (a mutation
+entry). Hand-built blocks decode as FFmpeg decodes them in a WAV file: predictors 0, 1, 3 and 6, a negative step, a
+step driven to the cap, a block cut short (its header's two samples and two a byte), stereo's pairing of the channels
+in each byte.
+
+`Seek` starts at the packet whose samples hold the time (every packet is a keyframe), among the packets listed when
+opening: the tail of a read from the start, as `IDemuxer.Seek` asks and `SeekTests` checks on every .wav sample.
+FFmpeg's own wav seek starts a packet at the exact sample instead (ffprobe `-read_intervals 0.5%` on 16-bit stereo at
+22.05 kHz: a packet at 11025, where a read from the start has them at 10240 and 11264), so its packets after a seek
+are not a read's; the samples before the time are dropped by whoever wants it, as for the other demuxers.
 
 ## Matroska and WebM demuxing
 
@@ -324,6 +530,87 @@ file (FFmpeg's muxer writes no DefaultDuration for AAC; libavformat fills in 102
 to the track's next frame, which the test checks against FFmpeg's next pts; Opus's durations come from FFmpeg's
 parser, which reads the packets, so they too are compared that way.
 
+## MXF demuxing
+
+`MxfDemuxer` (#469) finds a file's partitions (SMPTE ST 377-1 6.2, 7, 12), reads its header metadata (9, Annexes A,
+B, F, G) and its index tables (11), and gives the frame-wrapped essence of the first picture and sound tracks as
+packets. `MxfPartitionTests` compares every samples/*.mxf with the partition packs FFmpeg's demuxer reads
+(`ffprobe -v trace -show_packets`, its "PartitionPack:" lines: ThisPartition, PreviousPartition, FooterPartition,
+IndexSID and BodySID, in name.partitions.csv), and checks that the three ways of finding them (the random index pack,
+the chain back from the footer by PreviousPartition, and a walk over every KLV item) agree on each. The samples, from
+FFmpeg's `-f mxf` muxer (OP1a, H.264 and 24-bit PCM): a header, body and footer partition with a random index pack
+(mxf-h264-pcm); 20 s, for a body partition with index table segments beside the essence (mxf-h264-index); written to
+a pipe, so the header and body packs leave FooterPartition 0 (mxf-h264-pipe). tools/mxf-rewrite.py makes what FFmpeg's
+muxer never writes, each against its source's reference: no random index pack (mxf-h264-pcm-norip, found back from the
+footer; mxf-h264-pipe-norip, found by the walk, where FFmpeg's demuxer never reads the footer) and a 1 KiB run-in
+(mxf-h264-pcm-runin). Hand-made bytes cover the rest: BER lengths (the long form for short lengths, 0x80 and more than
+nine bytes refused), keys whose version byte differs (the fill item's two keys), partition packs whose essence
+container batch doesn't hold together, a random index pack that lists a partition that isn't there or gives a wrong
+BodySID, a PreviousPartition chain that loops, the run-in's 64 KiB limit, and a KLV item past the end of the file.
+
+`MxfHeaderTests` reads every sample's header metadata (the primer pack, the local sets, the strong references from the
+preface to the material package's tracks, their source clips, the file package's tracks and its descriptors, and the
+EssenceContainerData's stream IDs) and compares it with the streams FFmpeg's demuxer reads without decoding
+(`ffprobe -nofind_stream_info`, name.headers.json): codec, width and height, progressive or not, edit rate, duration,
+sample rate, channels, bits per sample, the file package's UMID, and the file's operational pattern, material package
+and start timecode. The samples add ProRes 422 HQ with a 16:9 picture over 160x120 and two stereo 16-bit PCM tracks
+(AES3 descriptors in a multiple descriptor) and a start timecode, DNxHR SQ, interlaced H.264 (separate fields: the
+stored height is a field's) with a drop-frame timecode, and MPEG-2. FFmpeg's demuxer reports the stored height (128
+for 120 coded in 16-row macroblocks: the decoder crops), so does MxfHeader; it gives no sample aspect ratio and no
+field order for separate fields (its decoder does, from the bitstream), so those are checked by hand-made header
+metadata instead: the aspect ratio over the display rectangle (4:3 over 720x576 is 16:15), BER local lengths, a tag
+the primer doesn't map, an unknown duration (-1), header metadata without a preface or a primer pack or with a
+property past its set, which partition's header metadata is read (closed first), and drop-frame timecodes.
+
+
+`MxfConformanceTests` compares every packet of every sample's video and first audio stream with FFmpeg's (`ffprobe
+-show_packets -show_data_hash MD5`, name.packets.csv): file order, pts, size, MD5, keyframe flag and duration, and the
+decode times with FFmpeg's MXF demuxer's own (`-fflags +nofillin+noparse`, name.packets.nofillin.csv). Video ticks are
+edit units; audio ticks are samples, a packet's duration its bytes over the block alignment. Where FFmpeg differs from
+what the file says, the file is followed and the test says so:
+
+- Keyframes: libavformat marks every packet of an intra-only codec (ProRes, DNxHR) a keyframe, while FFmpeg's muxer
+  leaves their index entries without the random access flag; `MxfDemuxer` does the same for those codecs, and takes the
+  index's flag for the others (H.264 and MPEG-2's first packet). D-10's MPEG-2 is I pictures only (SMPTE ST 356), and
+  every packet of it is a keyframe, as libavformat's parser marks them.
+- Times without an index FFmpeg reads: DNxHR's index has a constant edit unit size and no entries, and FFmpeg's demuxer
+  gives its video no times (libavformat fills in 0, 1, 2, which `MxfDemuxer`'s are); a pipe-written file without a
+  random index pack (mxf-h264-pipe-norip) has its index in the footer, which FFmpeg's demuxer never reaches, so it gives
+  no video times at all, where `MxfDemuxer` walks to the footer and times the packets by edit unit.
+- Decode times: libavformat moves MPEG-2's back a frame (its parser's reorder delay); FFmpeg's demuxer's own are the
+  edit units, which `MxfDemuxer`'s are. D-10's index has a constant size and no entries, so FFmpeg's demuxer gives its
+  MPEG-2 no decode times, and libavformat's start at -1; the test compares them a frame on.
+- Audio duration in the header: FFmpeg rescales the track's edit units to samples, rounded to the nearest (6 frames at
+  29.97 are 9609.6 samples: 9610).
+- Temporal offsets: FFmpeg's muxer writes H.264 unreordered (PosTableIndex 0, offsets 0), so its packets' pts are their
+  dts though libx264 writes B pictures. `MxfConformanceTests` rewrites an index to check that offsets are applied only
+  to an element the index says is reordered, and that the random access flag sets the keyframes.
+- Clip-wrapped essence (FFmpeg's OP-Atom muxer, `-f mxf_opatom`: one track a file, the whole clip one element, though
+  its essence container labels say frame wrapping): mxf-opatom-h264 is cut by the index entries' stream offsets,
+  mxf-opatom-dnxhr by the index's constant edit unit size (no entries), each packet an edit unit as FFmpeg's;
+  mxf-opatom-pcm's index edit unit is a sample, and FFmpeg's demuxer reads it in pieces of 1920 samples (a 25th of a
+  second at 48 kHz, the only rate its muxer writes, whatever `-mxf_audio_edit_rate`; tried at 25, 24, 50 and 30000/1001),
+  the last one shorter, which `MxfDemuxer` follows. `MxfIndexTests` cuts hand-made segments: entries across segments,
+  a constant size with a partial edit unit left over, and stream offsets that don't start at 0, go back, or run past
+  the element.
+- D-10 sound (FFmpeg's `-f mxf_d10`, SMPTE ST 386): each content package's sound is an 8-channel AES3 element (ST 331
+  7.1: a 4-byte header with the sample count, then a 32-bit word a channel a sample, all 8 channels whatever the
+  descriptor says), which FFmpeg's demuxer gives as PCM of the descriptor's channels and bits, and so does
+  `MxfDemuxer`: mxf-d10-pcm24 (625/50, 24-bit, 4 channels) and mxf-d10-525 (525/59.94, 16-bit stereo, elements of 1602
+  and 1601 samples by the five-frame sequence) match FFmpeg's packets and decode as its PCM. `MxfAes3Tests` unpacks
+  hand-made elements whose words set every bit around the audio (channel number, F, V, U, C, P).
+
+`PcmDecoderTests` decodes every sample's audio exactly as FFmpeg does (name.pcm.f32), and `SeekTests` seeks in every
+sample. `MxfConformanceTests` decodes the H.264 samples' frames with one and four threads and compares each with
+FFmpeg's (name.h264.framemd5, `-fps_mode passthrough`): FFmpeg's packets carry decode times as presentation times, which
+its decoder's frames take out of order, so by default its command line drops a frame and retimes the rest; with
+passthrough it keeps every frame. The file gives no frame its presentation time, and FFmpeg's frame times are its
+command line's guess, so only the MD5s are compared with FFmpeg's: on 2-second samples the guess is k + D between a
+guessed first time and a repeated last one, on mxf-h264-small's two 4-frame GOPs it is 0 2 3 5 6 7 7 7. `H264Decoder`
+times them as an AVI's Annex B stream, the k-th frame shown at the decode time D packets later (D the SPS's reorder
+depth, 2 for libx264's B pictures): k + D, which the test checks. `MediaPlayerTests` plays
+mxf-h264-pcm and mxf-h264-index, frames and audio. The picture size is the sampled rectangle's (120 rows for
+H.264's 128 stored), which is what the decoders give; FFmpeg's demuxer reports the stored size.
 ## H.264
 
 ### Raw H.264 files
@@ -342,6 +629,15 @@ H.264 conformance theory. The size comes from the SPS through a reader of the de
 cropping, VUI timing), which gives the decoder's size on every MP4 and Matroska sample's SPS (312 of them). Not
 covered by a sample: field pictures in a raw stream (a field a packet, as FFmpeg's parser cuts them), and a stream
 without VUI timing (libx264 always writes it), which takes 25 frames a second.
+
+FFmpeg can't seek in a raw stream (`-ss` before `-i`: "could not seek"). `H264Demuxer.Seek` starts at the last IDR
+picture at or before the time, from the access units found when opening; the frame then shown at the time is FFmpeg's
+`-ss` after `-i` (which decodes from the start and drops the frames before it): on an IDR picture and between two
+(h264-raw at 400 and 500 ms), and in an open GOP (h264-raw-open-gop: libx264's `open-gop`, recovery points FFmpeg's
+parser flags as keyframes after the first IDR picture) at 900 ms (`SeekFrameTests`). A recovery point is no place to
+start: the B pictures shown before it need the GOP before, and the decoder times its frames by their place in output
+order from the read's start, so the read starts at the stream's start there (`SeekTests`, which checks every raw
+sample's reads after a seek; a mutation entry starts at the keyframes instead).
 
 ### Annex B (AVI)
 
@@ -1212,6 +1508,56 @@ inlining): -2.21% on `h264-mbaff-default`, -3.41% on `jm-paff-b`, -1.41% on `h26
 `Weighting`, `LumaPlace`, `ChromaPlace`) the partition functions fell from 0.224 to 0.196 of the untouched set on
 `h264-mbaff-default` (every branch run below every base run) and from 0.191 to 0.137 on `jm-paff-b`: about 0.6 and
 1.4% of the frame.
+The chroma filter's row helper (`Across`: one load, the pairing shuffle and `pmaddubsw`) was a call of its own under
+the JIT, once a row of every chroma block, its vector arguments with it (2.1% of a 1080p frame by perf, by itself);
+it is now inlined (`AggressiveInlining`). On the first 360 frames of the Sintel trailer at 1080p (libx264 High, B
+pictures; docs/notes/h264-1080p-scaling-2026-11.md) the chroma functions (`PredictChromaPair`, `PredictChroma`,
+`Across`) fell from 0.93 to 1.00 of the untouched set (`FilterMacroblock420`, `HalfHorizontal`, `HalfVertical`) to
+0.74 to 0.77 (perf, six runs each, the order alternating, every branch run below every base run): from 8.5 to 6.7% of
+the frame, about 1.7%.
+Weighted prediction's 8-bit kernels: bi-prediction (`WeightBoth`, explicit and implicit weights) widened both
+predictions to 32-bit lanes and took two 32-bit multiplies (`pmulld`) and an add for four samples, then clamped with a
+minimum and a maximum. With SSE2 the two predictions' samples are now interleaved as 16-bit words, so that one
+`pmaddwd` against (w0, w1) gives p0 w0 + p1 w1 for four samples, exactly (samples to 255, weights -128 to 128), and the
+clip to 0..255 is the saturating packs (`packssdw`, then `packuswb`), as FFmpeg's does; blocks up to 8 wide take only a
+row's first half. One-list weighting (`WeightOne`) clips with `packuswb` too. `VectorWeights_MatchReference` checks
+both against the definition (a wrong shift fails it). On the same 1080p frames the weighting kernels fell from 0.27 to
+0.32 of the untouched set to 0.17 to 0.19 (perf, six runs each, the order alternating, every branch run below every
+base run): from about 2.6 to 1.6% of the frame.
+The luma 6-tap filter across (`HalfHorizontal`, and `Center`'s first pass) loaded each row six times, at samples -2
+to 3, widened every load to 16 bits (24 widenings a 16-wide row) and summed the taps there. With SSSE3 it now takes
+one 16-byte load for each half of a row: shuffles pair its samples as (E, F), (G, H) and (I, J), and `pmaddubsw`
+multiplies and adds each pair with (1, -5), (20, 20) and (-5, 1); no pair or sum leaves 16 bits (-2550 to 10710), so
+the sums are exact. A row's second half loads from sample 3, so the furthest byte read is the one the filter already
+read (sample 18). The half-sample rounding clips by `packuswb` and `Center`'s 32-bit sums by `packssdw` and
+`packuswb`, instead of a minimum, a maximum and a narrowing. `FastLumaAndChroma_MatchReference` fails with a wrong tap
+weight or a wrong offset for the second half. On the same 1080p frames the luma functions (`PredictLuma`,
+`HalfHorizontal`, `HalfVertical`, `Center`) fell from 0.83 to 0.90 of an untouched set (`FilterMacroblock420`,
+`PredictChromaPair`, `Cabac.ResidualBlock`) to 0.73 to 0.77 (perf, six runs each, the order alternating, every branch
+run below every base run): from about 12.2 to 10.6% of the frame.
+The chroma filter's row loop (`BilinearRows`) now takes the block's width as a type argument, so the row store is
+chosen once a block rather than by a switch every row, steps its source and output down by a row instead of
+multiplying, and narrows by one `packuswb` (the rounded sums are 0 to 255) where `Vector128.Narrow` took three
+instructions: 15 instructions a row, about 25 before. Callgrind (Native AOT, as above) counts 19.30 against 19.66 M
+instructions a frame on the first 360 frames of the 480p Sintel trailer (-1.8%). The time gained is smaller: the
+chroma functions fell from 0.70 to 0.81 of the untouched set (`FilterMacroblock420`, `HalfHorizontal`,
+`Cabac.ResidualBlock`) to 0.67 to 0.73 on the 1080p frames (perf, six runs each, the order alternating, lower in every
+pair), about 0.5% of the frame: at 1080p chroma's time is mostly reference reads and per-block setup, not the loop.
+Spatial direct's colZeroFlag (8.4.1.2.2) read each 8x8 block's co-located motion through `CoLocated`, which handles
+every layout (field pictures, MBAFF, frames over field pairs) and returns the reference's Id, parity and vertical scale
+as well, all of which colZeroFlag ignores. `ColZero` now reads a frame over a frame (no MBAFF, the co-located picture
+not coded as fields: the macroblock at the same address, no rescaling) straight from its arrays, after the same wait
+for the co-located motion; other layouts still go through `CoLocated`. Widening its vector range by one fails 144
+conformance tests. On the 1080p Sintel frames spatial direct's functions (`DirectMotion`, `CoLocated`, `ColZero`) fell
+from 0.23 to 0.26 of an untouched set (`FilterMacroblock420`, `HalfHorizontal`, `Cabac.ResidualBlock`,
+`PredictChromaPair`) to 0.21 to 0.23 (perf, six runs each, the order alternating, every branch run below every base
+run): about 3.15 to 2.75% of the frame.
+Tried and dropped (2026-11-11): the luma filter's vertical passes. `HalfVertical` with its six rows sliding down
+already widened (one row widened a row instead of six), and `Center`'s vertical pass by two `pmaddwd` a half, (outer,
+middle) by (1, -5) and (inner, 512) by (20, 1), then the saturating packs. Bit-exact, but callgrind (Native AOT, the
+480p Sintel frames) counted 19.14 against 19.23 M instructions a frame (-0.5%), and perf put `HalfVertical` and
+`Center` at 0.25 to 0.27 of an untouched set against 0.26 to 0.30 on the 1080p frames, lower in five pairs of six:
+about 0.3% of the frame, not worth a second loop in `HalfVertical`.
 
 ## AAC
 
@@ -1590,6 +1936,13 @@ of 1024 samples a block, decoded block after block into one frame; with CRCs, th
 the blocks but the first, and each block has its own. No encoder at hand writes them, so the tests join a sample's
 frames, 1 to 4 under one header, with and without CRCs, AAC LC and HE-AAC (the SBR state runs on across blocks), and
 require the same samples as the frames one by one.
+
+Both raw demuxers (ADTS here, raw MP3 below) seek, for `AudioPlayer`'s `Loop` (docs/decisions/2026-11-11-audio-player.md):
+a read starts at the frame holding the time, from the frames found when opening, its times and sequence numbers the
+file's. `SeekTests` checks each sample's reads after a seek as the tail of a read from the start, and that MP3's encoder
+delay (the first packet's SkipSamples) comes only with a read from the first frame; a mutation entry each. FFmpeg's
+`-ss` on such files is not compared (it seeks by bitrate or its parser, not by frames). `AudioPlayerTests` plays every
+.wav, raw MP3 and AAC sample: its decoders' own output, interleaved as stereo, and again on `Loop`.
 
 ## Raw MP3
 

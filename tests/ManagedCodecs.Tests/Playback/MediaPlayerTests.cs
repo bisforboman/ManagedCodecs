@@ -23,11 +23,16 @@ public class MediaPlayerTests
 
     // Audio in AVI: MP3 a frame a chunk and in the CBR layout, and AAC. (FFmpeg's muxer drops their second video frame
     // while interleaving the audio, so they are not for the tests that tick at the first frames' spacing.)
-    public static TheoryData<string> AviAudioSamples() => ["avi-mjpeg-mp3.avi", "avi-mjpeg-mp3-cbr.avi", "avi-mjpeg-aac.avi", "avi-mjpeg-pcm.avi", "avi-mjpeg-pcm-u8.avi"];
+    public static TheoryData<string> AviAudioSamples() => ["avi-mjpeg-mp3.avi", "avi-mjpeg-mp3-cbr.avi", "avi-mjpeg-aac.avi", "avi-mjpeg-pcm.avi", "avi-mjpeg-pcm-u8.avi", "avi-mjpeg-ima.avi", "avi-mjpeg-ms-adpcm.avi"];
+
+    // PCM in QuickTime and Matroska, one stereo format of each kind: 24-bit little-endian ('in24' and an 'enda'), 16-bit
+    // big-endian (A_PCM/INT/BIG) and 64-bit float (A_PCM/FLOAT/IEEE).
+    public static TheoryData<string> PcmSamples() => ["mov-pcm-s24le.mp4", "mkv-pcm-s16be.mkv", "mkv-pcm-f64le.mkv", "mxf-h264-pcm.mxf", "mxf-h264-index.mxf"];
 
     [Theory]
     [MemberData(nameof(Samples))]
     [MemberData(nameof(AviAudioSamples))]
+    [MemberData(nameof(PcmSamples))]
     public void PlaysTheDecodersFramesAndAudio(string name)
     {
         var (frames, audio) = Expected(name, null);
@@ -69,6 +74,8 @@ public class MediaPlayerTests
     [InlineData("h264-audio-edits.mp4", null, true)]
     [InlineData("testsrc-420.avi", null, false)]
     [InlineData("avi-mjpeg-pcm.avi", null, true)]
+    [InlineData("avi-mjpeg-ima.avi", null, true)]
+    [InlineData("avi-mjpeg-ms-adpcm.avi", null, true)]
     [InlineData("avi-mjpeg-mp3-cbr.avi", null, true)]
     public void NamesTheAudioItSkips(string name, string? skipped, bool plays)
     {
@@ -163,13 +170,16 @@ public class MediaPlayerTests
         Assert.Null(player.TakeFrame(TimeSpan.MaxValue));
     }
 
-    [Fact]
-    public void Loop_PlaysTheFileAgainAfterItsLastFrame()
+    /// <summary>Loop seeks back to the start: in MP4, and in a raw H.264 file, whose demuxer seeks to IDR pictures.</summary>
+    [Theory]
+    [InlineData("h264-audio-edits.mp4")]
+    [InlineData("h264-raw.h264")]
+    public void Loop_PlaysTheFileAgainAfterItsLastFrame(string name)
     {
-        var (frames, _) = Expected("h264-audio-edits.mp4", null);
+        var (frames, _) = Expected(name, null);
         var interval = frames[1].Time - frames[0].Time;
         var length = frames[^1].Time + interval;
-        using var player = new MediaPlayer(TestSamples.PathOf("h264-audio-edits.mp4"), new PlaybackOptions { Loop = true });
+        using var player = new MediaPlayer(TestSamples.PathOf(name), new PlaybackOptions { Loop = true });
         player.Start();
         var samples = new List<float>();
         for (int pass = 0; pass < 3; pass++)
@@ -327,7 +337,9 @@ public class MediaPlayerTests
         {
             { Codec: CodecIds.Aac } audio => new AacDecoder(audio),
             { Codec: CodecIds.Mp3 } audio => new Mp3Decoder(audio),
-            { Codec: CodecIds.PcmU8 or CodecIds.PcmS16Le } audio => new PcmDecoder(audio),
+            { Codec: CodecIds.AdpcmImaWav } audio => new ImaAdpcmDecoder(audio),
+            { Codec: CodecIds.AdpcmMs } audio => new MsAdpcmDecoder(audio),
+            { } audio when PcmDecoder.CanDecode(audio.Codec) => new PcmDecoder(audio),
             _ => null,
         };
         var frames = new List<(TimeSpan, byte[])>();

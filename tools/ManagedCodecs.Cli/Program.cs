@@ -13,7 +13,7 @@ using ManagedCodecs.Mp3;
 //   ffmpeg -benchmark -threads 1 -stream_loop 9 -i samples/h264-bench-720p.mp4 -f null -
 if (args.Length == 0 || args.Contains("-h") || args.Contains("--help"))
 {
-    Console.WriteLine("usage: mcdec <file> [--loops N] [--threads N] [--borrow-frames] [--zero-copy] [--conceal] | mcdec --hash [--loops N] <file>... | mcdec --dump <file> <prefix> | mcdec --thumbnail-hash <file>... | mcdec --thumbnail <file> <out.rgba>");
+    Console.WriteLine("usage: mcdec <file> [--loops N] [--threads N] [--borrow-frames] [--zero-copy] [--conceal] | mcdec --hash [--loops N] <file>... | mcdec --dump <file> <prefix> | mcdec --thumbnail-hash <file>... | mcdec --thumbnail <file> <out.rgba> | mcdec --live <url> <file> [--frames N]");
     Console.WriteLine("  Demuxes and decodes the file's video and audio N times (default 1), like ffmpeg -stream_loop N-1.");
     Console.WriteLine("  --threads N: decode up to N H.264 pictures, or HE-AAC channels, at once, each on a thread of its own (default 1).");
     Console.WriteLine("  --borrow-frames: H.264 frames point into the decoder's pictures instead of being copied out.");
@@ -22,6 +22,7 @@ if (args.Length == 0 || args.Contains("-h") || args.Contains("--help"))
     Console.WriteLine("  --hash: prints a SHA-256 of each file's decoded output instead (tools/wasm-check.sh compares them).");
     Console.WriteLine("  --thumbnail-hash <file>...: prints each file's VideoProbe facts and a small thumbnail's size, time and SHA-256 (tools/wasm-check.sh compares them).");
     Console.WriteLine("  --thumbnail: writes the file's thumbnail (480 x 480 at most) as raw RGBA and prints its size and time and the file's VideoProbe facts; tools/realworld.py compares them.");
+    Console.WriteLine("  --live <rtsp:// or http:// URL> <file> [--frames N]: plays the live stream with LivePlayer until N frames (default 250) are shown, each checked against the file's frames; tools/rtsp-nightly.py runs it.");
     Console.WriteLine("  --dump: writes <prefix>.video.md5 (each frame's MD5, as ffmpeg -f framemd5) and <prefix>.audio.f32 (as -f f32le); tools/realworld.py compares them.");
     return args.Length == 0 ? 1 : 0;
 }
@@ -38,6 +39,21 @@ if (args[0] == "--dump")
     return 0;
 }
 
+#if LIVE
+if (args[0] == "--live")
+{
+    int framesAt = Array.IndexOf(args, "--frames");
+    int liveFrames = 250;
+    if (args.Length < 3 || (framesAt >= 0 && (framesAt + 1 >= args.Length || !int.TryParse(args[framesAt + 1], out liveFrames) || liveFrames <= 0)))
+    {
+        Console.Error.WriteLine("--live needs a URL and the file it streams, and --frames a positive number.");
+        return 2;
+    }
+
+    return LiveCheck.Run(args[1], args[2], liveFrames, TimeSpan.FromSeconds(60 + (liveFrames / 10)));
+}
+
+#endif
 #if THUMBNAILS
 if (args[0] == "--thumbnail-hash")
 {
@@ -138,7 +154,9 @@ for (int loop = 0; loop < loops; loop++)
     {
         CodecIds.Aac => new AacDecoder(audio) { Threads = threads },
         CodecIds.Mp3 => new Mp3Decoder(audio),
-        CodecIds.PcmU8 or CodecIds.PcmS16Le => new PcmDecoder(audio),
+        CodecIds.AdpcmImaWav => new ImaAdpcmDecoder(audio),
+        CodecIds.AdpcmMs => new MsAdpcmDecoder(audio),
+        var codec when PcmDecoder.CanDecode(codec) => new PcmDecoder(audio!),
         _ => null,
     };
 

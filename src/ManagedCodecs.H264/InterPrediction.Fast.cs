@@ -301,20 +301,46 @@ internal static partial class InterPrediction
             throw new ArgumentOutOfRangeException(nameof(window));
         }
 
-        ref byte source = ref MemoryMarshal.GetReference(window);
+        ref byte source = ref Unsafe.Add(ref MemoryMarshal.GetReference(window), origin);
         ref byte dest = ref MemoryMarshal.GetReference(output);
+        switch (width)
+        {
+            case 8:
+                BilinearRows<Width8>(ref source, ws, height, xFrac, yFrac, ref dest, outputStride);
+                break;
+            case 4:
+                BilinearRows<Width4>(ref source, ws, height, xFrac, yFrac, ref dest, outputStride);
+                break;
+            case 2:
+                BilinearRows<Width2>(ref source, ws, height, xFrac, yFrac, ref dest, outputStride);
+                break;
+            default:
+                BilinearRows<Width16>(ref source, ws, height, xFrac, yFrac, ref dest, outputStride);
+                break;
+        }
+    }
+
+    /// <summary>
+    /// <see cref="Bilinear"/>'s rows, the block's width a type argument (the row store chosen once a block); source and
+    /// output step down a row at a time. The rounded sums are 0 .. 255, so the narrowing is the saturating pack.
+    /// </summary>
+    private static void BilinearRows<TWidth>(ref byte source, int ws, int height, int xFrac, int yFrac, ref byte dest, int outputStride)
+        where TWidth : IRowWidth
+    {
         var left = Vector128.Create((short)(8 - xFrac));
         var right = Vector128.Create((short)xFrac);
         var upper = Vector128.Create((short)(8 - yFrac));
         var lower = Vector128.Create((short)yFrac);
         var pairWeights = Vector128.Create((ushort)((8 - xFrac) | (xFrac << 8))).AsSByte();
-        var above = Across(ref source, origin, left, right, pairWeights);
+        var above = Across(ref source, 0, left, right, pairWeights);
         for (int j = 0; j < height; j++)
         {
-            var below = Across(ref source, origin + ((j + 1) * ws), left, right, pairWeights);
+            source = ref Unsafe.Add(ref source, ws);
+            var below = Across(ref source, 0, left, right, pairWeights);
             var sum = (above * upper) + (below * lower);
-            var rounded = ((sum + Vector128.Create((short)32)) >> 6).AsUInt16();
-            StorePartial(Vector128.Narrow(rounded, rounded), ref Unsafe.Add(ref dest, j * outputStride), width);
+            var rounded = (sum + Vector128.Create((short)32)) >> 6;
+            TWidth.Write(Sse2.IsSupported ? Sse2.PackUnsignedSaturate(rounded, rounded) : Vector128.Narrow(rounded.AsUInt16(), rounded.AsUInt16()), ref dest);
+            dest = ref Unsafe.Add(ref dest, outputStride);
             above = below;
         }
     }
@@ -324,6 +350,7 @@ internal static partial class InterPrediction
     /// paired with their right-hand neighbours by a shuffle, and one multiply-add of the pairs with the weights
     /// (<paramref name="pairWeights"/>: 8 - xFrac and xFrac in turn); else both samples widened and multiplied.
     /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static Vector128<short> Across(ref byte source, int offset, Vector128<short> left, Vector128<short> right, Vector128<sbyte> pairWeights)
     {
         if (Ssse3.IsSupported)
@@ -440,15 +467,7 @@ internal static partial class InterPrediction
         ref byte dest = ref MemoryMarshal.GetReference(output);
         for (int j = 0; j < height; j++)
         {
-            int p = origin + (j * ws) - 2;
-            var s0 = Load(ref source, p);
-            var s1 = Load(ref source, p + 1);
-            var s2 = Load(ref source, p + 2);
-            var s3 = Load(ref source, p + 3);
-            var s4 = Load(ref source, p + 4);
-            var s5 = Load(ref source, p + 5);
-            var low = Tap(Lower(s0), Lower(s1), Lower(s2), Lower(s3), Lower(s4), Lower(s5));
-            var high = width > 8 ? Tap(Upper(s0), Upper(s1), Upper(s2), Upper(s3), Upper(s4), Upper(s5)) : low;
+            var (low, high) = TapAcross(ref source, origin + (j * ws) - 2, width);
             RoundHalf(low, high).StoreUnsafe(ref dest, (nuint)(j * 16));
         }
     }
@@ -493,17 +512,11 @@ internal static partial class InterPrediction
         ref short intermediate = ref MemoryMarshal.GetReference(b1);
         for (int j = 0; j < height + 5; j++)
         {
-            int p = origin + ((j - 2) * ws) - 2;
-            var s0 = Load(ref source, p);
-            var s1 = Load(ref source, p + 1);
-            var s2 = Load(ref source, p + 2);
-            var s3 = Load(ref source, p + 3);
-            var s4 = Load(ref source, p + 4);
-            var s5 = Load(ref source, p + 5);
-            Tap(Lower(s0), Lower(s1), Lower(s2), Lower(s3), Lower(s4), Lower(s5)).StoreUnsafe(ref intermediate, (nuint)(j * 16));
+            var (low, high) = TapAcross(ref source, origin + ((j - 2) * ws) - 2, width);
+            low.StoreUnsafe(ref intermediate, (nuint)(j * 16));
             if (width > 8)
             {
-                Tap(Upper(s0), Upper(s1), Upper(s2), Upper(s3), Upper(s4), Upper(s5)).StoreUnsafe(ref intermediate, (nuint)((j * 16) + 8));
+                high.StoreUnsafe(ref intermediate, (nuint)((j * 16) + 8));
             }
         }
 
@@ -526,8 +539,7 @@ internal static partial class InterPrediction
                 // outer - 5 middle + 20 inner = outer + 5 (4 inner - middle)
                 var low = WeightedSum(Vector128.WidenLower(outer), Vector128.WidenLower(middle), Vector128.WidenLower(inner));
                 var high = WeightedSum(Vector128.WidenUpper(outer), Vector128.WidenUpper(middle), Vector128.WidenUpper(inner));
-                var clamped = Vector128.Narrow(Clamp(low), Clamp(high)).AsUInt16();
-                Unsafe.WriteUnaligned(ref Unsafe.Add(ref dest, (j * 16) + x), Vector128.Narrow(clamped, clamped).AsUInt64().ToScalar());
+                Unsafe.WriteUnaligned(ref Unsafe.Add(ref dest, (j * 16) + x), ClipToBytes(low, high).AsUInt64().ToScalar());
                 (r0, r1, r2, r3, r4) = (r1, r2, r3, r4, r5);
             }
         }
@@ -696,6 +708,48 @@ internal static partial class InterPrediction
     /// <summary>(a + b + 1) >> 1 per byte, without widening.</summary>
     private static Vector128<byte> RoundingAverage(Vector128<byte> a, Vector128<byte> b) => (a | b) - ((a ^ b) >> 1);
 
+    /// <summary>
+    /// The horizontal 6-tap sums (E - 5F + 20G + 20H - 5I + J) of a row's first 8 samples and, when the block is wider,
+    /// of its next 8, from the row's sample -2 at <paramref name="p"/>; the high half is undefined for blocks up to 8
+    /// wide. With SSSE3 one 16-byte load a half gives every tap: its samples paired by shuffles, (E, F), (G, H) and
+    /// (I, J), and each pair multiplied and added by <c>pmaddubsw</c> with (1, -5), (20, 20) and (-5, 1); no pair or sum
+    /// leaves 16 bits (-2550 .. 10710), so it is exact. The high half loads from p + 5, the furthest byte the taps read
+    /// being p + 20. Else every sample is widened and the vector Tap sums them.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static (Vector128<short> Low, Vector128<short> High) TapAcross(ref byte source, int p, int width)
+    {
+        if (Ssse3.IsSupported)
+        {
+            var outer = Vector128.Create((ushort)(1 | (0xFB << 8))).AsSByte(); // (1, -5)
+            var inner = Vector128.Create((byte)20).AsSByte();
+            var last = Vector128.Create((ushort)(0xFB | (1 << 8))).AsSByte(); // (-5, 1)
+            var row = Load(ref source, p);
+            var low = Sum(row, 0, outer, inner, last);
+            var high = width > 8 ? Sum(Load(ref source, p + 5), 3, outer, inner, last) : low;
+            return (low, high);
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            static Vector128<short> Sum(Vector128<byte> samples, byte first, Vector128<sbyte> outer, Vector128<sbyte> inner, Vector128<sbyte> last)
+            {
+                var pairs = Vector128.Create((byte)0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8) + Vector128.Create(first);
+                return Ssse3.MultiplyAddAdjacent(Ssse3.Shuffle(samples, pairs), outer)
+                    + Ssse3.MultiplyAddAdjacent(Ssse3.Shuffle(samples, pairs + Vector128.Create((byte)2)), inner)
+                    + Ssse3.MultiplyAddAdjacent(Ssse3.Shuffle(samples, pairs + Vector128.Create((byte)4)), last);
+            }
+        }
+
+        var s0 = Load(ref source, p);
+        var s1 = Load(ref source, p + 1);
+        var s2 = Load(ref source, p + 2);
+        var s3 = Load(ref source, p + 3);
+        var s4 = Load(ref source, p + 4);
+        var s5 = Load(ref source, p + 5);
+        var lowTaps = Tap(Lower(s0), Lower(s1), Lower(s2), Lower(s3), Lower(s4), Lower(s5));
+        var highTaps = width > 8 ? Tap(Upper(s0), Upper(s1), Upper(s2), Upper(s3), Upper(s4), Upper(s5)) : lowTaps;
+        return (lowTaps, highTaps);
+    }
+
     /// <summary>E - 5F + 20G + 20H - 5I + J, as (E + J) + 5 (4 (G + H) - (F + I)).</summary>
     private static Vector128<short> Tap(Vector128<short> e, Vector128<short> f, Vector128<short> g, Vector128<short> h, Vector128<short> i, Vector128<short> j)
     {
@@ -703,9 +757,36 @@ internal static partial class InterPrediction
         return (e + j) + (d << 2) + d;
     }
 
-    /// <summary>Clip1((v + 16) >> 5) for two vectors of eight 16-bit values, as sixteen bytes.</summary>
-    private static Vector128<byte> RoundHalf(Vector128<short> low, Vector128<short> high) =>
-        Vector128.Narrow(RoundHalfWide(low), RoundHalfWide(high));
+    /// <summary>
+    /// Clip1((v + 16) >> 5) for two vectors of eight 16-bit values, as sixteen bytes: with SSE2 the clip is the
+    /// saturating pack (<c>packuswb</c>).
+    /// </summary>
+    private static Vector128<byte> RoundHalf(Vector128<short> low, Vector128<short> high)
+    {
+        if (Sse2.IsSupported)
+        {
+            var round = Vector128.Create((short)16);
+            return Sse2.PackUnsignedSaturate((low + round) >> 5, (high + round) >> 5);
+        }
+
+        return Vector128.Narrow(RoundHalfWide(low), RoundHalfWide(high));
+    }
+
+    /// <summary>
+    /// Clip1 of eight 32-bit values (two vectors of four), as the first eight bytes: with SSE2 the saturating packs to
+    /// 16 bits and then to bytes, else a clamp and two narrowings.
+    /// </summary>
+    private static Vector128<byte> ClipToBytes(Vector128<int> low, Vector128<int> high)
+    {
+        if (Sse2.IsSupported)
+        {
+            var words = Sse2.PackSignedSaturate(low, high);
+            return Sse2.PackUnsignedSaturate(words, words);
+        }
+
+        var clamped = Vector128.Narrow(Clamp(low), Clamp(high)).AsUInt16();
+        return Vector128.Narrow(clamped, clamped);
+    }
 
     private static Vector128<ushort> RoundHalfWide(Vector128<short> tap) =>
         Vector128.Min(Vector128.Max((tap + Vector128.Create((short)16)) >> 5, Vector128<short>.Zero), Vector128.Create((short)255)).AsUInt16();

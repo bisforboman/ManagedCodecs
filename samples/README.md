@@ -9,7 +9,9 @@ goes for `jm/`: field pictures (PAFF), also next to MBAFF frames, in 4:0:0 and w
 (separate colour planes), muxed by `tools/mux-h264.py`, each with its references already made: the frames from JM's
 own decoder (ldecod), or for the interlaced ones (`jm-planes-*`, three 4:0:0 streams spliced by
 `tools/h264-splice-planes.py`) FFmpeg's decodes of the three monochrome streams, stacked, and the packets as ffprobe lists them; `tools/make-samples.sh` copies them here last. These are
-the only references not from FFmpeg. And for `heaac/`: HE-AAC (spectral band
+the only references not from FFmpeg. `gstreamer/` holds JPEG over RTP recordings by GStreamer's packetizer (types 0,
+64 and 65, which FFmpeg's never sends) beside the JPEGs that went in, made by `tools/gst-jpeg-record.py`; the tests read
+them where they are. And for `heaac/`: HE-AAC (spectral band
 replication, parametric stereo, and the header's second part from a patched copy; and AAC LC: noise in M/S bands, and
 a 5.1 stream with a program config element, from another patched copy) from the Fraunhofer FDK encoder, made
 again by `tools/make-heaac-samples.sh <fdk-aac tree>`. From the repository root:
@@ -42,6 +44,16 @@ references:
   with `-fflags +nofillin+noparse`): the durations the file itself gives, N/A where FFmpeg would fill one in.
   `name.streams` (`ffprobe -show_streams`): a Matroska file's streams (size, aspect ratio, rate, channels, time base)
   and its duration.
+- `name.partitions.csv` (`ffprobe -v trace -show_packets`, its "PartitionPack:" lines): an MXF file's partition packs as
+  FFmpeg's demuxer reads them, one a line as ThisPartition, PreviousPartition, FooterPartition, IndexSID, BodySID, by
+  offset. The samples tools/mxf-rewrite.py makes take their source's (the partitions don't move).
+- `name.packets.csv`, `name.packets.nofillin.csv` and `name.pcm.f32` for MXF too (`MxfConformanceTests`, `PcmDecoderTests`),
+  and `name.h264.framemd5`: an MXF file's H.264 frames, every one (`-fps_mode passthrough`).
+- `name.headers.json` (`ffprobe -nofind_stream_info -of json`): an MXF file's streams as FFmpeg's demuxer reads them from
+  the header metadata, nothing decoded, and its operational pattern, material package and start timecode.
+- `name.rtp` and `name.sdp` (`ffmpeg -c copy -f rtp -sdp_file`, recorded by tools/rtp-record.py): FFmpeg's RTP for an
+  H.264 MP4, each packet as a 16-bit big-endian length then the packet, and its SDP (`sprop-parameter-sets` from the
+  avcC). `h264-main-slices` and `h264-bench-720p` only (`RtpH264DepacketizerTests`).
 - `name.f32`: decoded AAC as 32-bit floats, edit list ignored so it holds 1024 samples for every packet (raw AAC
   has no edit list); AAC is compared by value, within a tolerance.
 - `name.trim.f32`: the same as FFmpeg decodes it by default, trimmed by the edit list (`aac-edit-trim` has an edit

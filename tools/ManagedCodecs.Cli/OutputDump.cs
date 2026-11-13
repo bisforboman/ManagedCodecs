@@ -29,7 +29,7 @@ public static class OutputDump
             CodecIds.H264 => new H264Decoder(video),
             _ => null,
         };
-        IAudioDecoder? audioDecoder = audio?.Codec switch { CodecIds.Aac => new AacDecoder(audio), CodecIds.Mp3 => new Mp3Decoder(audio), CodecIds.PcmU8 or CodecIds.PcmS16Le => new PcmDecoder(audio), _ => null };
+        IAudioDecoder? audioDecoder = audio?.Codec switch { CodecIds.Aac => new AacDecoder(audio), CodecIds.Mp3 => new Mp3Decoder(audio), CodecIds.AdpcmImaWav => new ImaAdpcmDecoder(audio), CodecIds.AdpcmMs => new MsAdpcmDecoder(audio), var codec when PcmDecoder.CanDecode(codec) => new PcmDecoder(audio!), _ => null };
         using var hashes = videoDecoder is null ? null : new StreamWriter(prefix + ".video.md5");
         using var samples = audioDecoder is null ? null : new BinaryWriter(File.Create(prefix + ".audio.f32"));
         var packed = new MemoryStream();

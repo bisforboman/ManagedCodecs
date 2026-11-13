@@ -104,7 +104,7 @@ public sealed class MediaPlayer : IDisposable
             }
 
             Video = video;
-            Audio = demuxer.Audio is { Codec: CodecIds.Aac or CodecIds.Mp3 or CodecIds.PcmU8 or CodecIds.PcmS16Le } audio ? audio : null;
+            Audio = demuxer.Audio is { } audio && AudioPipeline.CanPlay(audio.Codec) ? audio : null;
             SkippedAudioCodec = Audio is null ? demuxer.Audio?.Codec : null;
         }
         catch
@@ -121,7 +121,7 @@ public sealed class MediaPlayer : IDisposable
 
     /// <summary>
     /// The audio stream played, or null for none: the file has no audio, or audio this library doesn't decode (only
-    /// AAC, MP3 and AVI's 8- and 16-bit PCM), and plays silent.
+    /// AAC, MP3, PCM in AVI, QuickTime and Matroska, and IMA and Microsoft ADPCM), and plays silent.
     /// </summary>
     public AudioStreamInfo? Audio { get; }
 
@@ -295,13 +295,7 @@ public sealed class MediaPlayer : IDisposable
         IVideoDecoder decoder = video.Codec == CodecIds.H264
             ? new H264Decoder(video) { Threads = _options.DecoderThreads > 0 ? _options.DecoderThreads : Math.Clamp(Environment.ProcessorCount - 1, 1, 4) }
             : new MjpegDecoder(video);
-        IAudioDecoder? audio = Audio switch
-        {
-            null => null,
-            { Codec: CodecIds.Mp3 } => new Mp3Decoder(Audio),
-            { Codec: CodecIds.PcmU8 or CodecIds.PcmS16Le } => new PcmDecoder(Audio),
-            _ => new AacDecoder(Audio),
-        };
+        IAudioDecoder? audio = Audio is null ? null : AudioPipeline.CreateDecoder(Audio);
         long shown = Interlocked.Read(ref _converted);
         foreach (var packet in _demuxer.ReadPackets())
         {
@@ -318,7 +312,7 @@ public sealed class MediaPlayer : IDisposable
                 var frame = audio.Decode(packet);
                 if (frame.SampleCount > 0)
                 {
-                    _audio.Add(new AudioChunk(frame.SampleRate, Interleave(frame)), token);
+                    _audio.Add(AudioPipeline.ToStereo(frame), token);
                 }
             }
         }
@@ -378,20 +372,5 @@ public sealed class MediaPlayer : IDisposable
         }
 
         return new byte[length];
-    }
-
-    private static float[] Interleave(AudioFrame frame)
-    {
-        int count = frame.SampleCount;
-        var left = frame.Samples[0];
-        var right = frame.Channels > 1 ? frame.Samples[1] : left;
-        var samples = new float[count * 2];
-        for (int i = 0; i < count; i++)
-        {
-            samples[2 * i] = left[i];
-            samples[(2 * i) + 1] = right[i];
-        }
-
-        return samples;
     }
 }

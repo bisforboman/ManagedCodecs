@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- mclive: shows a camera's MJPEG over HTTP in an Avalonia window with ManagedCodecs.Playback's LivePlayer (issue #462,
+       docs/decisions/2026-11-10-live-mjpeg-over-http.md). Code only, no XAML. Runs on Windows, macOS and Linux (X11). -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <AssemblyName>mclive</AssemblyName>
+    <RootNamespace>ManagedCodecs.AvaloniaSample</RootNamespace>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" />
+    <PackageReference Include="Avalonia.Desktop" />
+    <PackageReference Include="Avalonia.Themes.Fluent" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\ManagedCodecs.Playback\ManagedCodecs.Playback.csproj" />
+  </ItemGroup>
+
+</Project>

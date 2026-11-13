@@ -16,8 +16,11 @@ namespace ManagedCodecs.Containers;
 /// anywhere in a frame), which is re-split into whole frames, each timed at its sample position (time base 1 / the
 /// sample rate; FFmpeg's parser interpolates there, up to a millisecond off: docs/decisions/2026-11-08-avi-audio.md).
 /// MP3 is <see cref="CodecIds.Mp3"/> and AAC <see cref="CodecIds.Aac"/> (its AudioSpecificConfig as the codec private
-/// data), PCM at 8 and 16 bits <see cref="CodecIds.PcmU8"/> and <see cref="CodecIds.PcmS16Le"/>; other audio is named by
-/// its WAVEFORMATEX format tag in hex ("0x0001" for PCM at other depths, "0x0011" for IMA ADPCM).
+/// data), PCM by its depth (<see cref="CodecIds.PcmU8"/>, <see cref="CodecIds.PcmS16Le"/>, <see cref="CodecIds.PcmS24Le"/>,
+/// <see cref="CodecIds.PcmS32Le"/>; float <see cref="CodecIds.PcmF32Le"/> and <see cref="CodecIds.PcmF64Le"/>), IMA ADPCM at
+/// 4 bits <see cref="CodecIds.AdpcmImaWav"/> (wSamplesPerBlock as the codec private data); other audio is named by its
+/// WAVEFORMATEX format tag in hex ("0x0031" for GSM 6.10, "0x0011" for IMA ADPCM at 2, 3 or 5 bits), as
+/// <c>WaveFormat</c> reads it, for .wav files too.
 /// </para>
 /// <para>
 /// Video keyframes come from the 'idx1' index (AVIIF_KEYFRAME), as FFmpeg's demuxer reads them; without one, and for
@@ -408,28 +411,13 @@ public sealed class AviDemuxer : IDemuxer
     /// <summary>The audio stream's description from its 'strh' and 'strf', and how its chunks become packets.</summary>
     private static (AudioStreamInfo? Audio, AudioLayout Layout) AudioOf(AudioStreamHeader? stream)
     {
-        // WAVEFORMATEX: wFormatTag, nChannels, nSamplesPerSec, nAvgBytesPerSec, nBlockAlign, wBitsPerSample, cbSize and
-        // cbSize bytes more (an AAC stream's AudioSpecificConfig), which FFmpeg takes as the codec's extradata.
-        if (stream is null || stream.Format.Length < 16)
+        // The 'strf' is a WAVEFORMATEX, its extra bytes (an AAC stream's AudioSpecificConfig) the codec's extradata.
+        if (stream is null || !WaveFormat.TryParse(stream.Format, out var format))
         {
             return (null, AudioLayout.None);
         }
 
-        var format = stream.Format;
-        int tag = BinaryPrimitives.ReadUInt16LittleEndian(format);
-        int channels = BinaryPrimitives.ReadUInt16LittleEndian(format.AsSpan(2));
-        int sampleRate = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(format.AsSpan(4)));
-        int extra = format.Length >= 18 ? BinaryPrimitives.ReadUInt16LittleEndian(format.AsSpan(16)) : 0;
-        var codecPrivate = extra > 0 && 18 + extra <= format.Length ? format.AsMemory(18, extra) : ReadOnlyMemory<byte>.Empty;
-        int bits = BinaryPrimitives.ReadUInt16LittleEndian(format.AsSpan(14));
-        string codec = (tag, bits) switch
-        {
-            (0x55, _) => CodecIds.Mp3,
-            (0xFF, _) => CodecIds.Aac,
-            (1, 8) => CodecIds.PcmU8,
-            (1, 16) => CodecIds.PcmS16Le,
-            _ => "0x" + tag.ToString("X4", CultureInfo.InvariantCulture),
-        };
+        var (codec, channels, sampleRate, codecPrivate) = (format.Codec, format.Channels, format.SampleRate, format.CodecPrivate);
 
         if (codec == CodecIds.Mp3 && stream.SampleSize > 0 && sampleRate > 0)
         {

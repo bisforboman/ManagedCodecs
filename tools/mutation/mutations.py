@@ -9,8 +9,9 @@ DELAYED_THREADS = "DisplayName~MatchesFfmpegWithDelayedThreads"
 
 MUTATIONS = [
     # ---- Frame threading: a picture reads only what an earlier one has reported final (src/ManagedCodecs.H264/CLAUDE.md, Frame threading).
-    # Not listed, because breaking them alone fails no test: the co-located motion wait (PictureDecoder.Direct.cs), which
-    # the motion compensation waits before it cover in practice, and ListsDamaged's wait for each picture in the lists
+    # Not listed, because breaking them alone fails no test: the co-located motion waits (PictureDecoder.Direct.cs,
+    # CoLocated and ColZero), which the motion compensation waits before them cover in practice, and ListsDamaged's
+    # wait for each picture in the lists
     # (H264Decoder.cs), which the motion compensation waits cover too: a picture reads its references' bottom rows,
     # final only once the reference is done and its Damaged set.
 
@@ -175,6 +176,107 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.Containers/Avi/AviDemuxer.cs",
          find="long pts = state.Bytes / blockSize;", replace="long pts = state.Position; state.Position += length / blockSize;",
          tests="FullyQualifiedName~AviDemuxerTests"),
+
+    # ---- MXF partitions (SMPTE ST 377-1): rules only some files reach
+    # A key's byte 8 (the registry version) is ignored: earlier encoders wrote the fill item's with version 1 (6.3.3).
+    dict(file="src/ManagedCodecs.Containers/Mxf/Klv.cs",
+         find="key[..7].SequenceEqual(label[..7]) && key[8..label.Length].SequenceEqual(label[8..])",
+         replace="key[..label.Length].SequenceEqual(label)",
+         tests="FullyQualifiedName~MxfPartitionTests"),
+    # A run-in is under 64 KiB (6.6): the header partition is searched for no further.
+    dict(file="src/ManagedCodecs.Containers/Mxf/MxfPartitions.cs",
+         find="new byte[Klv.MaxRunIn - 1 + Klv.KeyLength]", replace="new byte[(2 * Klv.MaxRunIn) + Klv.KeyLength]",
+         tests="FullyQualifiedName~MxfPartitionTests"),
+    # A random index pack is taken only if each partition it lists has its BodySID ...
+    dict(file="src/ManagedCodecs.Containers/Mxf/MxfPartitions.cs",
+         find="if (partition.BodySid != bodySid)", replace="if (false)",
+         tests="FullyQualifiedName~MxfPartitionTests"),
+    # ... and without one, the partitions come back from the footer by PreviousPartition (mxf-h264-pcm-norip).
+    dict(file="src/ManagedCodecs.Containers/Mxf/MxfPartitions.cs",
+         find="if (TryFromFooter(stream, runIn, header, out partitions))", replace="if (false)",
+         tests="FullyQualifiedName~MxfPartitionTests"),
+    # ---- MXF demuxer (packets as FFmpeg's)
+    # An intra-only codec's packets are all keyframes, whatever the index says (FFmpeg's muxer leaves ProRes without
+    # the random access flag: mxf-prores-pcm16).
+    dict(file="src/ManagedCodecs.Containers/Mxf/MxfDemuxer.cs",
+         find="bool keyframe = intra || (entry", replace="bool keyframe = (entry",
+         tests="FullyQualifiedName~MxfConformanceTests"),
+    # The temporal offset applies only where the index says the element is reordered (11.2.3, PosTableIndex -1).
+    dict(file="src/ManagedCodecs.Containers/Mxf/MxfDemuxer.cs",
+         find="entry is { } e && index!.FirstElementReordered ? e.TemporalOffset : 0", replace="entry is { } e ? e.TemporalOffset : 0",
+         tests="FullyQualifiedName~MxfConformanceTests"),
+    # Each stream starts at its own keyframe at or before the time (the audio's every packet).
+    dict(file="src/ManagedCodecs.Containers/Mxf/MxfDemuxer.cs",
+         find="_audioStart = Start(audio.StreamIndex, Rescale(pts, timeBase, audio.TimeBase));", replace="",
+         tests="FullyQualifiedName~MxfConformanceTests|DisplayName~mxf"),
+    # Clip-wrapped sound comes in pieces of a 25th of a second, FFmpeg's reading (mxf-opatom-pcm: 1920 samples).
+    dict(file="src/ManagedCodecs.Containers/Mxf/MxfDemuxer.cs",
+         find="audio.AudioSamplingRate.Numerator / 25)", replace="audio.AudioSamplingRate.Numerator / 50)",
+         tests="FullyQualifiedName~MxfConformanceTests"),
+    # Clip-wrapped pictures are cut by the index entries' stream offsets (mxf-opatom-h264) ...
+    dict(file="src/ManagedCodecs.Containers/Mxf/MxfIndex.cs",
+         find="long end = i + 1 < offsets.Count ? offsets[i + 1] : size;", replace="long end = size;",
+         tests="FullyQualifiedName~MxfConformanceTests|FullyQualifiedName~MxfIndexTests"),
+    # ... or by the constant edit unit size where the index has no entries (mxf-opatom-dnxhr).
+    dict(file="src/ManagedCodecs.Containers/Mxf/MxfIndex.cs",
+         find="else if (EditUnitByteCount > 0)", replace="else if (false)",
+         tests="FullyQualifiedName~MxfConformanceTests|FullyQualifiedName~MxfIndexTests"),
+    # Only a track's single element is clip-wrapped: frame-wrapped elements stay whole (every OP1a sample).
+    dict(file="src/ManagedCodecs.Containers/Mxf/MxfDemuxer.cs",
+         find="""                if (at >= 0)
+                {
+                    return;
+                }
+""", replace="",
+         tests="FullyQualifiedName~MxfConformanceTests"),
+    # D-10's sound is an 8-channel AES3 element (SMPTE ST 331 7.1: a CP sound item, element type 10h), given as PCM
+    # (mxf-d10-pcm24, mxf-d10-525) ...
+    dict(file="src/ManagedCodecs.Containers/Mxf/MxfDemuxer.cs",
+         find="=> (trackNumber >> 24) == 0x06 && ((trackNumber >> 8) & 0xFF) == 0x10;", replace="=> false;",
+         tests="FullyQualifiedName~MxfConformanceTests"),
+    # ... its 16-bit samples the audio's top 16 bits (mxf-d10-525) ...
+    dict(file="src/ManagedCodecs.Containers/Mxf/MxfDemuxer.cs",
+         find="if (bytes == 3)", replace="if (true)",
+         tests="FullyQualifiedName~MxfConformanceTests|FullyQualifiedName~MxfAes3Tests"),
+    # ... and each element's sample count from its header's two little-endian bytes (1920 is 0x0780). D-10's pictures
+    # are all keyframes (I pictures only, SMPTE ST 356), its index having no entries.
+    dict(file="src/ManagedCodecs.Containers/Mxf/MxfDemuxer.cs",
+         find=' || MxfLabels.IsD10Container(track.EssenceContainer ?? []);', replace=';',
+         tests="FullyQualifiedName~MxfConformanceTests"),
+    dict(file="src/ManagedCodecs.Containers/Mxf/MxfDemuxer.cs",
+         find="int count = header[1] | (header[2] << 8);", replace="int count = header[1];",
+         tests="FullyQualifiedName~MxfConformanceTests"),
+    # ---- MXF header metadata (SMPTE ST 377-1 9, Annexes B, F, G)
+    # One fill item may come between the partition pack and the primer pack (9.1), as FFmpeg's muxer writes.
+    dict(file="src/ManagedCodecs.Containers/Mxf/MxfHeaderMetadata.cs",
+         find="if (Klv.IsFill(key))", replace="if (false)",
+         tests="FullyQualifiedName~MxfHeaderTests"),
+    # An open header's metadata gives way to a closed partition's (6.2.3; the unit test, since FFmpeg's files close it).
+    dict(file="src/ManagedCodecs.Containers/Mxf/MxfHeader.cs",
+         find="if (partition.IsClosed && partition.HeaderByteCount > 0)", replace="if (false)",
+         tests="FullyQualifiedName~MxfHeaderTests"),
+    # A multiple descriptor's sub-descriptor is the one whose LinkedTrackID names the track (mxf-prores-pcm16).
+    dict(file="src/ManagedCodecs.Containers/Mxf/MxfHeader.cs",
+         find=".FirstOrDefault(d => d.UInt32(MxfLabels.LinkedTrackId) == trackId)", replace=".FirstOrDefault()",
+         tests="FullyQualifiedName~MxfHeaderTests"),
+    # Separate fields store a field: the frame is twice as tall (G.2.1; mxf-h264-interlaced).
+    dict(file="src/ManagedCodecs.Containers/Mxf/MxfHeader.cs",
+         find="int fields = layout == 1 ? 2 : 1;", replace="int fields = 1;",
+         tests="FullyQualifiedName~MxfHeaderTests"),
+    # A duration of -1 is unknown (a pipe-written file's open header: mxf-h264-pipe).
+    dict(file="src/ManagedCodecs.Containers/Mxf/MxfHeader.cs",
+         find="is { } d and >= 0 ? d : null", replace="is { } d ? d : null",
+         tests="FullyQualifiedName~MxfHeaderTests"),
+    # Drop-frame timecodes skip codes each minute but the tenth (mxf-h264-interlaced's 01:00:00;02).
+    dict(file="src/ManagedCodecs.Containers/Mxf/MxfHeader.cs",
+         find="frames += (9L * drop * tens) + (rest > drop ? drop * ((rest - drop) / perMinute) : 0);", replace="",
+         tests="FullyQualifiedName~MxfHeaderTests"),
+
+    # ---- Raw H.264: a seek starts at an IDR picture, not at the recovery points FFmpeg's parser also flags as keyframes
+    # (an open GOP's pictures shown before one need the GOP before; h264-raw-open-gop).
+    dict(file="src/ManagedCodecs.Containers/H264/H264Demuxer.cs",
+         find="if (_units[i].Idr)", replace="if (_units[i].Keyframe)",
+         tests="DisplayName~h264-raw-open-gop"),
 
     # ---- MP4 (as FFmpeg reads it)
     # Negative composition offsets in 'ctts': FFmpeg leaves the last two entries out of the shift.
@@ -555,10 +657,139 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.Playback/MediaPlayer.cs",
          find="if (_next.Time - _next.Lead > position)", replace="if (_next.Time > position)",
          tests="DisplayName~ClockAtTheFrameRate"),
+    # ---- LivePlayer (docs/decisions/2026-11-10-live-mjpeg-over-http.md): the newest frame wins, both while waiting to be
+    # decoded and while waiting to be taken ...
+    dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
+         find="if (Interlocked.Exchange(ref _pending, received) is not null)",
+         replace="if (Interlocked.CompareExchange(ref _pending, received, null) is not null)",
+         tests="FullyQualifiedName~LivePlayerTests.ShowsTheNewestFrame"),
+    dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
+         find="if (Interlocked.Exchange(ref _latest, rgba) is { } old)",
+         replace="if (Interlocked.CompareExchange(ref _latest, rgba, null) is { } old)",
+         tests="FullyQualifiedName~LivePlayerTests.DropsFramesNotTakenBeforeANewerOne"),
+    # ... 401, 403 and 404 are final, not retried ...
+    dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
+         find="if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden or HttpStatusCode.NotFound)",
+         replace="if (response.StatusCode is HttpStatusCode.Unauthorized)",
+         tests="FullyQualifiedName~LivePlayerTests.GivesUpOnAnswersARetryWontChange"),
+    # ... a stall counts from the last part, not from the connection ...
+    dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
+         find="                Touch();\n                Interlocked.Increment(ref _receivedCount);",
+         replace="                Interlocked.Increment(ref _receivedCount);",
+         tests="FullyQualifiedName~LivePlayerTests.ConnectsAgainWhenTheStreamStalls"),
+    # ... the wait between connections doubles up to 10 s, and starts again at 0.5 s once a connection played a frame.
+    dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
+         find="backoff = backoff + backoff < MaxBackoff ? backoff + backoff : MaxBackoff;",
+         replace="backoff = backoff + backoff;",
+         tests="FullyQualifiedName~LivePlayerTests.WaitsLongerAfterEachRefusal"),
+    dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
+         find="                backoff = FirstBackoff;\n            }",
+         replace="            }",
+         tests="FullyQualifiedName~LivePlayerTests.StartsTheWaitAgainOnceAFramePlays"),
+    # ... and a body sent as application/octet-stream is read as multipart, as FFmpeg's HTTP server sends -f mpjpeg.
+    dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
+         find="                && !media.Equals(\"application/octet-stream\", StringComparison.OrdinalIgnoreCase))",
+         replace="                && true)",
+         tests="DisplayName~application/octet-stream"),
+    # ---- RTP H.264 (RtpH264Depacketizer, docs/decisions/2026-11-10-live-rtsp-h264.md): what FFmpeg's packetizer never
+    # sends. A new timestamp ends a unit whose marker packet was lost ...
+    dict(file="src/ManagedCodecs.Playback/RtpH264Depacketizer.cs",
+         find="if (_inUnit && header.Timestamp != _timestamp)", replace="if (false)",
+         tests="FullyQualifiedName~RtpH264DepacketizerTests.EndsAUnitAtANewTimestampWhenItsMarkerWasLost"),
+    # ... a gap damages the next unit too (it may have held its start) ...
+    dict(file="src/ManagedCodecs.Playback/RtpH264Depacketizer.cs",
+         find="            _damaged = _gapBeforeNext;\n", replace="            _damaged = false;\n",
+         tests="FullyQualifiedName~RtpH264DepacketizerTests.AGapBetweenUnitsDamagesOnlyTheNextOne"),
+    # ... fragments whose start was lost are dropped, not glued to nothing ...
+    dict(file="src/ManagedCodecs.Playback/RtpH264Depacketizer.cs",
+         find="            _damaged = true; // its start was lost: the rest of it is no use\n            return;\n",
+         replace="            _damaged = true; // its start was lost: the rest of it is no use\n",
+         tests="FullyQualifiedName~RtpH264DepacketizerTests.IgnoresFragmentsWhoseStartWasLost"),
+    # ... and a packet from before the expected one (repeated) is skipped, the sequence number compared modulo 2^16.
+    dict(file="src/ManagedCodecs.Playback/RtpH264Depacketizer.cs",
+         find="if (gap >= 0x8000)", replace="if (gap < 0)",
+         tests="FullyQualifiedName~RtpH264DepacketizerTests.IgnoresARepeatedPacket"),
+    # ---- LivePlayer over RTSP (docs/decisions/2026-11-10-live-rtsp-h264.md): past MaxLag, skip to the next IDR picture ...
+    dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
+         find="else if (waitForIdr || _clock.Elapsed - _origin - queued.Time > maxLag)", replace="else if (waitForIdr)",
+         tests="FullyQualifiedName~LiveRtspTests.SkipsToTheNextIdrPictureWhenDecodingFallsBehind"),
+    # ... pass over a unit whose slices were all lost, rather than feed the decoder what it refuses ...
+    dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
+         find="                    if (!unit.HasPicture)\n                    {\n                        continue;\n                    }\n",
+         replace="",
+         tests="FullyQualifiedName~LiveRtspTests.ConcealsLostPacketsAndCountsThem"),
+    # ... 403, 404 and 454 are final as 401 is ...
+    dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
+         find="if (response.Status is 401 or 403 or 404 or 454)", replace="if (response.Status is 401)",
+         tests="FullyQualifiedName~LiveRtspTests.GivesUpOnAnswersARetryWontChange"),
+    # ... and the session is kept alive at half its timeout.
+    dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
+         find="TimeSpan.FromTicks(timeout.Ticks / 2)", replace="timeout",
+         tests="FullyQualifiedName~LiveRtspTests.KeepsTheSessionAliveAtHalfItsTimeout"),
+    # ---- JPEG over RTP (RFC 2435; docs/decisions/2026-11-12-live-rtsp-jpeg.md), rules neither FFmpeg's nor GStreamer's
+    # packetizer reaches (both send Q 255 with the tables in every frame): Q below 128 scales K.1's tables by
+    # Appendix A ...
+    dict(file="src/ManagedCodecs.Playback/RtpJpegDepacketizer.cs",
+         find="int scale = factor < 50 ? 5000 / factor : 200 - (factor * 2);", replace="int scale = 100;",
+         tests="FullyQualifiedName~RtpJpegDepacketizerTests.ScalesK1sTablesAsAppendixADoes"),
+    # ... tables sent once for a Q from 128 to 254 serve its later frames, which send a length of 0 ...
+    dict(file="src/ManagedCodecs.Playback/RtpJpegDepacketizer.cs",
+         find="                    if (q < 255)\n", replace="                    if (false)\n",
+         tests="FullyQualifiedName~RtpJpegDepacketizerTests.ReusesTablesSentOnceForTheSameQ"),
+    # ... and a fragment that doesn't continue the scan (one before it was lost) drops the frame. FFmpeg's one table
+    # for both components (a length of 64) its recording does reach.
+    dict(file="src/ManagedCodecs.Playback/RtpJpegDepacketizer.cs",
+         find="if (_damaged || offset != _scan.Length || ", replace="if (_damaged || ",
+         tests="FullyQualifiedName~RtpJpegDepacketizerTests.DropsAFrameMissingAPacketAndKeepsTheOthers"),
+    # MJPEG over HTTP: the first delimiter line names the boundary, whatever the header said (cameras get it wrong).
+    dict(file="src/ManagedCodecs.Playback/MultipartReader.cs",
+         find="            if (_first)\n", replace="            if (_boundary is null)\n",
+         tests="FullyQualifiedName~MultipartReaderTests.TakesTheBoundaryFromTheFirstDelimiter"),
+    # ---- QuickTime PCM with one tick a sample: each chunk in pieces of up to 1024 frames, as FFmpeg's mov demuxer cuts
+    # them (FFmpeg's muxer writes chunks of 1024, so only a hand-built file shows it).
+    dict(file="src/ManagedCodecs.Containers/Mp4/Mp4Demuxer.cs",
+         find="int piece = (int)Math.Min(1024, left);", replace="int piece = (int)left;",
+         tests="FullyQualifiedName~CutsQuickTimePcmChunksAsFfmpeg"),
+    # ---- .wav files: packets of 4096 bytes rounded down to whole blocks, as FFmpeg's wav demuxer reads them ...
+    dict(file="src/ManagedCodecs.Containers/Wav/WavDemuxer.cs",
+         find="int size = block <= PacketBytes ? PacketBytes / block * block : block;", replace="int size = PacketBytes;",
+         tests="FullyQualifiedName~WavDemuxerTests"),
+    # ... and a 'data' chunk sized 0 runs to the end of the file (checked with ffprobe on a hand-built file).
+    dict(file="src/ManagedCodecs.Containers/Wav/WavDemuxer.cs",
+         find="long end = size == 0 || start + size", replace="long end = start + size",
+         tests="FullyQualifiedName~SkipsOtherChunksAndBoundsTheData"),
+    # ... but ISO's 'ipcm' and 'fpcm' in pieces of 'stsz''s samples, as FFmpeg sizes them (mp4-pcm-s24le, whose 'pcmC'
+    # says 32 bits over 3-byte samples).
+    dict(file="src/ManagedCodecs.Containers/Mp4/Mp4Demuxer.cs",
+         find="int frameBytes = _isoPcm && _stsz.Length >= 12", replace="int frameBytes = false && _stsz.Length >= 12",
+         tests="DisplayName~mp4-pcm-s24le"),
+    # ---- Raw AAC and MP3 seek (docs/decisions/2026-11-11-audio-player.md): a read starts at the frame a Seek found.
+    dict(file="src/ManagedCodecs.Containers/Adts/AdtsDemuxer.cs",
+         find="if (i >= _start)", replace="if (true)",
+         tests="FullyQualifiedName~SeekTests"),
+    dict(file="src/ManagedCodecs.Containers/Mp3/Mp3Demuxer.cs",
+         find="if (sequence < _start)", replace="if (false)",
+         tests="FullyQualifiedName~SeekTests"),
     # ---- PCM: bytes after a packet's last whole sample frame are ignored, as FFmpeg's decoder ignores them (no spec).
     dict(file="src/ManagedCodecs.Core/PcmDecoder.cs",
          find="if (packet.Length > 0 && packet.Length < frameBytes)", replace="if (packet.Length % frameBytes != 0)",
          tests="FullyQualifiedName~PcmDecoderTests"),
+    # ---- IMA ADPCM: the difference rounded once, as FFmpeg's decoder does, not by IMA's recommended practice's shifts
+    # (up to 2 lower; docs/decisions/2026-11-10-ima-adpcm.md) ...
+    dict(file="src/ManagedCodecs.Core/ImaAdpcmDecoder.cs",
+         find="int difference = (((2 * (nibble & 7)) + 1) * step) >> 3;",
+         replace="int difference = (step >> 3) + ((nibble & 4) != 0 ? step : 0) + ((nibble & 2) != 0 ? step >> 1 : 0) + ((nibble & 1) != 0 ? step >> 2 : 0);",
+         tests="FullyQualifiedName~ImaAdpcmDecoderTests"),
+    # ... and a block cut short gives its whole groups of 4 bytes a channel, the rest ignored, as FFmpeg's (no spec).
+    dict(file="src/ManagedCodecs.Core/ImaAdpcmDecoder.cs",
+         find="if (bytes < headers)", replace="if (bytes < headers || (bytes - headers) % headers != 0)",
+         tests="FullyQualifiedName~ImaAdpcmDecoderTests"),
+    # ---- Microsoft ADPCM: the step capped at int.MaxValue / 768, as FFmpeg caps it (the format has no cap; without one
+    # a run of the largest codes overflows it; docs/decisions/2026-11-10-ms-adpcm.md).
+    dict(file="src/ManagedCodecs.Core/MsAdpcmDecoder.cs",
+         find="delta[c] = Math.Clamp((Adaptation[nibble] * delta[c]) >> 8, 16, MaxDelta);",
+         replace="delta[c] = Math.Max((Adaptation[nibble] * delta[c]) >> 8, 16);",
+         tests="FullyQualifiedName~MsAdpcmDecoderTests"),
     # ---- MP3: where the decoder does what FFmpeg's does and the spec leaves open, or what only some streams reach.
     # A frame whose main data starts before the reservoir does (a stream cut from a longer one): its granules are
     # skipped, silent, by their lengths until the data is there (mp3-cut).

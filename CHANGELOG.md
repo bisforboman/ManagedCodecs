@@ -15,10 +15,96 @@ run time.
 
 ### Added
 
+- Containers: `MxfDemuxer` reads clip-wrapped essence (OP-Atom files, SMPTE ST 390), cut into edit units by the index
+  table: pictures by the index entries' stream offsets or the constant edit unit size, sound in pieces of a 25th of a
+  second, as FFmpeg's demuxer gives them.
+- Containers: `MxfDemuxer` reads D-10's sound (SMPTE ST 386, the 8-channel AES3 element of ST 331) as little-endian PCM
+  of the descriptor's channels and 16 or 24 bits (`CodecIds.PcmS16Le`, `PcmS24Le`), as FFmpeg's demuxer gives it, so
+  `PcmDecoder` decodes it exactly as FFmpeg; its MPEG-2 video is named, not decoded.
+- Playback: `LivePlayer` plays RTSP cameras that send JPEG (RFC 2435: 4:2:0 and 4:2:2, restart markers, in-band or
+  computed quantization tables), which it refused before; the first H.264 or JPEG video track in the camera's SDP
+  plays. An incomplete frame is dropped and counted in `DamagedFrames`.
+
+## 0.13.0 – 2026-11-12
+
+Audio-only playback (`AudioPlayer`, raw AAC and MP3 seeking, and the samples), MXF files (`MxfDemuxer`), live cameras over
+RTSP (`RtspSource`, H.264), and two more audio codecs: Microsoft ADPCM (`MsAdpcmDecoder`) and G.711 A-law and μ-law.
+New public API, hence a minor version; code built against 0.12 keeps working.
+
+### Added
+
+- Samples: mcplay, the Godot node and the Unity sample play a file without video (.wav, raw MP3 or AAC) through
+  `AudioPlayer`, its sound alone; `VideoTexture` stays video-only (docs/decisions/2026-11-11-audio-player.md).
+- Playback: `AudioPlayer` plays a file's audio alone, as `MediaPlayer` plays it beside video (which `MediaPlayer`
+  needs): `.wav`, raw MP3 and AAC, or the audio of any file the demuxers open, decoded on a thread of its own into
+  float stereo for `TakeAudio()`, with `Loop`, `IsFinished` and `Error`. For `Loop`, `Mp3Demuxer` and `AdtsDemuxer`
+  now seek, to the frame holding the time (MP3's encoder delay skipped from its first frame only)
+  (docs/decisions/2026-11-11-audio-player.md).
+- Containers: `MxfDemuxer` reads MXF files (SMPTE ST 377-1), and `Demuxer.Open` detects them: OP1a with frame-wrapped
+  essence in the generic container, the first picture and sound tracks, packets as FFmpeg's MXF demuxer gives them
+  (times from the edit units and the index table, keyframes from it), and `Seek`. H.264 is `CodecIds.H264`, which
+  `H264Decoder` decodes exactly as FFmpeg (as in FFmpeg's, the packets' times are decode times where the index gives no
+  temporal offsets, and the frames are timed as an AVI's), and PCM (AES3 and Broadcast Wave mappings)
+  `CodecIds.PcmS16Le`, `PcmS24Le` or `PcmS32Le`, which `PcmDecoder` decodes exactly as FFmpeg, so `MediaPlayer` plays
+  them; ProRes, DNxHR and MPEG-2 are named (`prores`, `dnxhd`, `mpeg2video`) but not decoded (issue #469).
+- `MsAdpcmDecoder` (ManagedCodecs.Core) and `CodecIds.AdpcmMs`: Microsoft ADPCM (the WAVE format tag 0x02), mono and
+  stereo, exactly FFmpeg's output (its standard coefficient table whatever the file lists, and its cap on the step).
+  `.wav` and AVI files name such streams `CodecIds.AdpcmMs` where they named them `"0x0002"`, and `MediaPlayer` plays
+  them (docs/decisions/2026-11-10-ms-adpcm.md).
+- Live cameras over RTSP: `RtspSource` and a `LivePlayer` constructor taking it show H.264 over RTSP 1.0 (Digest or
+  Basic, RTP over the RTSP connection), decoding every picture with concealment for lost packets and skipping to the
+  next IDR picture when decoding falls `MaxLag` behind. `LiveStatistics.LostPackets` counts lost RTP packets, and
+  `LivePlayer.RtspSource` gives the source. `LivePlayer.Source` is now nullable (null for an RTSP player), which
+  callers that dereference it see as a nullable warning; it is binary compatible (issue #462,
+  docs/decisions/2026-11-10-live-rtsp-h264.md).
+- G.711 A-law and μ-law: `PcmDecoder` decodes them exactly as FFmpeg, named by new `CodecIds.PcmAlaw` and
+  `CodecIds.PcmMulaw`. `.wav` and AVI files (format tags 6 and 7, where they gave `"0x0006"` and `"0x0007"`) and
+  QuickTime ('alaw', 'ulaw') name them so, and `MediaPlayer` plays them.
+
+## 0.12.0 – 2026-11-10
+
+PCM everywhere: `PcmDecoder` takes every integer and float PCM format in both byte orders, from AVI, QuickTime, ISO
+MP4, Matroska and the new `WavDemuxer` for `.wav` files, exactly as FFmpeg decodes it. IMA ADPCM from cameras' AVIs
+(`ImaAdpcmDecoder`), raw H.264 files with seeking (`H264Demuxer`), and live cameras over HTTP (`LivePlayer`). New public
+API, hence a minor version; code built against 0.11 keeps working.
+
+### Added
+
+- Containers: `WavDemuxer` reads `.wav` files (RIFF WAVE), and `Demuxer.Open` detects them: integer and float PCM
+  (WAVE_FORMAT_EXTENSIBLE too), IMA ADPCM and MP3, packets as FFmpeg's wav demuxer gives them; `Seek` starts at the
+  packet holding the time; `mcdec` decodes them.
+  AVI names its 24- and 32-bit and float PCM by the same rules (`CodecIds.PcmS24Le`, `PcmS32Le`, `PcmF32Le`,
+  `PcmF64Le`), where it gave the format tag (docs/decisions/2026-11-10-pcm-containers.md).
+- PCM in ISO MP4 files: `Mp4Demuxer` names 'ipcm' and 'fpcm' (ISO/IEC 23003-5, as FFmpeg's mp4 muxer writes PCM) by
+  their 'pcmC' box, so `PcmDecoder` decodes them, exactly as FFmpeg does.
+- Live cameras: `LivePlayer` (Playback, and the Unity package) shows a camera serving MJPEG over HTTP
+  (`MjpegHttpSource`), handing the UI the newest decoded frame each render (`TakeLatest`), dropping older ones, and
+  connecting again after a drop or a stall, with `State`, `Error` and `LiveStatistics` to say what is happening
+  (issue #462). Samples for Avalonia (`tools/ManagedCodecs.Avalonia.Sample`) and WPF (`tools/ManagedCodecs.Wpf.Sample`).
+- PCM in QuickTime and Matroska files: `PcmDecoder` decodes signed 16-, 24- and 32-bit PCM in either byte order and
+  32- and 64-bit float PCM, exactly as FFmpeg does, named by new `CodecIds` constants (`PcmS16Be`, `PcmS24Le`,
+  `PcmS24Be`, `PcmS32Le`, `PcmS32Be`, `PcmF32Le`, `PcmF32Be`, `PcmF64Le`, `PcmF64Be`). `Mp4Demuxer` names QuickTime's
+  'raw ', 'sowt', 'twos', 'in24', 'in32', 'fl32' and 'fl64' entries by them (the byte order from 'enda'), and
+  `MatroskaDemuxer` the A_PCM Codec IDs by their BitDepth; `PcmDecoder.CanDecode` says whether a codec is one. So
+  `MediaPlayer` plays them and `mcdec` decodes them (docs/decisions/2026-11-10-pcm-containers.md).
 - Containers: `H264Demuxer` reads raw H.264 files (Annex B elementary streams, `.h264` and `.264`), and
   `Demuxer.Open` detects them: a packet an access unit, as FFmpeg's parser cuts them (IDR pictures keyframes), a tick
   each at the SPS's VUI frame rate (else 25), the size from the SPS; `H264Decoder` numbers their frames from 0, as
-  FFmpeg's command line does. No seeking (docs/decisions/2026-11-09-raw-h264.md).
+  FFmpeg's command line does. `Seek` starts at an IDR picture, so `MediaPlayer`'s `Loop` and thumbnails at a
+  time work too (docs/decisions/2026-11-09-raw-h264.md).
+- `ImaAdpcmDecoder` (ManagedCodecs.Core) and `CodecIds.AdpcmImaWav`: AVI's 4-bit IMA ADPCM (format tag 0x11), as
+  cameras write it beside MJPEG, exactly FFmpeg's output. `AviDemuxer` names such streams `CodecIds.AdpcmImaWav`
+  where it named them `"0x0011"`, and `MediaPlayer` plays them (docs/decisions/2026-11-10-ima-adpcm.md).
+
+### Changed
+
+- H.264: the chroma motion compensation filter's rows are inlined, no longer a call each: about 1.7% faster under the
+  JIT on a 1080p High profile stream with B pictures. The output is unchanged.
+- H.264: weighted prediction (libx264's default weighted P and implicit B weights) multiplies both predictions'
+  samples by their weights in one step and clips by saturating packs: about 1% faster under the JIT on the same
+  stream. The output is unchanged.
+- H.264: the luma interpolation filter sums each row's six taps by multiply-adds of paired samples (SSSE3) and clips by
+  saturating packs: about 1.5% faster under the JIT on the same stream. The output is unchanged.
 
 ## 0.11.0 – 2026-11-09
 

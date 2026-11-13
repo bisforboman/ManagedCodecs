@@ -33,7 +33,7 @@ in between. That comparison is not measured here.
 | `src/ManagedCodecs.Mjpeg` | `MjpegDecoder`: baseline/extended Huffman JPEG, interlaced AVI1, bit-exact with FFmpeg |
 | `src/ManagedCodecs.H264` | `H264Decoder`: Constrained Baseline, Main, High, High 10, High 4:2:2 and High 4:4:4 Predictive profile H.264 (CAVLC, CABAC, I/P/B, weighted prediction, 8x8 transform, scaling matrices, deblocking, monochrome, 4:2:0, 4:2:2 and 4:4:4, also as separate colour planes, 8 to 14 bits, lossless, progressive and interlaced), bit-exact |
 | `src/ManagedCodecs.Thumbnails` | `VideoProbe`: a video file's duration, displayed size, codecs and rotation as ffprobe reports them, without decoding; `VideoThumbnail`: a frame as a small upright RGBA image, PNG or JPEG; the `ManagedCodecs.Thumbnails` package (see Probing a video, Thumbnails; docs/decisions/2026-10-31-thumbnails.md) |
-| `src/ManagedCodecs.Playback` | `MediaPlayer`: plays a video file for a game engine, decoding on a thread of its own into RGBA frames and float stereo, and handing the game loop the frame due by its clock; the `ManagedCodecs.Playback` package (see In-game video) |
+| `src/ManagedCodecs.Playback` | `MediaPlayer`: plays a video file for a game engine, decoding on a thread of its own into RGBA frames and float stereo, and handing the game loop the frame due by its clock; `AudioPlayer`: the same for a file's audio alone (.wav, raw MP3 and AAC); `LivePlayer`: shows a camera's MJPEG over HTTP, the newest frame each render; the `ManagedCodecs.Playback` package (see In-game video, Live cameras) |
 | `src/ManagedCodecs.MonoGame` | `VideoTexture`: `MediaPlayer` for MonoGame, into a `Texture2D` and a `DynamicSoundEffectInstance`, drawn letterboxed and upright; the `ManagedCodecs.MonoGame` package (see In-game video) |
 | `src/ManagedCodecs.Unity` | The netstandard2.1 build for Unity (Mono, IL2CPP): every decoder's sources (and Thumbnails' and Playback's) in one assembly, without the vector paths, 1 to 3.4 times slower on CoreCLR; the `ManagedCodecs.Unity` package (see Unity) |
 | `src/ManagedCodecs.Aac` | `AacDecoder`: AAC LC (mono to 7.1, M/S, intensity, PNS, TNS), within 5e-7 of FFmpeg's float output; HE-AAC (spectral band replication) |
@@ -41,9 +41,15 @@ in between. That comparison is not measured here.
 | `src/Shared` | Source files linked into several codec projects (the VLC decoder, powers and cosines with the same bits on every runtime) |
 | `tools/ManagedCodecs.Cli` | `mcdec`: decodes a file and times it, to compare with `ffmpeg -benchmark` (`--threads N` for H.264 frame threading and HE-AAC's channels) |
 | `tools/ManagedCodecs.Godot` | A Godot 4 (.NET) node that plays a video into an `ImageTexture` and an `AudioStreamGenerator` with `ManagedCodecs.Playback`, as an addon (`addons/managedcodecs/`, a global class) to copy into a game; CI builds it with the Godot .NET SDK, Godot has not run it |
+| `tools/ManagedCodecs.Avalonia.Sample` | `mclive`: an Avalonia window showing a camera's MJPEG over HTTP with `LivePlayer` (issue #462); run on Linux under Xvfb against FFmpeg's `-f mpjpeg` |
+| `tools/ManagedCodecs.Wpf.Sample` | `mclive-wpf`: the same in WPF; CI builds it on Linux, nobody has run it on Windows yet |
 | `tools/ManagedCodecs.MonoGame.Sample` | `mcplay`: a MonoGame `Game` around `VideoTexture` (`ManagedCodecs.MonoGame`) (its README has the 1080p measurements; issue #254) |
 | `tools/ManagedCodecs.Unity.Sample` | A Unity `MonoBehaviour` that plays a video into a `Texture2D` and an `AudioClip` with the `ManagedCodecs.Unity` package (its `MediaPlayer`); CI compiles it against stubs of UnityEngine, Unity has not run it |
 | `tools/make-samples.sh` | Generates the test samples and FFmpeg's references |
+| `tools/gst-rtsp-server.py` | A GStreamer RTSP server with a live H.264 or JPEG test pattern (no auth, Basic or Digest), for trying `LivePlayer` by hand |
+| `tools/gst-jpeg-record.py` | Makes the committed JPEG over RTP recordings in `samples/gstreamer/` (GStreamer's `rtpjpegpay`: types 0, 64 and 65) |
+| `tools/rtsp-nightly.py` | `LivePlayer` against mediamtx serving an H.264 and an MJPEG clip, each frame checked against the clip's (`mcdec --live`); nightly in `realworld.yml` |
+| `tools/rtp-record.py` | Records the RTP packets FFmpeg sends to a loopback UDP port, for the RTP depacketizer's tests (make-samples.sh) |
 | `tools/compare.sh` | Times mcdec and FFmpeg on the same file |
 | `tools/h264-stages.py` | Shares of H.264 decoding by stage, for mcdec and FFmpeg, from perf and callgrind profiles (docs/notes/h264-stages-2026-11.md) |
 | `tools/realworld.py` | Decodes real public films with mcdec and FFmpeg and compares them (nightly, `realworld.yml`) |
@@ -93,12 +99,21 @@ and code that reproduces FFmpeg's reading where it differs from the spec), and n
   under 2e-6, LAME and shine streams). The MP4 edit list trims the priming (LAME's 1105 samples), Matroska's
   DiscardPadding the end. `MediaPlayer` plays it (In-game video); raw `.mp3` files gapless by their LAME tag (`Mp3Demuxer`);
   AVI's in both its chunk layouts. Not yet: free-format bitrates, Layers I and II (docs/decisions/2026-11-08-mp3-decoder.md).
-- **Containers**: AVI (video, and the first audio stream: MP3 in both its chunk layouts, AAC, others by their format
-  tag such as `0x0001` for PCM; docs/decisions/2026-11-08-avi-audio.md), MP4 (video and audio tracks, fragmented files too, edit lists of several edits),
+- **PCM** (`PcmDecoder`, in ManagedCodecs.Core): unsigned 8-bit, signed 16-, 24- and 32-bit and 32- and 64-bit float,
+  either byte order, and G.711 A-law and μ-law, exactly FFmpeg's float output; from AVI and `.wav` files (format tags
+  1, 3, 6 and 7 and WAVE_FORMAT_EXTENSIBLE), QuickTime ('raw ', 'sowt', 'twos', 'in24', 'in32', 'fl32', 'fl64',
+  'alaw', 'ulaw') and Matroska (A_PCM by
+  BitDepth), ISO MP4 (`ipcm`, `fpcm`). `MediaPlayer` plays it beside video
+  (docs/decisions/2026-11-10-pcm-containers.md).
+- **Containers**: AVI (video, and the first audio stream: MP3 in both its chunk layouts, AAC, integer and float PCM
+  and 4-bit IMA and Microsoft ADPCM, which `PcmDecoder`, `ImaAdpcmDecoder` and `MsAdpcmDecoder` decode exactly as
+  FFmpeg, others by their format tag such as `0x0031` for GSM 6.10; docs/decisions/2026-11-08-avi-audio.md), MP4 (video and audio tracks, fragmented files too, edit lists of several edits),
   Matroska and WebM (video and audio tracks, every kind of lacing, BlockGroups, live files of unknown size, header
   stripping and zlib, the display rotation, DiscardPadding; VP9, AV1, Opus and other codecs this library doesn't decode
   by their Codec IDs; MP3 as `CodecIds.Mp3` in MP4 and Matroska), raw AAC (ADTS), raw MP3 (gapless by the LAME
-  tag, as FFmpeg's) and raw H.264 (`.h264`, `.264`: access units as FFmpeg's parser cuts them, timed by the SPS's VUI;
+  tag, as FFmpeg's), `.wav` files (`WavDemuxer`: PCM, IMA ADPCM and MP3, packets as FFmpeg's, seeking by packet), MXF
+  (`MxfDemuxer`: OP1a, frame-wrapped essence, clip-wrapped OP-Atom files, D-10's AES3 sound, H.264 and PCM decoded, ProRes, DNxHR and MPEG-2 named; issue #469) and raw H.264 (`.h264`,
+  `.264`: access units as FFmpeg's parser cuts them, timed by the SPS's VUI, seeking to IDR pictures;
   docs/decisions/2026-11-09-raw-h264.md), with
   packets and timestamps as FFmpeg's demuxers give them.
 - **Throughout**: an async API, malformed input that ends in `InvalidDataException` or `NotSupportedException`
@@ -363,7 +378,8 @@ frame of 16384x14336 whose concealment took 30 s a picture; a longer one conceal
 hour each of `mjpeg` and `aac` after that (17 and 18 million inputs) found nothing. Field pictures' long-term marking (after 0.2.0): 40
 minutes of `h264` seeded with the long-term field samples alone (4.4 million inputs, with and without concealment)
 found nothing, and `ReferenceListTests` marks random field pictures with random memory management operations and
-checks the lists after each.
+checks the lists after each. MXF (#469): 30 minutes of `file` seeded with the MXF samples small enough
+(mxf-h264-small, made for it, and mxf-h264-interlaced; 3.3 million inputs) found nothing.
 
 ### Probing a video
 
@@ -449,8 +465,8 @@ while (player.TakeAudio() is { } audio) { /* audio.Samples at audio.SampleRate t
   FFmpeg's scaler (tools/ManagedCodecs.MonoGame.Sample/README.md); the fast path is checked against the formula on random
   samples of every 8-bit layout.
 - **Speed:** on 4 vCPUs at 2.1 GHz, 1080p24 and 1080p30 keep up, decoding and conversion included (mcplay's README).
-- **Audio it doesn't decode** (Opus, Vorbis, IMA ADPCM, ...; AAC, MP3 and AVI's PCM play) plays as none: `Audio` is null and
-  `SkippedAudioCodec` names it (the container's Codec ID, such as `A_OPUS`, or AVI's format tag, `0x0001`), for a warning; the Godot, Unity and
+- **Audio it doesn't decode** (Opus, Vorbis, GSM 6.10, ...; AAC, MP3, PCM, G.711 and IMA and Microsoft ADPCM play) plays as none: `Audio` is null and
+  `SkippedAudioCodec` names it (the container's Codec ID, such as `A_OPUS`, or AVI's format tag, `0x0031`), for a warning; the Godot, Unity and
   mcplay samples print one.
 - **Not a media player:** no seeking and no clock of its own (pause by stopping the clock you pass); `Loop` plays the
   file again from its start, its frames' times running on.
@@ -462,6 +478,60 @@ while (player.TakeAudio() is { } audio) { /* audio.Samples at audio.SampleRate t
 - **Samples:** `tools/ManagedCodecs.MonoGame.Sample` (mcplay, around `VideoTexture`), `tools/ManagedCodecs.Godot` (a Godot 4 .NET node) and
   `tools/ManagedCodecs.Unity.Sample` (a `MonoBehaviour`; `ManagedCodecs.Unity` holds `MediaPlayer` too). Only mcplay
   has been run; CI builds the others.
+- **Audio-only files:** `MediaPlayer` needs video; `AudioPlayer` plays a file's audio alone (`.wav`, raw MP3 and AAC,
+  or the audio of any file the demuxers open), the same way: `Start()`, then `TakeAudio()` as the sound has room, with
+  `Loop`, `IsFinished` and `Error` (docs/decisions/2026-11-11-audio-player.md). mcplay, the Godot node and the Unity
+  sample fall back to it for a file without video, playing its sound alone; `VideoTexture` itself stays video-only.
+
+### Live cameras
+
+`ManagedCodecs.Playback`'s `LivePlayer` shows a camera serving MJPEG over HTTP (`multipart/x-mixed-replace`:
+ESP32-CAM, mjpg-streamer, OctoPrint, most IP cameras' `video.mjpg`), with no native player: a thread reads the stream,
+another decodes, and the UI takes the newest frame on its render tick. No clock and no queue: a JPEG that arrives
+while the decoder is busy waits only until a newer one does, and a frame not taken before the next is decoded is
+dropped; `Statistics` counts both. A dropped connection, an error status or a stall (no part for `StallTimeout`, 5 s)
+is retried after 0.5 s, then up to 10 s apart; 401, 403, 404 and a response of another type than multipart or
+`application/octet-stream` (FFmpeg's HTTP server sends its multipart body as that), such as a snapshot URL's
+`image/jpeg`, are final. `State` and `Error` say which.
+
+```csharp
+using var player = new LivePlayer(new MjpegHttpSource(new Uri("http://camera.local/video.mjpg")));
+player.Start();
+
+// On each render tick of the UI (Avalonia's RequestAnimationFrame, WPF's CompositionTarget.Rendering):
+if (player.TakeLatest() is { } frame)
+{
+    // frame.Pixels: frame.Width x frame.Height, R, G, B, A from the top row, into a WriteableBitmap
+    player.Return(frame);
+}
+```
+
+- **Credentials, proxies, certificates:** pass an `HttpClient` (`new MjpegHttpSource(uri, client)`); a handler's
+  `Credentials` answers Basic and Digest. Give it an infinite `Timeout`: the stall check covers a dead connection.
+- **What cameras get wrong:** a part without `Content-Length` (split at the next delimiter), LF line ends, a header's
+  boundary written with its `--`, or one the body doesn't use (the first delimiter line's wins), none at all. Parts
+  that aren't JPEGs, and JPEGs the decoder refuses, are counted and skipped.
+- **RTSP:** `new LivePlayer(new RtspSource(new Uri("rtsp://user:password@camera/stream1")))` shows H.264 or JPEG over
+  RTSP 1.0, whichever video track comes first in the camera's SDP.
+  It authenticates with Digest or Basic, takes RTP over the RTSP connection (no UDP ports, through NAT), and sends
+  keep-alives at half the session's timeout.
+  - Every picture is decoded, as later ones are predicted from it, with concealment for lost packets
+    (`LiveStatistics.LostPackets`).
+  - If decoding falls more than `MaxLag` (1 s) behind the camera, pictures are skipped up to the next IDR picture
+    (`SkippedFrames`).
+  - JPEG (RFC 2435: 4:2:0 and 4:2:2, restart markers, in-band or computed tables) is rebuilt into whole JPEGs and
+    decoded as MJPEG over HTTP is, the newest waiting; an incomplete frame is dropped (`DamagedFrames`).
+  - Final answers: 401 after the challenge's answer, 403, 404, 454, 461 (the camera wants RTP over UDP, not
+    supported yet), an SDP with no H.264 or JPEG track or with H.264 in RTP's interleaved mode, and a JPEG type or
+    Q RFC 2435 reserves.
+  - Checked against GStreamer's RTSP server by hand, and nightly against mediamtx (docs/conformance.md, H.264 over RTSP
+    and JPEG over RTP).
+  - Not yet: RTP over UDP, RTSPS, H.265, JPEG over 2040 pixels.
+- **Samples:** `tools/ManagedCodecs.Avalonia.Sample` (`mclive`) and `tools/ManagedCodecs.Wpf.Sample` (`mclive-wpf`)
+  take either kind of URL.
+- **Cost:** a software decoder's. 1080p25 H.264 decodes in about 14 ms a frame on one thread (with 8 ms to convert),
+  so a wall of cameras wants their low-resolution substreams. docs/decisions/2026-11-10-live-mjpeg-over-http.md and
+  docs/decisions/2026-11-10-live-rtsp-h264.md and docs/decisions/2026-11-12-live-rtsp-jpeg.md have the plans.
 
 ### Unity
 
@@ -718,5 +788,5 @@ deblocking filter's field edges and the co-located field or frame of direct pred
 in for the specification's text where that was out of reach; no code was copied.
 
 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md), packed into every package, has the notices of the projects whose
-tables were transcribed (OpenH264's CABAC tables; libxaac's QMF window, SBR noise table and 34-band tables) and lists
-the ones only consulted.
+tables were transcribed (OpenH264's CABAC tables; libxaac's QMF window, SBR noise table and 34-band tables; the SMPTE
+Metadata Registers' MXF labels, BSD-3-Clause, each checked against SMPTE ST 377-1) and lists the ones only consulted.

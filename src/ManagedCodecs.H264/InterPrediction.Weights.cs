@@ -3,6 +3,7 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 #if NET
 using System.Runtime.Intrinsics;
+using System.Runtime.Intrinsics.X86;
 #endif
 
 namespace ManagedCodecs.H264;
@@ -63,7 +64,7 @@ internal static partial class InterPrediction
             var p = Load(ref source, j * stride);
             var low = (((Lower(p) * weight) + round) >> logWd) + offset;
             var high = (((Upper(p) * weight) + round) >> logWd) + offset;
-            StorePartial(ClampNarrow(low, high), ref Unsafe.Add(ref dest, j * outputStride), width);
+            StorePartial(Clip(low, high), ref Unsafe.Add(ref dest, j * outputStride), width);
         }
     }
 #endif
@@ -76,6 +77,12 @@ internal static partial class InterPrediction
         ref byte source0 = ref MemoryMarshal.GetReference(prediction0);
         ref byte source1 = ref MemoryMarshal.GetReference(prediction1);
         ref byte dest = ref MemoryMarshal.GetReference(output);
+        if (Sse2.IsSupported)
+        {
+            WeightBothSse2(ref source0, ref source1, stride, width, height, ref dest, outputStride, w0, w1, o, logWd);
+            return;
+        }
+
         var weight0 = Vector128.Create(w0);
         var weight1 = Vector128.Create(w1);
         var offset = Vector128.Create(o);
@@ -96,14 +103,57 @@ internal static partial class InterPrediction
     }
 #endif
 
+#if NET
+    /// <summary>
+    /// <see cref="WeightBoth"/> with SSE2: each sample of the two predictions paired with the other's as 16-bit words, so
+    /// that one multiply-add (<c>pmaddwd</c>) gives p0 w0 + p1 w1 for four samples, exactly, in 32 bits (samples to 255,
+    /// weights -128 to 128); the clip to 0..255 is the saturating packs to 16 bits and then to bytes. Blocks up to 8
+    /// wide take only the row's first half.
+    /// </summary>
+    private static void WeightBothSse2(ref byte source0, ref byte source1, int stride, int width, int height, ref byte dest, int outputStride, int w0, int w1, int o, int logWd)
+    {
+        var weights = Vector128.Create((w0 & 0xFFFF) | (w1 << 16)).AsInt16();
+        var offset = Vector128.Create(o);
+        var round = Vector128.Create(1 << logWd);
+        int shift = logWd + 1;
+        for (int j = 0; j < height; j++)
+        {
+            var p0 = Load(ref source0, j * stride);
+            var p1 = Load(ref source1, j * stride);
+            var pairs = Sse2.UnpackLow(p0, p1);
+            var first = Sse2.PackSignedSaturate(
+                Weigh(Sse2.UnpackLow(pairs, Vector128<byte>.Zero).AsInt16(), weights, round, shift, offset),
+                Weigh(Sse2.UnpackHigh(pairs, Vector128<byte>.Zero).AsInt16(), weights, round, shift, offset));
+            var second = first;
+            if (width == 16)
+            {
+                pairs = Sse2.UnpackHigh(p0, p1);
+                second = Sse2.PackSignedSaturate(
+                    Weigh(Sse2.UnpackLow(pairs, Vector128<byte>.Zero).AsInt16(), weights, round, shift, offset),
+                    Weigh(Sse2.UnpackHigh(pairs, Vector128<byte>.Zero).AsInt16(), weights, round, shift, offset));
+            }
+
+            StorePartial(Sse2.PackUnsignedSaturate(first, second), ref Unsafe.Add(ref dest, j * outputStride), width);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        static Vector128<int> Weigh(Vector128<short> pairs, Vector128<short> weights, Vector128<int> round, int shift, Vector128<int> offset) =>
+            ((Sse2.MultiplyAddAdjacent(pairs, weights) + round) >> shift) + offset;
+    }
+#endif
+
     // One bi-predicted lane group, clamped to 0..255 already, so that it narrows to 16 bits as it is.
 #if NET
     private static Vector128<int> Sum(Vector128<int> p0, Vector128<int> p1, Vector128<int> w0, Vector128<int> w1, Vector128<int> round, int shift, Vector128<int> offset) =>
         Vector128.Min(Vector128.Max((((p0 * w0) + (p1 * w1) + round) >> shift) + offset, Vector128<int>.Zero), Vector128.Create(255));
 #endif
 
-    // Clip1 of sixteen 16-bit values, as bytes.
+    // Clip1 of sixteen 16-bit values, as bytes: with SSE2 the saturating pack (packuswb) is exactly the clip.
 #if NET
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static Vector128<byte> Clip(Vector128<short> low, Vector128<short> high) =>
+        Sse2.IsSupported ? Sse2.PackUnsignedSaturate(low, high) : ClampNarrow(low, high);
+
     private static Vector128<byte> ClampNarrow(Vector128<short> low, Vector128<short> high)
     {
         var max = Vector128.Create((short)255);

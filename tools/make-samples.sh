@@ -55,6 +55,31 @@ ff -f lavfi -i testsrc2=size=160x120:rate=25 -f lavfi -i "sine=frequency=440:sam
 # The audio runs 0.2 s past the video, as cameras' often does a little: ffprobe's duration is still the video's (VideoProbe).
 ff -f lavfi -i testsrc2=size=160x120:rate=25:d=1 -f lavfi -i "aevalsrc=0.4*sin(2*PI*440*t)|0.3*sin(2*PI*660*t):s=11025:d=1.2" \
   -c:v mjpeg -q:v 5 -c:a pcm_u8 samples/avi-mjpeg-pcm-u8.avi
+# IMA ADPCM, as cameras write it beside MJPEG (ImaAdpcmDecoder): stereo, for the channels' turns of 4 bytes, in blocks of
+# 512 bytes (FFmpeg's default is 1024), a loud tone beside a quiet one and a low one, so the step index runs from one
+# end of its table to the other.
+ff -f lavfi -i testsrc2=size=160x120:rate=25:d=1 \
+  -f lavfi -i "aevalsrc=0.95*sin(2*PI*440*t)|0.5*sin(2*PI*3000*t)*lt(t\,0.5)+0.01*sin(2*PI*90*t):s=22050:d=1" \
+  -c:v mjpeg -q:v 5 -c:a adpcm_ima_wav -block_size 512 samples/avi-mjpeg-ima.avi
+# Microsoft ADPCM (MsAdpcmDecoder) the same way: stereo (a code of each channel a byte), 512-byte blocks, a loud tone
+# beside a quiet one and a low one, so the step runs from its floor (16) to large values and the predictors change.
+ff -f lavfi -i testsrc2=size=160x120:rate=25:d=1 \
+  -f lavfi -i "aevalsrc=0.95*sin(2*PI*440*t)|0.5*sin(2*PI*3000*t)*lt(t\,0.5)+0.01*sin(2*PI*90*t):s=22050:d=1" \
+  -c:v mjpeg -q:v 5 -c:a adpcm_ms -block_size 512 samples/avi-mjpeg-ms-adpcm.avi
+# 24- and 32-bit and float PCM in AVI (format tags 1 and 3 by wBitsPerSample, as FFmpeg's muxer writes them; WaveFormat).
+ff -f lavfi -i testsrc2=size=160x120:rate=25:d=1 -f lavfi -i "sine=frequency=440:sample_rate=22050:d=1" \
+  -c:v mjpeg -q:v 5 -c:a pcm_s24le -ac 2 samples/avi-mjpeg-pcm-s24.avi
+ff -f lavfi -i testsrc2=size=160x120:rate=25:d=1 -f lavfi -i "sine=frequency=440:sample_rate=22050:d=1" \
+  -c:v mjpeg -q:v 5 -c:a pcm_f32le samples/avi-mjpeg-pcm-f32.avi
+# .wav files (WavDemuxer), one per layout FFmpeg's muxer writes, each with its 'LIST' chunk before 'data': PCM with
+# format tag 1 (8-bit mono, 16-bit stereo), WAVE_FORMAT_EXTENSIBLE (24-bit stereo, float, 16-bit 5.1, whose blocks of
+# 12 bytes make packets of 4092), IMA ADPCM in 1024-byte blocks (packets of 4), Microsoft ADPCM in mono (two codes a
+# byte, 1024-byte blocks: packets of 4), and MP3 (tag 0x55, cut into frames).
+for spec in pcm_u8:1:8000:pcm-u8 pcm_s16le:2:44100:pcm-s16 pcm_s24le:2:48000:pcm-s24 pcm_f32le:2:44100:pcm-f32 \
+  pcm_s16le:6:48000:pcm-s16-6ch adpcm_ima_wav:2:22050:ima adpcm_ms:1:11025:ms-adpcm libmp3lame:2:44100:mp3; do
+  IFS=: read -r codec channels rate name <<< "$spec"
+  ff -f lavfi -i "sine=frequency=440:sample_rate=$rate:d=1.3" -ac "$channels" -c:a "$codec" "samples/wav-$name.wav"
+done
 # H.264 in AVI: Annex B (start codes, the SPS and PPS in the stream, no avcC), which H264Decoder reads without a
 # configuration record: libx264's High with B pictures and a keyframe every 12 frames (its 'idx1' index flags them, which
 # Seek starts from), and Constrained Baseline beside MP3 (FFmpeg's muxer drops its second video frame while
@@ -67,6 +92,11 @@ ff -f lavfi -i testsrc2=size=176x144:rate=25 -f lavfi -i "sine=frequency=440:sam
 # Baseline at 24 fps under the other extension.
 ff -f lavfi -i testsrc2=size=176x100:rate=30 -t 1 -c:v libx264 -g 12 -f h264 samples/h264-raw.h264
 ff -f lavfi -i testsrc2=size=160x120:rate=24 -t 1 -c:v libx264 -profile:v baseline -f h264 samples/h264-raw-baseline.264
+# Open GOPs: after the first IDR picture, I pictures behind a recovery point SEI, which FFmpeg's parser flags as
+# keyframes (packets 11, 22, 35) but H264Demuxer.Seek doesn't start at (the B pictures shown before each need the GOP
+# before it), so a seek anywhere starts at the stream's start.
+ff -f lavfi -i testsrc2=size=176x100:rate=30 -t 1.5 -c:v libx264 -bf 3 -x264-params open-gop=1:keyint=12:min-keyint=12:scenecut=0 \
+  -f h264 samples/h264-raw-open-gop.h264
 avicbr=$(mktemp --suffix=.avi)
 ff -f lavfi -i testsrc2=size=160x120:rate=25 -f lavfi -i "aevalsrc=0.4*sin(2*PI*440*t)|0.3*sin(2*PI*660*t):s=44100:d=2" \
   -t 2 -c:v mjpeg -q:v 5 -c:a libmp3lame -b:a 64k "$avicbr"
@@ -617,6 +647,34 @@ ff -f lavfi -i "aevalsrc=0.4*sin(2*PI*440*t)+0.1*sin(2*PI*3000*t)|0.4*sin(2*PI*4
 # The same AAC in a QuickTime file (-f mov), whose sound description holds the 'esds' in a 'wave' box; named .mp4 so
 # the MP4 references and tests take it.
 ff -i samples/aac-stereo-48k.mp4 -c copy -f mov samples/aac-quicktime.mp4
+# PCM in QuickTime files (PcmDecoder; named .mp4 like the one above), one per sample entry FFmpeg's muxer writes:
+# 'raw ' (unsigned 8-bit), 'sowt' and 'twos' (16-bit little- and big-endian, the latter in stereo), and 'in24', 'in32',
+# 'fl32' and 'fl64', whose byte order is an 'enda' box in the 'wave' box (1: little-endian), both orders between them.
+for spec in u8:raw:1 s16le:sowt:1 s16be:twos:2 s24le:in24:2 s32be:in32:1 f32le:fl32:2 f64be:fl64:1; do
+  IFS=: read -r fmt entry channels <<< "$spec"
+  ff -f lavfi -i testsrc2=size=160x120:rate=25:d=1 -f lavfi -i "sine=frequency=440:sample_rate=22050:d=1" \
+    -c:v mjpeg -q:v 5 -c:a "pcm_$fmt" -ac "$channels" -f mov "samples/mov-pcm-$fmt.mp4"
+done
+# G.711 (PcmDecoder): A-law and μ-law in QuickTime ('alaw', 'ulaw', a byte a sample), and in .wav files (format tags
+# 6 and 7) holding every one of the 256 codes four times over (mono A-law, stereo μ-law), so that FFmpeg's output
+# checks each code's value.
+for spec in alaw:alaw:1 mulaw:ulaw:2; do
+  IFS=: read -r fmt entry channels <<< "$spec"
+  ff -f lavfi -i testsrc2=size=160x120:rate=25:d=1 -f lavfi -i "sine=frequency=440:sample_rate=8000:d=1" \
+    -c:v mjpeg -q:v 5 -c:a "pcm_$fmt" -ac "$channels" -f mov "samples/mov-pcm-$fmt.mp4"
+  codes=$(mktemp)
+  python3 -c "import sys; sys.stdout.buffer.write(bytes(range(256)) * 4)" > "$codes"
+  ff -f "$fmt" -ar 8000 -ac "$channels" -i "$codes" -c:a copy "samples/wav-$fmt-codes.wav"
+  rm "$codes"
+done
+# PCM in ISO MP4 files (ISO/IEC 23003-5; FFmpeg's mp4 muxer): 'ipcm' and 'fpcm', depth and byte order in a 'pcmC' box.
+# FFmpeg 6.1 writes 24-bit samples under a 'pcmC' of 32 bits and reads them back so, 'stsz''s 3 bytes a piece:
+# mp4-pcm-s24le holds Mp4Demuxer to that (pieces by 'stsz').
+for spec in s16le:1 s16be:2 s24le:1 s32le:1 f32le:2 f32be:1 f64le:1; do
+  IFS=: read -r fmt channels <<< "$spec"
+  ff -f lavfi -i testsrc2=size=160x120:rate=25:d=1 -f lavfi -i "sine=frequency=440:sample_rate=22050:d=1" \
+    -c:v mjpeg -q:v 5 -c:a "pcm_$fmt" -ac "$channels" "samples/mp4-pcm-$fmt.mp4"
+done
 ff -f lavfi -i "aevalsrc=0.5*sin(2*PI*300*t)*sin(2*PI*2*t)+0.05*sin(2*PI*1700*t):s=8000:d=2" -c:a aac -b:a 16k -aac_pns 0 samples/aac-mono-8k.mp4
 ff -f lavfi -i "aevalsrc=0.5*sin(2*PI*600*t+4*sin(2*PI*3*t))|0.3*sin(2*PI*900*t):s=22050:d=2" -c:a aac -b:a 40k -aac_pns 0 samples/aac-stereo-22k.mp4
 ff -f lavfi -i "aevalsrc=0.6*sin(2*PI*440*t)*gt(mod(t\,0.1)\,0.05)+0.5*lt(mod(t\,0.25)\,0.0005):s=44100:d=2" -c:a aac -b:a 128k -aac_pns 0 samples/aac-transients.mp4
@@ -814,12 +872,108 @@ ff -f lavfi -i testsrc2=size=160x120:rate=25 -f lavfi -i sine=frequency=440:samp
   -g 12 -c:a pcm_s16le "$pcm"
 python3 tools/mkv-rewrite.py "$pcm" samples/mkv-lace-fixed.mkv --lace fixed --unknown-size
 rm "$pcm"
+# PCM's other Codec IDs by BitDepth (PcmDecoder; 16-bit little-endian is mkv-lace-fixed above): A_PCM/INT/LIT at 8 bits
+# (unsigned), 24 and 32; A_PCM/INT/BIG at 16 and 32 (in stereo); A_PCM/FLOAT/IEEE at 32 and 64 (FFmpeg's muxer writes no
+# big-endian float).
+for spec in u8:1 s24le:2 s32le:1 s16be:2 s32be:2 f32le:1 f64le:2; do
+  IFS=: read -r fmt channels <<< "$spec"
+  ff -f lavfi -i testsrc2=size=160x120:rate=25:d=1 -f lavfi -i "sine=frequency=440:sample_rate=32000:d=1" \
+    -c:v mjpeg -q:v 5 -c:a "pcm_$fmt" -ac "$channels" "samples/mkv-pcm-$fmt.mkv"
+done
 # The video's frames and CodecPrivate compressed with zlib (ContentCompAlgo 0), as mkvmerge's --compression writes them.
 python3 tools/mkv-rewrite.py samples/mkv-h264-aac.mkv samples/mkv-zlib.mkv --zlib
 # AAC whose last block has a DiscardPadding of 10 ms (480 samples at 48 kHz), which FFmpeg's decoder drops from its end.
 python3 tools/mkv-rewrite.py samples/mkv-h264-aac.mkv samples/mkv-aac-padding.mkv --discard-padding 10000000
 # A display rotation, which FFmpeg's muxer writes as a Projection's ProjectionPoseRoll (90, 180 and -90 degrees).
 for r in 90 180 270; do ff -i "samples/h264-rotate-$r.mp4" -c copy "samples/mkv-h264-rotate-$r.mkv"; done
+
+# ---- MXF for the demuxer (its partitions so far) ----
+# name.partitions.csv: the partition packs FFmpeg's demuxer reads (ffprobe -v trace, every packet read), one a line as
+# ThisPartition,PreviousPartition,FooterPartition,IndexSID,BodySID, by offset. FFmpeg's muxer writes OP1a, frame-wrapped.
+# mxf-h264-pcm: H.264 and 24-bit PCM (48 kHz, the only rate it writes), a header, a body and a footer partition and a
+# random index pack. mxf-h264-index: 20 s, long enough for a body partition with index table segments beside the
+# essence (IndexSID and BodySID both set). mxf-h264-pipe: written to a pipe, so the header and body packs leave
+# FooterPartition 0 (ST 377-1 7.2.2).
+mxf_src=(-f lavfi -i testsrc2=s=160x120:r=25 -f lavfi -i sine=sample_rate=48000)
+ff "${mxf_src[@]}" -t 2 -c:v libx264 -pix_fmt yuv420p -c:a pcm_s24le samples/mxf-h264-pcm.mxf
+ff "${mxf_src[@]}" -t 20 -c:v libx264 -pix_fmt yuv420p -g 25 -c:a pcm_s24le samples/mxf-h264-index.mxf
+ff "${mxf_src[@]}" -t 2 -c:v libx264 -pix_fmt yuv420p -c:a pcm_s24le -f mxf - > samples/mxf-h264-pipe.mxf
+for f in samples/mxf-h264-pcm.mxf samples/mxf-h264-index.mxf samples/mxf-h264-pipe.mxf; do
+  ffprobe -v trace -show_packets "$f" 2>&1 >/dev/null \
+    | sed -n 's/.*PartitionPack: ThisPartition = 0x\([0-9A-F]*\), PreviousPartition = 0x\([0-9A-F]*\), FooterPartition = 0x\([0-9A-F]*\), IndexSID = \([0-9]*\), BodySID = \([0-9]*\).*/\1 \2 \3 \4 \5/p' \
+    | while read -r this prev footer isid bsid; do echo "$((16#$this)),$((16#$prev)),$((16#$footer)),$isid,$bsid"; done \
+    | sort -t, -k1,1n -u > "${f%.mxf}.partitions.csv"
+done
+# What FFmpeg's muxer never writes (tools/mxf-rewrite.py), each against its source's partitions (FFmpeg's demuxer does
+# not read the footer of a pipe-written file without a random index pack): no random index pack, so the partitions
+# come back from the footer by PreviousPartition (mxf-h264-pcm-norip) or, with no FooterPartition to start from, by
+# walking the file (mxf-h264-pipe-norip); and a 1 KiB run-in before the header partition (mxf-h264-pcm-runin).
+python3 -I tools/mxf-rewrite.py samples/mxf-h264-pcm.mxf samples/mxf-h264-pcm-norip.mxf --strip-rip
+python3 -I tools/mxf-rewrite.py samples/mxf-h264-pipe.mxf samples/mxf-h264-pipe-norip.mxf --strip-rip
+python3 -I tools/mxf-rewrite.py samples/mxf-h264-pcm.mxf samples/mxf-h264-pcm-runin.mxf --run-in 1024
+cp samples/mxf-h264-pcm.partitions.csv samples/mxf-h264-pcm-norip.partitions.csv
+cp samples/mxf-h264-pipe.partitions.csv samples/mxf-h264-pipe-norip.partitions.csv
+cp samples/mxf-h264-pcm.partitions.csv samples/mxf-h264-pcm-runin.partitions.csv
+# The header metadata's descriptors, for MxfHeader: ProRes 422 HQ (10-bit 4:2:2, CDCI) with a 16:9 picture over
+# 160x120 (sample aspect 4:3), two stereo 16-bit PCM tracks (AES3 descriptors in a multiple descriptor) and a start
+# timecode; DNxHR SQ (VC-3, at its smallest size) with 24-bit PCM; interlaced H.264 (High 4:2:2 10-bit, FrameLayout
+# separate fields, so the stored height is a field's) at 29.97 with a drop-frame timecode; and MPEG-2, a coding label
+# of another family. No essence of these is decoded yet.
+ff "${mxf_src[@]}" -f lavfi -i sine=sample_rate=48000:frequency=660 -t 1 -map 0 -map 1 -map 2 -c:v prores_ks -profile:v 3 \
+  -pix_fmt yuv422p10le -aspect 16:9 -c:a pcm_s16le -ac 2 -timecode 01:00:00:00 samples/mxf-prores-pcm16.mxf
+ff -f lavfi -i testsrc2=s=256x144:r=25 -f lavfi -i sine=sample_rate=48000 -t 1 -c:v dnxhd -profile:v dnxhr_sq \
+  -pix_fmt yuv422p -c:a pcm_s24le samples/mxf-dnxhr-pcm24.mxf
+ff -f lavfi -i testsrc2=s=160x120:r=30000/1001 -t 1 -c:v libx264 -pix_fmt yuv422p10le -flags +ildct+ilme -x264opts tff=1 \
+  -timecode '01:00:00;02' samples/mxf-h264-interlaced.mxf
+ff -f lavfi -i testsrc2=s=160x120:r=25 -t 1 -c:v mpeg2video samples/mxf-mpeg2.mxf
+# mxf-h264-small: 8 frames of 64x48 H.264 (two GOPs) and 16-bit PCM, about 50 KB: the fuzzer's seed (it takes whole
+# files under 64 KiB, tools/ManagedCodecs.Fuzz), the other MXF samples being larger.
+ff -f lavfi -i testsrc2=s=64x48:r=25 -f lavfi -i sine=sample_rate=48000 -t 0.32 -c:v libx264 -pix_fmt yuv420p -g 4 \
+  -c:a pcm_s16le samples/mxf-h264-small.mxf
+# Clip-wrapped essence, from FFmpeg's OP-Atom muxer (-f mxf_opatom, ST 390: one track a file, the whole clip one
+# essence element, though its essence container labels say frame wrapping): H.264 found by the index entries' stream
+# offsets, DNxHR SQ by the index's constant EditUnitByteCount (no entries), and 24-bit PCM (48 kHz mono, all it writes)
+# whose index edit unit is a sample, which FFmpeg's demuxer reads in pieces of 1920 samples.
+ff -f lavfi -i testsrc2=s=160x120:r=25 -t 1 -c:v libx264 -pix_fmt yuv420p -g 10 -f mxf_opatom samples/mxf-opatom-h264.mxf
+ff -f lavfi -i testsrc2=s=256x144:r=25 -t 0.4 -c:v dnxhd -profile:v dnxhr_sq -pix_fmt yuv422p -f mxf_opatom \
+  samples/mxf-opatom-dnxhr.mxf
+ff -f lavfi -i sine=sample_rate=48000 -t 0.5 -c:a pcm_s24le -f mxf_opatom samples/mxf-opatom-pcm.mxf
+# D-10 (MPEG-2 IMX, -f mxf_d10, SMPTE ST 386): the content package's sound item is an 8-channel AES3 element (ST 331
+# 7.1), whatever the descriptor's channel count, which FFmpeg's demuxer gives as PCM. mxf-d10-pcm24: 625/50 at 50 Mb/s,
+# 24-bit, 4 channels, 1920 samples a frame; mxf-d10-525: 525/59.94 at 30 Mb/s (a whole number of bytes a frame, which
+# the muxer needs), 16-bit stereo, the element's sample count 1602 and 1601 by its five-frame sequence.
+ff -f lavfi -i testsrc2=s=720x608:r=25 -f lavfi -i sine=sample_rate=48000 -t 0.2 -c:v mpeg2video -pix_fmt yuv422p -g 1 \
+  -b:v 50M -minrate 50M -maxrate 50M -bufsize 2000000 -rc_init_occupancy 2000000 -flags +ildct+ilme -top 1 \
+  -c:a pcm_s24le -ac 4 -f mxf_d10 samples/mxf-d10-pcm24.mxf
+ff -f lavfi -i testsrc2=s=720x512:r=30000/1001 -f lavfi -i sine=sample_rate=48000 -t 0.2 -c:v mpeg2video -pix_fmt yuv422p \
+  -g 1 -b:v 30M -minrate 30M -maxrate 30M -bufsize 1001000 -rc_init_occupancy 1001000 -flags +ildct+ilme -top 0 \
+  -c:a pcm_s16le -ac 2 -f mxf_d10 samples/mxf-d10-525.mxf
+# name.headers.json: the streams as FFmpeg's demuxer reads them from the header metadata, nothing decoded
+# (ffprobe -nofind_stream_info: with probing, the size and aspect ratio are the decoder's), and the file's operational
+# pattern, material package and start timecode.
+for f in samples/mxf-*.mxf; do
+  ffprobe -v error -nofind_stream_info -of json -show_entries \
+    stream=index,codec_name,codec_type,width,height,field_order,time_base,duration_ts,sample_rate,channels,bits_per_sample:stream_tags=file_package_umid:format_tags=operational_pattern_ul,material_package_umid,timecode \
+    "$f" > "${f%.mxf}.headers.json"
+done
+# MxfDemuxer's packets: name.packets.csv as ffprobe lists them (keyframe flags from libavformat's parsers, durations it
+# fills in), and name.packets.nofillin.csv as FFmpeg's MXF demuxer itself gives them (decode times are its own there;
+# libavformat moves MPEG-2's back a frame).
+for f in samples/mxf-*.mxf; do
+  ffprobe -v error -show_packets -show_data_hash MD5 -show_entries packet=stream_index,pts,dts,duration,size,flags,data_hash \
+    -of csv=p=0 "$f" > "${f%.mxf}.packets.csv"
+  ffprobe -v error -fflags +nofillin+noparse -show_packets -show_entries packet=stream_index,pts,dts,duration,size,flags \
+    -of csv=p=0 "$f" > "${f%.mxf}.packets.nofillin.csv"
+  # name.h264.framemd5: the H.264 frames, every one (-fps_mode passthrough: FFmpeg's MXF packets carry decode times as
+  # presentation times, and its command line would drop a frame and retime the rest otherwise).
+  if [ "$(ffprobe -v error -select_streams v:0 -show_entries stream=codec_name -of csv=p=0 "$f")" = h264 ]; then
+    ff -idct simple -noautorotate -i "$f" -fps_mode passthrough -map 0:v -f framemd5 "${f%.mxf}.h264.framemd5"
+  fi
+  # name.pcm.f32: the first audio stream decoded, for PcmDecoder on MXF's little-endian PCM.
+  if [ -n "$(ffprobe -v error -select_streams a:0 -show_entries stream=index -of csv=p=0 "$f")" ]; then
+    ff -i "$f" -map 0:a:0 -f f32le "${f%.mxf}.pcm.f32"
+  fi
+done
 
 # ---- FFmpeg's references ----
 # name.framemd5: decoded frames. name.packets.csv: demuxed packets as ffprobe lists them (the demuxer's own timestamps,
@@ -937,6 +1091,13 @@ for s in h264-bframes.mp4:1200 h264-bframes.mp4:960 h264-bframes.mp4:1000 fmp4-b
   ff -seek_timestamp 1 -ss "$(printf '%d.%03d' $((ms / 1000)) $((ms % 1000)))" -idct simple -noautorotate -i "$f" -map 0:v:0 \
     -frames:v 1 -f framemd5 "${f%.*}.seek$ms.framemd5"
 done
+# The same for raw H.264, where FFmpeg can't seek (-ss before -i fails): its -ss after -i decodes from the start and
+# drops the frames before the time, the frame H264Demuxer.Seek's read shows there. On an IDR picture, between two, and
+# in an open GOP between recovery points.
+for s in h264-raw.h264:400 h264-raw.h264:500 h264-raw-open-gop.h264:900; do
+  f=samples/${s%%:*}; ms=${s##*:}
+  ff -i "$f" -ss "$(printf '%d.%03d' $((ms / 1000)) $((ms % 1000)))" -map 0:v:0 -frames:v 1 -f framemd5 "${f%.*}.seek$ms.framemd5"
+done
 # Raw AAC: packets as FFmpeg's demuxer gives them (whole ADTS frames), and every decoded sample (no edit list).
 for f in samples/*.aac; do
   ff -copyts -i "$f" -c copy -f framemd5 "${f%.aac}.packets.framemd5"
@@ -965,16 +1126,26 @@ for f in samples/*faac*.aac; do ff -i "$f" -f f32le "${f%.*}.delay.f32"; done
 # by default (MP4: the edit list's priming skipped; Matroska: the end's DiscardPadding dropped; a raw .mp3: its LAME
 # tag's delay and padding; AVI: every frame, in either layout). Raw .mp3 files' packets too, as FFmpeg's demuxer gives
 # them (name.packets.framemd5). Suffixes of their own, since AacConformanceTests decodes every name.f32.
-for f in samples/*.mp4 samples/*.mkv samples/*.mp3 samples/*.avi; do
+for f in samples/*.mp4 samples/*.mkv samples/*.mp3 samples/*.avi samples/*.wav; do
   [ "$(ffprobe -v error -select_streams a:0 -show_entries stream=codec_name -of csv=p=0 "$f")" = mp3 ] || continue
   [[ $f == *.mp4 ]] && ff -ignore_editlist 1 -i "$f" -map 0:a:0 -f f32le "${f%.*}.mp3.f32"
   ff -i "$f" -map 0:a:0 -f f32le "${f%.*}.mp3.trim.f32"
 done
-# PCM in AVI: name.pcm.f32, the decoded audio as FFmpeg gives it (PcmDecoder's values exactly).
-for f in samples/*.avi; do
+# PCM, IMA and Microsoft ADPCM: name.pcm.f32, name.ima.f32 and name.msadpcm.f32, the decoded audio as FFmpeg gives it
+# (PcmDecoder's, ImaAdpcmDecoder's and MsAdpcmDecoder's values exactly), for the formats they decode.
+for f in samples/*.avi samples/*.mp4 samples/*.mkv samples/*.wav; do
   case "$(ffprobe -v error -select_streams a:0 -show_entries stream=codec_name -of csv=p=0 "$f")" in
-    pcm_u8 | pcm_s16le) ff -i "$f" -map 0:a:0 -f f32le "${f%.avi}.pcm.f32" ;;
+    pcm_u8 | pcm_s16le | pcm_s16be | pcm_s24le | pcm_s24be | pcm_s32le | pcm_s32be | pcm_f32le | pcm_f32be | pcm_f64le | pcm_f64be \
+      | pcm_alaw | pcm_mulaw)
+      ff -i "$f" -map 0:a:0 -f f32le "${f%.*}.pcm.f32" ;;
+    adpcm_ima_wav) ff -i "$f" -map 0:a:0 -f f32le "${f%.*}.ima.f32" ;;
+    adpcm_ms) ff -i "$f" -map 0:a:0 -f f32le "${f%.*}.msadpcm.f32" ;;
   esac
+done
+# .wav files: packets as FFmpeg's wav demuxer gives them (name.packets.csv).
+for f in samples/*.wav; do
+  ffprobe -v error -show_packets -show_data_hash MD5 -show_entries packet=stream_index,pts,dts,duration,size,flags,data_hash \
+    -of csv=p=0 "$f" > "${f%.wav}.packets.csv"
 done
 # Raw MP3: packets as FFmpeg's demuxer gives them, and in .packets.csv with their skip-samples side data (the gapless
 # trim at both ends).
@@ -993,5 +1164,30 @@ for f in samples/*.mp4 samples/*.aac; do
     { echo "$tb"; ffprobe -v error -select_streams a:0 -show_entries frame=pts,nb_samples -of csv=p=0 "$f"; } > "${f%.*}.audioframes.csv"
   fi
 done
+
+# name.rtp and name.sdp: FFmpeg's RTP packetizer (RFC 6184, packetization-mode 1) on an H.264 sample, the packets
+# recorded as sent (tools/rtp-record.py: a 16-bit length, then the packet; it fails on a missing packet), for
+# RtpH264DepacketizerTests: depacketized, they must give back the MP4's samples NAL unit for NAL unit. h264-main-slices
+# puts the parameter sets and small slices into STAP-A and sends single NAL units; h264-bench-720p cuts most slices into
+# FU-A. The MP4's avcC goes to the SDP as sprop-parameter-sets (docs/decisions/2026-11-10-live-rtsp-h264.md).
+port=5040
+for f in samples/h264-main-slices.mp4 samples/h264-bench-720p.mp4; do
+  python3 tools/rtp-record.py "$port" "${f%.mp4}.rtp" &
+  recorder=$!
+  sleep 0.5
+  ffmpeg -nostdin -hide_banner -loglevel error -y -i "$f" -an -c:v copy -f rtp -sdp_file "${f%.mp4}.sdp" "rtp://127.0.0.1:$port"
+  wait "$recorder"
+  port=$((port + 2))
+done
+
+# testsrc-stdhuff.rtp: FFmpeg's RFC 2435 packetizer on that AVI's JPEGs as they are (-c copy: RFC 2435 needs T.81's
+# standard Huffman tables, which -huffman default wrote), type 1 (4:2:0) with Q 255 and the tables in every frame, for
+# RtpJpegDepacketizerTests: each JPEG rebuilt from RTP must decode to what the AVI's decodes to. The other types come
+# from GStreamer, committed in samples/gstreamer/ (tools/gst-jpeg-record.py; docs/decisions/2026-11-12-live-rtsp-jpeg.md).
+python3 tools/rtp-record.py "$port" samples/testsrc-stdhuff.rtp &
+recorder=$!
+sleep 0.5
+ffmpeg -nostdin -hide_banner -loglevel error -y -i samples/testsrc-stdhuff.avi -an -c:v copy -f rtp -sdp_file samples/testsrc-stdhuff.sdp "rtp://127.0.0.1:$port"
+wait "$recorder"
 
 echo "Samples and references written to samples/."

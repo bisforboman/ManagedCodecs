@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using ManagedCodecs.Containers;
 using ManagedCodecs.Playback;
 using UnityEngine;
 
@@ -9,7 +10,8 @@ namespace ManagedCodecs.UnitySample;
 /// ManagedCodecs.Unity: a thread of its own decodes ahead (<see cref="MediaPlayer"/>), <see cref="Update"/> shows the
 /// newest frame due by a clock started at the first frame (late ones are dropped), and the audio streams
 /// through an <see cref="AudioClip"/> whose callback, on Unity's audio thread, takes the decoded samples. Not for
-/// WebGL, which has no threads. Not a media player: no seeking, no pause.
+/// WebGL, which has no threads. A file without video (.wav, raw MP3 or AAC) plays its sound alone through
+/// <see cref="AudioPlayer"/>. Not a media player: no seeking, no pause.
 /// </summary>
 public sealed class ManagedCodecsVideo : MonoBehaviour
 {
@@ -19,6 +21,7 @@ public sealed class ManagedCodecsVideo : MonoBehaviour
 
     private readonly ConcurrentQueue<float> _samples = new();
     private MediaPlayer? _player;
+    private AudioPlayer? _audioOnly;
     private Renderer? _renderer;
     private Texture2D? _texture;
     private float _start = -1;
@@ -33,6 +36,19 @@ public sealed class ManagedCodecsVideo : MonoBehaviour
         string path = System.IO.Path.Combine(Application.streamingAssetsPath, fileName);
         try
         {
+            bool hasVideo;
+            using (var demuxer = Demuxer.Open(path))
+            {
+                hasVideo = demuxer.Video is not null;
+            }
+
+            if (!hasVideo)
+            {
+                _audioOnly = new AudioPlayer(path);
+                _audioOnly.Start();
+                return;
+            }
+
             _player = new MediaPlayer(path);
         }
         catch (System.Exception e) when (e is System.NotSupportedException or System.IO.InvalidDataException or System.IO.IOException)
@@ -53,6 +69,23 @@ public sealed class ManagedCodecsVideo : MonoBehaviour
 
     private void Update()
     {
+        if (_audioOnly is not null)
+        {
+            // Sound only: the clip starts with the first audio and plays until the player is done and its samples ran out.
+            StartAudio();
+            if (_audioOnly.IsFinished && _samples.IsEmpty)
+            {
+                if (_audioOnly.Error is { } audioError)
+                {
+                    Debug.LogError($"ManagedCodecsVideo: {fileName} stopped early: {audioError.Message}");
+                }
+
+                enabled = false;
+            }
+
+            return;
+        }
+
         if (_player is null || _renderer is null)
         {
             return;
@@ -120,10 +153,10 @@ public sealed class ManagedCodecsVideo : MonoBehaviour
     // The audio's clip, streaming from the decoded samples, made and played once the first frame is shown, so that the
     // sound starts with the picture's clock: the first audio comes out of the decoder before the first frame (frame
     // threading's delay and more), and is queued here until then. The first samples give the rate (HE-AAC's output is
-    // twice its core's).
+    // twice its core's). A sound-only file has no first frame to wait for: its clip starts with its first audio.
     private void StartAudio()
     {
-        while (_player!.TakeAudio() is { } chunk)
+        while ((_player?.TakeAudio() ?? _audioOnly?.TakeAudio()) is { } chunk)
         {
             _audioRate = chunk.SampleRate;
             foreach (float sample in chunk.Samples)
@@ -132,7 +165,7 @@ public sealed class ManagedCodecsVideo : MonoBehaviour
             }
         }
 
-        if (_audioRate == 0 || _start < 0 || GetComponent<AudioSource>() is { clip: not null })
+        if (_audioRate == 0 || (_start < 0 && _audioOnly is null) || GetComponent<AudioSource>() is { clip: not null })
         {
             return;
         }
@@ -160,5 +193,6 @@ public sealed class ManagedCodecsVideo : MonoBehaviour
         }
 
         _player?.Dispose();
+        _audioOnly?.Dispose();
     }
 }

@@ -268,7 +268,7 @@ MUTATIONS = [
          find="is { } d and >= 0 ? d : null", replace="is { } d ? d : null",
          tests="FullyQualifiedName~MxfHeaderTests"),
     # Drop-frame timecodes skip codes each minute but the tenth (mxf-h264-interlaced's 01:00:00;02).
-    dict(file="src/ManagedCodecs.Containers/Mxf/MxfHeader.cs",
+    dict(file="src/ManagedCodecs.Core/Timecode.cs",
          find="frames += (9L * drop * tens) + (rest > drop ? drop * ((rest - drop) / perMinute) : 0);", replace="",
          tests="FullyQualifiedName~MxfHeaderTests"),
 

@@ -19,6 +19,9 @@ run time.
   `DynamicSoundEffectInstance`, as `VideoTexture` plays a video: `Play`, `Pause`, `Update()`, `Volume`, and a
   `Position` that follows the sound (docs/decisions/2026-11-13-audio-track.md). mcplay plays sound-only files through
   it.
+- Playback: `LivePlayer` plays RTSP cameras that refuse RTP over the RTSP connection (461 Unsupported Transport): it
+  asks for RTP over UDP instead, on two local ports, takes only the server's packets and puts reordered ones back in
+  order within 50 ms (docs/decisions/2026-11-14-live-rtsp-udp.md).
 
 ## 0.14.0 – 2026-11-13
 

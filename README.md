@@ -515,24 +515,27 @@ if (player.TakeLatest() is { } frame)
 - **RTSP:** `new LivePlayer(new RtspSource(new Uri("rtsp://user:password@camera/stream1")))` shows H.264 or JPEG over
   RTSP 1.0, whichever video track comes first in the camera's SDP.
   It authenticates with Digest or Basic, takes RTP over the RTSP connection (no UDP ports, through NAT), and sends
-  keep-alives at half the session's timeout.
+  keep-alives at half the session's timeout. A server that refuses that (461) gets asked for RTP over UDP instead:
+  two local ports, a packet from each to open a NAT, only the server's packets (its address and SSRC), and a 50 ms
+  window that puts reordered packets back in order.
   - Every picture is decoded, as later ones are predicted from it, with concealment for lost packets
     (`LiveStatistics.LostPackets`).
   - If decoding falls more than `MaxLag` (1 s) behind the camera, pictures are skipped up to the next IDR picture
     (`SkippedFrames`).
   - JPEG (RFC 2435: 4:2:0 and 4:2:2, restart markers, in-band or computed tables) is rebuilt into whole JPEGs and
     decoded as MJPEG over HTTP is, the newest waiting; an incomplete frame is dropped (`DamagedFrames`).
-  - Final answers: 401 after the challenge's answer, 403, 404, 454, 461 (the camera wants RTP over UDP, not
-    supported yet), an SDP with no H.264 or JPEG track or with H.264 in RTP's interleaved mode, and a JPEG type or
+  - Final answers: 401 after the challenge's answer, 403, 404, 454, 461 to both RTP over the connection and over UDP
+    (multicast only), an SDP with no H.264 or JPEG track or with H.264 in RTP's interleaved mode, and a JPEG type or
     Q RFC 2435 reserves.
-  - Checked against GStreamer's RTSP server by hand, and nightly against mediamtx (docs/conformance.md, H.264 over RTSP
-    and JPEG over RTP).
-  - Not yet: RTP over UDP, RTSPS, H.265, JPEG over 2040 pixels.
+  - Checked against GStreamer's RTSP server by hand, and nightly against mediamtx, over UDP too (docs/conformance.md,
+    H.264 over RTSP, JPEG over RTP, RTP over UDP).
+  - Not yet: multicast, RTSPS, H.265, JPEG over 2040 pixels.
 - **Samples:** `tools/ManagedCodecs.Avalonia.Sample` (`mclive`) and `tools/ManagedCodecs.Wpf.Sample` (`mclive-wpf`)
   take either kind of URL.
 - **Cost:** a software decoder's. 1080p25 H.264 decodes in about 14 ms a frame on one thread (with 8 ms to convert),
   so a wall of cameras wants their low-resolution substreams. docs/decisions/2026-11-10-live-mjpeg-over-http.md and
-  docs/decisions/2026-11-10-live-rtsp-h264.md and docs/decisions/2026-11-12-live-rtsp-jpeg.md have the plans.
+  docs/decisions/2026-11-10-live-rtsp-h264.md, docs/decisions/2026-11-12-live-rtsp-jpeg.md and
+  docs/decisions/2026-11-14-live-rtsp-udp.md have the plans.
 
 ### Unity
 

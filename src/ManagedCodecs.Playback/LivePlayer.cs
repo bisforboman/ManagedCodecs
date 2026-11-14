@@ -27,6 +27,9 @@ namespace ManagedCodecs.Playback;
 public sealed class LivePlayer : IDisposable
 {
     private const int SpareLimit = 4;
+
+    // How long a UDP packet ahead of a missing one is held for it (docs/decisions/2026-11-14-live-rtsp-udp.md, decision 2).
+    private static readonly TimeSpan ReorderWindow = TimeSpan.FromMilliseconds(50);
     private static readonly TimeSpan FirstBackoff = TimeSpan.FromSeconds(0.5);
     private static readonly TimeSpan MaxBackoff = TimeSpan.FromSeconds(10);
 
@@ -248,7 +251,11 @@ public sealed class LivePlayer : IDisposable
                 // A refused or dropped connection, an error status, a stall or a body that isn't multipart: all may be
                 // gone on the next try, as cameras reboot and networks drop.
                 _error = connection.Stalled
-                    ? new TimeoutException($"Nothing received for {StallTimeout.TotalSeconds} s.", e)
+                    ? new TimeoutException(
+                        connection.Udp
+                            ? $"Nothing received for {StallTimeout.TotalSeconds} s over UDP (a firewall or NAT may be dropping it)."
+                            : $"Nothing received for {StallTimeout.TotalSeconds} s.",
+                        e)
                     : e;
             }
 
@@ -343,6 +350,7 @@ public sealed class LivePlayer : IDisposable
         Touch();
         var watchdog = WatchAsync(connection, cancel);
         RtspConnection? rtsp = null;
+        RtpUdpPorts? udp = null;
         Task? keepAlive = null;
         try
         {
@@ -361,7 +369,22 @@ public sealed class LivePlayer : IDisposable
                 throw new FatalException(new NotSupportedException("The camera sends H.264 in RTP's interleaved mode (packetization-mode=2), which isn't supported."));
             }
 
-            var setup = await Request(rtsp, "SETUP", Sdp.Resolve(baseUrl, track.Control), [new("Transport", "RTP/AVP/TCP;unicast;interleaved=0-1")], cancel.Token).ConfigureAwait(false);
+            // RTP over this connection; over UDP when the server refuses that (461; decision 1 of
+            // docs/decisions/2026-11-14-live-rtsp-udp.md).
+            string trackUrl = Sdp.Resolve(baseUrl, track.Control);
+            var setup = await rtsp.RequestAsync("SETUP", trackUrl, [new("Transport", "RTP/AVP/TCP;unicast;interleaved=0-1")], cancel.Token).ConfigureAwait(false);
+            if (setup.Status == 461)
+            {
+                udp = RtpUdpPorts.Bind(rtsp.LocalEndPoint.Address);
+                cancel.Token.Register(udp.Dispose);
+                connection.Udp = true;
+                setup = await Request(rtsp, "SETUP", trackUrl, [new("Transport", $"RTP/AVP;unicast;client_port={udp.RtpPort}-{udp.RtcpPort}")], cancel.Token).ConfigureAwait(false);
+            }
+            else
+            {
+                Check(setup, "SETUP");
+            }
+
             var session = setup.Header("Session") ?? throw new InvalidDataException("The camera's SETUP answer has no Session.");
             int semicolon = session.IndexOf(';');
             rtsp.Session = semicolon < 0 ? session.Trim() : session.Substring(0, semicolon).Trim();
@@ -371,57 +394,33 @@ public sealed class LivePlayer : IDisposable
                 timeout = TimeSpan.FromSeconds(Math.Max(2, int.Parse(match.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture)));
             }
 
-            int channel = 0;
-            if (setup.Header("Transport") is { } transport
-                && System.Text.RegularExpressions.Regex.Match(transport, @"interleaved\s*=\s*(\d+)") is { Success: true } interleaved)
-            {
-                channel = int.Parse(interleaved.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
-            }
+            var transport = RtspTransport.Parse(setup.Header("Transport"));
 
             string sessionUrl = Sdp.Resolve(baseUrl, sdp.SessionControl);
             await Request(rtsp, "PLAY", sessionUrl, [new("Range", "npt=0.000-")], cancel.Token).ConfigureAwait(false);
             keepAlive = KeepAliveAsync(rtsp, getParameter ? "GET_PARAMETER" : "OPTIONS", sessionUrl, timeout, cancel.Token);
 
-            if (track.Codec == SdpCodec.Jpeg)
+            var handle = track.Codec == SdpCodec.Jpeg ? JpegPackets(track.PayloadType, connection) : H264Packets(track, connection);
+            if (udp is null)
             {
-                await ReadJpegAsync(rtsp, channel, track.PayloadType, connection, cancel.Token).ConfigureAwait(false);
-                return;
+                await PumpTcpAsync(rtsp, transport.Channel, handle, cancel.Token).ConfigureAwait(false);
             }
-
-            int generation = Interlocked.Increment(ref _connection);
-            var depacketizer = new RtpH264Depacketizer(track.PayloadType, track.ParameterSets);
-            var units = new List<RtpAccessUnit>();
-            long lost = 0;
-            while (await rtsp.ReadAsync(cancel.Token).ConfigureAwait(false) is { } message)
+            else
             {
-                if (!message.IsPacket || message.Channel != channel)
+                var server = Plain(transport.Source ?? rtsp.RemoteEndPoint.Address);
+                if (transport.ServerRtpPort is { } serverRtp)
                 {
-                    continue; // keep-alives' answers, RTCP
+                    udp.Punch(new IPEndPoint(server, serverRtp), new IPEndPoint(server, transport.ServerRtcpPort ?? serverRtp + 1));
                 }
 
-                Touch();
-                depacketizer.Add(message.Data, units);
-                Interlocked.Add(ref _lost, depacketizer.LostPackets - lost);
-                lost = depacketizer.LostPackets;
-                foreach (var unit in units)
-                {
-                    Interlocked.Increment(ref _receivedCount);
-                    connection.Frames = true;
-                    SetState(LiveState.Playing);
-                    _units.Enqueue(new QueuedUnit(unit, _clock.Elapsed - _origin, generation));
-                }
-
-                if (units.Count > 0)
-                {
-                    units.Clear();
-                    _received.Set();
-                }
+                await PumpUdpAsync(rtsp, udp, server, transport.Ssrc, handle, cancel.Token).ConfigureAwait(false);
             }
         }
         finally
         {
             cancel.Cancel();
             rtsp?.Dispose();
+            udp?.Dispose();
             await watchdog.ConfigureAwait(false);
             if (keepAlive is not null)
             {
@@ -430,24 +429,46 @@ public sealed class LivePlayer : IDisposable
         }
     }
 
+    // H.264 over RTP (RFC 6184): access units in order to the decoding thread, each with its arrival time.
+    private Action<byte[]> H264Packets(SdpVideoTrack track, Connection connection)
+    {
+        int generation = Interlocked.Increment(ref _connection);
+        var depacketizer = new RtpH264Depacketizer(track.PayloadType, track.ParameterSets);
+        var units = new List<RtpAccessUnit>();
+        long lost = 0;
+        return packet =>
+        {
+            depacketizer.Add(packet, units);
+            Interlocked.Add(ref _lost, depacketizer.LostPackets - lost);
+            lost = depacketizer.LostPackets;
+            foreach (var unit in units)
+            {
+                Interlocked.Increment(ref _receivedCount);
+                connection.Frames = true;
+                SetState(LiveState.Playing);
+                _units.Enqueue(new QueuedUnit(unit, _clock.Elapsed - _origin, generation));
+            }
+
+            if (units.Count > 0)
+            {
+                units.Clear();
+                _received.Set();
+            }
+        };
+    }
+
     // JPEG over RTP (RFC 2435): each frame rebuilt as a whole JPEG and offered to decoding as one over HTTP is; an
     // incomplete one is dropped (docs/decisions/2026-11-12-live-rtsp-jpeg.md, decision 1).
-    private async Task ReadJpegAsync(RtspConnection rtsp, int channel, int payloadType, Connection connection, CancellationToken token)
+    private Action<byte[]> JpegPackets(int payloadType, Connection connection)
     {
         var depacketizer = new RtpJpegDepacketizer(payloadType);
         var frames = new List<RtpJpegFrame>();
         long lost = 0;
-        while (await rtsp.ReadAsync(token).ConfigureAwait(false) is { } message)
+        return packet =>
         {
-            if (!message.IsPacket || message.Channel != channel)
-            {
-                continue; // keep-alives' answers, RTCP
-            }
-
-            Touch();
             try
             {
-                depacketizer.Add(message.Data, frames);
+                depacketizer.Add(packet, frames);
             }
             catch (NotSupportedException e)
             {
@@ -472,8 +493,95 @@ public sealed class LivePlayer : IDisposable
             }
 
             frames.Clear();
+        };
+    }
+
+    // RTP interleaved on the RTSP connection: the packets of the track's channel, until the connection ends.
+    private async Task PumpTcpAsync(RtspConnection rtsp, int channel, Action<byte[]> handle, CancellationToken token)
+    {
+        while (await rtsp.ReadAsync(token).ConfigureAwait(false) is { } message)
+        {
+            if (!message.IsPacket || message.Channel != channel)
+            {
+                continue; // keep-alives' answers, RTCP
+            }
+
+            Touch();
+            handle(message.Data);
         }
     }
+
+    // RTP over UDP: the server's packets (its address, and its SSRC when SETUP's answer gave one) through the reorder
+    // window, until the RTSP connection, which still carries the keep-alives, ends.
+    private async Task PumpUdpAsync(RtspConnection rtsp, RtpUdpPorts udp, IPAddress server, uint? ssrc, Action<byte[]> handle, CancellationToken token)
+    {
+        var reorder = new RtpReorderBuffer(ReorderWindow);
+        var ready = new List<byte[]>();
+        var control = DrainAsync(rtsp, token);
+        var never = Task.Delay(Timeout.Infinite, token);
+        Task<(byte[] Packet, IPEndPoint From)>? receive = null;
+        try
+        {
+            while (true)
+            {
+                receive ??= udp.ReceiveAsync();
+                var wait = reorder.Remaining(_clock.Elapsed) is { } remaining ? _clock.Delay(remaining, token) : never;
+                var done = await Task.WhenAny(receive, control, wait).ConfigureAwait(false);
+                if (done == control)
+                {
+                    await control.ConfigureAwait(false); // the connection ended, or failed: its exception
+                    return;
+                }
+
+                // Stopped, or the watchdog's stall: as the read of the RTSP connection throws over TCP.
+                token.ThrowIfCancellationRequested();
+                if (done == receive)
+                {
+                    var (packet, from) = await receive.ConfigureAwait(false);
+                    receive = null;
+                    if (!Plain(from.Address).Equals(server) || (ssrc is { } expected && (packet.Length < 12 || Ssrc(packet) != expected)))
+                    {
+                        continue; // not this session's stream
+                    }
+
+                    Touch();
+                    reorder.Add(packet, _clock.Elapsed, ready);
+                }
+                else
+                {
+                    reorder.Poll(_clock.Elapsed, ready);
+                }
+
+                foreach (var packet in ready)
+                {
+                    handle(packet);
+                }
+
+                ready.Clear();
+            }
+        }
+        finally
+        {
+            // The ports close with the session (the caller disposes them), ending a receive still waiting.
+            Observe(receive);
+            Observe(control);
+        }
+    }
+
+    // Reads the RTSP connection (keep-alives' answers) until it ends.
+    private static async Task DrainAsync(RtspConnection rtsp, CancellationToken token)
+    {
+        while (await rtsp.ReadAsync(token).ConfigureAwait(false) is not null)
+        {
+        }
+    }
+
+    private static uint Ssrc(byte[] packet) => (uint)((packet[8] << 24) | (packet[9] << 16) | (packet[10] << 8) | packet[11]);
+
+    private static IPAddress Plain(IPAddress address) => address.IsIPv4MappedToIPv6 ? address.MapToIPv4() : address;
+
+    // A task left running when the session ends: its exception (the closed socket's) is expected, not unobserved.
+    private static void Observe(Task? task) => task?.ContinueWith(t => _ = t.Exception, CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
 
     // A JPEG for decoding: it replaces one still waiting, which is skipped (newest wins before decoding).
     private void Offer(Received received)
@@ -486,11 +594,14 @@ public sealed class LivePlayer : IDisposable
         _received.Set();
     }
 
-    // Sends a request and checks its answer: 401 (after the challenge's answer), 403, 404, 454 and 461 are final, as a
-    // retry gets the same; another failure may pass on the next connection.
-    private static async Task<RtspMessage> Request(RtspConnection rtsp, string method, string url, KeyValuePair<string, string>[] headers, CancellationToken token)
+    // Sends a request and checks its answer (Check).
+    private static async Task<RtspMessage> Request(RtspConnection rtsp, string method, string url, KeyValuePair<string, string>[] headers, CancellationToken token) =>
+        Check(await rtsp.RequestAsync(method, url, headers, token).ConfigureAwait(false), method);
+
+    // A request's answer: 401 (after the challenge's answer), 403, 404, 454 and 461 are final, as a retry gets the same;
+    // another failure may pass on the next connection.
+    private static RtspMessage Check(RtspMessage response, string method)
     {
-        var response = await rtsp.RequestAsync(method, url, headers, token).ConfigureAwait(false);
         if (response.Status is >= 200 and < 300)
         {
             return response;
@@ -504,7 +615,7 @@ public sealed class LivePlayer : IDisposable
 
         if (response.Status == 461)
         {
-            throw new FatalException(new NotSupportedException($"The camera refused RTP over the RTSP connection ({response.Status} {response.Reason}); RTP over UDP isn't supported yet."));
+            throw new FatalException(new NotSupportedException($"The camera refused RTP both over the RTSP connection and over UDP ({response.Status} {response.Reason} to {method}); multicast isn't supported."));
         }
 
         throw error;
@@ -776,6 +887,7 @@ public sealed class LivePlayer : IDisposable
     {
         public volatile bool Stalled;
         public volatile bool Frames;
+        public volatile bool Udp;
     }
 
     // A reason not to connect again (an answer a retry won't change); its inner exception is the player's Error.

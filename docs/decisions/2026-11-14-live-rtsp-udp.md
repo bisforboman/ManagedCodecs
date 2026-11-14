@@ -101,3 +101,13 @@ Asked with the multiple-choice prompt; the owner took each recommendation (2026-
 
 A consumer-visible change (a server that answered 461 now plays), so a CHANGELOG line under "Unreleased" when it is
 built. With 1 (a), no public API changes.
+
+## Since
+
+- Built (2026-11-14):
+  - `RtpReorderBuffer`, `RtpUdpPorts` and `RtspTransport` (internal, Playback).
+  - `LivePlayer`'s fallback on 461, with one packet pump per transport feeding the same H.264 and JPEG handlers.
+  - `RtspTestServer` over UDP.
+  - The checks are in docs/conformance.md, RTP over UDP.
+- The nightly run (tools/rtsp-nightly.py) gained mediamtx with UDP only, FFmpeg pushing over UDP.
+

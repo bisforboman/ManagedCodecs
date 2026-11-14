@@ -279,7 +279,7 @@ public class LiveRtspTests
     }
 
     // The recording's packets grouped by access unit (a unit ends at the marker bit).
-    private static List<List<byte[]>> AccessUnits(string name)
+    internal static List<List<byte[]>> AccessUnits(string name)
     {
         var units = new List<List<byte[]>> { new() };
         foreach (var packet in RtpH264DepacketizerTests.Recording(name))
@@ -296,7 +296,7 @@ public class LiveRtspTests
     }
 
     // For each unit, the RGBA of the newest frame H264Decoder gives for it (null for none), as the player converts it.
-    private static List<byte[]?> ExpectedFrames(string name, List<List<byte[]>> units)
+    internal static List<byte[]?> ExpectedFrames(string name, List<List<byte[]>> units)
     {
         var depacketizer = new RtpH264Depacketizer(96, RtpH264DepacketizerTests.SdpParameterSets(name));
         var decoder = new H264Decoder(ReadOnlySpan<byte>.Empty) { ConcealErrors = true };

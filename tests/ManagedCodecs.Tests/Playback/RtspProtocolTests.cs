@@ -64,6 +64,18 @@ public class RtspProtocolTests
         Assert.Equal((codec, payloadType), (track.Codec.ToString(), track.PayloadType));
     }
 
+    [Theory]
+    [InlineData("RTP/AVP/TCP;unicast;interleaved=2-3", 2, null, null, null, null)]
+    [InlineData("RTP/AVP;unicast;client_port=5000-5001;server_port=8000-8001;ssrc=D93F56E4", 0, 8000, 8001, 0xD93F56E4u, null)]
+    [InlineData("RTP/AVP;unicast;client_port=5000-5001;source=10.0.0.9;server_port=6970;ssrc=zz", 0, 6970, null, null, "10.0.0.9")]
+    [InlineData("RTP/AVP;unicast;server_port=1-2,RTP/AVP/TCP;interleaved=4-5", 0, 1, 2, null, null)] // the first transport only
+    [InlineData(null, 0, null, null, null, null)]
+    public void ReadsTheTransportAnswer(string? header, int channel, int? rtp, int? rtcp, uint? ssrc, string? source)
+    {
+        var transport = RtspTransport.Parse(header);
+        Assert.Equal((channel, rtp, rtcp, ssrc, source), (transport.Channel, transport.ServerRtpPort, transport.ServerRtcpPort, transport.Ssrc, transport.Source?.ToString()));
+    }
+
     [Fact]
     public void ToleratesParameterSetsThatArentBase64()
     {

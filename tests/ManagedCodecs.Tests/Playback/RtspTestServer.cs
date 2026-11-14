@@ -20,6 +20,8 @@ internal sealed record RtspRequest(int Connection, string Method, string Url, Di
 internal sealed class RtspTestServer : IDisposable
 {
     private readonly TcpListener _listener = new(IPAddress.Loopback, 0);
+    private readonly UdpClient _rtp = new(new IPEndPoint(IPAddress.Loopback, 0));
+    private readonly UdpClient _rtcp = new(new IPEndPoint(IPAddress.Loopback, 0));
     private readonly CancellationTokenSource _stop = new();
     private readonly Task _accepting;
     private int _connections;
@@ -30,7 +32,23 @@ internal sealed class RtspTestServer : IDisposable
         OnPlay = onPlay;
         _listener.Start();
         _accepting = AcceptAsync();
+        _ = RecordPunchesAsync(_rtp, "rtp");
+        _ = RecordPunchesAsync(_rtcp, "rtcp");
     }
+
+    /// <summary>
+    /// RTP over UDP only: SETUP asking for RTP over the RTSP connection is answered 461, as mediamtx answers it with
+    /// <c>rtspTransports: [udp]</c>. A SETUP asking for UDP is accepted either way.
+    /// </summary>
+    public bool UdpOnly { get; set; }
+
+    /// <summary>The SSRC SETUP's answer gives for UDP, or null to give none.</summary>
+    public uint? Ssrc { get; set; }
+
+    /// <summary>The datagrams that reached the server's UDP ports ("rtp" or "rtcp"): the client's punch packets.</summary>
+    public ConcurrentQueue<(string Port, byte[] Data)> Punches { get; } = new();
+
+    public IPEndPoint RtpEndPoint => (IPEndPoint)_rtp.Client.LocalEndPoint!;
 
     public string Sdp { get; set; }
 
@@ -63,6 +81,8 @@ internal sealed class RtspTestServer : IDisposable
     {
         _stop.Cancel();
         _listener.Stop();
+        _rtp.Dispose();
+        _rtcp.Dispose();
         try
         {
             _accepting.Wait(TimeSpan.FromSeconds(5));
@@ -74,6 +94,21 @@ internal sealed class RtspTestServer : IDisposable
 
     [SuppressMessage("Security", "CA5351:Do Not Use Broken Cryptographic Algorithms", Justification = "The test server checks RFC 2617 Digest answers, which are defined over MD5.")]
     private static string Md5(string text) => Convert.ToHexStringLower(MD5.HashData(Encoding.UTF8.GetBytes(text)));
+
+    private async Task RecordPunchesAsync(UdpClient socket, string port)
+    {
+        try
+        {
+            while (true)
+            {
+                var received = await socket.ReceiveAsync(_stop.Token);
+                Punches.Enqueue((port, received.Buffer));
+            }
+        }
+        catch (Exception e) when (e is OperationCanceledException or ObjectDisposedException or SocketException)
+        {
+        }
+    }
 
     private async Task AcceptAsync()
     {
@@ -103,6 +138,7 @@ internal sealed class RtspTestServer : IDisposable
             var writing = new SemaphoreSlim(1, 1);
             var reader = new StreamReader(stream, Encoding.UTF8);
             Task? playing = null;
+            IPEndPoint? udpClient = null;
             using var connection = CancellationTokenSource.CreateLinkedTokenSource(token);
             try
             {
@@ -111,6 +147,11 @@ internal sealed class RtspTestServer : IDisposable
                     Requests.Enqueue(request);
                     string cseq = request.Headers.GetValueOrDefault("CSeq", "0");
                     var (status, reason, headers, body) = Answer(request, index);
+                    if (request.Method == "SETUP" && status == 200 && ClientPort(request) is { } port)
+                    {
+                        udpClient = new IPEndPoint(IPAddress.Loopback, port);
+                    }
+
                     var head = new StringBuilder($"RTSP/1.0 {status} {reason}\r\nCSeq: {cseq}\r\n");
                     foreach (var (name, value) in headers)
                     {
@@ -136,7 +177,7 @@ internal sealed class RtspTestServer : IDisposable
 
                     if (request.Method == "PLAY" && status == 200 && playing is null)
                     {
-                        var play = new RtspPlay(stream, writing, index, connection.Token);
+                        var play = new RtspPlay(stream, writing, index, connection.Token, udpClient is { } target ? (_rtp, target) : null);
                         playing = Task.Run(async () =>
                         {
                             try
@@ -185,10 +226,20 @@ internal sealed class RtspTestServer : IDisposable
         {
             "OPTIONS" => (200, "OK", [("Public", "OPTIONS, DESCRIBE, SETUP, PLAY, GET_PARAMETER, TEARDOWN")], ""),
             "DESCRIBE" => (200, "OK", [("Content-Base", Uri + "/"), ("Content-Type", "application/sdp")], Sdp),
+            "SETUP" when ClientPort(request) is { } port =>
+                (200, "OK", [("Session", $"S{index}ession;timeout={SessionTimeout}"), ("Transport", $"RTP/AVP;unicast;client_port={port}-{port + 1};server_port={RtpEndPoint.Port}-{((IPEndPoint)_rtcp.Client.LocalEndPoint!).Port}{(Ssrc is { } ssrc ? $";ssrc={ssrc:X8}" : "")}")], ""),
+            "SETUP" when UdpOnly => (461, "Unsupported Transport", [], ""),
             "SETUP" => (200, "OK", [("Session", $"S{index}ession;timeout={SessionTimeout}"), ("Transport", "RTP/AVP/TCP;unicast;interleaved=0-1")], ""),
             _ => (200, "OK", [], ""),
         };
     }
+
+    // The client's RTP port when SETUP asks for RTP over UDP (client_port=), else null.
+    private static int? ClientPort(RtspRequest request) =>
+        request.Method == "SETUP" && request.Headers.TryGetValue("Transport", out var transport)
+            && Regex.Match(transport, @"client_port=(\d+)") is { Success: true } match
+            ? int.Parse(match.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture)
+            : null;
 
     private bool Authorized(RtspRequest request)
     {
@@ -238,8 +289,14 @@ internal sealed class RtspTestServer : IDisposable
 }
 
 /// <summary>What a test's <see cref="RtspTestServer.OnPlay"/> sends with: packets interleaved on the connection.</summary>
-internal sealed class RtspPlay(Stream stream, SemaphoreSlim writing, int connection, CancellationToken token)
+internal sealed class RtspPlay(Stream stream, SemaphoreSlim writing, int connection, CancellationToken token, (UdpClient Socket, IPEndPoint Client)? udp = null)
 {
+    /// <summary>Whether SETUP chose RTP over UDP: <see cref="SendAsync"/> then sends from the server's RTP port.</summary>
+    public bool Udp => udp is not null;
+
+    /// <summary>Where the client receives RTP over UDP.</summary>
+    public IPEndPoint? UdpClient => udp?.Client;
+
     public int Connection { get; } = connection;
 
     public CancellationToken Token { get; } = token;
@@ -249,6 +306,12 @@ internal sealed class RtspPlay(Stream stream, SemaphoreSlim writing, int connect
 
     public async Task SendAsync(byte[] packet, int channel = 0)
     {
+        if (udp is { } target)
+        {
+            await target.Socket.SendAsync(packet, target.Client, Token);
+            return;
+        }
+
         await writing.WaitAsync(Token);
         try
         {

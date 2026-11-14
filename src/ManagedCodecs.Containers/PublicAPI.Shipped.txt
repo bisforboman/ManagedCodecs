@@ -64,6 +64,7 @@ ManagedCodecs.Containers.MxfDemuxer.ReadPacketInfo() -> System.Collections.Gener
 ManagedCodecs.Containers.MxfDemuxer.ReadPackets() -> System.Collections.Generic.IEnumerable<ManagedCodecs.Packet>!
 ManagedCodecs.Containers.MxfDemuxer.ReadPacketsAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerable<ManagedCodecs.Packet>!
 ManagedCodecs.Containers.MxfDemuxer.Seek(long pts, int streamIndex) -> void
+ManagedCodecs.Containers.MxfDemuxer.StartTimecode.get -> ManagedCodecs.Timecode?
 ManagedCodecs.Containers.MxfDemuxer.Video.get -> ManagedCodecs.VideoStreamInfo?
 ManagedCodecs.Containers.WavDemuxer
 ManagedCodecs.Containers.WavDemuxer.Audio.get -> ManagedCodecs.AudioStreamInfo!

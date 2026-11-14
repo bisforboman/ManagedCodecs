@@ -167,6 +167,7 @@ ManagedCodecs.Containers.MxfDemuxer.ReadPacketInfo() -> System.Collections.Gener
 ManagedCodecs.Containers.MxfDemuxer.ReadPackets() -> System.Collections.Generic.IEnumerable<ManagedCodecs.Packet>!
 ManagedCodecs.Containers.MxfDemuxer.ReadPacketsAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerable<ManagedCodecs.Packet>!
 ManagedCodecs.Containers.MxfDemuxer.Seek(long pts, int streamIndex) -> void
+ManagedCodecs.Containers.MxfDemuxer.StartTimecode.get -> ManagedCodecs.Timecode?
 ManagedCodecs.Containers.MxfDemuxer.Video.get -> ManagedCodecs.VideoStreamInfo?
 ManagedCodecs.Containers.WavDemuxer
 ManagedCodecs.Containers.WavDemuxer.Audio.get -> ManagedCodecs.AudioStreamInfo!
@@ -535,6 +536,17 @@ ManagedCodecs.Thumbnails.VideoInfo.Width.get -> int
 ManagedCodecs.Thumbnails.VideoInfo.Width.init -> void
 ManagedCodecs.Thumbnails.VideoProbe
 ManagedCodecs.Thumbnails.VideoThumbnail
+ManagedCodecs.Timecode
+ManagedCodecs.Timecode.Base.get -> int
+ManagedCodecs.Timecode.Base.init -> void
+ManagedCodecs.Timecode.Deconstruct(out long FrameNumber, out int Base, out bool DropFrame) -> void
+ManagedCodecs.Timecode.DropFrame.get -> bool
+ManagedCodecs.Timecode.DropFrame.init -> void
+ManagedCodecs.Timecode.Equals(ManagedCodecs.Timecode other) -> bool
+ManagedCodecs.Timecode.FrameNumber.get -> long
+ManagedCodecs.Timecode.FrameNumber.init -> void
+ManagedCodecs.Timecode.Timecode() -> void
+ManagedCodecs.Timecode.Timecode(long FrameNumber, int Base, bool DropFrame) -> void
 ManagedCodecs.VideoFrame
 ManagedCodecs.VideoFrame.ChromaLocation.get -> ManagedCodecs.ChromaLocation
 ManagedCodecs.VideoFrame.ColorMatrix.get -> ManagedCodecs.ColorMatrix
@@ -637,6 +649,8 @@ override ManagedCodecs.Thumbnails.ThumbnailOptions.ToString() -> string!
 override ManagedCodecs.Thumbnails.VideoInfo.Equals(object? obj) -> bool
 override ManagedCodecs.Thumbnails.VideoInfo.GetHashCode() -> int
 override ManagedCodecs.Thumbnails.VideoInfo.ToString() -> string!
+override ManagedCodecs.Timecode.GetHashCode() -> int
+override ManagedCodecs.Timecode.ToString() -> string!
 override ManagedCodecs.VideoStreamInfo.Equals(object? obj) -> bool
 override ManagedCodecs.VideoStreamInfo.GetHashCode() -> int
 override ManagedCodecs.VideoStreamInfo.ToString() -> string!
@@ -682,6 +696,8 @@ static ManagedCodecs.Thumbnails.VideoThumbnail.Create(System.IO.Stream! stream, 
 static ManagedCodecs.Thumbnails.VideoThumbnail.Create(string! path) -> ManagedCodecs.Thumbnails.Thumbnail!
 static ManagedCodecs.Thumbnails.VideoThumbnail.Create(string! path, ManagedCodecs.Thumbnails.ThumbnailOptions? options) -> ManagedCodecs.Thumbnails.Thumbnail!
 static ManagedCodecs.Thumbnails.VideoThumbnail.CreateAsync(System.IO.Stream! stream, ManagedCodecs.Thumbnails.ThumbnailOptions? options = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<ManagedCodecs.Thumbnails.Thumbnail!>!
+static ManagedCodecs.Timecode.operator !=(ManagedCodecs.Timecode left, ManagedCodecs.Timecode right) -> bool
+static ManagedCodecs.Timecode.operator ==(ManagedCodecs.Timecode left, ManagedCodecs.Timecode right) -> bool
 static ManagedCodecs.VideoStreamInfo.operator !=(ManagedCodecs.VideoStreamInfo? left, ManagedCodecs.VideoStreamInfo? right) -> bool
 static ManagedCodecs.VideoStreamInfo.operator ==(ManagedCodecs.VideoStreamInfo? left, ManagedCodecs.VideoStreamInfo? right) -> bool
 ~override ManagedCodecs.Packet.Equals(object obj) -> bool
@@ -693,3 +709,4 @@ static ManagedCodecs.VideoStreamInfo.operator ==(ManagedCodecs.VideoStreamInfo? 
 ~override ManagedCodecs.Playback.PlaybackStatistics.Equals(object obj) -> bool
 ~override ManagedCodecs.Playback.PlaybackStatistics.ToString() -> string
 ~override ManagedCodecs.Rational.Equals(object obj) -> bool
+~override ManagedCodecs.Timecode.Equals(object obj) -> bool

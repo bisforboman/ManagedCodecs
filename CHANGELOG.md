@@ -11,7 +11,11 @@ share internals, so each depends on the others at exactly its own version (`[X]`
 then reports a mix of versions (NU1107, or NU1608 for a newer one referenced directly) rather than letting it fail at
 run time.
 
-## Unreleased
+## 0.15.0 – 2026-11-14
+
+Sound-only playback in MonoGame (`AudioTrack`), MXF start timecodes (`MxfDemuxer.StartTimecode`, `Timecode`), and live
+cameras that refuse RTP over TCP, played over UDP. New public API, hence a minor version; code built against 0.14 keeps
+working.
 
 ### Added
 

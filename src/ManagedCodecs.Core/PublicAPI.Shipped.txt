@@ -229,6 +229,17 @@ ManagedCodecs.Rational.Numerator.init -> void
 ManagedCodecs.Rational.Rational() -> void
 ManagedCodecs.Rational.Rational(int Numerator, int Denominator) -> void
 ManagedCodecs.Rational.ToDouble() -> double
+ManagedCodecs.Timecode
+ManagedCodecs.Timecode.Base.get -> int
+ManagedCodecs.Timecode.Base.init -> void
+ManagedCodecs.Timecode.Deconstruct(out long FrameNumber, out int Base, out bool DropFrame) -> void
+ManagedCodecs.Timecode.DropFrame.get -> bool
+ManagedCodecs.Timecode.DropFrame.init -> void
+ManagedCodecs.Timecode.Equals(ManagedCodecs.Timecode other) -> bool
+ManagedCodecs.Timecode.FrameNumber.get -> long
+ManagedCodecs.Timecode.FrameNumber.init -> void
+ManagedCodecs.Timecode.Timecode() -> void
+ManagedCodecs.Timecode.Timecode(long FrameNumber, int Base, bool DropFrame) -> void
 ManagedCodecs.VideoFrame
 ManagedCodecs.VideoFrame.ChromaLocation.get -> ManagedCodecs.ChromaLocation
 ManagedCodecs.VideoFrame.ColorMatrix.get -> ManagedCodecs.ColorMatrix
@@ -317,6 +328,8 @@ override ManagedCodecs.Packet.GetHashCode() -> int
 override ManagedCodecs.PacketInfo.GetHashCode() -> int
 override ManagedCodecs.Rational.GetHashCode() -> int
 override ManagedCodecs.Rational.ToString() -> string!
+override ManagedCodecs.Timecode.GetHashCode() -> int
+override ManagedCodecs.Timecode.ToString() -> string!
 override ManagedCodecs.VideoStreamInfo.Equals(object? obj) -> bool
 override ManagedCodecs.VideoStreamInfo.GetHashCode() -> int
 override ManagedCodecs.VideoStreamInfo.ToString() -> string!
@@ -334,6 +347,8 @@ static ManagedCodecs.PixelFormatExtensions.PlaneSize(this ManagedCodecs.PixelFor
 static ManagedCodecs.Rational.Reduce(long numerator, long denominator) -> ManagedCodecs.Rational
 static ManagedCodecs.Rational.operator !=(ManagedCodecs.Rational left, ManagedCodecs.Rational right) -> bool
 static ManagedCodecs.Rational.operator ==(ManagedCodecs.Rational left, ManagedCodecs.Rational right) -> bool
+static ManagedCodecs.Timecode.operator !=(ManagedCodecs.Timecode left, ManagedCodecs.Timecode right) -> bool
+static ManagedCodecs.Timecode.operator ==(ManagedCodecs.Timecode left, ManagedCodecs.Timecode right) -> bool
 static ManagedCodecs.VideoStreamInfo.operator !=(ManagedCodecs.VideoStreamInfo? left, ManagedCodecs.VideoStreamInfo? right) -> bool
 static ManagedCodecs.VideoStreamInfo.operator ==(ManagedCodecs.VideoStreamInfo? left, ManagedCodecs.VideoStreamInfo? right) -> bool
 ~override ManagedCodecs.Packet.Equals(object obj) -> bool
@@ -341,3 +356,4 @@ static ManagedCodecs.VideoStreamInfo.operator ==(ManagedCodecs.VideoStreamInfo? 
 ~override ManagedCodecs.PacketInfo.Equals(object obj) -> bool
 ~override ManagedCodecs.PacketInfo.ToString() -> string
 ~override ManagedCodecs.Rational.Equals(object obj) -> bool
+~override ManagedCodecs.Timecode.Equals(object obj) -> bool

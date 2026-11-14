@@ -1,6 +1,6 @@
 # Live camera viewing, step 4: RTP over UDP (2026-11-14)
 
-A plan, for the owner to decide on (Decisions, below). Nothing here is built yet. Steps 2 and 3 (RTSP with H.264,
+A plan, decided on by the owner (Decided, below). Nothing here is built yet. Steps 2 and 3 (RTSP with H.264,
 then JPEG: docs/decisions/2026-11-10-live-rtsp-h264.md and docs/decisions/2026-11-12-live-rtsp-jpeg.md, built and
 released in 0.13.0 and 0.14.0) take RTP only over the RTSP connection itself. A camera or server that won't do that
 answers SETUP with 461 Unsupported Transport, and `LivePlayer` gives up: "RTP over UDP isn't supported yet".
@@ -75,25 +75,25 @@ answers SETUP with 461 Unsupported Transport, and `LivePlayer` gives up: "RTP ov
 - **By hand**: GStreamer's RTSP server offers UDP too (`tools/gst-rtsp-server.py`). An IP camera if one is in reach,
   listed in docs/conformance.md.
 
-## Decisions
+## Decided
 
-For the owner, with a recommendation each.
+Asked with the multiple-choice prompt; the owner took each recommendation (2026-11-14).
 
-1. **When UDP is used**:
+1. **When UDP is used. Decided: (a), only after a 461.**
    - **(a) Only after a 461 to RTP over TCP** (recommended). No API change. TCP stays the default, since it works
      through NAT and firewalls and loses nothing, and UDP serves the servers that refuse it.
    - (b) (a) plus a public `RtspSource.Transport` (`Automatic`, `Tcp`, `Udp`), for a viewer that wants UDP's lower
      latency on a LAN, or TCP only. It is new public API, and nothing so far needs it; it can come later.
    - (c) UDP first, then TCP, as FFmpeg does. A firewall that drops UDP then costs a stall timeout (5 s) on every
      connection before TCP is tried.
-2. **The reorder window**:
+2. **The reorder window. Decided: (a), 50 ms by arrival.**
    - **(a) 50 ms, by arrival time** (recommended). Short enough not to be seen, and longer than the reordering a LAN or
      a Wi-Fi hop shows. A stall in the window can't hold a frame back for longer.
    - (b) None: a packet out of order is lost, as over TCP now. Simpler, but over Wi-Fi it would turn reordering into
      concealed damage.
    - (c) A count of packets (FFmpeg's approach). How long it holds a packet back then depends on the stream's
      bitrate: a 4K stream gets through the count far faster than a substream.
-3. **RTCP receiver reports**:
+3. **RTCP receiver reports. Decided: (a), none at first.**
    - **(a) None at first** (recommended). mediamtx didn't need them in 75 s, and the RTSP keep-alives keep the
      session. If a camera times out a reader that sends none, add them then, from what that camera shows.
    - (b) Send them every 5 s from the start (RFC 3550, 6.4.2: SSRC, loss and jitter): about a hundred lines more, for

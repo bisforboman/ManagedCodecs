@@ -121,6 +121,31 @@ internal static class Klv
         return checked(position + KeyLength + size);
     }
 
+    /// <summary>
+    /// <see cref="ReadHeader"/>, or false where the file ends inside the key or the length: a file cut short there, read
+    /// up to its last whole item (FFmpeg's demuxer stops there too).
+    /// </summary>
+    public static bool TryReadHeader(Stream stream, long position, Span<byte> key, out long valueStart, out long length)
+    {
+        valueStart = 0;
+        length = 0;
+        long left = stream.Length - position;
+        if (left < KeyLength + 1)
+        {
+            return false;
+        }
+
+        stream.Position = position + KeyLength;
+        int first = stream.ReadByte();
+        if (first >= 0x80 && left < KeyLength + 1 + (first & 0x7F))
+        {
+            return false;
+        }
+
+        valueStart = ReadHeader(stream, position, key, out length);
+        return true;
+    }
+
     /// <summary>Upper-case hex digits of <paramref name="bytes"/> (Convert.ToHexString, which .NET Standard 2.1 lacks).</summary>
     public static string Hex(ReadOnlySpan<byte> bytes)
     {

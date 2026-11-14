@@ -139,3 +139,4 @@ built. No public API changes.
   nightly run publishes FFmpeg's packets itself, with the one table sent as two.
 - Types 64 and 65 come from GStreamer when the JPEGs it is given have restart markers (Pillow 12's
   `restart_marker_rows`): `jpegenc` writes none.
+- Next: RTP over UDP, for servers that answer 461 (docs/decisions/2026-11-14-live-rtsp-udp.md).

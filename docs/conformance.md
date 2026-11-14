@@ -187,6 +187,37 @@ Real servers:
   - `mcdec --live` checks each frame shown against the clip's. The first run (2026-11-12) showed 100 frames, all the
     clip's, none damaged.
 
+### RTP over UDP
+
+`LivePlayer` asks for RTP over UDP when a server answers 461 to RTP over the RTSP connection
+(docs/decisions/2026-11-14-live-rtsp-udp.md). The loopback interface loses and reorders nothing, so the test server does
+it on purpose.
+
+- **`RtpReorderBufferTests`** checks the reorder window (50 ms by arrival) on hand-made packets and times:
+  - packets in order pass at once, and packets swapped within the window come out in order;
+  - a gap is given up once its first held packet has waited the window, and the missing packet, coming after, is
+    dropped;
+  - duplicates are dropped, held or already passed on;
+  - sequence numbers round the wrap.
+- **`LiveRtspUdpTests`** runs `RtspTestServer` set to answer 461 to RTP over the connection, as mediamtx with UDP only
+  does:
+  - In lockstep, every H.264 frame shown over UDP is `H264Decoder`'s for the units so far, and every JPEG frame the
+    JPEG that was sent.
+  - SETUP goes twice, TCP then UDP from an even port and the next, and a punch packet reaches each server port: an RTP
+    header and an empty receiver report.
+  - Packets swapped, sent twice, or interleaved with packets of another SSRC or from another address (127.0.0.2) change
+    no frame and lose nothing. The strangers are numbered as the next packet, so that taken in, they would push it out
+    as a duplicate.
+  - A packet 300 ms late drops its frame and counts as lost.
+  - A stall says UDP was in use.
+- **`RtspProtocolTests`** reads SETUP's `Transport` answers: `interleaved`, `server_port`, `ssrc`, `source`, and only
+  the first of several transports.
+- **Mutation entries:** the fallback on 461, the reorder window, and the address and SSRC filters.
+- **mediamtx 1.21.3, nightly** (tools/rtsp-nightly.py), with `rtspTransports: [udp]`, FFmpeg pushing over UDP too. It
+  answers our first SETUP with 461, as measured for the note. The first run (2026-11-14) showed 100 frames, all the
+  clip's, with none lost or damaged and no reconnects.
+- **Not tried yet:** a real network that loses or reorders packets, a NAT between camera and viewer, and an IP camera.
+
 ## Real films
 
 Every sample above is a test pattern encoded to isolate a feature. `tools/realworld.py` (nightly, `realworld.yml`, a job

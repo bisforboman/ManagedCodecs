@@ -2,8 +2,9 @@
 """LivePlayer against a real RTSP server (docs/decisions/2026-11-10-live-rtsp-h264.md, decision 4): mediamtx serves
 FFmpeg's push of a clip in a loop, and `mcdec --live` plays it, checking each frame it shows against the clip's own
 frames (tools/ManagedCodecs.Cli/LiveCheck.cs). An H.264 clip once per authentication method mediamtx offers (Basic,
-Digest), and an MJPEG one with Digest, which mediamtx sends as JPEG over RTP (RFC 2435;
-docs/decisions/2026-11-12-live-rtsp-jpeg.md).
+Digest), an MJPEG one with Digest, which mediamtx sends as JPEG over RTP (RFC 2435;
+docs/decisions/2026-11-12-live-rtsp-jpeg.md), and the H.264 one again with mediamtx serving RTP over UDP only: it
+answers 461 to RTP over the RTSP connection, and LivePlayer takes UDP (docs/decisions/2026-11-14-live-rtsp-udp.md).
 Fails on a frame not in the clip, a lost packet, a damaged frame, a reconnect, or too few frames. mediamtx is
 downloaded once, pinned by SHA-256, into samples/realworld/ (gitignored). Nightly (realworld.yml), not on pull
 requests: the required checks use the loopback server in the tests.
@@ -39,7 +40,7 @@ MEDIAMTX = {
 USER, PASSWORD = "viewer", "s3cret"
 PORT = 8554
 
-# Only RTSP over TCP (what LivePlayer speaks), the publisher from this machine without a password, a reader with one.
+# One RTP transport (tcp, or udp to check LivePlayer's fallback to it), the publisher from this machine without a password, a reader with one.
 CONFIG = """\
 logLevel: info
 api: false
@@ -51,7 +52,7 @@ hls: false
 webrtc: false
 srt: false
 rtsp: true
-rtspTransports: [tcp]
+rtspTransports: [{transports}]
 rtspAddress: :{port}
 rtspAuthMethods: [{method}]
 authInternalUsers:
@@ -206,11 +207,12 @@ def wait_for_port(port, seconds=20):
     sys.exit(f"Nothing is listening on port {port}.")
 
 
-def run(method, binary, clip, folder, frames):
-    """mediamtx with one authentication method, FFmpeg pushing the clip, then mcdec --live; its output and status."""
-    config = os.path.join(folder, f"mediamtx-{method}.yml")
+def run(method, binary, clip, folder, frames, transports="tcp"):
+    """mediamtx with one authentication method and one transport (tcp or udp), the clip pushed to it, then
+    mcdec --live; its output and status."""
+    config = os.path.join(folder, f"mediamtx-{method}-{transports}.yml")
     with open(config, "w") as f:
-        f.write(CONFIG.format(port=PORT, method=method, user=USER, password=PASSWORD))
+        f.write(CONFIG.format(port=PORT, method=method, user=USER, password=PASSWORD, transports=transports))
     log = []
     published = threading.Event()
     # In the temporary folder: mediamtx writes a self-signed certificate (auto.crt, auto.key) where it runs.
@@ -232,7 +234,7 @@ def run(method, binary, clip, folder, frames):
             publisher.start()
         else:
             push = subprocess.Popen(["ffmpeg", "-v", "error", "-re", "-stream_loop", "-1", "-i", clip, "-c", "copy",
-                                     "-f", "rtsp", "-rtsp_transport", "tcp", f"rtsp://127.0.0.1:{PORT}/live"])
+                                     "-f", "rtsp", "-rtsp_transport", transports, f"rtsp://127.0.0.1:{PORT}/live"])
         if not published.wait(20):
             return "\n".join(["The push never reached mediamtx.", *log[-20:]]), 1
         url = f"rtsp://{USER}:{PASSWORD}@127.0.0.1:{PORT}/live"
@@ -268,8 +270,10 @@ def main():
     with tempfile.TemporaryDirectory() as folder:
         h264 = make_clip(folder)
         mjpeg = make_mjpeg_clip(folder)
-        for label, method, clip in (("H.264, basic", "basic", h264), ("H.264, digest", "digest", h264), ("JPEG, digest", "digest", mjpeg)):
-            output, status = run(method, binary, clip, folder, args.frames)
+        runs = (("H.264, basic", "basic", h264, "tcp"), ("H.264, digest", "digest", h264, "tcp"),
+                ("JPEG, digest", "digest", mjpeg, "tcp"), ("H.264, digest, RTP over UDP only", "digest", h264, "udp"))
+        for label, method, clip, transports in runs:
+            output, status = run(method, binary, clip, folder, args.frames, transports)
             verdict = "passed" if status == 0 else "FAILED"
             print(f"== {label}: {verdict}\n{output}\n", flush=True)
             report += [f"**{label}**: {verdict}", "", "```", output, "```", ""]

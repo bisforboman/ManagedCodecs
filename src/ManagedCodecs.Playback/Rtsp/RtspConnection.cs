@@ -35,6 +35,12 @@ internal sealed class RtspConnection : IDisposable
     /// <summary>The session from SETUP's answer, sent with every later request.</summary>
     public string? Session { get; set; }
 
+    /// <summary>This end of the connection: where RTP over UDP is received (the same address).</summary>
+    public IPEndPoint LocalEndPoint => (IPEndPoint)_tcp.Client.LocalEndPoint!;
+
+    /// <summary>The server's end: where RTP over UDP comes from, unless SETUP's answer names a source.</summary>
+    public IPEndPoint RemoteEndPoint => (IPEndPoint)_tcp.Client.RemoteEndPoint!;
+
     public static async Task<RtspConnection> ConnectAsync(string host, int port, NetworkCredential? credential, CancellationToken token)
     {
         var tcp = new TcpClient { NoDelay = true };

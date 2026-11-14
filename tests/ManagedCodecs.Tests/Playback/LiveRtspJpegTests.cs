@@ -114,7 +114,7 @@ public class LiveRtspJpegTests
     private static string Sdp(string media) => "v=0\r\ns=-\r\nt=0 0\r\n" + media + "a=control:trackID=1\r\n";
 
     // The packets of each frame, up to its marker bit (copies: a test may rewrite them).
-    private static List<List<byte[]>> Frames(List<byte[]> packets)
+    internal static List<List<byte[]>> Frames(List<byte[]> packets)
     {
         var frames = new List<List<byte[]>> { new() };
         foreach (var packet in packets)
@@ -131,7 +131,7 @@ public class LiveRtspJpegTests
     }
 
     // The RGBA the player should show for a frame: the JPEG GStreamer was given, decoded and converted as it converts.
-    private static byte[] Expected(string name, int frame)
+    internal static byte[] Expected(string name, int frame)
     {
         using var decoded = new MjpegDecoder().Decode(File.ReadAllBytes(RtpJpegDepacketizerTests.SourcePath(name, frame)));
         var pixels = new byte[decoded.Width * decoded.Height * 4];

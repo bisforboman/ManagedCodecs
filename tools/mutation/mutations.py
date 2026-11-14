@@ -741,6 +741,23 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.Playback/RtpJpegDepacketizer.cs",
          find="if (_damaged || offset != _scan.Length || ", replace="if (_damaged || ",
          tests="FullyQualifiedName~RtpJpegDepacketizerTests.DropsAFrameMissingAPacketAndKeepsTheOthers"),
+    # ---- RTP over UDP (docs/decisions/2026-11-14-live-rtsp-udp.md), which the loopback interface never loses or
+    # reorders: a 461 to RTP over the RTSP connection means SETUP again for UDP ...
+    dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
+         find="if (setup.Status == 461)", replace="if (false)",
+         tests="FullyQualifiedName~LiveRtspUdpTests.FallsBackToUdpAndShowsEachFrameAsTheDecoderDecodesIt"),
+    # ... a packet ahead of the expected one waits the window for it ...
+    dict(file="src/ManagedCodecs.Playback/Rtsp/RtpReorderBuffer.cs",
+         find="OldestArrival() + _window <= now)", replace="true)",
+         tests="FullyQualifiedName~RtpReorderBufferTests.PutsPacketsBackInOrderWithinTheWindow"),
+    # ... and only the server's packets count: its address ...
+    dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
+         find="if (!Plain(from.Address).Equals(server) || ", replace="if (",
+         tests="FullyQualifiedName~LiveRtspUdpTests.PutsPacketsBackInOrderAndIgnoresDuplicatesAndStrangers"),
+    # ... and the SSRC SETUP's answer gave.
+    dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
+         find=" || (ssrc is { } expected && (packet.Length < 12 || Ssrc(packet) != expected)))", replace=")",
+         tests="FullyQualifiedName~LiveRtspUdpTests.PutsPacketsBackInOrderAndIgnoresDuplicatesAndStrangers"),
     # MJPEG over HTTP: the first delimiter line names the boundary, whatever the header said (cameras get it wrong).
     dict(file="src/ManagedCodecs.Playback/MultipartReader.cs",
          find="            if (_first)\n", replace="            if (_boundary is null)\n",

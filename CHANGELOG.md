@@ -22,6 +22,9 @@ run time.
 - Containers: `MxfDemuxer.StartTimecode`, the material package's start timecode (its first timecode track), as a new
   `Timecode` (Core: frames since midnight, base, drop frame; `ToString` as hh:mm:ss:ff or hh:mm:ss;ff, as ffprobe's
   `timecode` tag); null without a timecode track.
+- Playback: `LivePlayer` plays RTSP cameras that refuse RTP over the RTSP connection (461 Unsupported Transport): it
+  asks for RTP over UDP instead, on two local ports, takes only the server's packets and puts reordered ones back in
+  order within 50 ms (docs/decisions/2026-11-14-live-rtsp-udp.md).
 
 ## 0.14.0 – 2026-11-13
 

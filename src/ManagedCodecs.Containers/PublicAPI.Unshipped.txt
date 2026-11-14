@@ -1,1 +1,2 @@
 #nullable enable
+ManagedCodecs.Containers.MxfDemuxer.StartTimecode.get -> ManagedCodecs.Timecode?

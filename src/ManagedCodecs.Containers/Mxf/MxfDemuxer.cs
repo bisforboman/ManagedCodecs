@@ -79,6 +79,7 @@ public sealed class MxfDemuxer : IDemuxer
         {
             var partitions = MxfPartitions.Read(stream);
             var header = MxfHeader.Read(stream, partitions);
+            StartTimecode = header.StartTimecode;
             int videoIndex = header.Tracks.ToList().FindIndex(t => t.Kind == MxfTrackKind.Picture && t.BodySid != 0);
             int audioIndex = header.Tracks.ToList().FindIndex(t => t.Kind == MxfTrackKind.Sound && t.BodySid != 0);
             var video = videoIndex < 0 ? null : header.Tracks[videoIndex];
@@ -157,6 +158,12 @@ public sealed class MxfDemuxer : IDemuxer
 
     /// <summary>The material package's first sound track, or null if it has none with essence in the file.</summary>
     public AudioStreamInfo? Audio { get; }
+
+    /// <summary>
+    /// The start of the material package's first timecode track (SMPTE ST 377-1 B.17: its timecode component's start,
+    /// rounded base and drop frame), as ffprobe's <c>timecode</c> tag gives it; null if the package has none.
+    /// </summary>
+    public Timecode? StartTimecode { get; }
 
     /// <summary>Opens the file at <paramref name="path"/>, which the demuxer disposes with itself.</summary>
     public static MxfDemuxer Open(string path) => new(File.OpenRead(path));

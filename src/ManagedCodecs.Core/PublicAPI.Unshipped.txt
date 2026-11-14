@@ -1,1 +1,17 @@
 #nullable enable
+ManagedCodecs.Timecode
+ManagedCodecs.Timecode.Base.get -> int
+ManagedCodecs.Timecode.Base.init -> void
+ManagedCodecs.Timecode.Deconstruct(out long FrameNumber, out int Base, out bool DropFrame) -> void
+ManagedCodecs.Timecode.DropFrame.get -> bool
+ManagedCodecs.Timecode.DropFrame.init -> void
+ManagedCodecs.Timecode.Equals(ManagedCodecs.Timecode other) -> bool
+ManagedCodecs.Timecode.FrameNumber.get -> long
+ManagedCodecs.Timecode.FrameNumber.init -> void
+ManagedCodecs.Timecode.Timecode() -> void
+ManagedCodecs.Timecode.Timecode(long FrameNumber, int Base, bool DropFrame) -> void
+override ManagedCodecs.Timecode.GetHashCode() -> int
+override ManagedCodecs.Timecode.ToString() -> string!
+static ManagedCodecs.Timecode.operator !=(ManagedCodecs.Timecode left, ManagedCodecs.Timecode right) -> bool
+static ManagedCodecs.Timecode.operator ==(ManagedCodecs.Timecode left, ManagedCodecs.Timecode right) -> bool
+~override ManagedCodecs.Timecode.Equals(object obj) -> bool

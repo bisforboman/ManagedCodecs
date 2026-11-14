@@ -90,35 +90,6 @@ internal sealed record MxfTrack
     public int BlockAlign { get; init; }
 }
 
-/// <summary>A timecode component's start (SMPTE ST 377-1 B.17): frames since midnight at a rounded base, and drop frame.</summary>
-internal readonly record struct MxfTimecode(long Start, int Base, bool DropFrame)
-{
-    /// <summary>hh:mm:ss:ff (hh:mm:ss;ff for drop frame, counted as SMPTE ST 12-1 drops frames 0 and 1 each minute but every tenth, scaled to the base).</summary>
-    public override string ToString()
-    {
-        if (Base <= 0)
-        {
-            return "00:00:00:00";
-        }
-
-        long frames = Start;
-        if (DropFrame && Base % 30 == 0)
-        {
-            // Frame numbers skip `drop` codes a minute, except every tenth minute: add them back to count codes.
-            int drop = 2 * (Base / 30);
-            long perTenMinutes = (Base * 600L) - (9L * drop);
-            long perMinute = (Base * 60L) - drop;
-            long tens = frames / perTenMinutes;
-            long rest = frames % perTenMinutes;
-            frames += (9L * drop * tens) + (rest > drop ? drop * ((rest - drop) / perMinute) : 0);
-        }
-
-        long ff = frames % Base;
-        long seconds = frames / Base;
-        return $"{(seconds / 3600) % 24:00}:{(seconds / 60) % 60:00}:{seconds % 60:00}{(DropFrame ? ';' : ':')}{ff:00}";
-    }
-}
-
 /// <summary>
 /// An MXF file's structural metadata (SMPTE ST 377-1 9.4, 9.5): the essence tracks of its material package, each
 /// followed by its source clip to the top-level file package track and descriptor that describe its essence. Read from
@@ -127,7 +98,7 @@ internal readonly record struct MxfTimecode(long Start, int Base, bool DropFrame
 /// </summary>
 internal sealed class MxfHeader
 {
-    private MxfHeader(MxfPartition source, byte[]? operationalPattern, byte[]? materialPackageUmid, MxfTimecode? startTimecode, IReadOnlyList<MxfTrack> tracks)
+    private MxfHeader(MxfPartition source, byte[]? operationalPattern, byte[]? materialPackageUmid, Timecode? startTimecode, IReadOnlyList<MxfTrack> tracks)
     {
         Source = source;
         OperationalPattern = operationalPattern;
@@ -144,7 +115,7 @@ internal sealed class MxfHeader
     public byte[]? MaterialPackageUmid { get; }
 
     /// <summary>The material package's first timecode track's start, or null without one.</summary>
-    public MxfTimecode? StartTimecode { get; }
+    public Timecode? StartTimecode { get; }
 
     /// <summary>The material package's picture, sound and data tracks, in its order.</summary>
     public IReadOnlyList<MxfTrack> Tracks { get; }
@@ -209,7 +180,7 @@ internal sealed class MxfHeader
         }
 
         var tracks = new List<MxfTrack>();
-        MxfTimecode? timecode = null;
+        Timecode? timecode = null;
         foreach (var track in material?.References(MxfLabels.Tracks).Select(metadata.Resolve).OfType<MxfSet>() ?? [])
         {
             if (track.Kind != MxfSetKind.TimelineTrack || metadata.Resolve(track.Reference(MxfLabels.Sequence)) is not { } sequence)
@@ -225,7 +196,7 @@ internal sealed class MxfHeader
             {
                 if (timecode is null && components.FirstOrDefault(c => c.Kind == MxfSetKind.TimecodeComponent) is { } component)
                 {
-                    timecode = new MxfTimecode(component.Int64(MxfLabels.StartTimecode) ?? 0, component.UInt16(MxfLabels.RoundedTimecodeBase) ?? 0, component.UInt8(MxfLabels.DropFrame) is > 0);
+                    timecode = new Timecode(component.Int64(MxfLabels.StartTimecode) ?? 0, component.UInt16(MxfLabels.RoundedTimecodeBase) ?? 0, component.UInt8(MxfLabels.DropFrame) is > 0);
                 }
 
                 continue;

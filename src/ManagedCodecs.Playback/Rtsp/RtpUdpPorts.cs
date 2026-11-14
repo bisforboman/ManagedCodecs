@@ -30,6 +30,13 @@ internal sealed class RtpUdpPorts : IDisposable
     /// <exception cref="SocketException">No such pair in <see cref="Attempts"/> tries.</exception>
     public static RtpUdpPorts Bind(IPAddress local)
     {
+        // A dual-mode TCP socket (TcpClient's, where the machine has IPv6) gives an IPv4 peer's address as ::ffff:a.b.c.d,
+        // which a v6-only UDP socket can't bind (EINVAL): the IPv4 address it stands for.
+        if (local.IsIPv4MappedToIPv6)
+        {
+            local = local.MapToIPv4();
+        }
+
         for (int attempt = 0; ; attempt++)
         {
             var rtp = new Socket(local.AddressFamily, SocketType.Dgram, ProtocolType.Udp);

@@ -77,6 +77,15 @@ public class RtspProtocolTests
     }
 
     [Fact]
+    public void BindsUdpPortsOnAnIpv4MappedAddress()
+    {
+        // TcpClient's sockets are dual-mode where the machine has IPv6, so the RTSP connection's local address comes as
+        // ::ffff:127.0.0.1: a v6-only UDP socket can't bind that (EINVAL on CI's ARM64 runner), an IPv4 one can.
+        using var ports = RtpUdpPorts.Bind(IPAddress.Parse("::ffff:127.0.0.1"));
+        Assert.Equal((0, ports.RtpPort + 1), (ports.RtpPort % 2, ports.RtcpPort));
+    }
+
+    [Fact]
     public void ToleratesParameterSetsThatArentBase64()
     {
         var track = Sdp.Parse("m=video 0 RTP/AVP 96\na=rtpmap:96 H264/90000\na=fmtp:96 sprop-parameter-sets=@@@\n").Track!;

@@ -33,6 +33,12 @@ namespace ManagedCodecs.Containers;
 /// clip's other tracks) is not read.
 /// </para>
 /// <para>
+/// A file cut short (a recording that never closed, a partial download) is read as far as it goes, as FFmpeg's demuxer
+/// reads it: the essence element the end falls in is the last packet, of the bytes there (an 8-channel AES3 element's
+/// samples whose kept channels are there); a clip-wrapped sound track whose index was cut off with the footer is still
+/// cut into pieces where its edit unit is a sample. A growing file is read as far as it was written when opened.
+/// </para>
+/// <para>
 /// The size is the sampled rectangle's (the picture a decoder gives, without the stored padding of a macroblock row),
 /// twice its height for separate fields. FFmpeg's demuxer reports the stored size, and its decoder the sampled one.
 /// </para>
@@ -54,6 +60,9 @@ public sealed class MxfDemuxer : IDemuxer
     // The sound track's 8-channel AES3 elements (D-10's): its channels and bytes a sample, or 0 where it has none.
     private int _aes3Channels;
     private int _aes3Bytes;
+
+    // The packet (an index into _packets) of the essence element a file cut short ends in, or -1.
+    private int _cut = -1;
 
     // Where each stream's read starts, as a sequence: 0 until a Seek moves it.
     private long _videoStart;
@@ -103,12 +112,23 @@ public sealed class MxfDemuxer : IDemuxer
             var indexes = Walk(partitions.Header.End, video, videoIndex, audio, audioIndex);
             if (video is not null && indexes.TryGetValue(video.BodySid, out var videoTable))
             {
-                SplitClip(videoIndex, videoTable, 0);
+                SplitClip(videoIndex, videoTable, 0, 0);
             }
 
-            if (audio is not null && _aes3Channels == 0 && indexes.TryGetValue(audio.BodySid, out var audioTable))
+            if (audio is not null && _aes3Channels == 0)
             {
-                SplitClip(audioIndex, audioTable, Math.Max(1, audio.AudioSamplingRate.Numerator / 25) * (long)BlockAlign(audio));
+                // The index's constant edit unit size (a sample); without one (a file cut before its footer's index), the
+                // descriptor's block alignment where the track's edit unit is a sample, as OP-Atom's is: FFmpeg's demuxer
+                // cuts such a clip into its pieces all the same.
+                long pieceBytes = Math.Max(1, audio.AudioSamplingRate.Numerator / 25) * (long)BlockAlign(audio);
+                if (indexes.TryGetValue(audio.BodySid, out var audioTable))
+                {
+                    SplitClip(audioIndex, audioTable, pieceBytes, audioTable.EditUnitByteCount);
+                }
+                else if (audio.EditRate == (audio.AudioSamplingRate.Numerator, audio.AudioSamplingRate.Denominator))
+                {
+                    SplitClip(audioIndex, null, pieceBytes, BlockAlign(audio));
+                }
             }
 
             if (video is not null)
@@ -301,13 +321,21 @@ public sealed class MxfDemuxer : IDemuxer
         long length = _stream.Length;
         long videoCount = 0;
         long audioCount = 0;
-        for (long position = start; position < length;)
+        for (long position = start; position < length && Klv.TryReadHeader(_stream, position, key, out long valueStart, out long size);)
         {
-            long valueStart = Klv.ReadHeader(_stream, position, key, out long size);
+            // A file cut short (a recording that never closed, a partial download): the essence element the end falls in
+            // is a packet of the bytes there, as FFmpeg's demuxer gives it (flagged corrupt), and the last; an index
+            // table segment or anything else cut off is left out.
             long next = checked(valueStart + size);
             if (next > length)
             {
-                throw new InvalidDataException($"A KLV item at byte {position} runs past the end of the MXF file.");
+                if (!Klv.Matches(key, EssenceElementPrefix) || length <= valueStart)
+                {
+                    break;
+                }
+
+                _cut = _packets.Count;
+                size = length - valueStart;
             }
 
             if (Klv.Matches(key, EssenceElementPrefix))
@@ -326,7 +354,7 @@ public sealed class MxfDemuxer : IDemuxer
                 }
                 else if (audio is not null && number == audio.TrackNumber)
                 {
-                    int pcm = _aes3Channels > 0 ? Aes3PcmSize(valueStart, size) : (int)size;
+                    int pcm = _aes3Channels > 0 ? Aes3PcmSize(valueStart, size, _cut >= 0) : (int)size;
                     _packets.Add(new PacketInfo(audioIndex, audioCount++, pcm, true, 0, 0, 0));
                     _positions.Add(valueStart);
                     _lengths.Add((int)size);
@@ -349,6 +377,11 @@ public sealed class MxfDemuxer : IDemuxer
                 break;
             }
 
+            if (_cut >= 0)
+            {
+                break;
+            }
+
             position = next;
         }
 
@@ -365,9 +398,14 @@ public sealed class MxfDemuxer : IDemuxer
     /// gives: its audio sample count (header bytes 1 and 2, little-endian, ST 331 Figure 2) times the descriptor's
     /// channels and sample size. The element holds all 8 channels' words whether valid or not.
     /// </summary>
-    private int Aes3PcmSize(long valueStart, long size)
+    private int Aes3PcmSize(long valueStart, long size, bool cut)
     {
         Span<byte> header = stackalloc byte[4];
+        if (cut && size < header.Length)
+        {
+            return 0; // the file ends inside the element's header: no samples
+        }
+
         if (size < header.Length)
         {
             throw new InvalidDataException($"An 8-channel AES3 element at byte {valueStart} is {size} bytes, under its 4-byte header.");
@@ -376,7 +414,14 @@ public sealed class MxfDemuxer : IDemuxer
         _stream.Position = valueStart;
         _stream.ReadExactly(header);
         int count = header[1] | (header[2] << 8);
-        if (size < header.Length + (count * 8L * 4))
+        if (cut)
+        {
+            // The samples whose kept channels' words (the first _aes3Channels of its 8) are all before the file's end, as
+            // FFmpeg's demuxer counts them: a sample cut after them still gives its PCM.
+            count = (int)Math.Min(count, (size - header.Length + ((8 - _aes3Channels) * 4)) / (8 * 4));
+        }
+
+        if (!cut && size < header.Length + (count * 8L * 4))
         {
             throw new InvalidDataException($"An 8-channel AES3 element at byte {valueStart} holds {size} bytes, under its {count} samples of 8 channels.");
         }
@@ -417,9 +462,10 @@ public sealed class MxfDemuxer : IDemuxer
     /// <summary>
     /// Cuts the stream's essence into packets where it is a single element that <paramref name="index"/> puts two or
     /// more edit units in (clip-wrapped, the class remarks say how): pictures an edit unit a packet; sound, whose index
-    /// edit unit is a sample, in pieces of <paramref name="pieceBytes"/>, the last shorter, whole samples only.
+    /// edit unit is a sample (<paramref name="blockAlign"/> bytes), in pieces of <paramref name="pieceBytes"/>, the last
+    /// shorter, whole samples only but where the file ends in it.
     /// </summary>
-    private void SplitClip(int stream, MxfIndex index, long pieceBytes)
+    private void SplitClip(int stream, MxfIndex? index, long pieceBytes, long blockAlign)
     {
         int at = -1;
         for (int i = 0; i < _packets.Count; i++)
@@ -445,14 +491,15 @@ public sealed class MxfDemuxer : IDemuxer
         var pieces = new List<(long Offset, long Length)>();
         if (pieceBytes > 0)
         {
-            // Sound: an edit unit a sample, so the index's constant size is under the element's.
-            long blockAlign = index.EditUnitByteCount;
+            // Sound: an edit unit a sample, so its size (the index's constant one, or the block alignment) is under the
+            // element's.
             if (blockAlign <= 0 || blockAlign >= element.Size)
             {
                 return;
             }
 
-            long whole = element.Size - (element.Size % blockAlign);
+            // Whole samples only; but a clip the file ends in keeps its last bytes, as FFmpeg's demuxer gives them.
+            long whole = at == _cut ? element.Size : element.Size - (element.Size % blockAlign);
             long piece = Math.Max(blockAlign, pieceBytes - (pieceBytes % blockAlign));
             for (long offset = 0; offset < whole; offset += piece)
             {
@@ -461,7 +508,7 @@ public sealed class MxfDemuxer : IDemuxer
         }
         else
         {
-            pieces = index.EditUnits(element.Size);
+            pieces = index!.EditUnits(element.Size);
         }
 
         if (pieces.Count < 2)

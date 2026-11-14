@@ -577,7 +577,8 @@ footer; mxf-h264-pipe-norip, found by the walk, where FFmpeg's demuxer never rea
 (mxf-h264-pcm-runin). Hand-made bytes cover the rest: BER lengths (the long form for short lengths, 0x80 and more than
 nine bytes refused), keys whose version byte differs (the fill item's two keys), partition packs whose essence
 container batch doesn't hold together, a random index pack that lists a partition that isn't there or gives a wrong
-BodySID, a PreviousPartition chain that loops, the run-in's 64 KiB limit, and a KLV item past the end of the file.
+BodySID, a PreviousPartition chain that loops, the run-in's 64 KiB limit, and a file cut inside an item's value, length
+or key, or inside a partition pack (the walk ends at the last whole item).
 
 `MxfHeaderTests` reads every sample's header metadata (the primer pack, the local sets, the strong references from the
 preface to the material package's tracks, their source clips, the file package's tracks and its descriptors, and the
@@ -630,6 +631,20 @@ what the file says, the file is followed and the test says so:
   `MxfDemuxer`: mxf-d10-pcm24 (625/50, 24-bit, 4 channels) and mxf-d10-525 (525/59.94, 16-bit stereo, elements of 1602
   and 1601 samples by the five-frame sequence) match FFmpeg's packets and decode as its PCM. `MxfAes3Tests` unpacks
   hand-made elements whose words set every bit around the audio (channel number, F, V, U, C, P).
+- Files cut short (a recording that never closed, a partial download; a growing file is read as far as it is written
+  when opened): make-samples.sh cuts copies inside an essence element, placed by the source's packet positions so that
+  every machine cuts in the same place. FFmpeg's demuxer gives the element the end falls in as a last packet of the
+  bytes there (flagged corrupt), and it loses the footer's index (no video times); `MxfDemuxer` gives the same packets:
+  mxf-h264-pcm-cut (inside a sound element), mxf-h264-pcm-cut-video (inside a picture: FFmpeg's decoder conceals it,
+  `H264Decoder` refuses it outside `ConcealErrors`, so its frames have no reference), mxf-d10-pcm24-cut (an 8-channel
+  AES3 element: a sample counts where its kept channels' words are there, the words after them may be missing; checked
+  by hand at cuts 8, 16 and 24 bytes into a sample as well) and mxf-opatom-pcm-cut (its one sound clip, which FFmpeg's
+  demuxer still cuts into 1920-sample pieces without the index, the track's edit unit being a sample; the last piece
+  keeps a partial sample's bytes). A clip-wrapped H.264 file cut short is one packet of the clip's bytes, as FFmpeg's
+  demuxer gives it (`-fflags +noparse`: libavformat's H.264 parser then cuts it into pictures, which `ffprobe` shows by
+  default); a file cut inside its header metadata is refused (`ReadsAClipCutShortAsOnePacket`). A clip-wrapped file cut
+  short whose index survives (none of FFmpeg's muxers write one before the essence) is refused: no file shows what
+  FFmpeg does there.
 
 `PcmDecoderTests` decodes every sample's audio exactly as FFmpeg does (name.pcm.f32), and `SeekTests` seeks in every
 sample. `MxfConformanceTests` decodes the H.264 samples' frames with one and four threads and compares each with

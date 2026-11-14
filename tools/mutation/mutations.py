@@ -267,6 +267,23 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.Containers/Mxf/MxfHeader.cs",
          find="is { } d and >= 0 ? d : null", replace="is { } d ? d : null",
          tests="FullyQualifiedName~MxfHeaderTests"),
+    # A file cut short: the essence element the end falls in is the last packet, its bytes as far as they go (FFmpeg's
+    # demuxer; mxf-h264-pcm-cut, mxf-h264-pcm-cut-video).
+    dict(file="src/ManagedCodecs.Containers/Mxf/MxfDemuxer.cs",
+         find="if (!Klv.Matches(key, EssenceElementPrefix) || length <= valueStart)", replace="if (true)",
+         tests="DisplayName~mxf-h264-pcm-cut"),
+    # A cut 8-channel AES3 element keeps a sample whose kept channels' words are there (mxf-d10-pcm24-cut).
+    dict(file="src/ManagedCodecs.Containers/Mxf/MxfDemuxer.cs",
+         find="(size - header.Length + ((8 - _aes3Channels) * 4)) / (8 * 4)", replace="(size - header.Length) / (8 * 4)",
+         tests="DisplayName~mxf-d10-pcm24-cut"),
+    # A clip of sound the file ends in keeps its last bytes, not whole samples only (mxf-opatom-pcm-cut).
+    dict(file="src/ManagedCodecs.Containers/Mxf/MxfDemuxer.cs",
+         find="long whole = at == _cut ? element.Size :", replace="long whole =",
+         tests="DisplayName~mxf-opatom-pcm-cut"),
+    # Without the footer's index, a sound clip whose edit unit is a sample is still cut into pieces (mxf-opatom-pcm-cut).
+    dict(file="src/ManagedCodecs.Containers/Mxf/MxfDemuxer.cs",
+         find="else if (audio.EditRate == (audio.AudioSamplingRate.Numerator, audio.AudioSamplingRate.Denominator))", replace="else if (false)",
+         tests="DisplayName~mxf-opatom-pcm-cut"),
     # Drop-frame timecodes skip codes each minute but the tenth (mxf-h264-interlaced's 01:00:00;02).
     dict(file="src/ManagedCodecs.Core/Timecode.cs",
          find="frames += (9L * drop * tens) + (rest > drop ? drop * ((rest - drop) / perMinute) : 0);", replace="",

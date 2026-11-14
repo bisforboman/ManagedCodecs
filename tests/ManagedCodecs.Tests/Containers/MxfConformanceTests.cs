@@ -138,6 +138,30 @@ public class MxfConformanceTests
         }
     }
 
+    /// <summary>
+    /// A clip-wrapped file cut short loses its footer's index: FFmpeg's demuxer (<c>-fflags +noparse</c>) then gives the
+    /// H.264 clip's bytes as one packet (its parser alone cuts that into pictures, which this library doesn't do), and
+    /// a file cut inside its header metadata is still refused. The make-samples cut files cover the rest.
+    /// </summary>
+    [Fact]
+    public void ReadsAClipCutShortAsOnePacket()
+    {
+        byte[] file = File.ReadAllBytes(TestSamples.PathOf("mxf-opatom-h264.mxf"));
+        byte[] clip;
+        using (var whole = new MxfDemuxer(new MemoryStream(file)))
+        {
+            clip = [.. whole.ReadPackets().SelectMany(p => p.Data.ToArray())];
+        }
+
+        using var cut = new MxfDemuxer(new MemoryStream(file[..(file.Length * 55 / 100)]));
+        var packet = Assert.Single(cut.ReadPackets());
+        Assert.InRange(packet.Data.Length, 1, clip.Length - 1);
+        Assert.Equal(clip[..packet.Data.Length], packet.Data.ToArray());
+        Assert.Equal(1, cut.Video!.FrameCount);
+
+        Assert.Throws<InvalidDataException>(() => new MxfDemuxer(new MemoryStream(file[..1000])));
+    }
+
     [Fact]
     public void NamesTheCodecsThisLibraryDecodes()
     {

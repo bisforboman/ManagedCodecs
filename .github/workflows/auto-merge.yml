@@ -1,0 +1,49 @@
+name: Auto-merge
+
+# Turns auto-merge on for every pull request, so it merges once the required checks pass, whoever opened it (a
+# session that forgot, a PR opened by hand). What waits for the owner: drafts (until marked ready), release PRs
+# (release/* branches: nuget.org versions can't be deleted), PRs labeled `hold` (labeling one turns its auto-merge off
+# again; removing the label turns it on), Dependabot's (dependabot-auto-merge.yml takes them: minor and patch updates
+# merge, majors wait) and PRs from forks (this token can't merge them). CLAUDE.md, "PR pipeline".
+#
+# The token: a merge that GITHUB_TOKEN turned auto-merge on for pushes to main without starting any workflow (CI and
+# CodeQL on main, release.yml). With a fine-grained personal access token in the AUTO_MERGE_TOKEN secret (this
+# repository, Pull requests: read and write, Contents: read and write) the merge is the owner's and main's workflows
+# run as usual. A PR whose auto-merge a session already turned on is left as it is.
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review, labeled, unlabeled]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  auto-merge:
+    if: >-
+      github.event.pull_request.user.login != 'dependabot[bot]' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      !startsWith(github.event.pull_request.head.ref, 'release/')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Turn auto-merge on, or off for a PR labeled hold
+        env:
+          GH_TOKEN: ${{ secrets.AUTO_MERGE_TOKEN || github.token }}
+          PR: ${{ github.event.pull_request.html_url }}
+          DRAFT: ${{ github.event.pull_request.draft }}
+          HOLD: ${{ contains(github.event.pull_request.labels.*.name, 'hold') }}
+        run: |
+          enabled=$(gh pr view "$PR" --json autoMergeRequest --jq '.autoMergeRequest != null')
+          if [ "$HOLD" = true ]; then
+            if [ "$enabled" = true ]; then
+              gh pr merge --disable-auto "$PR"
+            fi
+            echo "Labeled hold: it waits for the owner."
+          elif [ "$DRAFT" = true ]; then
+            echo "A draft: auto-merge comes when it is marked ready."
+          elif [ "$enabled" = true ]; then
+            echo "Auto-merge is already on."
+          else
+            gh pr merge --auto --merge "$PR"
+          fi

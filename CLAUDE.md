@@ -21,11 +21,13 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
 
 ## Working on this repository
 
-- **PR pipeline**: work on a branch, open a PR, and turn auto-merge on at once (needs "Allow auto-merge" in the
-  settings). Not for drafts, nor for a PR the owner must decide on (its body says so; it waits for the answer), nor
-  release PRs: the owner merges those (nuget.org versions can't be deleted; the `release` environment waits for the
-  owner too). Never push to main. Required checks: `build`, `build-arm64`, `wasm`, `aot`, `unity` (ci.yml) and
-  `mutation` (mutation.yml, on docs-only PRs too).
+- **PR pipeline**: work on a branch and open a PR; `auto-merge.yml` turns auto-merge on (needs "Allow auto-merge" in
+  the settings; a session may turn it on itself too), so it merges once the required checks pass. What waits for the
+  owner: drafts, a PR the owner must decide on (label it `hold`, which turns auto-merge off again, and say so in its
+  body), and release PRs, which go on a `release/X.Y.Z` branch so the workflow skips them (nuget.org versions can't be
+  deleted; the `release` environment waits for the owner too); Dependabot's majors (dependabot-auto-merge.yml merges
+  minor and patch updates). Never push to main. Required checks: `build`, `build-arm64`, `wasm`, `aot`, `unity` (ci.yml)
+  and `mutation` (mutation.yml, on docs-only PRs too).
 - **Releases**: a PR a consumer would notice adds a line under CHANGELOG.md's "## Unreleased". A release PR renames
   it "## X.Y.Z – date" (a public API change only in a new minor version, a patch only fixes) and runs
   `tools/ship-public-api.py` (Unshipped into Shipped); `release.yml` then tests, packs every package at that one

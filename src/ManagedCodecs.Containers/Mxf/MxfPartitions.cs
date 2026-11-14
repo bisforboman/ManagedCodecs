@@ -198,16 +198,23 @@ internal sealed class MxfPartitions
         return true;
     }
 
-    /// <summary>The partitions found by walking every KLV item from the header partition pack to the end of the file.</summary>
+    /// <summary>The partitions found by walking every KLV item from the header partition pack to the end of the file, or to the last whole item of a file cut short.</summary>
     public static List<MxfPartition> Walk(Stream stream, MxfPartition header)
     {
         var partitions = new List<MxfPartition> { header };
         long fileLength = stream.Length;
         long position = header.End;
         Span<byte> key = stackalloc byte[Klv.KeyLength];
-        while (position < fileLength)
+        while (position < fileLength && Klv.TryReadHeader(stream, position, key, out long valueStart, out long length))
         {
-            long valueStart = Klv.ReadHeader(stream, position, key, out long length);
+            // A file cut short (a recording that never closed, a partial download) ends at its last whole item: an item
+            // running past the end is essence or an index FFmpeg's demuxer reads as far as it goes, not a partition.
+            long next = checked(valueStart + length);
+            if (next > fileLength)
+            {
+                break;
+            }
+
             if (Klv.IsPartitionPack(key, out _, out _))
             {
                 partitions.Add(MxfPartition.Read(stream, position));
@@ -216,12 +223,6 @@ internal sealed class MxfPartitions
             {
                 // The last item (ST 377-1 12): one that did not hold up (TryFromRandomIndexPack) ends the walk too.
                 break;
-            }
-
-            long next = checked(valueStart + length);
-            if (next > fileLength)
-            {
-                throw new InvalidDataException($"A KLV item at byte {position} runs past the end of the MXF file.");
             }
 
             position = next;

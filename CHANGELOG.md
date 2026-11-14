@@ -26,6 +26,9 @@ working.
 - Containers: `MxfDemuxer.StartTimecode`, the material package's start timecode (its first timecode track), as a new
   `Timecode` (Core: frames since midnight, base, drop frame; `ToString` as hh:mm:ss:ff or hh:mm:ss;ff, as ffprobe's
   `timecode` tag); null without a timecode track.
+- Containers: `MxfDemuxer` reads an MXF file cut short (a recording that never closed, a partial download, a file still
+  being written) as far as it goes, as FFmpeg's demuxer does: the essence element the end falls in is the last packet,
+  of the bytes there. Such files failed to open before.
 - Playback: `LivePlayer` plays RTSP cameras that refuse RTP over the RTSP connection (461 Unsupported Transport): it
   asks for RTP over UDP instead, on two local ports, takes only the server's packets and puts reordered ones back in
   order within 50 ms (docs/decisions/2026-11-14-live-rtsp-udp.md).

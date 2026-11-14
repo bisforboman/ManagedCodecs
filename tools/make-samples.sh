@@ -948,6 +948,22 @@ ff -f lavfi -i testsrc2=s=720x608:r=25 -f lavfi -i sine=sample_rate=48000 -t 0.2
 ff -f lavfi -i testsrc2=s=720x512:r=30000/1001 -f lavfi -i sine=sample_rate=48000 -t 0.2 -c:v mpeg2video -pix_fmt yuv422p \
   -g 1 -b:v 30M -minrate 30M -maxrate 30M -bufsize 1001000 -rc_init_occupancy 1001000 -flags +ildct+ilme -top 0 \
   -c:a pcm_s16le -ac 2 -f mxf_d10 samples/mxf-d10-525.mxf
+# Files cut short (a recording that never closed, a partial download; a growing file read while it is written is the
+# same): each copy ends inside an essence element, found by the source's packet positions (ffprobe's pos, an element's
+# key), so that the cut falls in the same place on every machine. FFmpeg's demuxer gives that element's bytes as the
+# last packet (flagged corrupt), and loses the footer's index: no video times. mxf-h264-pcm-cut ends 1000 bytes into
+# the 30th audio element; mxf-h264-pcm-cut-video 100 bytes into the 40th picture; mxf-d10-pcm24-cut 1000 bytes into the
+# third 8-channel AES3 element (20 of them key and length), inside a sample whose four kept channels are there;
+# mxf-opatom-pcm-cut halfway into its one clip, which FFmpeg's demuxer still cuts into 1920-sample pieces.
+mxf_cut() { # source, copy, stream index, packet number (from 1), bytes past that packet's key
+  local pos
+  pos=$(ffprobe -v error -show_entries packet=stream_index,pos -of csv=p=0 "$1" | awk -F, -v s="$3" '$1 == s {print $2}' | sed -n "$4p")
+  head -c $((pos + $5)) "$1" > "$2"
+}
+mxf_cut samples/mxf-h264-pcm.mxf samples/mxf-h264-pcm-cut.mxf 1 30 1000
+mxf_cut samples/mxf-h264-pcm.mxf samples/mxf-h264-pcm-cut-video.mxf 0 40 100
+mxf_cut samples/mxf-d10-pcm24.mxf samples/mxf-d10-pcm24-cut.mxf 1 3 1000
+mxf_cut samples/mxf-opatom-pcm.mxf samples/mxf-opatom-pcm-cut.mxf 0 1 40000
 # name.headers.json: the streams as FFmpeg's demuxer reads them from the header metadata, nothing decoded
 # (ffprobe -nofind_stream_info: with probing, the size and aspect ratio are the decoder's), and the file's operational
 # pattern, material package and start timecode.
@@ -974,6 +990,9 @@ for f in samples/mxf-*.mxf; do
     ff -i "$f" -map 0:a:0 -f f32le "${f%.mxf}.pcm.f32"
   fi
 done
+# mxf-h264-pcm-cut-video's last picture is cut short: FFmpeg's decoder conceals it, H264Decoder refuses it (outside
+# ConcealErrors, whose own tests cover concealment), so its frames have no reference; its packets do.
+rm -f samples/mxf-h264-pcm-cut-video.h264.framemd5
 
 # ---- FFmpeg's references ----
 # name.framemd5: decoded frames. name.packets.csv: demuxed packets as ffprobe lists them (the demuxer's own timestamps,

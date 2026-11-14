@@ -215,13 +215,25 @@ public class MxfPartitionTests
         Assert.Throws<InvalidDataException>(() => MxfPartitions.Read(new MemoryStream(new byte[100])));
     }
 
+    /// <summary>
+    /// A file cut short (no random index pack, no footer offset): the walk ends at the last whole item, whether the cut
+    /// falls in an item's value, its length or its key, as FFmpeg's demuxer reads such a file.
+    /// </summary>
     [Fact]
-    public void RejectsAWalkPastTheEndOfTheFile()
+    public void StopsAWalkAtAnItemCutShort()
     {
-        // No random index pack and no footer offset: the walk meets a KLV item longer than what is left of the file.
         byte[] header = PartitionPack(kind: 2, status: 1, thisPartition: 0);
         byte[] item = [.. Convert.FromHexString("060E2B34010201010D01030115010501"), 0x83, 0x01, 0x00, 0x00, 1, 2, 3];
-        Assert.Throws<InvalidDataException>(() => MxfPartitions.Read(new MemoryStream([.. header, .. item])));
+        byte[] body = PartitionPack(kind: 3, status: 1, thisPartition: (ulong)header.Length);
+        foreach (int keep in new[] { item.Length, 18, 17, 10 })
+        {
+            var partitions = MxfPartitions.Read(new MemoryStream([.. header, .. item[..keep]]));
+            Assert.Equal([0UL], partitions.Partitions.Select(p => p.ThisPartition));
+        }
+
+        // A partition pack cut short is no partition either; a whole one before the cut still counts.
+        Assert.Single(MxfPartitions.Read(new MemoryStream([.. header, .. body[..40]])).Partitions);
+        Assert.Equal(2, MxfPartitions.Read(new MemoryStream([.. header, .. body, .. item])).Partitions.Count);
     }
 
     // The key (16) and a one-byte BER length come before a pack's value in PartitionPack's packs.

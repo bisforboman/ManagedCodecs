@@ -34,6 +34,12 @@ public class MxfHeaderTests
         Assert.Equal(format.GetProperty("material_package_umid").GetString(), "0x" + Convert.ToHexString(header.MaterialPackageUmid!));
         Assert.Equal(format.GetProperty("timecode").GetString(), header.StartTimecode.ToString());
 
+        // The demuxer gives the same start timecode, publicly.
+        using (var demuxer = new MxfDemuxer(File.OpenRead(TestSamples.PathOf(sampleName))))
+        {
+            Assert.Equal(header.StartTimecode, demuxer.StartTimecode);
+        }
+
         // FFmpeg makes a stream of each essence track of the material package, in its order.
         Assert.Equal(streams.Count, header.Tracks.Count);
         for (int i = 0; i < streams.Count; i++)
@@ -85,7 +91,7 @@ public class MxfHeaderTests
     [InlineData(107894L, 30, true, "01:00:00;02")]
     [InlineData(215784L, 60, true, "01:00:00;00")] // 59.94: four dropped a minute
     public void FormatsTimecodes(long start, int timecodeBase, bool dropFrame, string expected) =>
-        Assert.Equal(expected, new MxfTimecode(start, timecodeBase, dropFrame).ToString());
+        Assert.Equal(expected, new Timecode(start, timecodeBase, dropFrame).ToString());
 
     [Fact]
     public void FollowsTheReferencesToEachTracksDescriptor()
@@ -96,6 +102,8 @@ public class MxfHeaderTests
         file.Sound(trackId: 2, fileTrackId: 3, trackNumber: 0x16010101, bits: 24);
         var header = MxfHeader.Build(file.Partition, file.Read());
 
+        // No timecode track in the material package: no start timecode.
+        Assert.Null(header.StartTimecode);
         Assert.Equal(2, header.Tracks.Count);
         var picture = header.Tracks[0];
         Assert.Equal(MxfTrackKind.Picture, picture.Kind);

@@ -14,8 +14,8 @@ run time.
 ## 0.15.0 – 2026-11-14
 
 Sound-only playback in MonoGame (`AudioTrack`), MXF start timecodes (`MxfDemuxer.StartTimecode`, `Timecode`) and MXF
-files cut short, and live cameras that refuse RTP over TCP, played over UDP. New public API, hence a minor version; code built against 0.14 keeps
-working.
+files cut short, and live cameras that refuse RTP over TCP, played over UDP. New public API, hence a minor version;
+code built against 0.14 keeps working.
 
 ### Added
 

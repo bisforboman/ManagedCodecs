@@ -10,8 +10,8 @@ namespace ManagedCodecs.MonoGameSample;
 /// Plays a file in the window with <see cref="VideoTexture"/>: letterboxed, at its sample aspect ratio and turned by
 /// the stream's rotation (phone video), its audio through a dynamic sound. Escape quits, space pauses. The window title
 /// shows the decoding's and the RGBA conversion's time per frame (means over the run, on the decoding thread), what a
-/// game's frame budget cares about. A file without video (.wav, raw MP3 or AAC) plays its sound alone (<see cref="AudioOnly"/>,
-/// over <c>AudioPlayer</c>), the window black, until its end.
+/// game's frame budget cares about. A file without video (.wav, raw MP3 or AAC) plays its sound alone
+/// (<see cref="AudioTrack"/>), the window black and its title showing the time played, until its end.
 /// </summary>
 internal sealed class PlayerGame : Game
 {
@@ -19,7 +19,7 @@ internal sealed class PlayerGame : Game
     private readonly string _path;
     private SpriteBatch? _sprites;
     private VideoTexture? _video;
-    private AudioOnly? _audio;
+    private AudioTrack? _audio;
     private bool _spaceDown;
 
     public PlayerGame(string path)
@@ -42,8 +42,8 @@ internal sealed class PlayerGame : Game
 
         if (!hasVideo)
         {
-            _audio = new AudioOnly(_path);
-            Window.Title = $"mcplay: {Path.GetFileName(_path)}, sound only ({_audio.Audio.Codec}, {_audio.Audio.SampleRate} Hz)";
+            _audio = new AudioTrack(_path);
+            _audio.Play();
             return;
         }
 
@@ -103,11 +103,11 @@ internal sealed class PlayerGame : Game
     }
 
     // A sound-only file: escape quits, space pauses, and it ends with its sound.
-    private void UpdateAudioOnly(AudioOnly audio, KeyboardState keyboard)
+    private void UpdateAudioOnly(AudioTrack audio, KeyboardState keyboard)
     {
         if (keyboard.IsKeyDown(Keys.Escape) || audio.IsFinished)
         {
-            if (audio.Error is { } error)
+            if (audio.Player.Error is { } error)
             {
                 Console.Error.WriteLine($"mcplay: stopped early: {error.Message}");
             }
@@ -131,6 +131,7 @@ internal sealed class PlayerGame : Game
 
         _spaceDown = space;
         audio.Update();
+        Window.Title = $"mcplay: {Path.GetFileName(_path)}, sound only ({audio.Player.Audio.Codec}, {audio.Player.Audio.SampleRate} Hz), {audio.Position:m\\:ss\\.f}";
     }
 
     protected override void Draw(GameTime gameTime)

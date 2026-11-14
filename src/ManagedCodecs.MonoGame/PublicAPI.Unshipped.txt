@@ -1,1 +1,16 @@
 #nullable enable
+ManagedCodecs.MonoGame.AudioTrack
+ManagedCodecs.MonoGame.AudioTrack.AudioTrack(string! path) -> void
+ManagedCodecs.MonoGame.AudioTrack.AudioTrack(string! path, ManagedCodecs.Playback.PlaybackOptions? options) -> void
+ManagedCodecs.MonoGame.AudioTrack.AudioTrack(System.IO.Stream! stream) -> void
+ManagedCodecs.MonoGame.AudioTrack.AudioTrack(System.IO.Stream! stream, ManagedCodecs.Playback.PlaybackOptions? options) -> void
+ManagedCodecs.MonoGame.AudioTrack.Dispose() -> void
+ManagedCodecs.MonoGame.AudioTrack.IsFinished.get -> bool
+ManagedCodecs.MonoGame.AudioTrack.IsPlaying.get -> bool
+ManagedCodecs.MonoGame.AudioTrack.Pause() -> void
+ManagedCodecs.MonoGame.AudioTrack.Play() -> void
+ManagedCodecs.MonoGame.AudioTrack.Player.get -> ManagedCodecs.Playback.AudioPlayer!
+ManagedCodecs.MonoGame.AudioTrack.Position.get -> System.TimeSpan
+ManagedCodecs.MonoGame.AudioTrack.Update() -> void
+ManagedCodecs.MonoGame.AudioTrack.Volume.get -> float
+ManagedCodecs.MonoGame.AudioTrack.Volume.set -> void

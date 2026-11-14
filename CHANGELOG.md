@@ -11,6 +11,15 @@ share internals, so each depends on the others at exactly its own version (`[X]`
 then reports a mix of versions (NU1107, or NU1608 for a newer one referenced directly) rather than letting it fail at
 run time.
 
+## Unreleased
+
+### Added
+
+- MonoGame: `AudioTrack` plays a sound-only file (`.wav`, raw MP3 or AAC, or any file's audio) into a
+  `DynamicSoundEffectInstance`, as `VideoTexture` plays a video: `Play`, `Pause`, `Update()`, `Volume`, and a
+  `Position` that follows the sound (docs/decisions/2026-11-13-audio-track.md). mcplay plays sound-only files through
+  it.
+
 ## 0.14.0 – 2026-11-13
 
 More of MXF (clip-wrapped essence, D-10's sound) and live cameras over RTSP that send JPEG. New features with no public

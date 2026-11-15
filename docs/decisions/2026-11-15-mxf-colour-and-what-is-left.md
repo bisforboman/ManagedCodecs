@@ -86,7 +86,7 @@ issue of its own, not a slice of #469.
 
 1. **Next slice:** colour and the 10-bit 4:2:2 sample.
 2. **Files from other writers:** pinned in `realworld.yml` afterwards, worked from the nightly's logs.
-3. **Sound tracks after the first:** an issue of its own.
+3. **Sound tracks after the first:** an issue of its own (#535).
 4. **Issue #469:** stays open, with a status comment after each pull request.
 
 ## Outcome (colour)

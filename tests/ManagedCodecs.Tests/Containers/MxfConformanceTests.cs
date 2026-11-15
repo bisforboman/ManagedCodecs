@@ -49,7 +49,7 @@ public class MxfConformanceTests
             // libavformat's MPEG-2 parser marks every I picture a keyframe; the index gives an open GOP's (B pictures
             // before it in display order lean on the GOP before) no random access flag, which is followed here
             // (mxf-mpeg2-b: only its first picture is one).
-            bool openGop = e.IsKeyframe && !p.IsKeyframe && p.StreamIndex == mxf.Video?.StreamIndex && mxf.Video.Codec == "mpeg2video" && p.Sequence > 0;
+            bool openGop = sampleName == "mxf-mpeg2-b.mxf" && e.IsKeyframe && !p.IsKeyframe && p.StreamIndex == mxf.Video?.StreamIndex && p.Sequence > 0;
             Assert.True(e.IsKeyframe == p.IsKeyframe || openGop, $"{at}: keyframe {p.IsKeyframe}, FFmpeg's {e.IsKeyframe}");
             Assert.True(e.Duration == p.Duration, $"{at}: duration {p.Duration}, FFmpeg's {e.Duration}");
 

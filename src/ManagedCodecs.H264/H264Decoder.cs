@@ -551,6 +551,7 @@ public sealed class H264Decoder : IVideoDecoder
         job.Signal.Apply(frame, _stream);
         if (_lengthSize == 0 && !PacketTimes)
         {
+            // With PacketTimes none are kept, and InTimeOrder then leaves each frame its own.
             _decodeTimes.Add(job.Pts);
             _timesDepth = _stream?.FramesFromZero == true ? 0 : ReorderDepth(state.Sps);
         }
@@ -567,7 +568,7 @@ public sealed class H264Decoder : IVideoDecoder
     /// </summary>
     private List<VideoFrame> InTimeOrder(List<VideoFrame> shown)
     {
-        if (_lengthSize != 0 || PacketTimes)
+        if (_lengthSize != 0)
         {
             return shown;
         }

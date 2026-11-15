@@ -810,7 +810,7 @@ MUTATIONS = [
     # ---- Capture times (docs/decisions/2026-11-15-live-rtcp.md, point 3), which need B pictures to tell a frame from
     # its unit: the live decoder's frames keep their own packets' times, not FFmpeg's for a stream with none ...
     dict(file="src/ManagedCodecs.H264/H264Decoder.cs",
-         find="if (_lengthSize != 0 || PacketTimes)", replace="if (_lengthSize != 0)",
+         find="if (_lengthSize == 0 && !PacketTimes)", replace="if (_lengthSize == 0)",
          tests="FullyQualifiedName~LiveRtcpTests.GivesEachFrameItsOwnPicturesTimeWhenBPicturesComeOutOfOrder"),
     # ... and the frame shown takes its own, not that of the unit whose decoding put it out ...
     dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",

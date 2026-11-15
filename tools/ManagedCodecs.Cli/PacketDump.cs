@@ -20,19 +20,20 @@ public static class PacketDump
         using var demuxer = Demuxer.Open(path);
         if (demuxer.Video is { } video)
         {
-            output.WriteLine(string.Create(CultureInfo.InvariantCulture, $"stream {video.StreamIndex} video {video.Codec} {video.Width}x{video.Height} {video.TimeBase.Numerator}/{video.TimeBase.Denominator}"));
+            output.WriteLine(Invariant($"stream {video.StreamIndex} video {video.Codec} {video.Width}x{video.Height} {video.TimeBase.Numerator}/{video.TimeBase.Denominator}"));
         }
 
         if (demuxer.Audio is { } audio)
         {
-            output.WriteLine(string.Create(CultureInfo.InvariantCulture, $"stream {audio.StreamIndex} audio {audio.Codec} {audio.SampleRate} {audio.Channels} {audio.TimeBase.Numerator}/{audio.TimeBase.Denominator}"));
+            output.WriteLine(Invariant($"stream {audio.StreamIndex} audio {audio.Codec} {audio.SampleRate} {audio.Channels} {audio.TimeBase.Numerator}/{audio.TimeBase.Denominator}"));
         }
 
         foreach (var packet in demuxer.ReadPackets())
         {
-            output.WriteLine(string.Create(
-                CultureInfo.InvariantCulture,
-                $"{packet.StreamIndex},{packet.Pts},{packet.Dts},{packet.Duration},{packet.Data.Length},{(packet.IsKeyframe ? 'K' : '_')},{Convert.ToHexStringLower(MD5.HashData(packet.Data.Span))}"));
+            output.WriteLine(Invariant($"{packet.StreamIndex},{packet.Pts},{packet.Dts},{packet.Duration},{packet.Data.Length},{(packet.IsKeyframe ? 'K' : '_')},{Convert.ToHexStringLower(MD5.HashData(packet.Data.Span))}"));
         }
     }
+
+    /// <summary>The text with its numbers as the invariant culture writes them (the Unity build's netstandard2.1 has no <c>string.Create</c> for it).</summary>
+    private static string Invariant(FormattableString text) => text.ToString(CultureInfo.InvariantCulture);
 }

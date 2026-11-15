@@ -7,7 +7,7 @@ namespace ManagedCodecs.Playback;
 /// 461 to that): what a <see cref="LivePlayer"/> connects to. Most IP cameras serve it, at a URL their manual gives (<c>rtsp://camera/stream1</c>, often with a
 /// substream at a lower resolution: show a wall of cameras from those). The first H.264 or JPEG video track of the
 /// camera's SDP plays. docs/decisions/2026-11-10-live-rtsp-h264.md, docs/decisions/2026-11-12-live-rtsp-jpeg.md,
-/// docs/decisions/2026-11-14-live-rtsp-udp.md.
+/// docs/decisions/2026-11-14-live-rtsp-udp.md. With <see cref="Audio"/>, its sound too.
 /// </summary>
 public sealed class RtspSource
 {
@@ -52,6 +52,14 @@ public sealed class RtspSource
     /// default.
     /// </summary>
     public TimeSpan MaxLag { get; init; } = TimeSpan.FromSeconds(1);
+
+    /// <summary>
+    /// Whether to play the camera's sound too: the first AAC (RFC 3640) or G.711 audio track of its SDP, taken with
+    /// <see cref="LivePlayer.TakeAudio"/>. False by default: the session is then for the video alone. A camera with no
+    /// such track, or one that refuses to send it, plays its video without sound (<see cref="LivePlayer.Audio"/>,
+    /// <see cref="LivePlayer.SkippedAudioCodec"/>). docs/decisions/2026-11-15-live-rtsp-audio.md.
+    /// </summary>
+    public bool Audio { get; init; }
 
     // The URL as sent: without its user info, which goes into an Authorization header instead.
     internal string RequestUrl =>

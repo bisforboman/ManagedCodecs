@@ -5,6 +5,8 @@ frames (tools/ManagedCodecs.Cli/LiveCheck.cs). An H.264 clip once per authentica
 Digest), an MJPEG one with Digest, which mediamtx sends as JPEG over RTP (RFC 2435;
 docs/decisions/2026-11-12-live-rtsp-jpeg.md), and the H.264 one again with mediamtx serving RTP over UDP only: it
 answers 461 to RTP over the RTSP connection, and LivePlayer takes UDP (docs/decisions/2026-11-14-live-rtsp-udp.md).
+And an H.264 clip with AAC sound, over both transports, played with RtspSource.Audio (`mcdec --live --audio`): each
+chunk of audio taken must be the clip's too (docs/decisions/2026-11-15-live-rtsp-audio.md).
 Fails on a frame not in the clip, a lost packet, a damaged frame, a reconnect, or too few frames. mediamtx is
 downloaded once, pinned by SHA-256, into samples/realworld/ (gitignored). Nightly (realworld.yml), not on pull
 requests: the required checks use the loopback server in the tests.
@@ -101,6 +103,18 @@ def make_clip(folder):
     clip = os.path.join(folder, "clip.mp4")
     subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=size=1280x720:rate=25", "-t", "10",
                     "-c:v", "libx264", "-preset", "veryfast", "-g", "50", "-pix_fmt", "yuv420p", clip], check=True)
+    return clip
+
+
+def make_audio_clip(folder):
+    """The H.264 clip's picture at 640x360 with 10 s of AAC LC sound (48 kHz stereo, FFmpeg's encoder): noise, so no
+    two frames decode alike, and without PNS, whose decoded noise depends on every frame before it, so that a frame's
+    samples are the file's whenever the frame before it was the file's (mcdec --live --audio)."""
+    clip = os.path.join(folder, "clip-audio.mp4")
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=25",
+                    "-f", "lavfi", "-i", "anoisesrc=color=pink:amplitude=0.3:sample_rate=48000", "-ac", "2", "-t", "10",
+                    "-c:v", "libx264", "-preset", "veryfast", "-g", "50", "-pix_fmt", "yuv420p",
+                    "-c:a", "aac", "-aac_pns", "0", "-b:a", "128k", clip], check=True)
     return clip
 
 
@@ -207,7 +221,7 @@ def wait_for_port(port, seconds=20):
     sys.exit(f"Nothing is listening on port {port}.")
 
 
-def run(method, binary, clip, folder, frames, transports="tcp"):
+def run(method, binary, clip, folder, frames, transports="tcp", audio=False):
     """mediamtx with one authentication method and one transport (tcp or udp), the clip pushed to it, then
     mcdec --live; its output and status."""
     config = os.path.join(folder, f"mediamtx-{method}-{transports}.yml")
@@ -238,7 +252,7 @@ def run(method, binary, clip, folder, frames, transports="tcp"):
         if not published.wait(20):
             return "\n".join(["The push never reached mediamtx.", *log[-20:]]), 1
         url = f"rtsp://{USER}:{PASSWORD}@127.0.0.1:{PORT}/live"
-        check = subprocess.run(["dotnet", MCDEC, "--live", url, clip, "--frames", str(frames)],
+        check = subprocess.run(["dotnet", MCDEC, "--live", url, clip, "--frames", str(frames), *(["--audio"] if audio else [])],
                                capture_output=True, text=True)
         output = check.stdout + check.stderr
         if check.returncode != 0:
@@ -270,10 +284,13 @@ def main():
     with tempfile.TemporaryDirectory() as folder:
         h264 = make_clip(folder)
         mjpeg = make_mjpeg_clip(folder)
-        runs = (("H.264, basic", "basic", h264, "tcp"), ("H.264, digest", "digest", h264, "tcp"),
-                ("JPEG, digest", "digest", mjpeg, "tcp"), ("H.264, digest, RTP over UDP only", "digest", h264, "udp"))
-        for label, method, clip, transports in runs:
-            output, status = run(method, binary, clip, folder, args.frames, transports)
+        sound = make_audio_clip(folder)
+        runs = (("H.264, basic", "basic", h264, "tcp", False), ("H.264, digest", "digest", h264, "tcp", False),
+                ("JPEG, digest", "digest", mjpeg, "tcp", False), ("H.264, digest, RTP over UDP only", "digest", h264, "udp", False),
+                ("H.264 and AAC, digest", "digest", sound, "tcp", True),
+                ("H.264 and AAC, digest, RTP over UDP only", "digest", sound, "udp", True))
+        for label, method, clip, transports, audio in runs:
+            output, status = run(method, binary, clip, folder, args.frames, transports, audio)
             verdict = "passed" if status == 0 else "FAILED"
             print(f"== {label}: {verdict}\n{output}\n", flush=True)
             report += [f"**{label}**: {verdict}", "", "```", output, "```", ""]

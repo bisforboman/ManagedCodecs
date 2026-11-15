@@ -124,5 +124,22 @@ Asked with the multiple-choice prompt; the owner took each recommendation (2026-
    - (c) Sync by RTCP sender reports: the picture is held back to the sound's time. It is what a player does, but it
      adds latency to the picture, which a live view exists to avoid, and needs RTCP parsing and a clock.
 
+## Since
+
+- Built (2026-11-15):
+  - `RtpAudioDepacketizer` and the SDP's audio track (internal, Playback).
+  - `RtspSource.Audio`, `LivePlayer.TakeAudio`, `Audio` and `SkippedAudioCodec`, and the three audio counts of
+    `LiveStatistics`.
+  - `RtspTestServer` with a second track. The checks are in docs/conformance.md, Audio over RTSP.
+  - The nightly run gained an H.264 clip with AAC sound through mediamtx, over the connection and over UDP
+    (`mcdec --live --audio`). mediamtx passes FFmpeg's `MPEG4-GENERIC` on as it is.
+- Differs from the plan:
+  - `LostPackets` counts the audio's lost packets too, and `DamagedAudioFrames` its dropped fragments, as planned.
+    Bad packets were added to it: one whose AU headers don't fit its payload.
+  - The marker bit's rule for a fragment (the last one carries it) turned out redundant with the size check and the
+    next unit's timestamp. It is kept, without a mutation entry.
+  - tools/gst-rtsp-server.py has no audio branch yet: GStreamer wasn't installed where this was built, and an untried
+    pipeline isn't worth committing. `rtpmp4gpay` (one access unit a packet) and `rtppcmapay` remain to try by hand.
+
 New public API (`RtspSource.Audio`, `LivePlayer.TakeAudio`, `Audio` and `SkippedAudioCodec`, the statistics), so the
 next minor version, with a CHANGELOG line under "Unreleased" when it is built.

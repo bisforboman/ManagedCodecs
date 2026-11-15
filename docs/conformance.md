@@ -255,6 +255,9 @@ checks are of the packets and the player.
 | `heaac-stereo-44k.rtp` | the same | HE-AAC (the FDK encoder's stream), 3 to 5 a packet |
 | `wav-alaw-codes.rtp` | FFmpeg, RFC 3551 | A-law mono as the static payload type 8, no `a=rtpmap` |
 | `wav-mulaw-codes.rtp` | the same | µ-law stereo as `PCMU/8000/2` |
+| `gstreamer/aac-single.rtp` (committed, tools/gst-audio-record.py) | GStreamer 1.24's `rtpmp4gpay`, RFC 3640, `mode=AAC-hbr` | AAC LC (FFmpeg's encoder through `avenc_aac`), one access unit a packet |
+| `gstreamer/aac-fragmented.rtp` | the same with `mtu=200` | every access unit over 3 to 5 packets: 163 packets for 41 |
+| `gstreamer/alaw.rtp`, `gstreamer/mulaw.rtp` | GStreamer's `rtppcmapay`, `rtppcmupay` | the static payload types 8 and 0 with no `a=rtpmap`, 1024 samples a packet |
 
 - **`RtpAudioDepacketizerTests`**:
   - The access units from FFmpeg's AAC packets are the file's packets byte for byte, and the SDP's `config=` is the
@@ -286,8 +289,16 @@ checks are of the packets and the player.
   frame before it, so the first chunk taken and the first of each loop of the clip are allowed not to be the clip's.
   The first runs (2026-11-15, by hand in the cloud session): 548 and 554 chunks beside 250 frames, 2 not the clip's
   (3 allowed), none dropped or damaged, no packet lost.
-- **Not tried yet:** an IP camera (their G.711 and one access unit a packet are covered by recordings and hand-made
-  packets only), GStreamer's `rtpmp4gpay`, and a fragmented access unit from a real sender.
+- **GStreamer's packetizers** (`RtpAudioDepacketizerTests`, the recordings above): the access units that come back
+  are the ones the encoder gave the packetizer, recorded beside the packets, byte for byte and with nothing lost or
+  damaged, one a packet and fragmented; the AAC decoder takes them; G.711's bytes come back the same.
+- **GStreamer 1.24's RTSP server, by hand** (2026-11-15, `AUDIO=... tools/gst-rtsp-server.py`, played by `mcplay`
+  under Xvfb, 22 s each beside the H.264 pattern): `aac` 1005 sound frames, `aac-fragmented` 1014, `alaw` and `mulaw`
+  169 packets each, none dropped or damaged, no packet lost; `latm` named by `SkippedAudioCodec` and not played. Its
+  sender reports gave both tracks capture times (`mcplay`'s lip sync held 471 to 483 of about 540 pictures, 31 to
+  102 ms each), and the sessions took the receiver reports.
+- **Not tried yet:** an IP camera (their G.711 and one access unit a packet are covered by GStreamer's and FFmpeg's
+  packetizers only).
 
 ### RTCP receiver reports
 

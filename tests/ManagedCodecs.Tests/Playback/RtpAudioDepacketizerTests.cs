@@ -8,7 +8,9 @@ namespace ManagedCodecs.Tests.Playback;
 /// The audio depacketizer (RFC 3640's AAC-hbr and AAC-lbr, RFC 3551's G.711) against FFmpeg's packetizer: the access
 /// units it gives back are the file's packets byte for byte, and the SDP's config is the file's AudioSpecificConfig
 /// (docs/decisions/2026-11-15-live-rtsp-audio.md). FFmpeg's encoder never writes an access unit larger than a packet,
-/// so fragments, AAC-lbr's field sizes and damage are hand-made packets. The SDP's audio track is read here too.
+/// so fragments' rules, AAC-lbr's field sizes and damage are hand-made packets; GStreamer's packetizers, recorded with
+/// what went into them (samples/gstreamer/, tools/gst-audio-record.py), send one access unit a packet and access units
+/// over several. The SDP's audio track is read here too.
 /// </summary>
 public class RtpAudioDepacketizerTests
 {
@@ -69,6 +71,64 @@ public class RtpAudioDepacketizerTests
         var fromRtp = new PcmDecoder(info).Decode(payloads.SelectMany(p => p).ToArray());
         var fromFile = new PcmDecoder(demuxer.Audio!).Decode(expected);
         Assert.Equal(fromFile.Samples[0].AsSpan(0, fromFile.SampleCount).ToArray(), fromRtp.Samples[0].AsSpan(0, fromRtp.SampleCount).ToArray());
+    }
+
+    [Theory]
+    [InlineData("aac-single", 1)] // one access unit a packet, as cameras send
+    [InlineData("aac-fragmented", 3)] // mtu=200: every access unit over several packets
+    public void GivesBackTheAccessUnitsGStreamerPacketized(string recording, int packetsAnAccessUnitAtLeast)
+    {
+        // GStreamer's rtpmp4gpay on its AAC encoder's access units, which were recorded beside the packets
+        // (tools/gst-audio-record.py): the same access units come back, and the AAC decoder takes them.
+        string path = Path.Combine("gstreamer", recording);
+        var track = Track(path);
+        var expected = Lengthed(File.ReadAllBytes(TestSamples.PathOf(path + ".frames")));
+        var packets = RtpH264DepacketizerTests.Recording(path);
+
+        var depacketizer = new RtpAudioDepacketizer(track);
+        var units = new List<byte[]>();
+        int fewest = int.MaxValue;
+        int since = 0;
+        foreach (var packet in packets)
+        {
+            int before = units.Count;
+            depacketizer.Add(packet, units);
+            since++;
+            Assert.InRange(units.Count - before, 0, 1);
+            if (units.Count > before)
+            {
+                fewest = Math.Min(fewest, since);
+                since = 0;
+            }
+        }
+
+        Assert.Equal((CodecIds.Aac, 97, 48000, 2), (track.Codec, track.PayloadType, track.SampleRate, track.Channels));
+        Assert.Equal((0L, 0L), (depacketizer.LostPackets, depacketizer.Damaged));
+        Assert.True(fewest >= packetsAnAccessUnitAtLeast, $"An access unit came in {fewest} packets.");
+        Assert.Equal(expected, units);
+
+        var decoder = AudioPipeline.CreateDecoder(new AudioStreamInfo(track.Codec, track.SampleRate, track.Channels, 0, new Rational(1, track.SampleRate), track.Config, 0));
+        Assert.All(units, unit => Assert.InRange(decoder.Decode(unit).SampleCount, 0, 1024));
+    }
+
+    [Theory]
+    [InlineData("alaw", CodecIds.PcmAlaw, 8)]
+    [InlineData("mulaw", CodecIds.PcmMulaw, 0)]
+    public void GivesBackTheG711SamplesGStreamerPacketized(string recording, string codec, int payloadType)
+    {
+        // rtppcmapay and rtppcmupay, described by their static payload types alone: the encoder's bytes come back.
+        string path = Path.Combine("gstreamer", recording);
+        var track = Track(path);
+        var depacketizer = new RtpAudioDepacketizer(track);
+        var payloads = new List<byte[]>();
+        foreach (var packet in RtpH264DepacketizerTests.Recording(path))
+        {
+            depacketizer.Add(packet, payloads);
+        }
+
+        Assert.Equal((codec, payloadType, 8000, 1), (track.Codec, track.PayloadType, track.SampleRate, track.Channels));
+        Assert.Equal((0L, 0L), (depacketizer.LostPackets, depacketizer.Damaged));
+        Assert.Equal(File.ReadAllBytes(TestSamples.PathOf(path + ".frames")), payloads.SelectMany(p => p).ToArray());
     }
 
     [Fact]
@@ -219,6 +279,20 @@ public class RtpAudioDepacketizerTests
     }
 
     /// <summary>The audio track of a recording's SDP (make-samples.sh's -sdp_file).</summary>
+    // Buffers each after its 16-bit length.
+    private static List<byte[]> Lengthed(byte[] data)
+    {
+        var buffers = new List<byte[]>();
+        for (int at = 0; at < data.Length;)
+        {
+            int length = (data[at] << 8) | data[at + 1];
+            buffers.Add(data.AsSpan(at + 2, length).ToArray());
+            at += 2 + length;
+        }
+
+        return buffers;
+    }
+
     internal static SdpAudioTrack Track(string recording) =>
         Sdp.Parse(File.ReadAllText(TestSamples.PathOf(recording + ".sdp"))).Audio ?? throw new InvalidDataException($"{recording}.sdp has no audio track that plays.");
 

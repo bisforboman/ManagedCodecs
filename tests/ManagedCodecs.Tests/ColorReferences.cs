@@ -61,6 +61,16 @@ public sealed class ColorReferences
             $"Frame {index}: {actual}; FFmpeg's {string.Join(", ", expected.Select(kv => $"{kv.Key}={kv.Value}"))}.");
     }
 
+    /// <summary>
+    /// Whether the values are those ffprobe names for a stream (color_range, color_primaries, color_transfer and
+    /// color_space; a name it leaves out is "unknown").
+    /// </summary>
+    public static bool Same(string? range, string? primaries, string? transfer, string? matrix, ColorRange r, ColorPrimaries p, ColorTransfer t, ColorMatrix m) =>
+        Ranges[(int)r] == (range ?? "unknown")
+            && Primaries[primaries ?? "unknown"].Contains((int)p)
+            && Transfers[transfer ?? "unknown"].Contains((int)t)
+            && Matrices[matrix ?? "unknown"].Contains((int)m);
+
     /// <summary>ffprobe prints a ratio as given ("64:45"), and N/A for an unknown one (0:1).</summary>
     private static bool SameRatio(Rational ratio, string printed) =>
         printed == "N/A" ? ratio.Numerator == 0 : printed == $"{ratio.Numerator}:{ratio.Denominator}";

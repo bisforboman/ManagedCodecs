@@ -209,6 +209,27 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.Containers/Mxf/MxfDemuxer.cs",
          find="_audioStart = Start(audio.StreamIndex, Rescale(pts, timeBase, audio.TimeBase));", replace="",
          tests="FullyQualifiedName~MxfConformanceTests|DisplayName~mxf"),
+    # The range by the descriptor's reference levels is FFmpeg's reading, not a rule of ST 377-1: full range takes a
+    # missing black level for 0, a colour range of the largest value or one more ...
+    dict(file="src/ManagedCodecs.Containers/Mxf/MxfHeader.cs",
+         find="(black ?? 0) == 0 && white == largest && (range == largest || range == largest + 1)",
+         replace="black == 0 && white == largest && (range == largest || range == largest + 1)",
+         tests="FullyQualifiedName~MxfHeaderTests"),
+    dict(file="src/ManagedCodecs.Containers/Mxf/MxfHeader.cs",
+         find="(black ?? 0) == 0 && white == largest && (range == largest || range == largest + 1)",
+         replace="(black ?? 0) == 0 && white == largest && range == largest + 1",
+         tests="FullyQualifiedName~MxfHeaderTests"),
+    # ... and limited range the levels at the component depth, colour range included (16, 235 and 225 at 8 bits).
+    dict(file="src/ManagedCodecs.Containers/Mxf/MxfHeader.cs",
+         find="white == 235u << (depth - 8) && range == (14u << (depth - 4)) + 1", replace="white == 235u << (depth - 8)",
+         tests="FullyQualifiedName~MxfHeaderTests"),
+    # BT.601's coding equations are BT.470 BG's matrix to FFmpeg, and BT.470's transfer gamma 2.2.
+    dict(file="src/ManagedCodecs.Containers/Mxf/MxfLabels.cs",
+         find="0x01 => ColorMatrix.Bt470BG,", replace="0x01 => ColorMatrix.Smpte170M,",
+         tests="FullyQualifiedName~MxfHeaderTests"),
+    dict(file="src/ManagedCodecs.Containers/Mxf/MxfLabels.cs",
+         find="0x01 => ColorTransfer.Gamma22,", replace="0x01 => ColorTransfer.Gamma28,",
+         tests="FullyQualifiedName~MxfHeaderTests"),
     # Clip-wrapped sound comes in pieces of a 25th of a second, FFmpeg's reading (mxf-opatom-pcm: 1920 samples).
     dict(file="src/ManagedCodecs.Containers/Mxf/MxfDemuxer.cs",
          find="audio.AudioSamplingRate.Numerator / 25)", replace="audio.AudioSamplingRate.Numerator / 50)",

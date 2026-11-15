@@ -19,6 +19,13 @@ run time.
   from the RTCP port over UDP (loss, jitter, and the camera's last sender report echoed). Cameras and servers that drop
   a reader they hear no RTCP from keep playing. docs/decisions/2026-11-15-live-rtcp.md.
 
+### Fixed
+
+- Containers: `MxfDemuxer.Video` carries the picture descriptor's colour (`ColorPrimaries`, `ColorTransfer`,
+  `ColorMatrix`, and `ColorRange` by its black and white reference levels), as FFmpeg's demuxer reads it; it was left
+  unspecified. Decoded H.264 frames take it where the stream's VUI says nothing, as with MP4's 'colr', so HDR and
+  full-range MXF files are no longer shown as unspecified. docs/decisions/2026-11-15-mxf-colour-and-what-is-left.md.
+
 ## 0.17.0 – 2026-11-15
 
 Live cameras over RTSPS: `rtsps://` URLs over TLS, a camera's certificate pinned by `RtspSource.CertificateHash`. New

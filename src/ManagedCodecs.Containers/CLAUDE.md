@@ -74,6 +74,13 @@ The repository's CLAUDE.md (process, core idea, cross-cutting gotchas) applies t
   120 coded in macroblocks), no sample aspect ratio and no field order for separate fields, which come from the
   decoder otherwise (make-samples.sh's `.headers.json`). Its codec names follow the descriptor's coding label, else the
   essence container's; PCM in the AES3 and Broadcast Wave mappings is `pcm_s<bits>le` (ST 382: little-endian).
+- MXF colour: FFmpeg's muxer writes the descriptor's labels and reference levels from `-color_primaries`,
+  `-color_trc`, `-colorspace` and `-color_range`, with `-c copy` too (remux raw H.264 to make the descriptor differ
+  from the VUI), but one label for several values (smpte170m's transfer reads back bt709, its matrix bt470bg).
+  `ffprobe -nofind_stream_info` shows the descriptor's; with probing the stream shows the decoder's. To see what
+  FFmpeg reads for a label or a level its muxer never writes, patch the value's bytes in a sample and run ffprobe
+  (the expectations of `MxfHeaderTests` were made that way); the SMPTE registers (registry.smpte-ra.org, Labels.xml
+  and Elements.xml) answer from the cloud sandbox.
 - MXF packets: FFmpeg's demuxer itself gives no keyframe flags (libavformat's parsers and its intra-only rule add
   them), no durations, and no video times where it reads no index entries (DNxHR's constant-size index; the footer's
   index of a pipe-written file without a random index pack, which it never reaches); compare against `.packets.csv`

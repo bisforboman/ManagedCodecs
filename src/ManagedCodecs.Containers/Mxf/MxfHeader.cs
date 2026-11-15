@@ -80,6 +80,19 @@ internal sealed record MxfTrack
 
     public int VerticalSubsampling { get; init; }
 
+    /// <summary>
+    /// The picture descriptor's colour, as ITU-T H.273's code points (<see cref="MxfLabels.Primaries"/>,
+    /// <see cref="MxfLabels.Transfer"/>, <see cref="MxfLabels.Matrix"/>), and the range its reference levels give
+    /// (<see cref="MxfHeader.RangeOf"/>); unspecified where the descriptor says nothing, or nothing known.
+    /// </summary>
+    public ColorPrimaries ColorPrimaries { get; init; } = ColorPrimaries.Unspecified;
+
+    public ColorTransfer ColorTransfer { get; init; } = ColorTransfer.Unspecified;
+
+    public ColorMatrix ColorMatrix { get; init; } = ColorMatrix.Unspecified;
+
+    public ColorRange ColorRange { get; init; } = ColorRange.Unspecified;
+
     /// <summary>The sound's sampling rate, or (0, 0).</summary>
     public (int Numerator, int Denominator) AudioSamplingRate { get; init; }
 
@@ -303,6 +316,7 @@ internal sealed class MxfHeader
         }
 
         byte[] coding = descriptor.Get(MxfLabels.PictureEssenceCoding) ?? [];
+        int depth = (int)Math.Min(descriptor.UInt32(MxfLabels.ComponentDepth) ?? 0, int.MaxValue);
         return common with
         {
             Codec = MxfLabels.PictureCodec(coding, common.EssenceContainer ?? []),
@@ -313,10 +327,37 @@ internal sealed class MxfHeader
             SampleAspectRatio = sampleAspect,
             FrameLayout = layout,
             FieldDominance = descriptor.UInt8(MxfLabels.FieldDominance),
-            ComponentDepth = (int)Math.Min(descriptor.UInt32(MxfLabels.ComponentDepth) ?? 0, int.MaxValue),
+            ComponentDepth = depth,
+            ColorPrimaries = MxfLabels.Primaries(descriptor.Get(MxfLabels.ColorPrimaries)),
+            ColorTransfer = MxfLabels.Transfer(descriptor.Get(MxfLabels.TransferCharacteristic)),
+            ColorMatrix = MxfLabels.Matrix(descriptor.Get(MxfLabels.CodingEquations)),
+            ColorRange = RangeOf(descriptor.UInt32(MxfLabels.BlackRefLevel), descriptor.UInt32(MxfLabels.WhiteRefLevel), descriptor.UInt32(MxfLabels.ColorRange), depth),
             HorizontalSubsampling = (int)Math.Min(descriptor.UInt32(MxfLabels.HorizontalSubsampling) ?? 0, int.MaxValue),
             VerticalSubsampling = (int)Math.Min(descriptor.UInt32(MxfLabels.VerticalSubsampling) ?? 0, int.MaxValue),
         };
+    }
+
+    /// <summary>
+    /// The range a CDCI descriptor's reference levels give (ST 377-1 G.2.26 to G.2.28: the black and white levels and
+    /// the colour difference range, at the component depth), as FFmpeg's demuxer tells them (ffprobe on a file with the
+    /// levels patched; it has no rule in ST 377-1): limited for ITU-R BT.601's levels at the depth (16, 235 and 225 at
+    /// 8 bits; 64, 940 and 897 at 10), full for black 0 (or none given), white the depth's largest value and a range of
+    /// that or one more (255 or 256), and unspecified for anything else, a depth outside 8 to 16 among it.
+    /// </summary>
+    internal static ColorRange RangeOf(uint? black, uint? white, uint? range, int depth)
+    {
+        if (depth is < 8 or > 16 || white is null || range is null)
+        {
+            return ColorRange.Unspecified;
+        }
+
+        uint largest = (1u << depth) - 1;
+        if (black == 16u << (depth - 8) && white == 235u << (depth - 8) && range == (14u << (depth - 4)) + 1)
+        {
+            return ColorRange.Limited;
+        }
+
+        return (black ?? 0) == 0 && white == largest && (range == largest || range == largest + 1) ? ColorRange.Full : ColorRange.Unspecified;
     }
 
     private static MxfTrack DescribeSound(MxfTrack common, MxfSet descriptor)

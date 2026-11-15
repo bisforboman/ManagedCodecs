@@ -684,6 +684,28 @@ metadata instead: the aspect ratio over the display rectangle (4:3 over 720x576 
 the primer doesn't map, an unknown duration (-1), header metadata without a preface or a primer pack or with a
 property past its set, which partition's header metadata is read (closed first), and drop-frame timecodes.
 
+The picture descriptor's colour (ST 377-1 Annex G) is compared the same way (`color_range`, `color_primaries`,
+`color_transfer` and `color_space` in name.headers.json): the Color Primaries, Transfer Characteristic and Coding
+Equations labels (the SMPTE registers' 04.01.01.01 labels, as ITU-T H.273's code points), and the range by the CDCI
+descriptor's black and white reference levels and colour range at its component depth. mxf-h264-colour-hlg has
+BT.2020, HLG and limited range in the descriptor alone, mxf-h264-colour-conflict BT.2020 and PQ in the descriptor
+against BT.709 and full range in the VUI, mxf-h264-colour-full full range (0, 255, 256), and mxf-h264-422-10 (10-bit
+4:2:2 intra-only H.264) limited range at 10 bits (64, 940, 897); the ProRes, DNxHR, D-10 and interlaced H.264
+samples carry what FFmpeg's muxers write by default, limited range's levels and no label. `MxfDemuxer.Video` gives the descriptor's values, and decoded frames the VUI's where it speaks, else the
+descriptor's, as ffprobe lists them frame by frame (name.color; `MxfConformanceTests`). The rest is hand-made:
+
+- Labels: FFmpeg's muxer writes one label for several code points (BT.709's transfer for SMPTE 170M's, BT.601's
+  equations for BT.470 BG's and SMPTE 170M's matrix, BT.470's transfer for gamma 2.2) and never most of the others.
+  `MxfHeaderTests` writes every label of the three lists into a descriptor; the expectations are what FFmpeg 6.1's
+  demuxer reads from a sample with the label patched in (BT.601's equations as bt470bg, BT.470's transfer as gamma
+  2.2, the deprecated SMPTE 274M/296M transfer as bt709, the cinema mezzanine's primaries as smpte428). Two labels
+  FFmpeg 6.1 doesn't know are read by the registers' definition: sRGB's transfer and ICtCp's equations. Labels
+  without a code point (gamma 2.6, the camera logs and gamuts, ACES, P3 D60) stay unspecified.
+- Range: ST 377-1 gives the levels, not a rule for telling the range by them, so the rule is FFmpeg's, measured
+  the same way on 33 combinations: limited for 16, 235 and 225 scaled to the depth; full for 0 (or no black level),
+  the depth's largest value and a colour range of that or one more; unspecified for anything else (8-bit levels at
+  10 bits, a missing white level, colour range or depth).
+
 
 `MxfConformanceTests` compares every packet of every sample's video and first audio stream with FFmpeg's (`ffprobe
 -show_packets -show_data_hash MD5`, name.packets.csv): file order, pts, size, MD5, keyframe flag and duration, and the

@@ -113,20 +113,27 @@ public class MxfConformanceTests
         var video = demuxer.Video!;
         Assert.Equal(CodecIds.H264, video.Codec);
         var decoder = new H264Decoder(video) { Threads = threads };
+        var colors = ColorReferences.Read(sampleName);
         var frames = new List<(long Pts, string Md5)>();
+        void Take(VideoFrame frame)
+        {
+            // The frame's colour as ffprobe lists it (name.color): the VUI's, else the picture descriptor's.
+            colors?.Check(frames.Count, frame);
+            frames.Add((frame.Pts, FrameMd5.Hash(frame)));
+            frame.Dispose();
+        }
+
         foreach (var packet in demuxer.ReadPackets().Where(p => p.StreamIndex == video.StreamIndex))
         {
             foreach (var frame in decoder.Decode(packet))
             {
-                frames.Add((frame.Pts, FrameMd5.Hash(frame)));
-                frame.Dispose();
+                Take(frame);
             }
         }
 
         foreach (var frame in decoder.Flush())
         {
-            frames.Add((frame.Pts, FrameMd5.Hash(frame)));
-            frame.Dispose();
+            Take(frame);
         }
 
         Assert.Equal(expected.Count, frames.Count);
@@ -182,6 +189,33 @@ public class MxfConformanceTests
         using var interlaced = Demuxer.Open(TestSamples.PathOf("mxf-h264-interlaced.mxf"));
         Assert.Equal(new Rational(1001, 30000), interlaced.Video!.TimeBase);
         Assert.Equal(120, interlaced.Video.Height); // two sampled fields of 60
+    }
+
+    /// <summary>
+    /// The colour samples do say what they are for, in the stream and in the frames: the descriptor's colour where the
+    /// VUI says nothing, the VUI's where both speak (the stream keeps the descriptor's), full range by the levels, and
+    /// limited range at 10 bits.
+    /// </summary>
+    [Theory]
+    [InlineData("mxf-h264-colour-hlg.mxf", ColorRange.Limited, ColorPrimaries.Bt2020, ColorTransfer.AribStdB67, ColorMatrix.Bt2020Ncl, ColorRange.Limited, ColorPrimaries.Bt2020)]
+    [InlineData("mxf-h264-colour-conflict.mxf", ColorRange.Limited, ColorPrimaries.Bt2020, ColorTransfer.Smpte2084, ColorMatrix.Bt2020Ncl, ColorRange.Full, ColorPrimaries.Bt709)]
+    [InlineData("mxf-h264-colour-full.mxf", ColorRange.Full, ColorPrimaries.Smpte170M, ColorTransfer.Bt709, ColorMatrix.Bt470BG, ColorRange.Full, ColorPrimaries.Smpte170M)]
+    [InlineData("mxf-h264-422-10.mxf", ColorRange.Limited, ColorPrimaries.Bt709, ColorTransfer.Bt709, ColorMatrix.Bt709, ColorRange.Limited, ColorPrimaries.Bt709)]
+    [InlineData("mxf-h264-pcm.mxf", ColorRange.Unspecified, ColorPrimaries.Unspecified, ColorTransfer.Unspecified, ColorMatrix.Unspecified, ColorRange.Unspecified, ColorPrimaries.Unspecified)]
+    public void GivesThePictureDescriptorsColour(string sampleName, ColorRange range, ColorPrimaries primaries, ColorTransfer transfer, ColorMatrix matrix, ColorRange frameRange, ColorPrimaries framePrimaries)
+    {
+        if (TestSamples.Directory is null || !File.Exists(TestSamples.PathOf(sampleName)))
+        {
+            return;
+        }
+
+        using var demuxer = Demuxer.Open(TestSamples.PathOf(sampleName));
+        var video = demuxer.Video!;
+        Assert.Equal((range, primaries, transfer, matrix), (video.ColorRange, video.ColorPrimaries, video.ColorTransfer, video.ColorMatrix));
+
+        var decoder = new H264Decoder(video);
+        using var frame = demuxer.ReadPackets().Where(p => p.StreamIndex == video.StreamIndex).SelectMany(decoder.Decode).Concat(decoder.Flush()).First();
+        Assert.Equal((frameRange, framePrimaries), (frame.ColorRange, frame.ColorPrimaries));
     }
 
     [Fact]

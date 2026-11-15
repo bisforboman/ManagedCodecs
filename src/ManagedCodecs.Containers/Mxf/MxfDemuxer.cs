@@ -600,7 +600,13 @@ public sealed class MxfDemuxer : IDemuxer
                 _packets.Count(p => p.StreamIndex == _videoIndex),
                 new Rational(video.EditRate.Denominator, video.EditRate.Numerator),
                 ReadOnlyMemory<byte>.Empty,
-                _videoIndex);
+                _videoIndex)
+            {
+                ColorRange = video.ColorRange,
+                ColorPrimaries = video.ColorPrimaries,
+                ColorTransfer = video.ColorTransfer,
+                ColorMatrix = video.ColorMatrix,
+            };
         }
 
         if (_audio is { } audio)

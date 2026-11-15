@@ -329,6 +329,8 @@ reports are the tests' own, so the checks are of the arithmetic and of which tim
   - Several AAC frames in a packet: each is later than the one before by that one's length.
 - **Mutation entries:** the frame's own time rather than its unit's (in `H264Decoder` and in `LivePlayer`), another
   stream's report placing nothing, and the later frames of an AAC packet.
+- **mediamtx 1.21.3, by hand** (2026-11-15): its sender reports gave both tracks capture times, and `mcplay`'s lip
+  sync held 968 of 976 pictures for the sound (tools/ManagedCodecs.MonoGame.Sample/README.md).
 - **Not tried yet:** a camera's own sender reports. JPEG over RTSP's times have no test of their own (a JPEG frame is
   its packets' picture, with nothing reordered).
 

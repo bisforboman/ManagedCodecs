@@ -72,6 +72,12 @@ internal sealed class RtspTestServer : IDisposable
 
     public ConcurrentQueue<RtspRequest> Requests { get; } = new();
 
+    /// <summary>
+    /// The packets the client sent interleaved on a connection, by channel: its RTCP receiver reports. (Over UDP they
+    /// reach the server's RTCP port: <see cref="Punches"/>.)
+    /// </summary>
+    public ConcurrentQueue<(int Channel, byte[] Data)> Interleaved { get; } = new();
+
     public Uri Uri => new($"{(Certificate is null ? "rtsp://127.0.0.1" : "rtsps://localhost")}:{((IPEndPoint)_listener.LocalEndpoint).Port}/stream");
 
     /// <summary>Serve RTSPS: each connection over TLS with this certificate (and its private key).</summary>
@@ -157,13 +163,13 @@ internal sealed class RtspTestServer : IDisposable
             }
 
             var writing = new SemaphoreSlim(1, 1);
-            var reader = new StreamReader(stream, Encoding.UTF8);
+            var reader = new ByteReader(stream);
             Task? playing = null;
             var udpClients = new List<IPEndPoint>(); // a track's each, in SETUP's order
             using var connection = CancellationTokenSource.CreateLinkedTokenSource(token);
             try
             {
-                while (await ReadRequestAsync(reader, index, connection.Token) is { } request)
+                while (await ReadRequestAsync(reader, index, Interleaved, connection.Token) is { } request)
                 {
                     Requests.Enqueue(request);
                     string cseq = request.Headers.GetValueOrDefault("CSeq", "0");
@@ -198,7 +204,7 @@ internal sealed class RtspTestServer : IDisposable
 
                     if (request.Method == "PLAY" && status == 200 && playing is null)
                     {
-                        var play = new RtspPlay(stream, writing, index, connection.Token, udpClients.Count > 0 ? (_rtp, udpClients.ToArray()) : null);
+                        var play = new RtspPlay(stream, writing, index, connection.Token, udpClients.Count > 0 ? (_rtp, _rtcp, udpClients.ToArray()) : null);
                         playing = Task.Run(async () =>
                         {
                             try
@@ -289,18 +295,42 @@ internal sealed class RtspTestServer : IDisposable
             && fields.GetValueOrDefault("response") == expected && fields.GetValueOrDefault("opaque") == "op";
     }
 
-    private static async Task<RtspRequest?> ReadRequestAsync(StreamReader reader, int index, CancellationToken token)
+    // The next request; the packets the client interleaves before it ('$', channel, length, data) go to interleaved.
+    private static async Task<RtspRequest?> ReadRequestAsync(ByteReader reader, int index, ConcurrentQueue<(int Channel, byte[] Data)> interleaved, CancellationToken token)
     {
         string? line;
-        do
+        while (true)
         {
+            int first = await reader.PeekAsync(token);
+            if (first < 0)
+            {
+                return null;
+            }
+
+            if (first == '$')
+            {
+                var head = await reader.ReadAsync(4, token);
+                var data = head is null ? null : await reader.ReadAsync((head[2] << 8) | head[3], token);
+                if (data is null)
+                {
+                    return null;
+                }
+
+                interleaved.Enqueue((head![1], data));
+                continue;
+            }
+
             line = await reader.ReadLineAsync(token);
             if (line is null)
             {
                 return null;
             }
+
+            if (line.Length > 0)
+            {
+                break;
+            }
         }
-        while (line.Length == 0);
 
         var parts = line.Split(' ');
         var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -312,10 +342,72 @@ internal sealed class RtspTestServer : IDisposable
 
         return new RtspRequest(index, parts[0], parts[1], headers);
     }
+
+    // Lines and counted bytes from one stream (a StreamReader would decode the interleaved packets as text).
+    private sealed class ByteReader(Stream stream)
+    {
+        private readonly byte[] _buffer = new byte[4096];
+        private int _start;
+        private int _end;
+
+        public async Task<int> PeekAsync(CancellationToken token)
+        {
+            if (_start == _end)
+            {
+                _start = 0;
+                _end = await stream.ReadAsync(_buffer, token);
+                if (_end == 0)
+                {
+                    return -1;
+                }
+            }
+
+            return _buffer[_start];
+        }
+
+        public async Task<byte[]?> ReadAsync(int count, CancellationToken token)
+        {
+            var bytes = new byte[count];
+            for (int i = 0; i < count; i++)
+            {
+                int next = await PeekAsync(token);
+                if (next < 0)
+                {
+                    return null;
+                }
+
+                bytes[i] = (byte)next;
+                _start++;
+            }
+
+            return bytes;
+        }
+
+        public async Task<string?> ReadLineAsync(CancellationToken token)
+        {
+            var line = new List<byte>();
+            while (true)
+            {
+                int next = await PeekAsync(token);
+                if (next < 0)
+                {
+                    return line.Count == 0 ? null : Encoding.UTF8.GetString([.. line]);
+                }
+
+                _start++;
+                if (next == '\n')
+                {
+                    return Encoding.UTF8.GetString([.. line]).TrimEnd('\r');
+                }
+
+                line.Add((byte)next);
+            }
+        }
+    }
 }
 
 /// <summary>What a test's <see cref="RtspTestServer.OnPlay"/> sends with: packets interleaved on the connection.</summary>
-internal sealed class RtspPlay(Stream stream, SemaphoreSlim writing, int connection, CancellationToken token, (UdpClient Socket, IPEndPoint[] Clients)? udp = null)
+internal sealed class RtspPlay(Stream stream, SemaphoreSlim writing, int connection, CancellationToken token, (UdpClient Socket, UdpClient Rtcp, IPEndPoint[] Clients)? udp = null)
 {
     /// <summary>Whether SETUP chose RTP over UDP: <see cref="SendAsync"/> then sends from the server's RTP port.</summary>
     public bool Udp => udp is not null;
@@ -330,12 +422,22 @@ internal sealed class RtspPlay(Stream stream, SemaphoreSlim writing, int connect
     /// <summary>Close the connection once OnPlay returns (a camera that drops the stream).</summary>
     public bool CloseAfter { get; set; }
 
-    // Over UDP, a channel's packets go to its track's port: channel 0 to the first SETUP's, channel 2 to the second's.
+    // Over UDP, a channel's packets go to its track's port: channel 0 to the first SETUP's, channel 2 to the second's,
+    // and an odd channel's (RTCP) from the server's RTCP port to the port after the track's.
     public async Task SendAsync(byte[] packet, int channel = 0)
     {
         if (udp is { } target)
         {
-            await target.Socket.SendAsync(packet, target.Clients[channel / 2], Token);
+            var client = target.Clients[channel / 2];
+            if (channel % 2 == 1)
+            {
+                await target.Rtcp.SendAsync(packet, new IPEndPoint(client.Address, client.Port + 1), Token);
+            }
+            else
+            {
+                await target.Socket.SendAsync(packet, client, Token);
+            }
+
             return;
         }
 

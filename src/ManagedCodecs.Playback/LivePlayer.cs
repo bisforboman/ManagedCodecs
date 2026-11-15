@@ -31,6 +31,9 @@ public sealed class LivePlayer : IDisposable
 {
     private const int SpareLimit = 4;
 
+    // The RTP clock of H.264 (RFC 6184) and JPEG (RFC 2435).
+    private const int VideoClockRate = 90000;
+
     // How long a UDP packet ahead of a missing one is held for it (docs/decisions/2026-11-14-live-rtsp-udp.md, decision 2).
     private static readonly TimeSpan ReorderWindow = TimeSpan.FromMilliseconds(50);
     private static readonly TimeSpan FirstBackoff = TimeSpan.FromSeconds(0.5);
@@ -38,6 +41,10 @@ public sealed class LivePlayer : IDisposable
 
     // How much decoded audio waits for TakeAudio (docs/decisions/2026-11-15-live-rtsp-audio.md, decision 3).
     private static readonly TimeSpan AudioQueue = TimeSpan.FromSeconds(0.5);
+
+    // How often each track's RTCP receiver report goes to the camera (RFC 3550, 6.2's minimum;
+    // docs/decisions/2026-11-15-live-rtcp.md).
+    private static readonly TimeSpan ReportInterval = TimeSpan.FromSeconds(5);
 
     private readonly ILiveClock _clock;
     private readonly HttpClient? _client;
@@ -417,6 +424,7 @@ public sealed class LivePlayer : IDisposable
         AudioSession? audio = null;
         Task? keepAlive = null;
         Task? audioPump = null;
+        Task? reports = null;
         try
         {
             try
@@ -495,31 +503,53 @@ public sealed class LivePlayer : IDisposable
             keepAlive = KeepAliveAsync(rtsp, getParameter ? "GET_PARAMETER" : "OPTIONS", sessionUrl, timeout, cancel.Token);
 
             var handle = track.Codec == SdpCodec.Jpeg ? JpegPackets(track.PayloadType, connection) : H264Packets(track, connection);
+
+            // Each track's receiver reports go back the way its packets come: on the RTSP connection's next channel,
+            // or from the RTCP port to the server's (docs/decisions/2026-11-15-live-rtcp.md).
+            var rtcp = new RtcpSession(VideoClockRate);
+            var senders = new List<(RtcpSession Rtcp, Func<byte[], Task> Send)>();
+            var ending = cancel.Token;
             if (udp is null)
             {
-                await PumpTcpAsync(rtsp, transport.Channel, handle, audio?.Channel ?? -1, audio?.Handle, cancel.Token).ConfigureAwait(false);
+                var connected = rtsp;
+                senders.Add((rtcp, new Func<byte[], Task>(report => connected.SendPacketAsync(transport.Channel + 1, report, ending))));
+                if (audio is not null)
+                {
+                    senders.Add((audio.Rtcp, new Func<byte[], Task>(report => connected.SendPacketAsync(audio.Channel + 1, report, ending))));
+                }
+
+                reports = SendReportsAsync(senders, ending);
+                await PumpTcpAsync(rtsp, transport.Channel, handle, rtcp, audio, ending).ConfigureAwait(false);
             }
             else
             {
                 var server = Plain(transport.Source ?? rtsp.RemoteEndPoint.Address);
                 if (transport.ServerRtpPort is { } serverRtp)
                 {
-                    udp.Punch(new IPEndPoint(server, serverRtp), new IPEndPoint(server, transport.ServerRtcpPort ?? serverRtp + 1));
+                    var serverRtcp = new IPEndPoint(server, transport.ServerRtcpPort ?? serverRtp + 1);
+                    udp.Punch(new IPEndPoint(server, serverRtp), serverRtcp);
+                    senders.Add((rtcp, Sender(udp, serverRtcp)));
                 }
 
+                Observe(ReadReportsAsync(udp, server, rtcp));
                 if (audio?.Udp is { } audioUdp)
                 {
                     var audioServer = Plain(audio.Transport.Source ?? rtsp.RemoteEndPoint.Address);
                     if (audio.Transport.ServerRtpPort is { } audioRtp)
                     {
-                        audioUdp.Punch(new IPEndPoint(audioServer, audioRtp), new IPEndPoint(audioServer, audio.Transport.ServerRtcpPort ?? audioRtp + 1));
+                        var audioRtcp = new IPEndPoint(audioServer, audio.Transport.ServerRtcpPort ?? audioRtp + 1);
+                        audioUdp.Punch(new IPEndPoint(audioServer, audioRtp), audioRtcp);
+                        senders.Add((audio.Rtcp, Sender(audioUdp, audioRtcp)));
                     }
 
-                    // Until the session ends (the token): the video's pump decides when that is.
-                    audioPump = PumpUdpAsync(Task.Delay(Timeout.Infinite, cancel.Token), audioUdp, audioServer, audio.Transport.Ssrc, audio.Handle, watched: false, cancel.Token);
+                    Observe(ReadReportsAsync(audioUdp, audioServer, audio.Rtcp));
+
+                    // Until the ending ends (the ending): the video's pump decides when that is.
+                    audioPump = PumpUdpAsync(Task.Delay(Timeout.Infinite, ending), audioUdp, audioServer, audio.Transport.Ssrc, audio.Handle, audio.Rtcp, watched: false, ending);
                 }
 
-                await PumpUdpAsync(DrainAsync(rtsp, cancel.Token), udp, server, transport.Ssrc, handle, watched: true, cancel.Token).ConfigureAwait(false);
+                reports = SendReportsAsync(senders, ending);
+                await PumpUdpAsync(DrainAsync(rtsp, ending), udp, server, transport.Ssrc, handle, rtcp, watched: true, ending).ConfigureAwait(false);
             }
         }
         finally
@@ -544,6 +574,11 @@ public sealed class LivePlayer : IDisposable
             if (keepAlive is not null)
             {
                 await keepAlive.ConfigureAwait(false);
+            }
+
+            if (reports is not null)
+            {
+                await reports.ConfigureAwait(false);
             }
         }
     }
@@ -586,7 +621,7 @@ public sealed class LivePlayer : IDisposable
             // An answer that names no channel (read as 0) would put the audio on the video's: the one asked for.
             int channel = transport.Channel == videoChannel ? 2 : transport.Channel;
             _audioInfo = info;
-            return new AudioSession(AudioPackets(track, decoder), channel, ports, transport);
+            return new AudioSession(AudioPackets(track, decoder), channel, ports, transport, new RtcpSession(track.SampleRate));
         }
         catch (Exception)
         {
@@ -709,29 +744,84 @@ public sealed class LivePlayer : IDisposable
     }
 
     // RTP interleaved on the RTSP connection: the packets of the video's channel, and of the audio's when it has one,
-    // until the connection ends. Only the video's count against a stall.
-    private async Task PumpTcpAsync(RtspConnection rtsp, int channel, Action<byte[]> handle, int audioChannel, Action<byte[]>? audio, CancellationToken token)
+    // until the connection ends, and on the channel after each its RTCP (the camera's sender reports). Only the
+    // video's packets count against a stall.
+    private async Task PumpTcpAsync(RtspConnection rtsp, int channel, Action<byte[]> handle, RtcpSession rtcp, AudioSession? audio, CancellationToken token)
     {
+        int audioChannel = audio?.Channel ?? -1;
         while (await rtsp.ReadAsync(token).ConfigureAwait(false) is { } message)
         {
-            if (message.IsPacket && message.Channel == channel)
+            if (!message.IsPacket)
             {
-                Touch();
-                handle(message.Data);
-            }
-            else if (message.IsPacket && message.Channel == audioChannel)
-            {
-                audio!(message.Data);
+                continue; // a keep-alive's answer
             }
 
-            // Else keep-alives' answers, RTCP.
+            if (message.Channel == channel)
+            {
+                Touch();
+                rtcp.Received(message.Data, _clock.Elapsed);
+                handle(message.Data);
+            }
+            else if (message.Channel == channel + 1)
+            {
+                rtcp.Report(message.Data, _clock.Elapsed);
+            }
+            else if (message.Channel == audioChannel)
+            {
+                audio!.Rtcp.Received(message.Data, _clock.Elapsed);
+                audio.Handle(message.Data);
+            }
+            else if (audio is not null && message.Channel == audioChannel + 1)
+            {
+                audio.Rtcp.Report(message.Data, _clock.Elapsed);
+            }
+        }
+    }
+
+    // The receiver reports: each track's, every ReportInterval until the connection ends. A camera that times out a
+    // reader it hears no RTCP from hears these.
+    private async Task SendReportsAsync(List<(RtcpSession Rtcp, Func<byte[], Task> Send)> tracks, CancellationToken token)
+    {
+        try
+        {
+            while (true)
+            {
+                await _clock.Delay(ReportInterval, token).ConfigureAwait(false);
+                foreach (var (rtcp, send) in tracks)
+                {
+                    await send(rtcp.Build(_clock.Elapsed)).ConfigureAwait(false);
+                }
+            }
+        }
+        catch (Exception)
+        {
+            // The connection ended (cancelled, or the write failed): the reading loop sees it too.
+        }
+    }
+
+    private static Func<byte[], Task> Sender(RtpUdpPorts udp, IPEndPoint to) => report =>
+    {
+        udp.SendReport(report, to);
+        return Task.CompletedTask;
+    };
+
+    // RTCP over UDP: the server's sender reports, until the ports close with the session (the receive then throws).
+    private async Task ReadReportsAsync(RtpUdpPorts udp, IPAddress server, RtcpSession rtcp)
+    {
+        while (true)
+        {
+            var (packet, from) = await udp.ReceiveReportAsync().ConfigureAwait(false);
+            if (Plain(from.Address).Equals(server))
+            {
+                rtcp.Report(packet, _clock.Elapsed);
+            }
         }
     }
 
     // RTP over UDP: the server's packets (its address, and its SSRC when SETUP's answer gave one) through the reorder
     // window, until control ends: the video's is the read of the RTSP connection, which still carries the keep-alives.
     // The video's packets (watched) count against a stall; the audio's don't.
-    private async Task PumpUdpAsync(Task control, RtpUdpPorts udp, IPAddress server, uint? ssrc, Action<byte[]> handle, bool watched, CancellationToken token)
+    private async Task PumpUdpAsync(Task control, RtpUdpPorts udp, IPAddress server, uint? ssrc, Action<byte[]> handle, RtcpSession rtcp, bool watched, CancellationToken token)
     {
         var reorder = new RtpReorderBuffer(ReorderWindow);
         var ready = new List<byte[]>();
@@ -766,6 +856,7 @@ public sealed class LivePlayer : IDisposable
                         Touch();
                     }
 
+                    rtcp.Received(packet, _clock.Elapsed);
                     reorder.Add(packet, _clock.Elapsed, ready);
                 }
                 else
@@ -1172,7 +1263,7 @@ public sealed class LivePlayer : IDisposable
     private sealed record QueuedAudio(byte[] Data, IAudioDecoder Decoder);
 
     // The audio track as set up: where its packets go, its channel on the RTSP connection or its UDP ports, and SETUP's answer.
-    private sealed record AudioSession(Action<byte[]> Handle, int Channel, RtpUdpPorts? Udp, RtspTransport Transport);
+    private sealed record AudioSession(Action<byte[]> Handle, int Channel, RtpUdpPorts? Udp, RtspTransport Transport, RtcpSession Rtcp);
 
     private sealed class Connection
     {

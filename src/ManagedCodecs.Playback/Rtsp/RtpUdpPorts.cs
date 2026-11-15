@@ -5,8 +5,8 @@ namespace ManagedCodecs.Playback.Rtsp;
 
 /// <summary>
 /// The two UDP ports an RTSP session over UDP receives on (RFC 3550, 11): RTP on an even port, RTCP on the next, both
-/// on the local address of the RTSP connection. What comes on the RTCP port is never read (decision 3: no receiver
-/// reports); the port is held so that the server's RTCP has somewhere to go. docs/decisions/2026-11-14-live-rtsp-udp.md.
+/// on the local address of the RTSP connection. The RTCP port receives the server's sender reports and sends the receiver
+/// reports. docs/decisions/2026-11-14-live-rtsp-udp.md, docs/decisions/2026-11-15-live-rtcp.md.
 /// </summary>
 internal sealed class RtpUdpPorts : IDisposable
 {
@@ -15,6 +15,7 @@ internal sealed class RtpUdpPorts : IDisposable
     private readonly Socket _rtp;
     private readonly Socket _rtcp;
     private readonly byte[] _buffer = new byte[65536];
+    private readonly byte[] _rtcpBuffer = new byte[65536];
 
     private RtpUdpPorts(Socket rtp, Socket rtcp)
     {
@@ -92,6 +93,17 @@ internal sealed class RtpUdpPorts : IDisposable
         var result = await _rtp.ReceiveFromAsync(new ArraySegment<byte>(_buffer), SocketFlags.None, any).ConfigureAwait(false);
         return (_buffer.AsSpan(0, result.ReceivedBytes).ToArray(), (IPEndPoint)result.RemoteEndPoint);
     }
+
+    /// <summary>The next datagram on the RTCP port and where it came from.</summary>
+    public async Task<(byte[] Packet, IPEndPoint From)> ReceiveReportAsync()
+    {
+        EndPoint any = new IPEndPoint(_rtcp.AddressFamily == AddressFamily.InterNetworkV6 ? IPAddress.IPv6Any : IPAddress.Any, 0);
+        var result = await _rtcp.ReceiveFromAsync(new ArraySegment<byte>(_rtcpBuffer), SocketFlags.None, any).ConfigureAwait(false);
+        return (_rtcpBuffer.AsSpan(0, result.ReceivedBytes).ToArray(), (IPEndPoint)result.RemoteEndPoint);
+    }
+
+    /// <summary>Sends an RTCP packet from the RTCP port.</summary>
+    public void SendReport(byte[] packet, IPEndPoint to) => _rtcp.SendTo(packet, to);
 
     /// <inheritdoc/>
     public void Dispose()

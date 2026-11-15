@@ -540,7 +540,11 @@ if (player.TakeLatest() is { } frame)
   that is AAC (RFC 3640's `MPEG4-GENERIC`, AAC LC and HE-AAC) or G.711 (A-law, µ-law), set up beside the video on the
   same transport. `player.TakeAudio()` returns it as float stereo chunks, in order, for the application's sound output
   (as `MediaPlayer.TakeAudio()` does).
-  - No lip sync: the picture and the sound each come as soon as they are decoded.
+  - Lip sync is the application's, by capture times: the picture and the sound each come as soon as they are decoded,
+    and `RgbaFrame.CaptureTime` and `AudioChunk.CaptureTime` say when the camera captured each, on the camera's own
+    clock (from the RTCP sender reports; null until a track's first, usually within seconds). The sound is normally
+    the later one, by what the sound output buffers: show a picture once the sound being heard has reached its time,
+    or show the newest at once for the least delay.
   - Half a second waits at most. Past that the oldest chunk is dropped (`LiveStatistics.DroppedAudioFrames`), so a
     sound that plays slower than the camera sends never falls further behind.
   - Sound never stops the picture: a camera that refuses the audio's SETUP plays without it (`Error` says why), audio

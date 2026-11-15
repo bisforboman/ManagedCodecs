@@ -297,7 +297,7 @@ public class LiveRtspAudioTests
     }
 
     // For each packet, the stereo samples of the chunks its access units decode to, by a decoder of the test's own.
-    private static List<List<float[]>> Expected(SdpAudioTrack track, List<byte[]> packets)
+    internal static List<List<float[]>> Expected(SdpAudioTrack track, List<byte[]> packets)
     {
         var decoder = AudioPipeline.CreateDecoder(new AudioStreamInfo(track.Codec, track.SampleRate, track.Channels, 0, new Rational(1, track.SampleRate), track.Config, 0));
         var depacketizer = new RtpAudioDepacketizer(track);

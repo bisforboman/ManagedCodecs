@@ -17,6 +17,8 @@ internal sealed class RtcpSession
     private const int ReceiverReport = 201;
     private const int SourceDescription = 202;
 
+    private static readonly DateTime NtpEpoch = new(1900, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+
     private readonly object _lock = new();
     private readonly int _clockRate;
     private readonly uint _ssrc;
@@ -32,6 +34,8 @@ internal sealed class RtcpSession
     private uint _jitter;
     private uint _lastSenderReport;
     private uint _senderReportSource;
+    private ulong _senderReportNtp;
+    private uint _senderReportRtp;
     private TimeSpan? _senderReportArrival;
 
     /// <param name="clockRate">The RTP timestamps' rate: 90000 for video, the sample rate for audio.</param>
@@ -133,6 +137,8 @@ internal sealed class RtcpSession
                 lock (_lock)
                 {
                     _senderReportSource = BinaryPrimitives.ReadUInt32BigEndian(packet.Slice(4));
+                    _senderReportNtp = BinaryPrimitives.ReadUInt64BigEndian(packet.Slice(8));
+                    _senderReportRtp = BinaryPrimitives.ReadUInt32BigEndian(packet.Slice(16));
                     _lastSenderReport = middle;
                     _senderReportArrival = now;
                 }
@@ -140,6 +146,40 @@ internal sealed class RtcpSession
 
             packet = packet.Slice(length);
         }
+    }
+
+    /// <summary>
+    /// When the camera sampled what carries the RTP timestamp <paramref name="timestamp"/>, by the camera's own clock
+    /// (UTC): the stream's last sender report pairs an NTP time with an RTP timestamp (6.4.1), and the timestamp is so
+    /// many ticks of the stream's clock from that one, either side. Null before the stream's first sender report, and
+    /// while the last one is another SSRC's than the stream's packets.
+    /// </summary>
+    public DateTime? CaptureTime(uint timestamp)
+    {
+        ulong ntp;
+        uint rtp;
+        lock (_lock)
+        {
+            if (_senderReportArrival is null || (_any && _senderReportSource != _source))
+            {
+                return null;
+            }
+
+            ntp = _senderReportNtp;
+            rtp = _senderReportRtp;
+        }
+
+        // NTP's seconds count from 1900 and wrap in 2036: a count below half the range is of the era after (RFC 4330, 3).
+        // An NTP time of zero is a camera with no clock at all (its timestamps then only relate its tracks, from 1900).
+        long seconds = (long)(ntp >> 32);
+        if (seconds < 0x80000000 && seconds != 0)
+        {
+            seconds += 1L << 32;
+        }
+
+        long fraction = ((long)(ntp & 0xFFFFFFFF) * TimeSpan.TicksPerSecond) >> 32;
+        long offset = (long)(int)(timestamp - rtp) * TimeSpan.TicksPerSecond / _clockRate;
+        return NtpEpoch.AddTicks((seconds * TimeSpan.TicksPerSecond) + fraction + offset);
     }
 
     /// <summary>

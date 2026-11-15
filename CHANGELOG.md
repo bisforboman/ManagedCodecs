@@ -13,6 +13,16 @@ run time.
 
 ## Unreleased
 
+New public API (`CaptureTime`), hence the next version is a minor one; code built against 0.17 keeps working.
+
+### Added
+
+- Playback: lip sync for live cameras, by capture times. Over RTSP, `RgbaFrame.CaptureTime` and
+  `AudioChunk.CaptureTime` say when the camera captured the picture and the sound, on the camera's own clock (from the
+  RTP timestamps and each track's RTCP sender reports), so an application can delay whichever is early by what its
+  sound output buffers. Null until the track's first sender report, and from files and MJPEG over HTTP. The player
+  still holds nothing back: each comes as soon as it is decoded. docs/decisions/2026-11-15-live-rtcp.md.
+
 ### Changed
 
 - Playback: an RTSP session now sends RTCP receiver reports, one a track every 5 seconds, on the RTSP connection or

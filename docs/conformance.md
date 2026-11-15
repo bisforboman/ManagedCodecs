@@ -786,6 +786,11 @@ what the file says, the file is followed and the test says so:
   `MxfFollowTests` grows mxf-h264-mono4 under two of its four tracks. Not covered by a file: two tracks naming the
   same essence elements (the first is read). The other demuxers still read their first audio stream alone (the
   interface's defaults, checked on a one-stream demuxer).
+- The players on those tracks (`PlaybackOptions.AudioTrack`): `AudioPlayer` and `MediaPlayer` play mxf-h264-mono4's
+  mono tracks in pairs, the track named as the left channel and the next as the right, sample for sample FFmpeg's
+  `join` filter's stereo of the two (name.pair01.f32, name.pair23.f32); `AudioPlayerTests` also takes each track as
+  the left one (the last plays on both speakers), a looped pair, mxf-prores-pcm16's second stereo track, and the
+  pairing itself on hand-made packets of unequal sizes (no file has two mono tracks of different lengths).
 - Keyframes: libavformat marks every packet of an intra-only codec (ProRes, DNxHR) a keyframe, while FFmpeg's muxer
   leaves their index entries without the random access flag; `MxfDemuxer` does the same for those codecs, and takes the
   index's flag for the others (H.264 and MPEG-2's first packet). D-10's MPEG-2 is I pictures only (SMPTE ST 356), and

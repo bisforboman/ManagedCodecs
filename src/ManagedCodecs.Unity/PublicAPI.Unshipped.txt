@@ -4,4 +4,6 @@ ManagedCodecs.Containers.MxfDemuxer.SelectAudio(params int[]! streamIndexes) -> 
 ManagedCodecs.IDemuxer.AudioTracks.get -> System.Collections.Generic.IReadOnlyList<ManagedCodecs.AudioStreamInfo!>!
 ManagedCodecs.IDemuxer.SelectAudio(params int[]! streamIndexes) -> void
 ManagedCodecs.Playback.AudioChunk.CaptureTime.get -> System.DateTime?
+ManagedCodecs.Playback.PlaybackOptions.AudioTrack.get -> int
+ManagedCodecs.Playback.PlaybackOptions.AudioTrack.init -> void
 ManagedCodecs.Playback.RgbaFrame.CaptureTime.get -> System.DateTime?

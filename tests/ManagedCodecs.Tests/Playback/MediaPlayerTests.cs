@@ -63,6 +63,47 @@ public class MediaPlayerTests
     }
 
     /// <summary>
+    /// <see cref="PlaybackOptions.AudioTrack"/> beside video, on an MXF file's mono track a channel (mxf-h264-mono4): the
+    /// track named and the next play as left and right, FFmpeg's <c>join</c> of the two (name.pair01.f32,
+    /// name.pair23.f32), and the picture plays as ever. A track the file doesn't have is refused.
+    /// </summary>
+    [Theory]
+    [InlineData(0, 1, "pair01")]
+    [InlineData(2, 3, "pair23")]
+    public void PlaysAnMxfFilesMonoTracksAsLeftAndRight(int track, int streamIndex, string reference)
+    {
+        const string Name = "mxf-h264-mono4.mxf";
+        using var player = new MediaPlayer(TestSamples.PathOf(Name), new PlaybackOptions { AudioTrack = track });
+        Assert.Equal(streamIndex, player.Audio!.StreamIndex);
+        Assert.Null(player.SkippedAudioCodec);
+        player.Start();
+        var samples = new List<float>();
+        MediaPlayer? TakeAll()
+        {
+            while (player.TakeFrame(TimeSpan.FromHours(1)) is { } frame)
+            {
+                player.Return(frame);
+            }
+
+            return player.IsFinished ? player : null;
+        }
+
+        Wait(player, TakeAll, samples);
+        while (player.TakeAudio() is { } chunk)
+        {
+            samples.AddRange(chunk.Samples);
+        }
+
+        Assert.Null(player.Error);
+        Assert.Equal(25, player.Statistics.ConvertedFrames);
+        var expected = System.Runtime.InteropServices.MemoryMarshal.Cast<byte, float>(File.ReadAllBytes(TestSamples.ReferenceOf(Name, $".{reference}.f32"))).ToArray();
+        Assert.Equal(expected.Length, samples.Count);
+        Assert.Equal(expected, samples);
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => new MediaPlayer(TestSamples.PathOf(Name), new PlaybackOptions { AudioTrack = 4 }));
+    }
+
+    /// <summary>
     /// Audio it doesn't decode plays as none and is named, for the engines' warning: Opus in Matroska. AAC and MP3 (in MP4,
     /// QuickTime's '.mp3' entry and Matroska) play, and they and a file without audio name nothing.
     /// </summary>

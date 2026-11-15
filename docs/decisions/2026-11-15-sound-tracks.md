@@ -71,9 +71,25 @@ public interface IDemuxer
   (`.headers.json`); selection, its refusals and seeking by hand; `MxfFollowTests` a growing file with two of four
   tracks selected; the interface's defaults on a one-stream demuxer.
 
+## The players (the second pull request)
+
+- `PlaybackOptions.AudioTrack` counts the demuxer's `AudioTracks` from 0. A file with tracks but not that many is
+  refused when opened (`ArgumentOutOfRangeException`); a file with no audio plays silent (`MediaPlayer`) or is refused
+  as before (`AudioPlayer`), whatever the option says. `Audio` and `SkippedAudioCodec` speak of the chosen track.
+- **Folding is MXF's alone** (`demuxer is MxfDemuxer`): in MP4 or Matroska two mono tracks are two languages as likely
+  as two channels, so once those demuxers list their tracks a mono one still plays on both speakers. The pair is the
+  chosen track and the one after it in the list, both mono, of one codec and rate: tracks 1 and 2 unasked, 3 and 4
+  for `AudioTrack = 2`; `AudioTrack = 1` pairs 2 with 3, and the last track plays on both.
+- The two tracks' samples are paired as they are decoded, whatever their packets' sizes and order; what one has past
+  the other's end plays beside silence. `Audio` is the left track; the right one is not exposed.
+- **Not built, to decide if it is missed:** a way to turn the folding off (channel 1 alone on both speakers, as
+  0.17 played such files), and more than two channels out of a player (`AudioChunk` is stereo).
+- **Checks:** mxf-h264-mono4 through `AudioPlayer` and `MediaPlayer` against FFmpeg's `join` of the two tracks
+  (name.pair01.f32, name.pair23.f32), sample for sample, for each track as the left one, and looped; the pairing on
+  hand-made packets; mxf-prores-pcm16's second stereo track; the refusals.
+
 ## Left for the later pull requests
 
-- The players' option and folding (decoded samples against FFmpeg's `amerge` of the two tracks).
 - `Mp4Demuxer`, `MatroskaDemuxer`, `AviDemuxer`: their own `AudioTracks` and `SelectAudio`, each with a sample of
   several tracks (`-map 0 -map 1 -map 2`) against FFmpeg's packets.
 - Track names and languages (MP4's 'mdhd' language, Matroska's Language and Name): not in `AudioStreamInfo` today, and

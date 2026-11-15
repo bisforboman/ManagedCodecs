@@ -1,4 +1,5 @@
 using ManagedCodecs.Aac;
+using ManagedCodecs.Containers;
 using ManagedCodecs.Mp3;
 
 namespace ManagedCodecs.Playback;
@@ -37,5 +38,141 @@ internal static class AudioPipeline
         }
 
         return new AudioChunk(frame.SampleRate, samples) { CaptureTime = captureTime };
+    }
+}
+
+/// <summary>
+/// The audio a <see cref="MediaPlayer"/> or <see cref="AudioPlayer"/> plays of a file: the track
+/// <see cref="PlaybackOptions.AudioTrack"/> names and, where that one is mono and an MXF file's next sound track is mono
+/// of the same codec and rate (broadcast MXF's mono track a channel), that next one as the right channel
+/// (docs/decisions/2026-11-15-sound-tracks.md).
+/// </summary>
+internal sealed class PlayedAudio
+{
+    internal PlayedAudio(AudioStreamInfo track, AudioStreamInfo? right)
+    {
+        Track = track;
+        Right = right;
+    }
+
+    /// <summary>The track chosen: alone, or the left channel of a pair.</summary>
+    public AudioStreamInfo Track { get; }
+
+    /// <summary>The mono track played as the right channel beside a mono <see cref="Track"/>, or null.</summary>
+    public AudioStreamInfo? Right { get; }
+
+    /// <summary>
+    /// The track the options name among the demuxer's, or null where the file has no audio at all. Does not select it:
+    /// <see cref="Select"/> does, once the caller knows the track plays.
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException"><see cref="PlaybackOptions.AudioTrack"/> is negative, or the file has audio tracks but not that many.</exception>
+    public static PlayedAudio? Choose(IDemuxer demuxer, PlaybackOptions options)
+    {
+        int index = options.AudioTrack;
+        if (index < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(options), index, "PlaybackOptions.AudioTrack is negative.");
+        }
+
+        var tracks = demuxer.AudioTracks;
+        if (tracks.Count == 0)
+        {
+            return null;
+        }
+
+        if (index >= tracks.Count)
+        {
+            throw new ArgumentOutOfRangeException(nameof(options), index, $"PlaybackOptions.AudioTrack is {index}, and the file has {tracks.Count} audio track{(tracks.Count == 1 ? "" : "s")}.");
+        }
+
+        var track = tracks[index];
+        var right = demuxer is MxfDemuxer && track.Channels == 1 && index + 1 < tracks.Count
+            && tracks[index + 1] is { Channels: 1 } next && next.Codec == track.Codec && next.SampleRate == track.SampleRate
+            ? next
+            : null;
+        return new PlayedAudio(track, right);
+    }
+
+    /// <summary>Has the demuxer's next read give the track's packets (and its right channel's).</summary>
+    public void Select(IDemuxer demuxer)
+    {
+        if (Right is null)
+        {
+            demuxer.SelectAudio(Track.StreamIndex);
+        }
+        else
+        {
+            demuxer.SelectAudio(Track.StreamIndex, Right.StreamIndex);
+        }
+    }
+
+    /// <summary>Decoders that start afresh, for one pass over the file.</summary>
+    public Decoding Decode() => new(this);
+
+    /// <summary>One pass's decoders and, for a pair of mono tracks, the samples of one still waiting for the other's.</summary>
+    internal sealed class Decoding(PlayedAudio audio)
+    {
+        private readonly IAudioDecoder _decoder = AudioPipeline.CreateDecoder(audio.Track);
+        private readonly IAudioDecoder? _rightDecoder = audio.Right is null ? null : AudioPipeline.CreateDecoder(audio.Right);
+        private readonly List<float> _left = [];
+        private readonly List<float> _right = [];
+        private int _sampleRate = audio.Track.SampleRate;
+
+        /// <summary>
+        /// The audio the packet completes as stereo, or null: a packet of another stream, one to discard or that decodes
+        /// to nothing, or a mono track's samples whose other channel has not come yet.
+        /// </summary>
+        public AudioChunk? Decode(Packet packet)
+        {
+            bool left = packet.StreamIndex == audio.Track.StreamIndex;
+            if ((!left && packet.StreamIndex != audio.Right?.StreamIndex) || packet.Discard)
+            {
+                return null;
+            }
+
+            var frame = (left ? _decoder : _rightDecoder!).Decode(packet);
+            if (frame.SampleCount == 0)
+            {
+                return null;
+            }
+
+            if (_rightDecoder is null)
+            {
+                return AudioPipeline.ToStereo(frame);
+            }
+
+            _sampleRate = frame.SampleRate;
+            (left ? _left : _right).AddRange(frame.Samples[0].AsSpan(0, frame.SampleCount));
+            return Pair(Math.Min(_left.Count, _right.Count));
+        }
+
+        /// <summary>At the file's end: what one mono track has past the other's end, beside silence; null for none.</summary>
+        public AudioChunk? Flush()
+        {
+            int count = Math.Max(_left.Count, _right.Count);
+            _left.AddRange(new float[count - _left.Count]);
+            _right.AddRange(new float[count - _right.Count]);
+            return Pair(count);
+        }
+
+        // The first `count` waiting samples of each track, as left and right.
+        private AudioChunk? Pair(int count)
+        {
+            if (count == 0)
+            {
+                return null;
+            }
+
+            var samples = new float[count * 2];
+            for (int i = 0; i < count; i++)
+            {
+                samples[2 * i] = _left[i];
+                samples[(2 * i) + 1] = _right[i];
+            }
+
+            _left.RemoveRange(0, count);
+            _right.RemoveRange(0, count);
+            return new AudioChunk(_sampleRate, samples);
+        }
     }
 }

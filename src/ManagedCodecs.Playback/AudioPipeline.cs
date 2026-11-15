@@ -24,7 +24,7 @@ internal static class AudioPipeline
     };
 
     /// <summary>A frame's samples as interleaved stereo: its first two channels, or mono on both.</summary>
-    public static AudioChunk ToStereo(AudioFrame frame)
+    public static AudioChunk ToStereo(AudioFrame frame, DateTime? captureTime = null)
     {
         int count = frame.SampleCount;
         var left = frame.Samples[0];
@@ -36,6 +36,6 @@ internal static class AudioPipeline
             samples[(2 * i) + 1] = right[i];
         }
 
-        return new AudioChunk(frame.SampleRate, samples);
+        return new AudioChunk(frame.SampleRate, samples) { CaptureTime = captureTime };
     }
 }

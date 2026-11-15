@@ -828,6 +828,23 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
          find="senders.Add((rtcp, Sender(udp, serverRtcp)));", replace="",
          tests="FullyQualifiedName~LiveRtcpTests.ReportsOverUdpFromTheRtcpPortWithWhatWasLost"),
+    # ---- Capture times (docs/decisions/2026-11-15-live-rtcp.md, point 3), which need B pictures to tell a frame from
+    # its unit: the live decoder's frames keep their own packets' times, not FFmpeg's for a stream with none ...
+    dict(file="src/ManagedCodecs.H264/H264Decoder.cs",
+         find="if (_lengthSize == 0 && !PacketTimes)", replace="if (_lengthSize == 0)",
+         tests="FullyQualifiedName~LiveRtcpTests.GivesEachFrameItsOwnPicturesTimeWhenBPicturesComeOutOfOrder"),
+    # ... and the frame shown takes its own, not that of the unit whose decoding put it out ...
+    dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
+         find="queued.Rtcp.CaptureTime((uint)frame.Pts)", replace="queued.Rtcp.CaptureTime(unit.Timestamp)",
+         tests="FullyQualifiedName~LiveRtcpTests.GivesEachFrameItsOwnPicturesTimeWhenBPicturesComeOutOfOrder"),
+    # ... another stream's sender report places nothing ...
+    dict(file="src/ManagedCodecs.Playback/Rtsp/RtcpSession.cs",
+         find="if (_senderReportArrival is null || (_any && _senderReportSource != _source))", replace="if (_senderReportArrival is null)",
+         tests="FullyQualifiedName~RtcpSessionTests.PlacesAnRtpTimestampOnTheCamerasClock"),
+    # ... and an AAC packet's later frames come after its first.
+    dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
+         find="queued.Rtcp.CaptureTime(queued.Timestamp)?.AddTicks(sincePacket)", replace="queued.Rtcp.CaptureTime(queued.Timestamp)",
+         tests="FullyQualifiedName~LiveRtcpTests.PlacesAnAacPacketsLaterFramesByTheLengthOfThoseBeforeThem"),
     # ---- Audio over RTSP (docs/decisions/2026-11-15-live-rtsp-audio.md): no second SETUP unless RtspSource.Audio asks ...
     dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
          find="if (source.Audio && sdp.Audio is { } audioTrack)", replace="if (sdp.Audio is { } audioTrack)",

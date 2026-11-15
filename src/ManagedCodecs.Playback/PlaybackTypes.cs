@@ -52,6 +52,16 @@ public sealed class RgbaFrame
     /// <summary>The width of a pixel over its height: shown this much wider (0/0 or 1/1 for square pixels).</summary>
     public Rational SampleAspectRatio { get; }
 
+    /// <summary>
+    /// From a <see cref="LivePlayer"/> over RTSP: when the camera captured the frame, by the camera's own clock (UTC),
+    /// from the RTP timestamp and the video track's last RTCP sender report. The sound's
+    /// <see cref="AudioChunk.CaptureTime"/> is on the same clock, so the two say which sound belongs to which picture
+    /// (lip sync), whatever the clock is set to; against this machine's clock it is only as right as the camera's.
+    /// Null until the camera's first sender report for the track (usually within seconds of connecting), and always
+    /// from a file or MJPEG over HTTP.
+    /// </summary>
+    public DateTime? CaptureTime { get; internal init; }
+
     // How long before Time the frame counts as due (MediaPlayer.TakeFrame): half the interval before it, so that a clock
     // a rounding error short of Time, or a tick early by vsync's jitter, shows it rather than nothing.
     internal TimeSpan Lead { get; init; }
@@ -74,6 +84,15 @@ public sealed class AudioChunk
 
     /// <summary>Left, right, left, right... A mono stream is copied to both; more channels give their first two.</summary>
     public float[] Samples { get; }
+
+    /// <summary>
+    /// From a <see cref="LivePlayer"/> over RTSP: when the camera captured the chunk's first sample, by the camera's own
+    /// clock (UTC), from the RTP timestamp and the audio track's last RTCP sender report: the clock of
+    /// <see cref="RgbaFrame.CaptureTime"/>. Within a packet of several AAC frames, the frames after the first are
+    /// placed by the length of those decoded before them. Null until the camera's first sender report for the track,
+    /// and always from a file.
+    /// </summary>
+    public DateTime? CaptureTime { get; internal init; }
 }
 
 /// <summary>How the decoding thread has kept up, for a log line.</summary>

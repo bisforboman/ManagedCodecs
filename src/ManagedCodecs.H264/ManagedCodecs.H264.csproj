@@ -11,6 +11,7 @@
   <ItemGroup>
     <InternalsVisibleTo Include="ManagedCodecs.Tests" />
     <InternalsVisibleTo Include="ManagedCodecs.Thumbnails" />
+    <InternalsVisibleTo Include="ManagedCodecs.Playback" />
   </ItemGroup>
 
   <ItemGroup>

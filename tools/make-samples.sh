@@ -1215,8 +1215,11 @@ done
 # RtpH264DepacketizerTests: depacketized, they must give back the MP4's samples NAL unit for NAL unit. h264-main-slices
 # puts the parameter sets and small slices into STAP-A and sends single NAL units; h264-bench-720p cuts most slices into
 # FU-A. The MP4's avcC goes to the SDP as sprop-parameter-sets (docs/decisions/2026-11-10-live-rtsp-h264.md).
+# h264-b-motion has B pictures, sent in decoding order with their presentation times as RTP timestamps, which so don't
+# rise from packet to packet: for LiveRtcpTests, where each frame shown must take its own picture's timestamp
+# (docs/decisions/2026-11-15-live-rtcp.md, point 3).
 port=5040
-for f in samples/h264-main-slices.mp4 samples/h264-bench-720p.mp4; do
+for f in samples/h264-main-slices.mp4 samples/h264-bench-720p.mp4 samples/h264-b-motion.mp4; do
   python3 tools/rtp-record.py "$port" "${f%.mp4}.rtp" &
   recorder=$!
   sleep 0.5

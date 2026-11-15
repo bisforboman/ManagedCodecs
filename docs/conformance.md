@@ -308,6 +308,30 @@ by a parser and sender reports of the tests' own.
   sending over UDP.
 - **Not tried yet:** a camera or server that drops a reader without them. mediamtx plays with and without.
 
+### Capture times
+
+Over RTSP, `RgbaFrame.CaptureTime` and `AudioChunk.CaptureTime` place each picture and sound on the camera's clock, by
+its RTP timestamp and the track's last sender report (docs/decisions/2026-11-15-live-rtcp.md, point 3). The sender
+reports are the tests' own, so the checks are of the arithmetic and of which timestamp a frame takes.
+
+| Recording (make-samples.sh, `-c copy -f rtp`) | What it has |
+|---|---|
+| `h264-b-motion.rtp` | B pictures (a pyramid): the units' RTP timestamps run 0, 4, 2, 1, 3, 8, 6, 5, 7... frames |
+
+- **`RtcpSessionTests`**: a timestamp after and before the report's, across the timestamp's wrap, at 90 kHz and 8 kHz,
+  NTP's era after 2036, null before the first report and after another SSRC's.
+- **`LiveRtcpTests`**, through `LivePlayer`:
+  - A picture and a sound each take their own track's report, and both are null before it (H.264 and AAC, one frame
+    a packet).
+  - With B pictures, the k-th frame out has the k-th smallest timestamp, though its unit has another.
+  - A B picture sent twice makes the decoder give a frame more than it was given pictures: the frames after it still
+    have their own times.
+  - Several AAC frames in a packet: each is later than the one before by that one's length.
+- **Mutation entries:** the frame's own time rather than its unit's (in `H264Decoder` and in `LivePlayer`), another
+  stream's report placing nothing, and the later frames of an AAC packet.
+- **Not tried yet:** a camera's own sender reports. JPEG over RTSP's times have no test of their own (a JPEG frame is
+  its packets' picture, with nothing reordered).
+
 ## Real films
 
 Every sample above is a test pattern encoded to isolate a feature. `tools/realworld.py` (nightly, `realworld.yml`, a job

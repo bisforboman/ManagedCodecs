@@ -42,6 +42,9 @@ internal sealed record RtcpReport(uint Ssrc, List<RtcpReportBlock> Blocks, strin
         return new RtcpReport(ssrc, blocks, Encoding.ASCII.GetString(description.Slice(10, nameLength)), BinaryPrimitives.ReadUInt32BigEndian(description.Slice(4)));
     }
 
+    /// <summary>A time as NTP's seconds since 1900 (of the era up to 2036).</summary>
+    public static uint NtpSeconds(DateTime time) => (uint)(time - new DateTime(1900, 1, 1, 0, 0, 0, DateTimeKind.Utc)).TotalSeconds;
+
     /// <summary>A sender report (6.4.1) with no report blocks.</summary>
     public static byte[] SenderReport(uint ssrc, uint ntpSeconds, uint ntpFraction, uint rtpTime)
     {
@@ -62,7 +65,7 @@ internal sealed record RtcpReportBlock(uint Source, int Fraction, int Lost, uint
 /// <summary>
 /// RtcpSession against RFC 3550's definitions: the loss counts of A.3 (expected from the sequence numbers, across their
 /// wrap; a fraction of each interval's), the interarrival jitter of 6.4.1 (against its formula in floating point), and
-/// the echo of the last sender report (LSR and DLSR).
+/// the echo of the last sender report (LSR and DLSR); and an RTP timestamp placed on the camera's clock by it.
 /// </summary>
 public class RtcpSessionTests
 {
@@ -207,6 +210,39 @@ public class RtcpSessionTests
         session.Received(Packet(1, 0), TimeSpan.FromSeconds(2));
         var block = Assert.Single(RtcpReport.Parse(session.Build(TimeSpan.FromSeconds(3))).Blocks);
         Assert.Equal((0x33445566u, 2u * 65536), (block.LastSenderReport, block.Delay));
+    }
+
+    [Fact]
+    public void PlacesAnRtpTimestampOnTheCamerasClock()
+    {
+        // A sender report: the camera's clock read 12:00:00.5 when its RTP timestamp was 1000.
+        var noon = new DateTime(2026, 11, 15, 12, 0, 0, DateTimeKind.Utc);
+        var session = new RtcpSession(90000);
+        Assert.Null(session.CaptureTime(1000));
+        session.Report(RtcpReport.SenderReport(Source, RtcpReport.NtpSeconds(noon), 0x80000000, 1000), TimeSpan.Zero);
+
+        // Known before the stream's first packet, and either side of the report's timestamp.
+        Assert.Equal(noon.AddSeconds(0.5), session.CaptureTime(1000));
+        session.Received(Packet(1, 1000), TimeSpan.Zero);
+        var captured = session.CaptureTime(1000 + 90000);
+        Assert.Equal((noon.AddSeconds(1.5), DateTimeKind.Utc), (captured, captured!.Value.Kind));
+        Assert.Equal(noon, session.CaptureTime(unchecked((uint)(1000 - 45000))));
+        Assert.Equal(noon.AddSeconds(0.5).AddTicks(3600 * TimeSpan.TicksPerSecond / 90000), session.CaptureTime(1000 + 3600));
+
+        // Across the timestamp's wrap, and by the stream's own rate.
+        session.Report(RtcpReport.SenderReport(Source, RtcpReport.NtpSeconds(noon), 0, 0xFFFFFF00), TimeSpan.Zero);
+        Assert.Equal(noon.AddTicks(0x200 * TimeSpan.TicksPerSecond / 90000), session.CaptureTime(0x100));
+        var audio = new RtcpSession(8000);
+        audio.Report(RtcpReport.SenderReport(Source, RtcpReport.NtpSeconds(noon), 0, 0), TimeSpan.Zero);
+        Assert.Equal(noon.AddSeconds(2), audio.CaptureTime(16000));
+
+        // NTP's seconds wrap on 2036-02-07: a small count is of the era after.
+        session.Report(RtcpReport.SenderReport(Source, 100, 0, 0), TimeSpan.Zero);
+        Assert.Equal(new DateTime(2036, 2, 7, 6, 28, 16, DateTimeKind.Utc).AddSeconds(100), session.CaptureTime(0));
+
+        // Another stream's sender report places nothing of this one's.
+        session.Report(RtcpReport.SenderReport(Source + 1, RtcpReport.NtpSeconds(noon), 0, 0), TimeSpan.Zero);
+        Assert.Null(session.CaptureTime(0));
     }
 
     [Fact]

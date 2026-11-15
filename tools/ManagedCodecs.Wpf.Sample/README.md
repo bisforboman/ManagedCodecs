@@ -6,11 +6,18 @@ line; not a viewer.
 
     dotnet run -c Release --project tools/ManagedCodecs.Wpf.Sample -- http://camera.local/video.mjpg
     dotnet run -c Release --project tools/ManagedCodecs.Wpf.Sample -- rtsp://user:password@camera.local/stream1
+    dotnet run -c Release --project tools/ManagedCodecs.Wpf.Sample -- http://camera.local/video.mjpg --frames 100
 
 - On each frame WPF renders (`CompositionTarget.Rendering`), `TakeLatest()` gives the newest decoded frame, if one
   arrived since. WPF has no RGBA pixel format, so its red and blue are swapped in place (the frame is the window's
   until `Return`) and it is written into a `WriteableBitmap` as `Bgra32`. The status line shows `State`,
   `LiveStatistics` and `Error`.
-- Code only, no XAML. Windows only to run; CI builds it on Linux (`EnableWindowsTargeting`). Nobody has run it yet:
-  the Avalonia sample (`mclive`) is the one tried, under Xvfb on Linux. To try it without a camera, serve
-  `ffmpeg -re -f lavfi -i testsrc2 -c:v mjpeg -f mpjpeg -listen 1 http://127.0.0.1:8090/video.mjpg` and open that URL.
+- `--frames N` makes it a check of itself: every frame shown is compared with what WPF draws of the bitmap (rendered
+  into a `RenderTargetBitmap`, a pixel for each of the bitmap's), so red and blue the wrong way round, or rows out of
+  step, fail it. After N frames it prints the status line and the result and exits: 0, 1 if the player gave up, 2 if a
+  frame was drawn unlike the decoded one.
+- Code only, no XAML. Windows only to run; CI builds it on Linux (`EnableWindowsTargeting`), and
+  `.github/workflows/windows.yml` runs it with `--frames 100` on a Windows runner, weekly and when the sample changes,
+  against `tools/mjpeg-http-server.py` serving `samples/gstreamer/jpeg-422` (5 JPEGs of 320x240, in a loop at 25 fps).
+  Nobody has looked at its window yet. To try it without a camera, run that server
+  (`python tools/mjpeg-http-server.py samples/gstreamer/jpeg-422`) and open `http://127.0.0.1:8090/video.mjpg`.

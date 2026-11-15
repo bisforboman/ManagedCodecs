@@ -4,14 +4,18 @@ namespace ManagedCodecs.Playback.Rtsp;
 /// What a live view needs from a camera's SDP (RFC 4566): the session's control URL and the first video track it can
 /// play, in the SDP's order: H.264 (an <c>a=rtpmap</c> naming H264, with its <c>a=fmtp</c> parameters, RFC 6184, 8.1)
 /// or JPEG (RFC 2435: the static payload type 26, or an <c>a=rtpmap</c> naming JPEG)
-/// (docs/decisions/2026-11-12-live-rtsp-jpeg.md, decision 3).
+/// (docs/decisions/2026-11-12-live-rtsp-jpeg.md, decision 3), and the first audio track it can play: AAC (RFC 3640:
+/// an <c>a=rtpmap</c> naming MPEG4-GENERIC, with its <c>a=fmtp</c>) or G.711 (RFC 3551: the static payload types 0 and
+/// 8, or an <c>a=rtpmap</c> naming PCMU or PCMA) (docs/decisions/2026-11-15-live-rtsp-audio.md, decision 1).
 /// </summary>
 internal sealed class Sdp
 {
-    private Sdp(string? sessionControl, SdpVideoTrack? track)
+    private Sdp(string? sessionControl, SdpVideoTrack? track, SdpAudioTrack? audio, string? skippedAudio)
     {
         SessionControl = sessionControl;
         Track = track;
+        Audio = audio;
+        SkippedAudio = skippedAudio;
     }
 
     /// <summary>The session's <c>a=control</c>, before any media line; null when it has none.</summary>
@@ -19,6 +23,15 @@ internal sealed class Sdp
 
     /// <summary>The first H.264 or JPEG video track, or null when there is none.</summary>
     public SdpVideoTrack? Track { get; }
+
+    /// <summary>The first AAC or G.711 audio track, or null when there is none.</summary>
+    public SdpAudioTrack? Audio { get; }
+
+    /// <summary>
+    /// When there is audio but none that plays (<see cref="Audio"/> is null): the first audio format's encoding name
+    /// (<c>MP4A-LATM</c>, <c>G726-32</c>), or its payload type when it has no <c>a=rtpmap</c>. Else null.
+    /// </summary>
+    public string? SkippedAudio { get; }
 
     public static Sdp Parse(string text)
     {
@@ -94,7 +107,34 @@ internal sealed class Sdp
             }
         }
 
-        return new Sdp(sessionControl, found);
+        SdpAudioTrack? audio = null;
+        string? skipped = null;
+        foreach (var m in media)
+        {
+            if (audio is not null || m.Fields.Length < 4 || m.Fields[0] != "audio")
+            {
+                continue;
+            }
+
+            foreach (var format in m.Fields.Skip(3))
+            {
+                if (!int.TryParse(format, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out int type))
+                {
+                    continue;
+                }
+
+                string? map = m.RtpMap.TryGetValue(type, out var mapped) ? mapped : null;
+                audio = SdpAudioTrack.From(type, m.Control, map, m.Fmtp.TryGetValue(type, out var fmtp) ? fmtp : "");
+                if (audio is not null)
+                {
+                    break;
+                }
+
+                skipped ??= map is null ? "payload type " + format : map.Split('/')[0];
+            }
+        }
+
+        return new Sdp(sessionControl, found, audio, audio is null ? skipped : null);
     }
 
     /// <summary>
@@ -185,5 +225,125 @@ internal sealed record SdpVideoTrack(SdpCodec Codec, int PayloadType, string? Co
         }
 
         return new SdpVideoTrack(SdpCodec.H264, payloadType, control, mode, parameterSets);
+    }
+}
+
+/// <summary>An audio track of an SDP that plays.</summary>
+/// <param name="Codec"><see cref="CodecIds.Aac"/>, <see cref="CodecIds.PcmMulaw"/> or <see cref="CodecIds.PcmAlaw"/>.</param>
+/// <param name="PayloadType">Its RTP payload type.</param>
+/// <param name="Control">Its <c>a=control</c>, or null.</param>
+/// <param name="SampleRate">The <c>a=rtpmap</c>'s clock rate (8000 for the static G.711 types).</param>
+/// <param name="Channels">The <c>a=rtpmap</c>'s channels (1 when it gives none).</param>
+/// <param name="SizeLength">AAC: the bits of each AU header's size (<c>sizelength</c>: 13 for AAC-hbr, 6 for AAC-lbr).</param>
+/// <param name="IndexLength">AAC: the bits of the first AU header's index (<c>indexlength</c>).</param>
+/// <param name="IndexDeltaLength">AAC: the bits of the other AU headers' index delta (<c>indexdeltalength</c>).</param>
+/// <param name="Config">AAC: the AudioSpecificConfig (<c>config</c>, hexadecimal); empty for G.711.</param>
+internal sealed record SdpAudioTrack(string Codec, int PayloadType, string? Control, int SampleRate, int Channels, int SizeLength, int IndexLength, int IndexDeltaLength, byte[] Config)
+{
+    /// <summary>
+    /// The track a format describes, or null when it isn't one that plays: an encoding other than MPEG4-GENERIC, PCMU
+    /// and PCMA, or MPEG4-GENERIC in a mode other than AAC-hbr and AAC-lbr, or without a size field or a config.
+    /// </summary>
+    public static SdpAudioTrack? From(int payloadType, string? control, string? rtpMap, string fmtp)
+    {
+        if (rtpMap is null)
+        {
+            // G.711's static payload types (RFC 3551), which need no a=rtpmap.
+            return payloadType switch
+            {
+                0 => new SdpAudioTrack(CodecIds.PcmMulaw, 0, control, 8000, 1, 0, 0, 0, []),
+                8 => new SdpAudioTrack(CodecIds.PcmAlaw, 8, control, 8000, 1, 0, 0, 0, []),
+                _ => null,
+            };
+        }
+
+        // "MPEG4-GENERIC/48000/2": the encoding, the clock rate and, for audio, the channels (1 when left out).
+        var parts = rtpMap.Split('/');
+        if (parts.Length < 2 || !Number(parts[1], out int rate) || rate <= 0)
+        {
+            return null;
+        }
+
+        int channels = 1;
+        if (parts.Length > 2 && (!Number(parts[2], out channels) || channels <= 0))
+        {
+            return null;
+        }
+
+        string encoding = parts[0].Trim();
+        if (encoding.Equals("PCMU", StringComparison.OrdinalIgnoreCase) || encoding.Equals("PCMA", StringComparison.OrdinalIgnoreCase))
+        {
+            return new SdpAudioTrack(encoding.Equals("PCMU", StringComparison.OrdinalIgnoreCase) ? CodecIds.PcmMulaw : CodecIds.PcmAlaw, payloadType, control, rate, channels, 0, 0, 0, []);
+        }
+
+        if (!encoding.Equals("MPEG4-GENERIC", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        string mode = "";
+        int sizeLength = 0;
+        int indexLength = 0;
+        int indexDeltaLength = 0;
+        byte[] config = [];
+        foreach (var parameter in fmtp.Split(';'))
+        {
+            int equals = parameter.IndexOf('=');
+            if (equals < 0)
+            {
+                continue;
+            }
+
+            string name = parameter.Substring(0, equals).Trim();
+            string value = parameter.Substring(equals + 1).Trim();
+            if (name.Equals("mode", StringComparison.OrdinalIgnoreCase))
+            {
+                mode = value;
+            }
+            else if (name.Equals("sizelength", StringComparison.OrdinalIgnoreCase))
+            {
+                _ = Number(value, out sizeLength);
+            }
+            else if (name.Equals("indexlength", StringComparison.OrdinalIgnoreCase))
+            {
+                _ = Number(value, out indexLength);
+            }
+            else if (name.Equals("indexdeltalength", StringComparison.OrdinalIgnoreCase))
+            {
+                _ = Number(value, out indexDeltaLength);
+            }
+            else if (name.Equals("config", StringComparison.OrdinalIgnoreCase))
+            {
+                config = Hex(value);
+            }
+        }
+
+        bool aac = mode.Equals("AAC-hbr", StringComparison.OrdinalIgnoreCase) || mode.Equals("AAC-lbr", StringComparison.OrdinalIgnoreCase);
+        return aac && sizeLength is > 0 and <= 16 && indexLength <= 16 && indexDeltaLength <= 16 && config.Length > 0
+            ? new SdpAudioTrack(CodecIds.Aac, payloadType, control, rate, channels, sizeLength, indexLength, indexDeltaLength, config)
+            : null;
+    }
+
+    private static bool Number(string text, out int value) =>
+        int.TryParse(text.Trim(), System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out value);
+
+    // Hexadecimal digits as bytes; empty when they aren't (an odd count, another character).
+    private static byte[] Hex(string text)
+    {
+        if (text.Length % 2 != 0)
+        {
+            return [];
+        }
+
+        var bytes = new byte[text.Length / 2];
+        for (int i = 0; i < bytes.Length; i++)
+        {
+            if (!byte.TryParse(text.Substring(2 * i, 2), System.Globalization.NumberStyles.AllowHexSpecifier, System.Globalization.CultureInfo.InvariantCulture, out bytes[i]))
+            {
+                return [];
+            }
+        }
+
+        return bytes;
     }
 }

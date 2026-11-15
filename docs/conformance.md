@@ -218,6 +218,53 @@ it on purpose.
   clip's, with none lost or damaged and no reconnects.
 - **Not tried yet:** a real network that loses or reorders packets, a NAT between camera and viewer, and an IP camera.
 
+### Audio over RTSP
+
+With `RtspSource.Audio`, `LivePlayer` sets up the camera's first AAC or G.711 audio track beside the video
+(docs/decisions/2026-11-15-live-rtsp-audio.md). It adds no decoding of its own (`AacDecoder`, `PcmDecoder`), so the
+checks are of the packets and the player.
+
+| Recording (make-samples.sh, `-c copy -f rtp`) | Packetizer | What it has |
+|---|---|---|
+| `aac-stereo-48k.rtp` | FFmpeg 6.1, RFC 3640, `mode=AAC-hbr` | AAC LC, 9 or 10 access units a packet |
+| `aac-stereo-48k-single.rtp` | the same with `-max_delay 0` | one access unit a packet, as cameras send |
+| `heaac-stereo-44k.rtp` | the same | HE-AAC (the FDK encoder's stream), 3 to 5 a packet |
+| `wav-alaw-codes.rtp` | FFmpeg, RFC 3551 | A-law mono as the static payload type 8, no `a=rtpmap` |
+| `wav-mulaw-codes.rtp` | the same | µ-law stereo as `PCMU/8000/2` |
+
+- **`RtpAudioDepacketizerTests`**:
+  - The access units from FFmpeg's AAC packets are the file's packets byte for byte, and the SDP's `config=` is the
+    file's AudioSpecificConfig. FFmpeg's muxer leaves the last access units of a file unsent (those waiting for a
+    full packet), so the comparison is of the ones that came, from the first on.
+  - The G.711 payloads are the .wav files' bytes, and decode to the same samples.
+  - **Hand-made packets**, for what FFmpeg never sends (its encoder writes no access unit larger than a packet): a
+    unit fragmented over three packets; one missing a fragment, missing its end, or ended early by the marker (dropped
+    and counted once); `AAC-lbr`'s 6-bit sizes; headers that don't fit the packet; a non-zero index (interleaving,
+    refused); another payload type, a repeated packet, a lost one.
+  - The SDP's audio track: the static types 0 and 8, `PCMA` with a rate, `MPEG4-GENERIC` with its parameters in any
+    case and order, the first format that plays across tracks, and what doesn't play by name (`MP4A-LATM`, a payload
+    type with no `a=rtpmap`, `MPEG4-GENERIC` in another mode, or without a `config`).
+- **`LiveRtspAudioTests`** runs `RtspTestServer` with a video and an audio recording as two tracks:
+  - In lockstep, every chunk taken is the decoder's for the access units in order (AAC LC over the connection and
+    over UDP, HE-AAC, A-law, µ-law over UDP), and the audio's SETUP is in the video's session, on channels 2 and 3 or
+    a port pair of its own.
+  - Without `Audio` there is one SETUP and no sound, even from a server that sends it.
+  - The audio's SETUP refused, LATM, and a `config` the decoder refuses: the video plays, `Audio` is null, and
+    `Error` or `SkippedAudioCodec` says why.
+  - 94 frames never taken leave the newest 23 (0.49 s) and count 71 dropped.
+  - A lost packet and a frame the decoder rejects are counted, and the sound goes on.
+  - Video that stalls while audio still comes reconnects, over the connection and over UDP.
+- **Mutation entries:** no audio SETUP without `Audio`, the audio's packets not counting against a stall (both
+  transports), the queue's bound, and a fragmented unit ending where another starts.
+- **mediamtx 1.21.3, nightly** (tools/rtsp-nightly.py): a 640x360 H.264 clip with AAC LC sound (pink noise, FFmpeg's
+  encoder without PNS), pushed by FFmpeg, served over the connection and with `rtspTransports: [udp]`.
+  `mcdec --live --audio` checks each chunk taken against the clip's decoded audio. A frame's samples depend on the
+  frame before it, so the first chunk taken and the first of each loop of the clip are allowed not to be the clip's.
+  The first runs (2026-11-15, by hand in the cloud session): 548 and 554 chunks beside 250 frames, 2 not the clip's
+  (3 allowed), none dropped or damaged, no packet lost.
+- **Not tried yet:** an IP camera (their G.711 and one access unit a packet are covered by recordings and hand-made
+  packets only), GStreamer's `rtpmp4gpay`, and a fragmented access unit from a real sender.
+
 ## Real films
 
 Every sample above is a test pattern encoded to isolate a feature. `tools/realworld.py` (nightly, `realworld.yml`, a job

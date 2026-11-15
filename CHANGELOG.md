@@ -11,6 +11,17 @@ share internals, so each depends on the others at exactly its own version (`[X]`
 then reports a mix of versions (NU1107, or NU1608 for a newer one referenced directly) rather than letting it fail at
 run time.
 
+## Unreleased
+
+### Added
+
+- Live cameras: sound over RTSP. `new RtspSource(uri) { Audio = true }` also sets up the camera's first AAC (RFC 3640,
+  AAC LC and HE-AAC) or G.711 (A-law, µ-law) audio track, and `LivePlayer.TakeAudio()` returns it as float stereo
+  chunks, in order. No lip sync; half a second waits at most, the oldest chunk dropped past that. `LivePlayer.Audio`
+  and `SkippedAudioCodec` say what plays and what doesn't, and `LiveStatistics` gains `DecodedAudioFrames`,
+  `DroppedAudioFrames` and `DamagedAudioFrames` (`LostPackets` counts both tracks). Off by default: without `Audio`
+  nothing changes. docs/decisions/2026-11-15-live-rtsp-audio.md.
+
 ## 0.15.0 – 2026-11-14
 
 Sound-only playback in MonoGame (`AudioTrack`), MXF start timecodes (`MxfDemuxer.StartTimecode`, `Timecode`) and MXF

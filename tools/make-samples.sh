@@ -1208,5 +1208,24 @@ recorder=$!
 sleep 0.5
 ffmpeg -nostdin -hide_banner -loglevel error -y -i samples/testsrc-stdhuff.avi -an -c:v copy -f rtp -sdp_file samples/testsrc-stdhuff.sdp "rtp://127.0.0.1:$port"
 wait "$recorder"
+port=$((port + 2))
+
+# Audio over RTP, for RtpAudioDepacketizerTests and LiveRtspAudioTests (docs/decisions/2026-11-15-live-rtsp-audio.md):
+# FFmpeg's RFC 3640 packetizer (MPEG4-GENERIC, mode AAC-hbr, the AudioSpecificConfig as the SDP's config=) on an AAC LC
+# and an HE-AAC sample as they are, which puts several access units into a packet, and with -max_delay 0 one a packet
+# (-single), as cameras send; and its RFC 3551 one on the G.711 .wav files: A-law mono as the static payload type 8
+# with no a=rtpmap, μ-law stereo as "PCMU/8000/2". FFmpeg's encoder never writes an access unit larger than a packet,
+# so fragments are hand-made in the tests.
+for spec in aac-stereo-48k.mp4:aac-stereo-48k: "aac-stereo-48k.mp4:aac-stereo-48k-single:-max_delay 0" heaac-stereo-44k.mp4:heaac-stereo-44k: \
+  wav-alaw-codes.wav:wav-alaw-codes: wav-mulaw-codes.wav:wav-mulaw-codes:; do
+  IFS=: read -r input name options <<< "$spec"
+  python3 tools/rtp-record.py "$port" "samples/$name.rtp" &
+  recorder=$!
+  sleep 0.5
+  # shellcheck disable=SC2086
+  ffmpeg -nostdin -hide_banner -loglevel error -y -i "samples/$input" -vn -c:a copy $options -f rtp -sdp_file "samples/$name.sdp" "rtp://127.0.0.1:$port"
+  wait "$recorder"
+  port=$((port + 2))
+done
 
 echo "Samples and references written to samples/."

@@ -57,6 +57,21 @@ public readonly record struct LiveStatistics(
     double DecodeMilliseconds,
     double ConvertMilliseconds)
 {
-    /// <summary>RTP packets the sequence numbers say never arrived (RTSP); 0 for MJPEG over HTTP.</summary>
+    /// <summary>RTP packets the sequence numbers say never arrived (RTSP), the audio track's included; 0 for MJPEG over HTTP.</summary>
     public long LostPackets { get; init; }
+
+    /// <summary>Audio frames decoded (<see cref="RtspSource.Audio"/>): AAC's access units, or G.711's packets.</summary>
+    public long DecodedAudioFrames { get; init; }
+
+    /// <summary>
+    /// Decoded audio frames dropped because half a second already waited for <see cref="LivePlayer.TakeAudio"/>: the
+    /// caller takes none, or its sound plays slower than the camera sends.
+    /// </summary>
+    public long DroppedAudioFrames { get; init; }
+
+    /// <summary>
+    /// Audio frames lost to damage: one the decoder rejected, a fragmented AAC access unit missing a packet, a packet
+    /// whose headers don't fit it.
+    /// </summary>
+    public long DamagedAudioFrames { get; init; }
 }

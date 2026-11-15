@@ -33,7 +33,7 @@ in between. That comparison is not measured here.
 | `src/ManagedCodecs.Mjpeg` | `MjpegDecoder`: baseline/extended Huffman JPEG, interlaced AVI1, bit-exact with FFmpeg |
 | `src/ManagedCodecs.H264` | `H264Decoder`: Constrained Baseline, Main, High, High 10, High 4:2:2 and High 4:4:4 Predictive profile H.264 (CAVLC, CABAC, I/P/B, weighted prediction, 8x8 transform, scaling matrices, deblocking, monochrome, 4:2:0, 4:2:2 and 4:4:4, also as separate colour planes, 8 to 14 bits, lossless, progressive and interlaced), bit-exact |
 | `src/ManagedCodecs.Thumbnails` | `VideoProbe`: a video file's duration, displayed size, codecs and rotation as ffprobe reports them, without decoding; `VideoThumbnail`: a frame as a small upright RGBA image, PNG or JPEG; the `ManagedCodecs.Thumbnails` package (see Probing a video, Thumbnails; docs/decisions/2026-10-31-thumbnails.md) |
-| `src/ManagedCodecs.Playback` | `MediaPlayer`: plays a video file for a game engine, decoding on a thread of its own into RGBA frames and float stereo, and handing the game loop the frame due by its clock; `AudioPlayer`: the same for a file's audio alone (.wav, raw MP3 and AAC); `LivePlayer`: shows a camera's MJPEG over HTTP, the newest frame each render; the `ManagedCodecs.Playback` package (see In-game video, Live cameras) |
+| `src/ManagedCodecs.Playback` | `MediaPlayer`: plays a video file for a game engine, decoding on a thread of its own into RGBA frames and float stereo, and handing the game loop the frame due by its clock; `AudioPlayer`: the same for a file's audio alone (.wav, raw MP3 and AAC); `LivePlayer`: shows a camera's MJPEG over HTTP, or its H.264 or JPEG over RTSP (with its AAC or G.711 sound, if asked), the newest frame each render; the `ManagedCodecs.Playback` package (see In-game video, Live cameras) |
 | `src/ManagedCodecs.MonoGame` | `VideoTexture`: `MediaPlayer` for MonoGame, into a `Texture2D` and a `DynamicSoundEffectInstance`, drawn letterboxed and upright; `AudioTrack`: `AudioPlayer` for sound-only files; the `ManagedCodecs.MonoGame` package (see In-game video) |
 | `src/ManagedCodecs.Unity` | The netstandard2.1 build for Unity (Mono, IL2CPP): every decoder's sources (and Thumbnails' and Playback's) in one assembly, without the vector paths, 1 to 3.4 times slower on CoreCLR; the `ManagedCodecs.Unity` package (see Unity) |
 | `src/ManagedCodecs.Aac` | `AacDecoder`: AAC LC (mono to 7.1, M/S, intensity, PNS, TNS), within 5e-7 of FFmpeg's float output; HE-AAC (spectral band replication) |
@@ -48,7 +48,7 @@ in between. That comparison is not measured here.
 | `tools/make-samples.sh` | Generates the test samples and FFmpeg's references |
 | `tools/gst-rtsp-server.py` | A GStreamer RTSP server with a live H.264 or JPEG test pattern (no auth, Basic or Digest), for trying `LivePlayer` by hand |
 | `tools/gst-jpeg-record.py` | Makes the committed JPEG over RTP recordings in `samples/gstreamer/` (GStreamer's `rtpjpegpay`: types 0, 64 and 65) |
-| `tools/rtsp-nightly.py` | `LivePlayer` against mediamtx serving an H.264 and an MJPEG clip, each frame checked against the clip's (`mcdec --live`); nightly in `realworld.yml` |
+| `tools/rtsp-nightly.py` | `LivePlayer` against mediamtx serving an H.264 and an MJPEG clip, each frame checked against the clip's, and an H.264 clip with AAC sound, each chunk of audio checked too (`mcdec --live`); nightly in `realworld.yml` |
 | `tools/rtp-record.py` | Records the RTP packets FFmpeg sends to a loopback UDP port, for the RTP depacketizer's tests (make-samples.sh) |
 | `tools/compare.sh` | Times mcdec and FFmpeg on the same file |
 | `tools/h264-stages.py` | Shares of H.264 decoding by stage, for mcdec and FFmpeg, from perf and callgrind profiles (docs/notes/h264-stages-2026-11.md) |
@@ -530,12 +530,25 @@ if (player.TakeLatest() is { } frame)
   - Checked against GStreamer's RTSP server by hand, and nightly against mediamtx, over UDP too (docs/conformance.md,
     H.264 over RTSP, JPEG over RTP, RTP over UDP).
   - Not yet: multicast, RTSPS, H.265, JPEG over 2040 pixels.
+- **Sound:** `new RtspSource(uri) { Audio = true }` plays the camera's sound too: the first audio track of its SDP
+  that is AAC (RFC 3640's `MPEG4-GENERIC`, AAC LC and HE-AAC) or G.711 (A-law, µ-law), set up beside the video on the
+  same transport. `player.TakeAudio()` returns it as float stereo chunks, in order, for the application's sound output
+  (as `MediaPlayer.TakeAudio()` does).
+  - No lip sync: the picture and the sound each come as soon as they are decoded.
+  - Half a second waits at most. Past that the oldest chunk is dropped (`LiveStatistics.DroppedAudioFrames`), so a
+    sound that plays slower than the camera sends never falls further behind.
+  - Sound never stops the picture: a camera that refuses the audio's SETUP plays without it (`Error` says why), audio
+    of another kind (LATM, G.726, Opus) is named by `SkippedAudioCodec`, and lost packets are a gap in the sound.
+  - Off by default: without `Audio` the session is for the video alone.
+  - `mclive` and `mclive-wpf` stay silent (neither Avalonia nor WPF plays raw samples without a native library or a
+    platform API).
+  - Checked nightly against mediamtx, over the connection and over UDP (docs/conformance.md, Audio over RTSP).
 - **Samples:** `tools/ManagedCodecs.Avalonia.Sample` (`mclive`) and `tools/ManagedCodecs.Wpf.Sample` (`mclive-wpf`)
   take either kind of URL.
 - **Cost:** a software decoder's. 1080p25 H.264 decodes in about 14 ms a frame on one thread (with 8 ms to convert),
   so a wall of cameras wants their low-resolution substreams. docs/decisions/2026-11-10-live-mjpeg-over-http.md and
-  docs/decisions/2026-11-10-live-rtsp-h264.md, docs/decisions/2026-11-12-live-rtsp-jpeg.md and
-  docs/decisions/2026-11-14-live-rtsp-udp.md have the plans.
+  docs/decisions/2026-11-10-live-rtsp-h264.md, docs/decisions/2026-11-12-live-rtsp-jpeg.md,
+  docs/decisions/2026-11-14-live-rtsp-udp.md and docs/decisions/2026-11-15-live-rtsp-audio.md have the plans.
 
 ### Unity
 

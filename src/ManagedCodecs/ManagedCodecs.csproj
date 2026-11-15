@@ -14,6 +14,7 @@
     <ProjectReference Include="..\ManagedCodecs.Core\ManagedCodecs.Core.csproj" />
     <ProjectReference Include="..\ManagedCodecs.Containers\ManagedCodecs.Containers.csproj" />
     <ProjectReference Include="..\ManagedCodecs.Mjpeg\ManagedCodecs.Mjpeg.csproj" />
+    <ProjectReference Include="..\ManagedCodecs.Rdd36\ManagedCodecs.Rdd36.csproj" />
     <ProjectReference Include="..\ManagedCodecs.H264\ManagedCodecs.H264.csproj" />
     <ProjectReference Include="..\ManagedCodecs.Aac\ManagedCodecs.Aac.csproj" />
     <ProjectReference Include="..\ManagedCodecs.Mp3\ManagedCodecs.Mp3.csproj" />

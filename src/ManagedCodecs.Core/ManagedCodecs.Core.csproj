@@ -10,6 +10,7 @@
   <ItemGroup>
     <InternalsVisibleTo Include="ManagedCodecs.H264" />
     <InternalsVisibleTo Include="ManagedCodecs.Mjpeg" />
+    <InternalsVisibleTo Include="ManagedCodecs.Rdd36" />
     <InternalsVisibleTo Include="ManagedCodecs.Containers" />
     <InternalsVisibleTo Include="ManagedCodecs.Aac" />
     <InternalsVisibleTo Include="ManagedCodecs.Mp3" />

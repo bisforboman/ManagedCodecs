@@ -4,6 +4,7 @@ using ManagedCodecs.Containers;
 using ManagedCodecs.H264;
 using ManagedCodecs.Mjpeg;
 using ManagedCodecs.Mp3;
+using ManagedCodecs.Rdd36;
 using ManagedCodecs.Thumbnails;
 
 namespace ManagedCodecs.Fuzz;
@@ -18,12 +19,12 @@ public static class Targets
     /// <summary>
     /// file: a container (AVI or MP4) demuxed and every stream decoded. h264: a 2-byte big-endian length, that many
     /// bytes of avcC, then packets of length-prefixed NAL units, each packet behind a 4-byte length. mjpeg: one JPEG
-    /// image. aac: a 1-byte length, that many bytes of AudioSpecificConfig, then raw AAC frames, each behind a
+    /// image. rdd36: one SMPTE RDD 36 frame. aac: a 1-byte length, that many bytes of AudioSpecificConfig, then raw AAC frames, each behind a
     /// 2-byte big-endian length (several, so SBR's and parametric stereo's state carries from frame to frame). mp3:
     /// packets of MP3 frames, each behind a 2-byte big-endian length (several, so the bit reservoir reaches back).
     /// thumbnail: a container file probed and thumbnailed (ManagedCodecs.Thumbnails).
     /// </summary>
-    public static readonly string[] Names = ["file", "h264", "mjpeg", "aac", "mp3", "thumbnail"];
+    public static readonly string[] Names = ["file", "h264", "mjpeg", "rdd36", "aac", "mp3", "thumbnail"];
 
     /// <summary>
     /// What <see cref="Run"/> makes of <paramref name="data"/>, as one line: "accepted", "rejected", or the type and
@@ -68,6 +69,9 @@ public static class Targets
                     break;
                 case "mjpeg":
                     new MjpegDecoder().Decode(new Packet(0, 0, data.ToArray(), true, 0, 0, 1)).ToList().ForEach(f => f.Dispose());
+                    break;
+                case "rdd36":
+                    new Rdd36Decoder().Decode(new Packet(0, 0, data.ToArray(), true, 0, 0, 1)).ToList().ForEach(f => f.Dispose());
                     break;
                 case "aac":
                     DecodeAac(data);
@@ -120,6 +124,7 @@ public static class Targets
         {
             CodecIds.H264 => new H264Decoder(video) { Threads = threads, ConcealErrors = conceal },
             CodecIds.Mjpeg => new MjpegDecoder(video),
+            CodecIds.Rdd36 => new Rdd36Decoder(video),
             _ => null,
         };
         IAudioDecoder? audioDecoder = audio?.Codec switch

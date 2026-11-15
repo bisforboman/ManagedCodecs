@@ -6,6 +6,7 @@ using ManagedCodecs.Containers;
 using ManagedCodecs.H264;
 using ManagedCodecs.Mjpeg;
 using ManagedCodecs.Playback;
+using ManagedCodecs.Rdd36;
 
 namespace ManagedCodecs.Cli;
 
@@ -122,6 +123,7 @@ public static class LiveCheck
         {
             CodecIds.H264 => new H264Decoder(video),
             CodecIds.Mjpeg => new MjpegDecoder(video),
+            CodecIds.Rdd36 => new Rdd36Decoder(video),
             _ => throw new NotSupportedException($"No live decoding of {video.Codec}."),
         };
 

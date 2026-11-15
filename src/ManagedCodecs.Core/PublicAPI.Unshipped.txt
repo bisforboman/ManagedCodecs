@@ -1,3 +1,4 @@
 #nullable enable
+const ManagedCodecs.CodecIds.Rdd36 = "RDD36" -> string!
 ManagedCodecs.IDemuxer.AudioTracks.get -> System.Collections.Generic.IReadOnlyList<ManagedCodecs.AudioStreamInfo!>!
 ManagedCodecs.IDemuxer.SelectAudio(params int[]! streamIndexes) -> void

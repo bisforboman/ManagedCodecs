@@ -4,7 +4,7 @@ using ManagedCodecs.Containers;
 namespace ManagedCodecs.Tests.Containers;
 
 /// <summary>
-/// Demuxes every samples/*.mp4 and compares each packet (dts, pts, duration, size, MD5, keyframe and discard flags)
+/// Demuxes every samples/*.mp4 and *.mov and compares each packet (dts, pts, duration, size, MD5, keyframe and discard flags)
 /// with samples/*.packets.csv, written by <c>ffprobe -show_packets -show_data_hash MD5</c> (the demuxer's own
 /// timestamps: <c>ffmpeg -c copy -f framemd5</c> makes decode timestamps go forward, which an edit list's discarded
 /// packets don't), and the codec private data with samples/*.packets.framemd5. See samples/README.md.
@@ -12,7 +12,7 @@ namespace ManagedCodecs.Tests.Containers;
 public class Mp4ConformanceTests
 {
     public static TheoryData<string> Samples() =>
-        new(TestSamples.WithReference(".packets.csv").Where(name => name.EndsWith(".mp4", StringComparison.Ordinal)));
+        new(TestSamples.WithReference(".packets.csv").Where(name => name.EndsWith(".mp4", StringComparison.Ordinal) || name.EndsWith(".mov", StringComparison.Ordinal)));
 
     [Theory]
     [MemberData(nameof(Samples))]

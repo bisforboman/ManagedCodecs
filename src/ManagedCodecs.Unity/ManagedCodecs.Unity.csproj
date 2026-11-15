@@ -17,7 +17,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Compile Include="..\ManagedCodecs.Core\**\*.cs;..\ManagedCodecs.Containers\**\*.cs;..\ManagedCodecs.Mjpeg\**\*.cs;..\ManagedCodecs.H264\**\*.cs;..\ManagedCodecs.Aac\**\*.cs;..\ManagedCodecs.Mp3\**\*.cs;..\ManagedCodecs.Thumbnails\**\*.cs;..\ManagedCodecs.Playback\**\*.cs"
+    <Compile Include="..\ManagedCodecs.Core\**\*.cs;..\ManagedCodecs.Containers\**\*.cs;..\ManagedCodecs.Mjpeg\**\*.cs;..\ManagedCodecs.Rdd36\**\*.cs;..\ManagedCodecs.H264\**\*.cs;..\ManagedCodecs.Aac\**\*.cs;..\ManagedCodecs.Mp3\**\*.cs;..\ManagedCodecs.Thumbnails\**\*.cs;..\ManagedCodecs.Playback\**\*.cs"
              Exclude="..\*\obj\**;..\*\bin\**" LinkBase="Sources" />
     <!-- Shared\*.cs compiles into each project's namespace there; here once, into H.264's (GlobalUsings.cs aliases it for AAC and MP3). -->
     <Compile Include="..\Shared\*.cs" Link="Shared\%(Filename)%(Extension)" />

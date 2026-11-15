@@ -1037,6 +1037,83 @@ ff -i samples/mxf-h264-mono4.mxf -filter_complex '[0:a:2][0:a:3]join=inputs=2:ch
 # ConcealErrors, whose own tests cover concealment), so its frames have no reference; its packets do.
 rm -f samples/mxf-h264-pcm-cut-video.h264.framemd5 samples/mxf-h264-pcm-cut-video.color
 
+# ---- SMPTE RDD 36 (compatible with Apple ProRes) in MOV ----
+# For Rdd36Decoder (issue #461): 4:2:2, progressive, 10 bits, from FFmpeg's two encoders. No Apple-encoded file is here
+# (none found under a licence that allows it in a public repository; docs/conformance.md says so). What neither
+# encoder writes (a quantization_index above 128, stuffing, zero bytes after a component's data, bitstream version 1
+# in 4:2:2, a frame header's aspect ratio) is covered by hand-made frames in Rdd36DecoderTests.
+R=(-f lavfi -i testsrc2=size=320x240:rate=25 -t 0.4 -pix_fmt yuv422p10le)
+# The four 4:2:2 profiles (sample entries 'apco', 'apcs', 'apcn', 'apch') from prores_ks (Kostya Shishkov's; its
+# frames say 'Lavc'), which picks each slice's quantization_index for a bit rate (1 to 68 here), and from prores_aw
+# (Anatoliy Wasserman's; 'fmpg'), which keeps it in a narrow band; both write their quantization matrices into every
+# frame header, prores_aw's Proxy a chroma matrix that is not the luma one. 20 macroblocks a row: slices of 8, 8 and 4.
+profile=0
+for name in proxy lt standard hq; do
+  ff "${R[@]}" -c:v prores_ks -profile:v $profile "samples/rdd36-ks-$name.mov"
+  ff "${R[@]}" -c:v prores_aw -profile:v $profile "samples/rdd36-aw-$name.mov"
+  profile=$((profile + 1))
+done
+# FFmpeg 6.1's encoder named "prores" is prores_aw under its other name (the same bytes here); kept in case a later
+# FFmpeg's differs.
+ff "${R[@]}" -c:v prores -profile:v 2 samples/rdd36-prores.mov
+# A picture that ends inside its last macroblocks, 330x250: 10 of 16 luma columns (5 of 8 chroma) and 10 of 16 rows
+# are the picture's, the rest the encoder's padding, which the decoder discards. 21 macroblocks: slices of 8, 8, 4, 1.
+# (Neither encoder takes an odd width or height: FFmpeg's 4:2:2 formats round both down.)
+ff -f lavfi -i testsrc2=size=330x250:rate=25 -t 0.2 -pix_fmt yuv422p10le -c:v prores_ks -profile:v 2 samples/rdd36-ks-edges.mov
+ff -f lavfi -i testsrc2=size=330x250:rate=25 -t 0.2 -pix_fmt yuv422p10le -c:v prores_aw -profile:v 2 samples/rdd36-aw-edges.mov
+# log2_desired_slice_size_in_mb 0 to 3 (prores_ks's -mbs_per_slice; 8 is its default) in a row of 15 macroblocks:
+# slices of 1; of 2 and a last of 1; of 4, 2 and 1; of 8, 4, 2 and 1.
+for mbs in 1 2 4 8; do
+  ff -f lavfi -i testsrc2=size=240x144:rate=25 -t 0.2 -pix_fmt yuv422p10le -c:v prores_ks -profile:v 2 -mbs_per_slice $mbs \
+    "samples/rdd36-ks-slices-$mbs.mov"
+done
+# No quantization matrix in the frame header (load_luma_quantization_matrix and load_chroma_quantization_matrix 0):
+# the default matrix, 4 everywhere.
+ff "${R[@]}" -c:v prores_ks -profile:v 2 -quant_mat default samples/rdd36-ks-flat.mov
+# The coarsest prores_ks goes (-qscale:v 64, its maximum: quantization_index 64 in every slice), small levels and
+# long runs; and noise at its finest (quantization_index 1), levels up to about 3700 and next to no runs.
+ff "${R[@]}" -c:v prores_ks -profile:v 0 -qscale:v 64 samples/rdd36-ks-coarse.mov
+ff -f lavfi -i "testsrc2=size=320x240:rate=25,noise=alls=60:allf=t" -t 0.2 -pix_fmt yuv422p10le -c:v prores_ks -profile:v 3 \
+  -qscale:v 1 samples/rdd36-ks-noise.mov
+ff -f lavfi -i "testsrc2=size=320x240:rate=25,noise=alls=60:allf=t" -t 0.2 -pix_fmt yuv422p10le -c:v prores_aw -profile:v 3 \
+  samples/rdd36-aw-noise.mov
+# Colour: the encoders take it from the frames (setparams), not from -color_primaries, and write it into the frame
+# header and the sample entry's 'colr'. prores_ks: BT.2020 with PQ (9, 16, 9). prores_aw: BT.601 525, whose transfer
+# (6) it writes as 0, unknown in RDD 36, beside a 'colr' that says 6: the decoder takes the container's there, where
+# FFmpeg's shows the frame's 0 as "reserved" (Rdd36ConformanceTests).
+ff -f lavfi -i testsrc2=size=320x240:rate=25 -t 0.2 \
+  -vf "setparams=color_primaries=bt2020:color_trc=smpte2084:colorspace=bt2020nc,format=yuv422p10le" -c:v prores_ks -profile:v 2 \
+  samples/rdd36-ks-colour.mov
+ff -f lavfi -i testsrc2=size=320x240:rate=25 -t 0.2 \
+  -vf "setparams=color_primaries=smpte170m:color_trc=smpte170m:colorspace=smpte170m,format=yuv422p10le" -c:v prores_aw -profile:v 2 \
+  samples/rdd36-aw-colour.mov
+# A 'pasp' that is not 1:1 (the frame header's aspect_ratio_information stays 0 with both encoders).
+ff -f lavfi -i testsrc2=size=320x240:rate=25,setsar=16/11 -t 0.2 -pix_fmt yuv422p10le -c:v prores_ks -profile:v 1 samples/rdd36-ks-sar.mov
+# Beside a sound track (16-bit PCM, 'sowt'), as cameras and editors write it: the video is the first of two tracks.
+ff -f lavfi -i testsrc2=size=320x240:rate=25 -f lavfi -i sine=frequency=440:sample_rate=48000 -t 0.4 -pix_fmt yuv422p10le \
+  -c:v prores_ks -profile:v 2 -c:a pcm_s16le samples/rdd36-ks-pcm.mov
+# A picture of a size in use, 1280x720 HQ: 80 macroblocks a row, 45 rows, 450 slices a frame.
+ff -f lavfi -i testsrc2=size=1280x720:rate=25 -t 0.08 -pix_fmt yuv422p10le -c:v prores_ks -profile:v 3 samples/rdd36-ks-720p.mov
+
+# What FFmpeg's encoders never write, by rewriting rdd36-ks-standard's frames (tools/rdd36-rewrite.py: each slice's
+# coefficients scaled to another quantization_index, towards zero, the bytes saved becoming stuffing after the picture,
+# which the encoders don't write either), so that FFmpeg's decoder is the reference for it:
+# - quantization_index above 128, where qScale grows by 4 an index, to 224 (qScale 512), beside 97 and 128;
+# - the reserved indices: 0 (which FFmpeg takes as 1) and 225 and 255 (as 224);
+# - bitstream_version 1 on a 4:2:2 stream without alpha, which that version allows;
+# - zero bytes after each component's coefficients, 1 and 3 (the most), as older encoders left them;
+# - a frame header and a picture header with bytes after their syntax elements (5 and 3), found by their sizes;
+# - colour in the frame header alone (BT.709 primaries, HLG, BT.2020's matrix), the sample entry without a 'colr',
+#   and aspect_ratio_information 2 beside a 'pasp' of 1:1, which stands.
+rw() { python3 -I tools/rdd36-rewrite.py samples/rdd36-ks-standard.mov "samples/rdd36-rw-$1.mov" "${@:2}"; }
+rw index --quantization-index 129,160,200,224,128,97
+rw reserved-index --quantization-index 0,225,255
+rw version1 --version 1
+rw zero-byte --quantization-index 20 --zero-bytes 1
+rw zero-bytes --quantization-index 20 --zero-bytes 3
+rw headers --quantization-index 20 --extra 5,3
+rw header-colour --colour 1,18,9 --aspect 2
+
 # ---- FFmpeg's references ----
 # name.framemd5: decoded frames. name.packets.csv: demuxed packets as ffprobe lists them (the demuxer's own timestamps,
 # flags with discard, MD5 of the data); name.packets.framemd5 for the codec private data (and the ADTS packets).
@@ -1123,7 +1200,19 @@ for f in samples/*.avi samples/*.mp4; do
     -show_entries frame=color_range,color_space,color_primaries,color_transfer,chroma_location,sample_aspect_ratio "$f")
   if [ -n "$t" ]; then echo "$t" > "${f%.*}.color"; fi
 done
-for f in samples/*.mp4 samples/*.mkv samples/*.webm samples/*.avi samples/*.h264 samples/*.264; do
+# The same for the RDD 36 samples (samples/rdd36-*.mov): frames, picture types, interlacing, colour and aspect ratio as
+# FFmpeg's decoder gives them, and below the packets as its MOV demuxer does. -cpuflags 0: FFmpeg's C inverse transform,
+# the arithmetic Rdd36Idct follows. Its x64 SIMD one gives the same samples for these streams (measured; the two part
+# only for coefficients beyond the range a picture gives), and CI's ARM64 runner makes its own references.
+for f in samples/*.mov; do
+  ff -cpuflags 0 -noautorotate -i "$f" -map 0:v:0 -f framemd5 "${f%.*}.framemd5"
+  ffprobe -v error -select_streams v:0 -show_entries frame=pict_type -of csv=p=0 "$f" | cut -d, -f1 > "${f%.*}.picttypes"
+  ffprobe -v error -select_streams v:0 -show_entries stream=field_order:frame=interlaced_frame,top_field_first -of csv "$f" \
+    | cut -d, -f1-3 > "${f%.*}.interlacing"
+  ffprobe -v error -select_streams v:0 -of compact=p=0 \
+    -show_entries frame=color_range,color_space,color_primaries,color_transfer,chroma_location,sample_aspect_ratio "$f" > "${f%.*}.color"
+done
+for f in samples/*.mp4 samples/*.mov samples/*.mkv samples/*.webm samples/*.avi samples/*.h264 samples/*.264; do
   ff -copyts -i "$f" -c copy -f framemd5 "${f%.*}.packets.framemd5"
   ffprobe -v error -show_packets -show_data_hash MD5 -show_entries packet=stream_index,pts,dts,duration,size,flags,data_hash \
     -of csv=p=0 "$f" > "${f%.*}.packets.csv"

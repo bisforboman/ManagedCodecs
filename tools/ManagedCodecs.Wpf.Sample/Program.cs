@@ -11,7 +11,7 @@ internal static class Program
     [STAThread]
     public static int Main(string[] args)
     {
-        if (args.Length != 1 || !Uri.TryCreate(args[0], UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https" or "rtsp"))
+        if (args.Length != 1 || !Uri.TryCreate(args[0], UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https" or "rtsp" or "rtsps"))
         {
             MessageBox.Show("usage: mclive-wpf <http://camera/video.mjpg | rtsp://user:password@camera/stream>", "mclive-wpf");
             return 1;

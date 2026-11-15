@@ -34,7 +34,10 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
   version, publishes (trusted publishing) and tags. After it has published, a PR of its own sets
   `PackageValidationBaselineVersion` (Directory.Build.props) to it (the release PR can't: its version isn't on
   nuget.org yet; until then a member the release added could be removed unnoticed) and deletes any
-  `CompatibilitySuppressions.xml` that only covered breaks up to it.
+  `CompatibilitySuppressions.xml` that only covered breaks up to it. A new package has no baseline to compare with
+  (restoring it fails, NU1101): its project sets `PackageValidationBaselineVersion` empty, and the baseline PR after
+  the release that first ships it removes that line. Its ID goes in release.yml's pack and push lists, and nuget.org's
+  trusted publishing has to accept it.
 - **Public API**: every public change is an API decision, and a breaking one waits for the next minor version
   (CHANGELOG says so under "Unreleased"). Each src/ package lists its API in `PublicAPI.Shipped.txt` (last release)
   and `PublicAPI.Unshipped.txt` (since, a removal as `*REMOVED*<line>`); an unlisted member fails the build (RS0016,

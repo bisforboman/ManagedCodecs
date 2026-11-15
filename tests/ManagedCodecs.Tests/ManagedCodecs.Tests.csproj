@@ -44,8 +44,11 @@
     <ProjectReference Include="..\..\src\ManagedCodecs.Thumbnails\ManagedCodecs.Thumbnails.csproj" />
     <ProjectReference Include="..\..\src\ManagedCodecs.Playback\ManagedCodecs.Playback.csproj" />
     <ProjectReference Include="..\..\src\ManagedCodecs.MonoGame\ManagedCodecs.MonoGame.csproj" />
+    <ProjectReference Include="..\..\src\ManagedCodecs.Avalonia\ManagedCodecs.Avalonia.csproj" />
     <!-- The package compiles against MonoGame without passing it on (a game brings its platform's); its tests need it. -->
     <PackageReference Include="MonoGame.Framework.DesktopGL" />
+    <PackageReference Include="Avalonia.Headless" />
+    <PackageReference Include="Avalonia.Skia" />
   </ItemGroup>
 
 </Project>

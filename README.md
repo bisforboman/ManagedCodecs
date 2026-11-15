@@ -41,8 +41,10 @@ in between. That comparison is not measured here.
 | `src/Shared` | Source files linked into several codec projects (the VLC decoder, powers and cosines with the same bits on every runtime) |
 | `tools/ManagedCodecs.Cli` | `mcdec`: decodes a file and times it, to compare with `ffmpeg -benchmark` (`--threads N` for H.264 frame threading and HE-AAC's channels) |
 | `tools/ManagedCodecs.Godot` | A Godot 4 (.NET) node that plays a video into an `ImageTexture` and an `AudioStreamGenerator` with `ManagedCodecs.Playback`, as an addon (`addons/managedcodecs/`, a global class) to copy into a game; CI builds it with the Godot .NET SDK, Godot has not run it |
-| `tools/ManagedCodecs.Avalonia.Sample` | `mclive`: an Avalonia window showing a camera's MJPEG over HTTP with `LivePlayer` (issue #462); run on Linux under Xvfb against FFmpeg's `-f mpjpeg` |
-| `tools/ManagedCodecs.Wpf.Sample` | `mclive-wpf`: the same in WPF; CI builds it on Linux, nobody has run it on Windows yet |
+| `src/ManagedCodecs.Avalonia` | `LiveView`: a `LivePlayer`'s newest frame in an Avalonia control, laid out as an `Image`; the `ManagedCodecs.Avalonia` package (see Live cameras) |
+| `src/ManagedCodecs.Wpf` | `LiveView`: the same in WPF (net10.0-windows); the `ManagedCodecs.Wpf` package, built and packed on Linux, not yet run on Windows |
+| `tools/ManagedCodecs.Avalonia.Sample` | `mclive`: an Avalonia window showing a camera with `ManagedCodecs.Avalonia`'s `LiveView` (issue #462); run on Linux under Xvfb against FFmpeg's `-f mpjpeg` |
+| `tools/ManagedCodecs.Wpf.Sample` | `mclive-wpf`: the same in WPF with `ManagedCodecs.Wpf`'s `LiveView`; CI builds it on Linux, nobody has run it on Windows yet |
 | `tools/ManagedCodecs.MonoGame.Sample` | `mcplay`: a MonoGame `Game` around `VideoTexture` (`ManagedCodecs.MonoGame`) (its README has the 1080p measurements; issue #254) |
 | `tools/ManagedCodecs.Unity.Sample` | A Unity `MonoBehaviour` that plays a video into a `Texture2D` and an `AudioClip` with the `ManagedCodecs.Unity` package (its `MediaPlayer`); CI compiles it against stubs of UnityEngine, Unity has not run it |
 | `tools/make-samples.sh` | Generates the test samples and FFmpeg's references |
@@ -548,8 +550,13 @@ if (player.TakeLatest() is { } frame)
   - `mclive` and `mclive-wpf` stay silent (neither Avalonia nor WPF plays raw samples without a native library or a
     platform API).
   - Checked nightly against mediamtx, over the connection and over UDP (docs/conformance.md, Audio over RTSP).
-- **Samples:** `tools/ManagedCodecs.Avalonia.Sample` (`mclive`) and `tools/ManagedCodecs.Wpf.Sample` (`mclive-wpf`)
-  take either kind of URL.
+- **Controls:** `ManagedCodecs.Avalonia` and `ManagedCodecs.Wpf` each have a `LiveView` that shows a `LivePlayer`'s
+  newest frame on each frame the UI renders, laid out as an `Image` (`Stretch`, `StretchDirection`):
+  `new LiveView { Player = player }`. The application makes, starts and disposes the player, so every source and option
+  works as it is (docs/decisions/2026-11-15-live-controls.md). Sound is the application's to play: neither framework
+  plays raw samples.
+- **Samples:** `tools/ManagedCodecs.Avalonia.Sample` (`mclive`) and `tools/ManagedCodecs.Wpf.Sample` (`mclive-wpf`),
+  around those controls, take any of the URLs.
 - **Cost:** a software decoder's. 1080p25 H.264 decodes in about 14 ms a frame on one thread (with 8 ms to convert),
   so a wall of cameras wants their low-resolution substreams. docs/decisions/2026-11-10-live-mjpeg-over-http.md and
   docs/decisions/2026-11-10-live-rtsp-h264.md, docs/decisions/2026-11-12-live-rtsp-jpeg.md,

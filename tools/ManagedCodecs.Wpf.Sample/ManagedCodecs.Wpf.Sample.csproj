@@ -15,6 +15,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\ManagedCodecs.Playback\ManagedCodecs.Playback.csproj" />
+    <ProjectReference Include="..\..\src\ManagedCodecs.Wpf\ManagedCodecs.Wpf.csproj" />
   </ItemGroup>
 
 </Project>

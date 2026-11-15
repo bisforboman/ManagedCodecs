@@ -1,0 +1,13 @@
+#nullable enable
+ManagedCodecs.Wpf.LiveView
+ManagedCodecs.Wpf.LiveView.LiveView() -> void
+ManagedCodecs.Wpf.LiveView.Player.get -> ManagedCodecs.Playback.LivePlayer?
+ManagedCodecs.Wpf.LiveView.Player.set -> void
+ManagedCodecs.Wpf.LiveView.ShownFrames.get -> long
+ManagedCodecs.Wpf.LiveView.Stretch.get -> System.Windows.Media.Stretch
+ManagedCodecs.Wpf.LiveView.Stretch.set -> void
+ManagedCodecs.Wpf.LiveView.StretchDirection.get -> System.Windows.Controls.StretchDirection
+ManagedCodecs.Wpf.LiveView.StretchDirection.set -> void
+static readonly ManagedCodecs.Wpf.LiveView.PlayerProperty -> System.Windows.DependencyProperty!
+static readonly ManagedCodecs.Wpf.LiveView.StretchDirectionProperty -> System.Windows.DependencyProperty!
+static readonly ManagedCodecs.Wpf.LiveView.StretchProperty -> System.Windows.DependencyProperty!

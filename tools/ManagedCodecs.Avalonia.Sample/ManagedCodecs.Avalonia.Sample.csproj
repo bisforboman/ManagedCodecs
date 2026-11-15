@@ -17,6 +17,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\ManagedCodecs.Playback\ManagedCodecs.Playback.csproj" />
+    <ProjectReference Include="..\..\src\ManagedCodecs.Avalonia\ManagedCodecs.Avalonia.csproj" />
   </ItemGroup>
 
 </Project>

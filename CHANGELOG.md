@@ -1,7 +1,7 @@
 # Changelog
 
 Versions are git tags (`vX.Y.Z`); each one publishes every package (ManagedCodecs.Core, .Containers, .Mjpeg, .H264,
-.Aac, .Thumbnails, .Playback, .MonoGame, .Unity and the ManagedCodecs meta-package) to nuget.org at that version, and a GitHub release with this file's section
+.Aac, .Mp3, .Thumbnails, .Playback, .MonoGame, .Avalonia, .Wpf, .Unity and the ManagedCodecs meta-package) to nuget.org at that version, and a GitHub release with this file's section
 as its notes. `release.yml` releases on the push to main that brings a version heading not yet tagged, so a release
 is a pull request that turns "Unreleased" into "## X.Y.Z – date" and runs `tools/ship-public-api.py`. From 0.1.0 on, the
 public API changes only in a new minor version (0.2.0, 0.3.0, ...), with a "Breaking changes" entry; a patch version
@@ -10,6 +10,14 @@ the last baseline release on nuget.org (Directory.Build.props). 1.0 is a later d
 share internals, so each depends on the others at exactly its own version (`[X]`; Directory.Build.targets): NuGet
 then reports a mix of versions (NU1107, or NU1608 for a newer one referenced directly) rather than letting it fail at
 run time.
+
+## Unreleased
+
+### Added
+
+- ManagedCodecs.Avalonia and ManagedCodecs.Wpf, two new packages: `LiveView`, a control that shows a `LivePlayer`'s
+  newest frame on each frame the UI renders, laid out as an `Image` (`Stretch`, `StretchDirection`). The application
+  makes, starts and disposes the player. docs/decisions/2026-11-15-live-controls.md.
 
 ## 0.17.0 – 2026-11-15
 

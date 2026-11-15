@@ -813,7 +813,7 @@ MUTATIONS = [
          tests="FullyQualifiedName~LiveRtspAudioTests.SetsUpNoAudioUnlessAskedTo"),
     # ... the audio's packets don't count against a stall, on the RTSP connection ...
     dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
-         find="                audio!(message.Data);", replace="                Touch();\n                audio!(message.Data);",
+         find="                audio.Handle(message.Data);", replace="                Touch();\n                audio.Handle(message.Data);",
          tests="DisplayName~ConnectsAgainWhenTheVideoStallsThoughAudioStillComes"),
     # ... or over UDP ...
     dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",

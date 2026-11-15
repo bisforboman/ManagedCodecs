@@ -140,6 +140,13 @@ Asked with the multiple-choice prompt; the owner took each recommendation (2026-
     next unit's timestamp. It is kept, without a mutation entry.
   - tools/gst-rtsp-server.py has no audio branch yet: GStreamer wasn't installed where this was built, and an untried
     pipeline isn't worth committing. `rtpmp4gpay` (one access unit a packet) and `rtppcmapay` remain to try by hand.
+- Tried (2026-11-15, issue #527): GStreamer 1.24's `rtpmp4gpay`, also fragmenting every access unit (`mtu=200`),
+  `rtppcmapay` and `rtppcmupay`.
+  - Recorded with what went into the packetizer (tools/gst-audio-record.py, committed in samples/gstreamer/): the
+    depacketizer gives the encoder's access units and bytes back as they were. Nothing had to change in it.
+  - Live: tools/gst-rtsp-server.py has the audio branch (`AUDIO=aac|aac-fragmented|alaw|mulaw|latm`), and `mcplay`
+    played each beside the H.264 pattern; LATM is named and skipped. docs/conformance.md, Audio over RTSP.
+  - Unlike FFmpeg's packetizer (64 to 320 ms of AAC a packet), GStreamer's sends each frame as it is encoded.
 
 New public API (`RtspSource.Audio`, `LivePlayer.TakeAudio`, `Audio` and `SkippedAudioCodec`, the statistics), so the
 next minor version, with a CHANGELOG line under "Unreleased" when it is built.

@@ -13,10 +13,16 @@ run time.
 
 ## Unreleased
 
-New public API (`CaptureTime`), hence the next version is a minor one; code built against 0.17 keeps working.
+New public API (`CaptureTime`, `AudioTracks`, `SelectAudio`), hence the next version is a minor one; code built against 0.17 keeps working.
 
 ### Added
 
+- Containers: sound tracks after the first. `IDemuxer.AudioTracks` lists a file's audio streams and
+  `IDemuxer.SelectAudio` chooses which of them `ReadPackets` gives, one or several in one pass; `Audio` is the first
+  one chosen, and until a choice is made the file's first audio stream is read alone, as before. `MxfDemuxer` lists
+  every sound track (broadcast MXF's mono track a channel), each with the packets FFmpeg's demuxer gives for it; the
+  other demuxers still list their first audio stream only, and the players still play the first (both to follow,
+  issue #535). docs/decisions/2026-11-15-sound-tracks.md.
 - ManagedCodecs.Avalonia and ManagedCodecs.Wpf, two new packages: `LiveView`, a control that shows a `LivePlayer`'s
   newest frame on each frame the UI renders, laid out as an `Image` (`Stretch`, `StretchDirection`). The application
   makes, starts and disposes the player. docs/decisions/2026-11-15-live-controls.md.

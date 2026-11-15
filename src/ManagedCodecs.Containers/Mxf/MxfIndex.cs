@@ -18,8 +18,12 @@ internal sealed class MxfIndex
     /// <summary>The size of every edit unit (Edit Unit Byte Count, 3F05), where a segment gives one other than 0; else 0.</summary>
     public long EditUnitByteCount { get; private set; }
 
-    /// <summary>Whether the first delta entry (the edit unit's first element) has PosTableIndex -1: it is reordered (11.2.3).</summary>
-    public bool FirstElementReordered { get; private set; }
+    /// <summary>
+    /// Whether a delta entry has PosTableIndex -1: that element of the edit unit is temporally reordered (11.2.3), and
+    /// the entries' temporal offsets are its. Only a picture is ever reordered, and it is rarely the edit unit's first
+    /// element (FFmpeg's muxer and broadcast writers put a system item first), so any entry counts.
+    /// </summary>
+    public bool HasReorderedElement { get; private set; }
 
     /// <summary>The temporal offset and flags of edit unit <paramref name="editUnit"/>, or null where no segment indexes it.</summary>
     public (sbyte TemporalOffset, byte Flags)? Entry(long editUnit)
@@ -161,9 +165,13 @@ internal sealed class MxfIndex
         }
 
         // Delta entries (Table 27): PosTableIndex (Int8), Slice, Element Delta.
-        if (deltas.Length >= 8 + 6 && BinaryPrimitives.ReadUInt32BigEndian(deltas) > 0 && BinaryPrimitives.ReadUInt32BigEndian(deltas[4..]) >= 6)
+        if (deltas.Length >= 8 && BinaryPrimitives.ReadUInt32BigEndian(deltas[4..]) is >= 6 and var deltaLength)
         {
-            index.FirstElementReordered = (sbyte)deltas[8] == -1;
+            uint deltaCount = Math.Min(BinaryPrimitives.ReadUInt32BigEndian(deltas), (uint)(deltas.Length - 8) / deltaLength);
+            for (uint i = 0; i < deltaCount; i++)
+            {
+                index.HasReorderedElement |= (sbyte)deltas[8 + (int)(i * deltaLength)] == -1;
+            }
         }
 
         // Index entries (Table 28): Temporal Offset (Int8), Key-Frame Offset, Flags, Stream Offset, the slices'...

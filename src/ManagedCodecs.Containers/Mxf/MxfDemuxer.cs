@@ -627,6 +627,26 @@ public sealed class MxfDemuxer : IDemuxer
         bool intra = track.Codec is "prores" or "dnxhd" or "jpeg2000" || MxfLabels.IsD10Container(track.EssenceContainer ?? []);
         int blockAlign = _aes3Channels > 0 && track.Kind == MxfTrackKind.Sound ? _aes3Channels * _aes3Bytes : BlockAlign(track);
         long samples = 0;
+
+        // A reordered picture's temporal offsets (ST 377-1 11.2.3, Table 28) lead from display order to stored order:
+        // the edit unit shown n-th is stored at n + TemporalOffset[n]. Decode times then start early by the largest
+        // offset, so that no picture is shown before it is decoded (FFmpeg's demuxer: -1 where B pictures follow their
+        // anchor, MPEG-2's and H.264's usual layout).
+        var shown = new Dictionary<long, long>();
+        long delay = 0;
+        if (track.Kind == MxfTrackKind.Picture && index is { HasReorderedElement: true })
+        {
+            long units = _packets.Count(p => p.StreamIndex == stream);
+            for (long n = 0; n < units; n++)
+            {
+                if (index.Entry(n) is { } displayed)
+                {
+                    shown[n + displayed.TemporalOffset] = n;
+                    delay = Math.Max(delay, displayed.TemporalOffset);
+                }
+            }
+        }
+
         for (int i = 0; i < _packets.Count; i++)
         {
             var packet = _packets[i];
@@ -645,9 +665,9 @@ public sealed class MxfDemuxer : IDemuxer
             {
                 long unit = packet.Sequence;
                 var entry = index?.Entry(unit);
-                long pts = unit + (entry is { } e && index!.FirstElementReordered ? e.TemporalOffset : 0);
+                long pts = shown.TryGetValue(unit, out long display) ? display : unit;
                 bool keyframe = intra || (entry is { } f ? (f.Flags & MxfIndex.RandomAccess) != 0 : unit == 0);
-                _packets[i] = packet with { Dts = unit, Pts = pts, Duration = 1, IsKeyframe = keyframe };
+                _packets[i] = packet with { Dts = unit - delay, Pts = pts, Duration = 1, IsKeyframe = keyframe };
             }
         }
     }

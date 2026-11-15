@@ -201,9 +201,21 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.Containers/Mxf/MxfDemuxer.cs",
          find="bool keyframe = intra || (entry", replace="bool keyframe = (entry",
          tests="FullyQualifiedName~MxfConformanceTests"),
-    # The temporal offset applies only where the index says the element is reordered (11.2.3, PosTableIndex -1).
+    # The temporal offsets apply only where the index says an element is reordered (11.2.3, PosTableIndex -1) ...
     dict(file="src/ManagedCodecs.Containers/Mxf/MxfDemuxer.cs",
-         find="entry is { } e && index!.FirstElementReordered ? e.TemporalOffset : 0", replace="entry is { } e ? e.TemporalOffset : 0",
+         find="index is { HasReorderedElement: true })", replace="index is not null)",
+         tests="FullyQualifiedName~MxfConformanceTests"),
+    # ... whichever element it is: the picture's delta entry is rarely the first (mxf-mpeg2-b: a system item first).
+    dict(file="src/ManagedCodecs.Containers/Mxf/MxfIndex.cs",
+         find="for (uint i = 0; i < deltaCount; i++)", replace="for (uint i = 0; i < Math.Min(deltaCount, 1); i++)",
+         tests="FullyQualifiedName~MxfConformanceTests"),
+    # They lead from display order to stored order: the picture shown n-th is stored at n + TemporalOffset[n] ...
+    dict(file="src/ManagedCodecs.Containers/Mxf/MxfDemuxer.cs",
+         find="shown[n + displayed.TemporalOffset] = n;", replace="shown[n] = n + displayed.TemporalOffset;",
+         tests="FullyQualifiedName~MxfConformanceTests"),
+    # ... and decode times start early by the largest (FFmpeg's demuxer: -1 for MPEG-2's B pictures).
+    dict(file="src/ManagedCodecs.Containers/Mxf/MxfDemuxer.cs",
+         find="Dts = unit - delay, Pts = pts", replace="Dts = unit, Pts = pts",
          tests="FullyQualifiedName~MxfConformanceTests"),
     # Each stream starts at its own keyframe at or before the time (the audio's every packet).
     dict(file="src/ManagedCodecs.Containers/Mxf/MxfDemuxer.cs",

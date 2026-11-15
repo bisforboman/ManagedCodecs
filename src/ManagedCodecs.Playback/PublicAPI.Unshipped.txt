@@ -1,12 +1,1 @@
 #nullable enable
-ManagedCodecs.Playback.LivePlayer.Audio.get -> ManagedCodecs.AudioStreamInfo?
-ManagedCodecs.Playback.LivePlayer.SkippedAudioCodec.get -> string?
-ManagedCodecs.Playback.LivePlayer.TakeAudio() -> ManagedCodecs.Playback.AudioChunk?
-ManagedCodecs.Playback.LiveStatistics.DamagedAudioFrames.get -> long
-ManagedCodecs.Playback.LiveStatistics.DamagedAudioFrames.init -> void
-ManagedCodecs.Playback.LiveStatistics.DecodedAudioFrames.get -> long
-ManagedCodecs.Playback.LiveStatistics.DecodedAudioFrames.init -> void
-ManagedCodecs.Playback.LiveStatistics.DroppedAudioFrames.get -> long
-ManagedCodecs.Playback.LiveStatistics.DroppedAudioFrames.init -> void
-ManagedCodecs.Playback.RtspSource.Audio.get -> bool
-ManagedCodecs.Playback.RtspSource.Audio.init -> void

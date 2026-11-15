@@ -166,6 +166,7 @@ ManagedCodecs.Containers.MxfDemuxer.MxfDemuxer(System.IO.Stream! stream, bool le
 ManagedCodecs.Containers.MxfDemuxer.ReadPacketInfo() -> System.Collections.Generic.IEnumerable<ManagedCodecs.PacketInfo>!
 ManagedCodecs.Containers.MxfDemuxer.ReadPackets() -> System.Collections.Generic.IEnumerable<ManagedCodecs.Packet>!
 ManagedCodecs.Containers.MxfDemuxer.ReadPacketsAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerable<ManagedCodecs.Packet>!
+ManagedCodecs.Containers.MxfDemuxer.Refresh() -> System.Collections.Generic.IEnumerable<ManagedCodecs.Packet>!
 ManagedCodecs.Containers.MxfDemuxer.Seek(long pts, int streamIndex) -> void
 ManagedCodecs.Containers.MxfDemuxer.StartTimecode.get -> ManagedCodecs.Timecode?
 ManagedCodecs.Containers.MxfDemuxer.Video.get -> ManagedCodecs.VideoStreamInfo?
@@ -354,16 +355,19 @@ ManagedCodecs.Playback.AudioPlayer.IsFinished.get -> bool
 ManagedCodecs.Playback.AudioPlayer.Start() -> void
 ManagedCodecs.Playback.AudioPlayer.TakeAudio() -> ManagedCodecs.Playback.AudioChunk?
 ManagedCodecs.Playback.LivePlayer
+ManagedCodecs.Playback.LivePlayer.Audio.get -> ManagedCodecs.AudioStreamInfo?
 ManagedCodecs.Playback.LivePlayer.Dispose() -> void
 ManagedCodecs.Playback.LivePlayer.Error.get -> System.Exception?
 ManagedCodecs.Playback.LivePlayer.LivePlayer(ManagedCodecs.Playback.MjpegHttpSource! source) -> void
 ManagedCodecs.Playback.LivePlayer.LivePlayer(ManagedCodecs.Playback.RtspSource! source) -> void
 ManagedCodecs.Playback.LivePlayer.Return(ManagedCodecs.Playback.RgbaFrame! frame) -> void
 ManagedCodecs.Playback.LivePlayer.RtspSource.get -> ManagedCodecs.Playback.RtspSource?
+ManagedCodecs.Playback.LivePlayer.SkippedAudioCodec.get -> string?
 ManagedCodecs.Playback.LivePlayer.Source.get -> ManagedCodecs.Playback.MjpegHttpSource?
 ManagedCodecs.Playback.LivePlayer.Start() -> void
 ManagedCodecs.Playback.LivePlayer.State.get -> ManagedCodecs.Playback.LiveState
 ManagedCodecs.Playback.LivePlayer.Statistics.get -> ManagedCodecs.Playback.LiveStatistics
+ManagedCodecs.Playback.LivePlayer.TakeAudio() -> ManagedCodecs.Playback.AudioChunk?
 ManagedCodecs.Playback.LivePlayer.TakeLatest() -> ManagedCodecs.Playback.RgbaFrame?
 ManagedCodecs.Playback.LiveState
 ManagedCodecs.Playback.LiveState.Connecting = 0 -> ManagedCodecs.Playback.LiveState
@@ -374,13 +378,19 @@ ManagedCodecs.Playback.LiveState.Stopped = 3 -> ManagedCodecs.Playback.LiveState
 ManagedCodecs.Playback.LiveStatistics
 ManagedCodecs.Playback.LiveStatistics.ConvertMilliseconds.get -> double
 ManagedCodecs.Playback.LiveStatistics.ConvertMilliseconds.init -> void
+ManagedCodecs.Playback.LiveStatistics.DamagedAudioFrames.get -> long
+ManagedCodecs.Playback.LiveStatistics.DamagedAudioFrames.init -> void
 ManagedCodecs.Playback.LiveStatistics.DamagedFrames.get -> long
 ManagedCodecs.Playback.LiveStatistics.DamagedFrames.init -> void
 ManagedCodecs.Playback.LiveStatistics.DecodeMilliseconds.get -> double
 ManagedCodecs.Playback.LiveStatistics.DecodeMilliseconds.init -> void
+ManagedCodecs.Playback.LiveStatistics.DecodedAudioFrames.get -> long
+ManagedCodecs.Playback.LiveStatistics.DecodedAudioFrames.init -> void
 ManagedCodecs.Playback.LiveStatistics.DecodedFrames.get -> long
 ManagedCodecs.Playback.LiveStatistics.DecodedFrames.init -> void
 ManagedCodecs.Playback.LiveStatistics.Deconstruct(out long ReceivedFrames, out long DecodedFrames, out long TakenFrames, out long SkippedFrames, out long DroppedFrames, out long DamagedFrames, out long Reconnects, out double DecodeMilliseconds, out double ConvertMilliseconds) -> void
+ManagedCodecs.Playback.LiveStatistics.DroppedAudioFrames.get -> long
+ManagedCodecs.Playback.LiveStatistics.DroppedAudioFrames.init -> void
 ManagedCodecs.Playback.LiveStatistics.DroppedFrames.get -> long
 ManagedCodecs.Playback.LiveStatistics.DroppedFrames.init -> void
 ManagedCodecs.Playback.LiveStatistics.Equals(ManagedCodecs.Playback.LiveStatistics other) -> bool
@@ -453,6 +463,8 @@ ManagedCodecs.Playback.RgbaFrame.SampleAspectRatio.get -> ManagedCodecs.Rational
 ManagedCodecs.Playback.RgbaFrame.Time.get -> System.TimeSpan
 ManagedCodecs.Playback.RgbaFrame.Width.get -> int
 ManagedCodecs.Playback.RtspSource
+ManagedCodecs.Playback.RtspSource.Audio.get -> bool
+ManagedCodecs.Playback.RtspSource.Audio.init -> void
 ManagedCodecs.Playback.RtspSource.Credential.get -> System.Net.NetworkCredential?
 ManagedCodecs.Playback.RtspSource.MaxLag.get -> System.TimeSpan
 ManagedCodecs.Playback.RtspSource.MaxLag.init -> void

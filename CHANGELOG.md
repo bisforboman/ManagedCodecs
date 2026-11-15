@@ -11,7 +11,11 @@ share internals, so each depends on the others at exactly its own version (`[X]`
 then reports a mix of versions (NU1107, or NU1608 for a newer one referenced directly) rather than letting it fail at
 run time.
 
-## Unreleased
+## 0.16.0 – 2026-11-15
+
+Sound from live cameras (`RtspSource.Audio`, `LivePlayer.TakeAudio`: AAC and G.711 over RTSP), and MXF files still
+being written, followed as they grow (`MxfDemuxer.Refresh`). New public API, hence a minor version; code built against
+0.15 keeps working.
 
 ### Added
 

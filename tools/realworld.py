@@ -103,7 +103,7 @@ PACKET_FILES = {
         "The same advertisement with 5.1 24-bit sound"),
     "nasa_russian_eva_44.mxf": (
         "https://archive.org/download/Russian-EVA-44-VR-Lab-Animation_613184.mxf/Russian-EVA-44-VR-Lab-Animation_613184.mxf",
-        "", 32 << 20,
+        "9aa9bba1fbb7fcb55f4b7f897634f204629c436153e54f9f232741127a2c21b1", 32 << 20,
         "NASA's broadcast file (jsc-pao-video-collection, a US government work), its first 32 MiB of 2.6 GB"),
 }
 
@@ -352,11 +352,14 @@ def compare_packets(path):
             if (size, md5) != (their_size, their_md5):
                 problems.append(f"{kind} packet {i}: {size} bytes {md5}, FFmpeg's {their_size} bytes {their_md5}")
                 break
-            if their_pts is not None and pts * base != their_pts * their_base:
-                problems.append(f"{kind} packet {i}: pts {pts} x {base}, FFmpeg's {their_pts} x {their_base}")
-                break
-            if their_dts is not None and dts * base != their_dts * their_base:
-                problems.append(f"{kind} packet {i}: dts {dts} x {base}, FFmpeg's {their_dts} x {their_base}")
+            wrong = [f"{what} {own} x {base}, FFmpeg's {their} x {their_base}"
+                     for what, own, their in (("pts", pts, their_pts), ("dts", dts, their_dts))
+                     if their is not None and own * base != their * their_base]
+            if wrong:
+                problems.append(f"{kind} packet {i}: {'; '.join(wrong)}")
+                # The times around it, for the log: ours, then FFmpeg's demuxer's.
+                for j in range(max(0, i - 2), min(len(mine), len(theirs), i + 14)):
+                    print(f"  {kind} packet {j}: pts {mine[j][0]} dts {mine[j][1]}; FFmpeg's pts {theirs[j][0]} dts {theirs[j][1]}", flush=True)
                 break
             timed += their_pts is not None
         summary.append(f"{kind} {codec}: {len(mine)} packets ({timed} with FFmpeg's times)")

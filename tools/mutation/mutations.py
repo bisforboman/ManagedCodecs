@@ -270,7 +270,7 @@ MUTATIONS = [
     # A file cut short: the essence element the end falls in is the last packet, its bytes as far as they go (FFmpeg's
     # demuxer; mxf-h264-pcm-cut, mxf-h264-pcm-cut-video).
     dict(file="src/ManagedCodecs.Containers/Mxf/MxfDemuxer.cs",
-         find="if (!Klv.Matches(key, EssenceElementPrefix) || length <= valueStart)", replace="if (true)",
+         find="if (!partial || !Klv.Matches(key, EssenceElementPrefix) || length <= valueStart)", replace="if (true)",
          tests="DisplayName~mxf-h264-pcm-cut"),
     # Following a file as it is written (Refresh): the element the writer is in waits until whole.
     dict(file="src/ManagedCodecs.Containers/Mxf/MxfDemuxer.cs",

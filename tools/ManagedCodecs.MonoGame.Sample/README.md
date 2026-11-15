@@ -5,8 +5,9 @@ AAC or MP3 audio) in a MonoGame window with the `ManagedCodecs.MonoGame` package
 costs. Not a media player: no seeking; space pauses, Escape quits. A file without video (.wav, raw MP3 or AAC) plays
 its sound alone, the window black, through `ManagedCodecs.MonoGame`'s `AudioTrack`. A camera's URL plays live
 (`LiveView.cs`, issue #526): `LivePlayer`'s newest picture each frame of the game, and over RTSP or RTSPS the camera's
-sound (`RtspSource.Audio`, `LivePlayer.TakeAudio`) through a dynamic sound, as it comes, with no lip sync; up to six
-chunks queue in the sound, and past that a chunk is dropped rather than letting the delay grow. Escape quits; a final
+sound (`RtspSource.Audio`, `LivePlayer.TakeAudio`) through a dynamic sound, as it comes, with no lip sync. The sound
+starts once 100 ms is queued (and again after running dry), and at most 250 ms is queued: the rest waits in the
+player, whose own queue drops the oldest (`LiveStatistics.DroppedAudioFrames`) rather than letting the delay grow. Escape quits; a final
 error (a wrong password, a refused certificate) ends it, and the title shows the state, the frames, the packets lost
 and the sound.
 
@@ -15,8 +16,21 @@ and the sound.
     dotnet run -c Release --project tools/ManagedCodecs.MonoGame.Sample -- rtsps://camera/stream1 --certificate-hash <SHA-256>
 
 Live mode was run under Xvfb (2026-11-15) against mediamtx 1.21.3 serving FFmpeg's push of a 640x360 H.264 clip with
-48 kHz AAC: the picture played, about 47 sound frames a second were decoded and none dropped, no packet lost. The VM
-has no sound device, so the sound went to OpenAL's null output, unheard: nobody has listened to it yet.
+48 kHz AAC: the picture played, about 47 sound frames a second were decoded and none dropped, no packet lost.
+
+**The live sound, measured** (2026-11-15, the same setup, the clip's sound a 440 Hz tone). The VM has no sound device,
+but OpenAL Soft writes what it mixed to a file (`drivers=wave` in the file `ALSOFT_CONF` names), and a gap in a steady
+tone shows there (`ffmpeg -af silencedetect=noise=-50dB:d=0.003`). 40 s a run, the two builds alternated:
+
+| Build | Gaps in the tone |
+|---|---|
+| the sound started with the first chunk, at most 6 chunks queued | 6, 7, 3, 6 and 4 in five runs, each about 19 ms (one of OpenAL's mixing periods) |
+| the sound started once 100 ms is queued, at most 250 ms queued (now) | none in five runs |
+
+FFmpeg sends 3 or 4 frames of 48 kHz AAC a packet (64 to 85 ms), so a sound started on the first chunk has nothing
+queued when a packet is a few milliseconds late. With 16 kHz AAC (5 frames a packet, 320 ms) and with A-law at 8 kHz
+neither build had a gap (one run each). Not measured: the delay from the camera to the sound, and a camera whose clock
+runs unlike the sound card's. Nobody has listened to it yet.
 
 - `VideoTexture` (`ManagedCodecs.MonoGame`) runs `ManagedCodecs.Playback`'s `MediaPlayer`, which demuxes and decodes
   ahead on a thread of its own (H.264 with frame threading, up to 4 threads) and converts each frame to RGBA on the CPU

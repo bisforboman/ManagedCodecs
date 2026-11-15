@@ -11,6 +11,14 @@ share internals, so each depends on the others at exactly its own version (`[X]`
 then reports a mix of versions (NU1107, or NU1608 for a newer one referenced directly) rather than letting it fail at
 run time.
 
+## Unreleased
+
+### Changed
+
+- Playback: an RTSP session now sends RTCP receiver reports, one a track every 5 seconds, on the RTSP connection or
+  from the RTCP port over UDP (loss, jitter, and the camera's last sender report echoed). Cameras and servers that drop
+  a reader they hear no RTCP from keep playing. docs/decisions/2026-11-15-live-rtcp.md.
+
 ## 0.17.0 – 2026-11-15
 
 Live cameras over RTSPS: `rtsps://` URLs over TLS, a camera's certificate pinned by `RtspSource.CertificateHash`. New

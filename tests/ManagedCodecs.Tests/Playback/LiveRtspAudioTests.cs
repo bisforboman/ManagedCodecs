@@ -290,7 +290,7 @@ public class LiveRtspAudioTests
     }
 
     // The video recording's SDP with the audio recording's track after it, each with a control URL.
-    private static string TwoTracks(string recording)
+    internal static string TwoTracks(string recording)
     {
         string audio = File.ReadAllText(TestSamples.PathOf(recording + ".sdp"));
         return RtspTestServer.SdpOf(Slices).TrimEnd() + "\r\n" + audio.Substring(audio.IndexOf("m=audio", StringComparison.Ordinal)).TrimEnd() + "\r\na=control:trackID=2\r\n";

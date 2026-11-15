@@ -517,7 +517,8 @@ if (player.TakeLatest() is { } frame)
   It authenticates with Digest or Basic, takes RTP over the RTSP connection (no UDP ports, through NAT), and sends
   keep-alives at half the session's timeout. A server that refuses that (461) gets asked for RTP over UDP instead:
   two local ports, a packet from each to open a NAT, only the server's packets (its address and SSRC), and a 50 ms
-  window that puts reordered packets back in order.
+  window that puts reordered packets back in order. Either way an RTCP receiver report goes back every 5 seconds for
+  each track (what arrived, what was lost), for cameras that drop a reader they hear nothing from.
   - Every picture is decoded, as later ones are predicted from it, with concealment for lost packets
     (`LiveStatistics.LostPackets`).
   - If decoding falls more than `MaxLag` (1 s) behind the camera, pictures are skipped up to the next IDR picture

@@ -283,6 +283,31 @@ checks are of the packets and the player.
 - **Not tried yet:** an IP camera (their G.711 and one access unit a packet are covered by recordings and hand-made
   packets only), GStreamer's `rtpmp4gpay`, and a fragmented access unit from a real sender.
 
+### RTCP receiver reports
+
+Every RTSP session sends a receiver report a track every 5 seconds (RFC 3550, 6.4.2;
+docs/decisions/2026-11-15-live-rtcp.md). No sender's RTCP is recorded, so the checks are against the RFC's definitions,
+by a parser and sender reports of the tests' own.
+
+- **`RtcpSessionTests`**, on hand-made packets:
+  - A.3's counts: the packets expected from the sequence numbers, across their wrap; reordering loses nothing;
+    duplicates count as received, so the loss can be negative; the fraction is of each interval's packets and never
+    negative.
+  - 6.4.1's interarrival jitter, within 3 timestamp units of its formula in floating point over 500 random arrivals,
+    the RTP timestamp wrapping on the way; 0 for evenly spaced arrivals.
+  - The last sender report's NTP time echoed (its middle 32 bits) with the time since it came, also when it came
+    before the stream's first packet; not another SSRC's; truncated RTCP, another version and other packet types
+    ignored.
+  - A stream whose SSRC changes is counted from there.
+- **`LiveRtcpTests`**, through `LivePlayer` on the test's clock:
+  - Over the connection: nothing before 5 seconds, then a report on channel 1 and one on channel 3 (the audio's), each
+    naming its stream's SSRC and last sequence number, no loss, and the server's sender report with 5 seconds since
+    it; again 5 seconds later.
+  - Over UDP: the reports reach the server's RTCP port, and a sequence number the server skipped counts as one lost.
+- **Mutation entries:** the fraction's floor at 0, a sender report echoed only to its own stream, and the reports'
+  sending over UDP.
+- **Not tried yet:** a camera or server that drops a reader without them. mediamtx plays with and without.
+
 ## Real films
 
 Every sample above is a test pattern encoded to isolate a feature. `tools/realworld.py` (nightly, `realworld.yml`, a job

@@ -144,6 +144,26 @@ internal sealed class RtspConnection : IDisposable
         }
     }
 
+    /// <summary>Sends a packet interleaved on the connection (RFC 2326, 10.12): an RTCP report on its channel.</summary>
+    public async Task SendPacketAsync(int channel, byte[] packet, CancellationToken token)
+    {
+        var bytes = new byte[4 + packet.Length];
+        bytes[0] = (byte)'$';
+        bytes[1] = (byte)channel;
+        bytes[2] = (byte)(packet.Length >> 8);
+        bytes[3] = (byte)packet.Length;
+        packet.CopyTo(bytes, 4);
+        await _writing.WaitAsync(token).ConfigureAwait(false);
+        try
+        {
+            await _stream.WriteAsync(bytes, 0, bytes.Length, token).ConfigureAwait(false);
+        }
+        finally
+        {
+            _writing.Release();
+        }
+    }
+
     /// <summary>The next message: an interleaved packet or a response; null at the end of the connection.</summary>
     /// <exception cref="InvalidDataException">Neither: a head or a body too long, or no status line.</exception>
     public async Task<RtspMessage?> ReadAsync(CancellationToken token)

@@ -794,6 +794,19 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
          find=" || (ssrc is { } expected && (packet.Length < 12 || Ssrc(packet) != expected)))", replace=")",
          tests="FullyQualifiedName~LiveRtspUdpTests.PutsPacketsBackInOrderAndIgnoresDuplicatesAndStrangers"),
+    # ---- RTCP receiver reports (docs/decisions/2026-11-15-live-rtcp.md), which no recording carries: duplicates
+    # outnumbering losses in an interval give a fraction of 0, not a negative one read as a large one ...
+    dict(file="src/ManagedCodecs.Playback/Rtsp/RtcpSession.cs",
+         find="expectedInterval <= 0 || lostInterval <= 0 ? 0", replace="expectedInterval <= 0 ? 0",
+         tests="FullyQualifiedName~RtcpSessionTests.CountsDuplicatesAsReceivedSoThatLossCanBeNegative"),
+    # ... a sender report is echoed only while the stream is from the SSRC that sent it ...
+    dict(file="src/ManagedCodecs.Playback/Rtsp/RtcpSession.cs",
+         find="_senderReportArrival is not null && _senderReportSource == _source;", replace="_senderReportArrival is not null;",
+         tests="FullyQualifiedName~RtcpSessionTests.StartsAgainWhenTheStreamsSsrcChanges"),
+    # ... and over UDP the reports go from the RTCP port to the server's.
+    dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
+         find="senders.Add((rtcp, Sender(udp, serverRtcp)));", replace="",
+         tests="FullyQualifiedName~LiveRtcpTests.ReportsOverUdpFromTheRtcpPortWithWhatWasLost"),
     # ---- Audio over RTSP (docs/decisions/2026-11-15-live-rtsp-audio.md): no second SETUP unless RtspSource.Audio asks ...
     dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
          find="if (source.Audio && sdp.Audio is { } audioTrack)", replace="if (sdp.Audio is { } audioTrack)",

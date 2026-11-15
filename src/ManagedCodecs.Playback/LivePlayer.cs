@@ -507,7 +507,7 @@ public sealed class LivePlayer : IDisposable
             // Each track's receiver reports go back the way its packets come: on the RTSP connection's next channel,
             // or from the RTCP port to the server's (docs/decisions/2026-11-15-live-rtcp.md).
             var rtcp = new RtcpSession(VideoClockRate);
-            var handle = track.Codec == SdpCodec.Jpeg ? JpegPackets(track.PayloadType, connection, rtcp) : H264Packets(track, connection, rtcp);
+            var handle = track.Codec == SdpCodec.Jpeg ? JpegPackets(track, connection, rtcp) : H264Packets(track, connection, rtcp);
             var senders = new List<(RtcpSession Rtcp, Func<byte[], Task> Send)>();
             var ending = cancel.Token;
             if (udp is null)
@@ -710,9 +710,9 @@ public sealed class LivePlayer : IDisposable
 
     // JPEG over RTP (RFC 2435): each frame rebuilt as a whole JPEG and offered to decoding as one over HTTP is; an
     // incomplete one is dropped (docs/decisions/2026-11-12-live-rtsp-jpeg.md, decision 1).
-    private Action<byte[]> JpegPackets(int payloadType, Connection connection, RtcpSession rtcp)
+    private Action<byte[]> JpegPackets(SdpVideoTrack track, Connection connection, RtcpSession rtcp)
     {
-        var depacketizer = new RtpJpegDepacketizer(payloadType);
+        var depacketizer = new RtpJpegDepacketizer(track.PayloadType, track.Width, track.Height);
         var frames = new List<RtpJpegFrame>();
         long lost = 0;
         return packet =>

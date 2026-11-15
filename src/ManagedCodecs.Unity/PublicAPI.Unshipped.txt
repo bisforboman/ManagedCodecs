@@ -1,4 +1,5 @@
 #nullable enable
+ManagedCodecs.Containers.MxfDemuxer.Refresh() -> System.Collections.Generic.IEnumerable<ManagedCodecs.Packet>!
 ManagedCodecs.Playback.LivePlayer.Audio.get -> ManagedCodecs.AudioStreamInfo?
 ManagedCodecs.Playback.LivePlayer.SkippedAudioCodec.get -> string?
 ManagedCodecs.Playback.LivePlayer.TakeAudio() -> ManagedCodecs.Playback.AudioChunk?

@@ -392,7 +392,7 @@ first run in CI, on the branch.
   under MXF demuxing).
 - The first 32 MiB of a NASA broadcast file of 2.6 GB (jsc-pao-video-collection; by HTTP range, pinned by those bytes'
   SHA-256), read as a file cut short: MPEG-2 and 24-bit PCM, 274 packets each, and seven more streams in FFmpeg's
-  reading (the other sound tracks among them), which are not compared.
+  reading, which are not compared (what they are was not looked at).
 
 Not compared there: keyframe flags (FFmpeg's demuxer itself gives none) and the header's facts beyond the codec and
 the sound's format.

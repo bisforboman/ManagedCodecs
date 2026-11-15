@@ -112,7 +112,7 @@ issue of its own, not a slice of #469.
   A job a file in `realworld.yml`, run on the branch before the pull request.
 - **Files:** two of archive.org's `mxfburger` (Public Domain Mark; pinned by the SHA-1 archive.org lists): MPEG-2 at
   29.97 with B pictures, 16-bit mono and 24-bit 5.1 PCM. And the first 32 MiB of a NASA broadcast file (2.6 GB) by
-  HTTP range, read as a file cut short: MPEG-2 and 24-bit PCM, eight sound tracks.
+  HTTP range, read as a file cut short: MPEG-2 and 24-bit PCM, and seven more streams in FFmpeg's reading, not compared.
 - **First run:** the NASA head matched packet for packet. The `mxfburger` files matched in data and differed in
   times, which was a bug here that FFmpeg's own files could show too, once asked for B pictures (`-c:v mpeg2video
   -bf 2`, now mxf-mpeg2-b):

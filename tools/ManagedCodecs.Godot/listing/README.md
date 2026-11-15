@@ -16,27 +16,27 @@ repository host with that zip as its download URL. After each release: edit the 
 
 | Field | Value |
 | --- | --- |
-| Asset name | ManagedCodecs Video (H.264/MJPEG, AAC; MP4, MKV, AVI) |
+| Asset name | ManagedCodecs Video (H.264/MJPEG, AAC/MP3; MP4, MKV, AVI, MXF) |
 | Category | Scripts |
 | Godot version | 4.7 |
-| Version | 0.9.1 (the release whose zip it downloads; the first with one) |
+| Version | the newest release, whose zip it downloads (0.15.0 when this was last updated; 0.9.1 was the first with one); the description's package reference names the same |
 | Repository host | Custom |
 | Repository URL | https://github.com/bisforboman/ManagedCodecs |
 | Issues URL | https://github.com/bisforboman/ManagedCodecs/issues |
-| Download URL | https://github.com/bisforboman/ManagedCodecs/releases/download/v0.9.1/managedcodecs-godot-0.9.1.zip |
+| Download URL | https://github.com/bisforboman/ManagedCodecs/releases/download/v0.15.0/managedcodecs-godot-0.15.0.zip (that version's) |
 | Icon URL | https://raw.githubusercontent.com/bisforboman/ManagedCodecs/main/tools/ManagedCodecs.Godot/listing/icon.png |
 | License | MIT |
 | Previews | image: `demo.gif`, thumbnail `still.jpg` (raw.githubusercontent.com URLs, as the icon's) |
 
 Description:
 
-> Play MP4, Matroska, WebM and AVI video in Godot 4 (.NET) with a node: `ManagedCodecsVideo`, a TextureRect that
-> plays H.264 or MJPEG video with AAC or MP3 sound. Godot itself plays only Ogg Theora; this decodes in managed C# (the
-> ManagedCodecs NuGet packages), with no native libraries, so the same file plays on every desktop platform the .NET
-> build exports to.
+> Play MP4, Matroska, WebM, AVI and MXF video in Godot 4 (.NET) with a node: `ManagedCodecsVideo`, a TextureRect that
+> plays H.264 or MJPEG video with AAC, MP3 or PCM sound, and sound-only files (.wav, raw MP3 or AAC). Godot itself
+> plays only Ogg Theora; this decodes in managed C# (the ManagedCodecs NuGet packages), with no native libraries, so the
+> same file plays on every desktop platform the .NET build exports to.
 >
 > Needs Godot 4.7 or later (.NET build) and the .NET 10 SDK. Add the package to your project's .csproj (net10.0):
-> `<PackageReference Include="ManagedCodecs.Playback" Version="0.9.1" />`, add a ManagedCodecsVideo node and set its
+> `<PackageReference Include="ManagedCodecs.Playback" Version="0.15.0" />`, add a ManagedCodecsVideo node and set its
 > File Path. To export, add `*.mp4` to the export preset's non-resource filter. The addon's README has the details.
 >
 > Plays from start to end, optionally looped (cutscenes, menu backdrops); no seeking or pausing. The whole file is read

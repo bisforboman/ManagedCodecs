@@ -327,7 +327,7 @@ MUTATIONS = [
          tests="FullyQualifiedName~MxfFollowTests"),
     # A cut 8-channel AES3 element keeps a sample whose kept channels' words are there (mxf-d10-pcm24-cut).
     dict(file="src/ManagedCodecs.Containers/Mxf/MxfDemuxer.cs",
-         find="(size - header.Length + ((8 - _aes3Channels) * 4)) / (8 * 4)", replace="(size - header.Length) / (8 * 4)",
+         find="(size - header.Length + ((8 - channels) * 4)) / (8 * 4)", replace="(size - header.Length) / (8 * 4)",
          tests="DisplayName~mxf-d10-pcm24-cut"),
     # A clip of sound the file ends in keeps its last bytes, not whole samples only (mxf-opatom-pcm-cut).
     dict(file="src/ManagedCodecs.Containers/Mxf/MxfDemuxer.cs",

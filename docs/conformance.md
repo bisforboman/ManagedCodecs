@@ -771,12 +771,21 @@ descriptor's, as ffprobe lists them frame by frame (name.color; `MxfConformanceT
   10 bits, a missing white level, colour range or depth).
 
 
-`MxfConformanceTests` compares every packet of every sample's video and first audio stream with FFmpeg's (`ffprobe
+`MxfConformanceTests` compares every packet of every sample's video and audio streams with FFmpeg's (`ffprobe
 -show_packets -show_data_hash MD5`, name.packets.csv): file order, pts, size, MD5, keyframe flag and duration, and the
 decode times with FFmpeg's MXF demuxer's own (`-fflags +nofillin+noparse`, name.packets.nofillin.csv). Video ticks are
 edit units; audio ticks are samples, a packet's duration its bytes over the block alignment. Where FFmpeg differs from
 what the file says, the file is followed and the test says so:
 
+- Sound tracks (#535, docs/decisions/2026-11-15-sound-tracks.md): `MxfDemuxer.AudioTracks` lists every sound track, a
+  stream each with ffprobe's index, and `SelectAudio` chooses which `ReadPackets` gives (unasked, the first alone).
+  mxf-h264-mono4 has broadcast MXF's layout, four mono 24-bit tracks (each a sine of its own frequency), and
+  mxf-prores-pcm16 two stereo ones: the comparison above runs for the first track alone, each track alone, all of them,
+  and all named backwards, a track's packets being the same whichever others are read with it. By hand: `Audio`
+  following the choice, a read under way keeping its tracks, the refusals, a seek moving the tracks not selected too;
+  `MxfFollowTests` grows mxf-h264-mono4 under two of its four tracks. Not covered by a file: two tracks naming the
+  same essence elements (the first is read). The other demuxers still read their first audio stream alone (the
+  interface's defaults, checked on a one-stream demuxer).
 - Keyframes: libavformat marks every packet of an intra-only codec (ProRes, DNxHR) a keyframe, while FFmpeg's muxer
   leaves their index entries without the random access flag; `MxfDemuxer` does the same for those codecs, and takes the
   index's flag for the others (H.264 and MPEG-2's first packet). D-10's MPEG-2 is I pictures only (SMPTE ST 356), and

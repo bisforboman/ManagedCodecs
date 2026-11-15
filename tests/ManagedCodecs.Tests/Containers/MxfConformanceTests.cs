@@ -5,7 +5,8 @@ using ManagedCodecs.H264;
 namespace ManagedCodecs.Tests.Containers;
 
 /// <summary>
-/// Demuxes every samples/*.mxf and compares each packet of its video and first audio stream with FFmpeg's: pts, size,
+/// Demuxes every samples/*.mxf and compares each packet of its video and its audio streams (the first alone, as read
+/// unasked, then each alone, all, and all named backwards: <see cref="MxfDemuxer.SelectAudio"/>) with FFmpeg's: pts, size,
 /// MD5, keyframe flag and duration with samples/*.packets.csv (<c>ffprobe -show_packets -show_data_hash MD5</c>), the
 /// decode times with *.packets.nofillin.csv (FFmpeg's MXF demuxer's own, before libavformat moves MPEG-2's back a frame;
 /// audio has none there, and its dts is its pts), and the streams' facts with the header metadata FFmpeg reads.
@@ -25,7 +26,26 @@ public class MxfConformanceTests
     {
         using var demuxer = Demuxer.Open(TestSamples.PathOf(sampleName));
         var mxf = Assert.IsType<MxfDemuxer>(demuxer);
-        var streams = new[] { mxf.Video?.StreamIndex, mxf.Audio?.StreamIndex }.OfType<int>().ToHashSet();
+        var tracks = mxf.AudioTracks.Select(t => t.StreamIndex).ToArray();
+        Assert.Equal(tracks.FirstOrDefault(-1), mxf.Audio?.StreamIndex ?? -1);
+
+        // The first track alone, before any choice; then each alone, all of them, and all named backwards (the packets
+        // stay in file order, Audio is the first named).
+        CompareWithFfmpeg(mxf, sampleName, tracks.Take(1).ToArray());
+        if (tracks.Length > 1)
+        {
+            foreach (int[] selection in tracks.Select(t => new[] { t }).Append(tracks).Append([.. tracks.Reverse()]))
+            {
+                mxf.SelectAudio(selection);
+                CompareWithFfmpeg(mxf, sampleName, selection);
+            }
+        }
+    }
+
+    private static void CompareWithFfmpeg(MxfDemuxer mxf, string sampleName, int[] selected)
+    {
+        Assert.Equal(selected.FirstOrDefault(-1), mxf.Audio?.StreamIndex ?? -1);
+        var streams = selected.Append(mxf.Video?.StreamIndex ?? -1).ToHashSet();
 
         var expected = Parse(TestSamples.ReferenceOf(sampleName, ".packets.csv")).Where(p => streams.Contains(p.StreamIndex)).ToList();
         var own = Parse(TestSamples.ReferenceOf(sampleName, ".packets.nofillin.csv")).Where(p => streams.Contains(p.StreamIndex)).ToList();
@@ -69,12 +89,132 @@ public class MxfConformanceTests
             Assert.Equal(sequences[video.StreamIndex], video.FrameCount);
         }
 
-        if (mxf.Audio is { } audio)
+        foreach (var audio in mxf.AudioTracks.Where(t => selected.Contains(t.StreamIndex)))
         {
             Assert.Equal(sequences[audio.StreamIndex], audio.FrameCount);
             Assert.Equal(new Rational(1, audio.SampleRate), audio.TimeBase);
             var last = packets.Last(p => p.StreamIndex == audio.StreamIndex);
             Assert.Equal(last.Pts + last.Duration, audio.Duration);
+        }
+    }
+
+    /// <summary>
+    /// mxf-h264-mono4 is what it is for: four mono sound tracks, a stream each as ffprobe numbers them (name.headers.json),
+    /// each with packets of its own; and mxf-prores-pcm16's two stereo tracks.
+    /// </summary>
+    [Fact]
+    public void ListsEverySoundTrack()
+    {
+        using var mono = MxfDemuxer.Open(TestSamples.PathOf("mxf-h264-mono4.mxf"));
+        Assert.Equal([1, 2, 3, 4], mono.AudioTracks.Select(t => t.StreamIndex));
+        Assert.All(mono.AudioTracks, t => Assert.Equal((CodecIds.PcmS24Le, 48000, 1, 25L, 48000L), (t.Codec, t.SampleRate, t.Channels, t.FrameCount, t.Duration)));
+        Assert.Same(mono.AudioTracks[0], mono.Audio);
+        Assert.Equal(FfprobeAudioStreams("mxf-h264-mono4.mxf"), mono.AudioTracks.Select(t => t.StreamIndex));
+
+        mono.SelectAudio(1, 2, 3, 4);
+        var first = mono.ReadPackets().Where(p => p.StreamIndex != mono.Video!.StreamIndex).Take(4).ToList();
+        Assert.Equal([1, 2, 3, 4], first.Select(p => p.StreamIndex));
+        Assert.Equal(4, first.Select(p => FrameMd5.Hash(p.Data.Span)).Distinct().Count());
+
+        using var stereo = MxfDemuxer.Open(TestSamples.PathOf("mxf-prores-pcm16.mxf"));
+        Assert.Equal([(1, 2), (2, 2)], stereo.AudioTracks.Select(t => (t.StreamIndex, t.Channels)));
+        Assert.Equal(FfprobeAudioStreams("mxf-prores-pcm16.mxf"), stereo.AudioTracks.Select(t => t.StreamIndex));
+
+        // One track, or none: the list says so.
+        using var one = MxfDemuxer.Open(TestSamples.PathOf("mxf-h264-pcm.mxf"));
+        Assert.Same(one.Audio, Assert.Single(one.AudioTracks));
+        using var none = MxfDemuxer.Open(TestSamples.PathOf("mxf-mpeg2.mxf"));
+        Assert.Empty(none.AudioTracks);
+        Assert.Throws<ArgumentOutOfRangeException>(() => none.SelectAudio(0));
+    }
+
+    private static IEnumerable<int> FfprobeAudioStreams(string sampleName)
+    {
+        using var json = System.Text.Json.JsonDocument.Parse(File.ReadAllText(TestSamples.ReferenceOf(sampleName, ".headers.json")));
+        return [.. json.RootElement.GetProperty("streams").EnumerateArray()
+            .Where(s => s.GetProperty("codec_type").GetString() == "audio")
+            .Select(s => s.GetProperty("index").GetInt32())];
+    }
+
+    /// <summary>
+    /// <see cref="MxfDemuxer.SelectAudio"/>: <see cref="MxfDemuxer.Audio"/> is the first track named, a read already
+    /// started keeps its tracks, a choice that is refused changes nothing, and a seek moves every track, those chosen
+    /// after it too.
+    /// </summary>
+    [Fact]
+    public void SelectsSoundTracks()
+    {
+        using var mxf = MxfDemuxer.Open(TestSamples.PathOf("mxf-h264-mono4.mxf"));
+        var video = mxf.Video!;
+        using var started = mxf.ReadPackets().GetEnumerator();
+        Assert.True(started.MoveNext());
+
+        mxf.SelectAudio(3, 2);
+        Assert.Same(mxf.AudioTracks[2], mxf.Audio);
+        Assert.Equal([0, 2, 3], mxf.ReadPackets().Select(p => p.StreamIndex).Distinct().Order());
+        Assert.Equal([0, 2, 3], mxf.ReadPacketInfo().Select(p => p.StreamIndex).Distinct().Order());
+        var rest = new List<int>();
+        while (started.MoveNext())
+        {
+            rest.Add(started.Current.StreamIndex);
+        }
+
+        Assert.Equal([0, 1], rest.Distinct().Order());
+
+        Assert.Throws<ArgumentException>(() => mxf.SelectAudio());
+        Assert.Throws<ArgumentException>(() => mxf.SelectAudio(1, 1));
+        Assert.Throws<ArgumentOutOfRangeException>(() => mxf.SelectAudio(1, video.StreamIndex));
+        Assert.Throws<ArgumentOutOfRangeException>(() => mxf.SelectAudio(5));
+        Assert.Throws<ArgumentNullException>(() => mxf.SelectAudio(null!));
+        Assert.Equal(3, mxf.Audio!.StreamIndex);
+        Assert.Equal([0, 2, 3], mxf.ReadPackets().Select(p => p.StreamIndex).Distinct().Order());
+
+        // Half a second in, by a track that is not selected: every track starts at its packet there (a 25th of a second
+        // each, so the 13th), the video at the keyframe before (-g 5: the 11th picture).
+        mxf.Seek(24000, 4);
+        mxf.SelectAudio(1, 4);
+        var after = mxf.ReadPackets().ToList();
+        Assert.Equal(10, after.First(p => p.StreamIndex == video.StreamIndex).Sequence);
+        Assert.Equal([(1, 12L, 23040L), (4, 12L, 23040L)], after.Where(p => p.StreamIndex != video.StreamIndex).Take(2).Select(p => (p.StreamIndex, p.Sequence, p.Pts)));
+        Assert.Throws<ArgumentOutOfRangeException>(() => mxf.Seek(0, 5));
+    }
+
+    /// <summary>
+    /// <see cref="IDemuxer"/>'s defaults, for a demuxer that reads one audio stream: the list is that stream, and only it
+    /// can be selected.
+    /// </summary>
+    [Fact]
+    public void ADemuxerOfOneAudioStreamListsAndSelectsIt()
+    {
+        IDemuxer one = new OneStream(new AudioStreamInfo(CodecIds.PcmS16Le, 48000, 2, 0, new Rational(1, 48000), default, 1));
+        Assert.Same(one.Audio, Assert.Single(one.AudioTracks));
+        one.SelectAudio(1);
+        Assert.Throws<ArgumentOutOfRangeException>(() => one.SelectAudio(0));
+        Assert.Throws<ArgumentOutOfRangeException>(() => one.SelectAudio(1, 2));
+        Assert.Throws<ArgumentException>(() => one.SelectAudio(1, 1));
+        Assert.Throws<ArgumentException>(() => one.SelectAudio());
+        Assert.Throws<ArgumentNullException>(() => one.SelectAudio(null!));
+
+        IDemuxer none = new OneStream(null);
+        Assert.Empty(none.AudioTracks);
+        Assert.Throws<ArgumentOutOfRangeException>(() => none.SelectAudio(0));
+
+        // The library's other demuxers still read their first audio stream alone.
+        using var mp4 = Demuxer.Open(TestSamples.PathOf("h264-with-audio.mp4"));
+        Assert.Same(mp4.Audio, Assert.Single(mp4.AudioTracks));
+        mp4.SelectAudio(mp4.Audio!.StreamIndex);
+    }
+
+    private sealed class OneStream(AudioStreamInfo? audio) : IDemuxer
+    {
+        public VideoStreamInfo? Video => null;
+
+        public AudioStreamInfo? Audio => audio;
+
+        public IEnumerable<Packet> ReadPackets() => [];
+
+        public void Dispose()
+        {
         }
     }
 

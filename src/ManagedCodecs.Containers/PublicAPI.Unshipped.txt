@@ -1,1 +1,3 @@
 #nullable enable
+ManagedCodecs.Containers.MxfDemuxer.AudioTracks.get -> System.Collections.Generic.IReadOnlyList<ManagedCodecs.AudioStreamInfo!>!
+ManagedCodecs.Containers.MxfDemuxer.SelectAudio(params int[]! streamIndexes) -> void

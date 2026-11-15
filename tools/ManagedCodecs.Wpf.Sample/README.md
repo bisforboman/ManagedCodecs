@@ -19,5 +19,8 @@ line; not a viewer.
 - Code only, no XAML. Windows only to run; CI builds it on Linux (`EnableWindowsTargeting`), and
   `.github/workflows/windows.yml` runs it with `--frames 100` on a Windows runner, weekly and when the sample changes,
   against `tools/mjpeg-http-server.py` serving `samples/gstreamer/jpeg-422` (5 JPEGs of 320x240, in a loop at 25 fps).
-  Nobody has looked at its window yet. To try it without a camera, run that server
+  Its first run (2026-11-15, `windows-2025`): 100 frames shown of 102 received, each drawn as decoded, about 1 ms to
+  decode and 1 ms to convert a frame. With the swap of red and blue taken out, the run failed at the first frame
+  ("decoded R 255 G 12 B 18, drawn R 18 G 12 B 255"). Nobody has looked at its window yet, and RTSP hasn't been tried
+  on Windows. To try it without a camera, run that server
   (`python tools/mjpeg-http-server.py samples/gstreamer/jpeg-422`) and open `http://127.0.0.1:8090/video.mjpg`.

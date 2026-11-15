@@ -9,6 +9,11 @@ And an H.264 clip with AAC sound, over both transports, played with RtspSource.A
 chunk of audio taken must be the clip's too (docs/decisions/2026-11-15-live-rtsp-audio.md). And the H.264 clip over
 RTSPS (mediamtx with `rtspEncryption: strict` and a certificate openssl makes, pinned by `--certificate-hash`;
 docs/decisions/2026-11-15-live-rtsps.md).
+And over a network that misbehaves (issue #527), tools/rtsp-lossy-relay.py between mediamtx (UDP only) and LivePlayer:
+once sending packets twice and holding some back 10 ms for 6 s, which the 50 ms reorder window must put right with nothing lost
+and every frame the clip's; and once dropping 2% of the packets for 6 s, with and without sound, where the packets
+LivePlayer counts lost must be the ones the relay dropped, its last receiver reports must say the same, it must not
+reconnect, and the last 75 frames and chunks must be the clip's again (`mcdec --live --lossy`).
 Fails on a frame not in the clip, a lost packet, a damaged frame, a reconnect, or too few frames. mediamtx is
 downloaded once, pinned by SHA-256, into samples/realworld/ (gitignored). Nightly (realworld.yml), not on pull
 requests: the required checks use the loopback server in the tests.
@@ -19,8 +24,10 @@ Usage (from the repository root, after a Release build of tools/ManagedCodecs.Cl
 
 import argparse
 import hashlib
+import json
 import os
 import platform
+import re
 import ssl
 import socket
 import struct
@@ -34,6 +41,7 @@ import urllib.request
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CACHE = os.path.join(ROOT, "samples", "realworld")
+RELAY = os.path.join(ROOT, "tools", "rtsp-lossy-relay.py")
 MCDEC = os.path.join(ROOT, "tools", "ManagedCodecs.Cli", "bin", "Release", "net10.0", "mcdec.dll")
 
 # mediamtx's release (bluenviron/mediamtx, MIT): its checksums.sha256 lists these.
@@ -42,8 +50,14 @@ MEDIAMTX = {
     "x86_64": ("linux_amd64", "0a2ea7eba96023631efa1bea7804823a9145b043b6646a8a05798d4ac24ed635"),
 }
 
+# rtsp-lossy-relay.py's options: a twentieth of the packets sent twice and a tenth held back 10 ms, inside LivePlayer's
+# 50 ms reorder window; and 2% dropped; each for the first 6 s.
+REORDERING = ["--repeat", "0.05", "--reorder", "0.1", "--seconds", "6"]
+LOSING = ["--loss", "0.02", "--seconds", "6"]
+
 USER, PASSWORD = "viewer", "s3cret"
 PORT = 8554
+RELAY_PORT = 8555
 TLS_PORT = 8322
 
 # RTSPS only: TLS on its own port, RTP inside it (or SRTP, which LivePlayer doesn't take).
@@ -243,9 +257,36 @@ def make_certificate(folder):
         return key, cert, hashlib.sha256(ssl.PEM_cert_to_DER_cert(f.read())).hexdigest()
 
 
-def run(method, binary, clip, folder, frames, transports="tcp", audio=False, tls=False):
+def check_relay(summary, output, lossy):
+    """What the relay did against what mcdec printed and what LivePlayer's receiver reports told the server; the
+    lines to add to the output, and whether they agree."""
+    streams, reports = summary["streams"], summary["reports"]
+    dropped = sum(s["dropped"] for s in streams.values())
+    repeated = sum(s["repeated"] for s in streams.values())
+    held = sum(s["held"] for s in streams.values())
+    lost = re.search(r"lost packets (\d+)", output)
+    lines = [f"relay: {sum(s['forwarded'] for s in streams.values())} packets forwarded in {len(streams)} stream(s), "
+             f"{dropped} dropped, {repeated} sent twice, {held} held back."]
+    ok = bool(streams) and lost is not None and int(lost[1]) == dropped
+    if lost is not None and int(lost[1]) != dropped:
+        lines.append(f"LivePlayer counted {lost[1]} packets lost, the relay dropped {dropped}.")
+    if lossy and dropped == 0 or not lossy and (repeated == 0 or held == 0):
+        lines.append("The relay impaired nothing: the run checked nothing.")
+        ok = False
+    for ssrc, counts in streams.items():
+        report = reports.get(ssrc)
+        # RFC 3550, A.3: packets expected less packets received, a packet sent twice received twice.
+        expected = counts["dropped"] - counts["repeated"]
+        lines.append(f"stream {ssrc}: receiver reports {report['reports'] if report else 0}, the last one's cumulative lost "
+                     f"{report['lost'] if report else 'none'} (dropped less sent twice: {expected}).")
+        ok &= report is not None and report["lost"] == expected
+    return lines, ok
+
+
+def run(method, binary, clip, folder, frames, transports="tcp", audio=False, tls=False, relay=None):
     """mediamtx with one authentication method and one transport (tcp or udp), over RTSPS with tls, the clip pushed
-    to it, then mcdec --live; its output and status."""
+    to it, then mcdec --live; its output and status. With relay (rtsp-lossy-relay.py's options), through the relay,
+    and its counts checked against mcdec's."""
     config = os.path.join(folder, f"mediamtx-{method}-{transports}{'-tls' if tls else ''}.yml")
     with open(config, "w") as f:
         f.write(CONFIG.format(port=PORT, method=method, user=USER, password=PASSWORD, transports=transports))
@@ -266,6 +307,9 @@ def run(method, binary, clip, folder, frames, transports="tcp", audio=False, tls
 
     threading.Thread(target=read, daemon=True).start()
     push = None
+    lossy_relay = None
+    summary = os.path.join(folder, "relay.json")
+    lossy = relay is not None and "--loss" in relay
     stop = threading.Event()
     try:
         wait_for_port(port)
@@ -277,17 +321,30 @@ def run(method, binary, clip, folder, frames, transports="tcp", audio=False, tls
                                      "-f", "rtsp", "-rtsp_transport", transports, f"{scheme}://{host}:{port}/live"])
         if not published.wait(20):
             return "\n".join(["The push never reached mediamtx.", *log[-20:]]), 1
+        if relay is not None:
+            lossy_relay = subprocess.Popen([sys.executable, RELAY, "--listen", str(RELAY_PORT), "--server", f"127.0.0.1:{port}",
+                                            "--summary", summary, *relay], stdout=subprocess.DEVNULL)
+            wait_for_port(RELAY_PORT)
+            port = RELAY_PORT
         url = f"{scheme}://{USER}:{PASSWORD}@{host}:{port}/live"
         check = subprocess.run(["dotnet", MCDEC, "--live", url, clip, "--frames", str(frames), *(["--audio"] if audio else []),
-                                *(["--certificate-hash", digest] if tls else [])],
+                                *(["--certificate-hash", digest] if tls else []), *(["--lossy"] if lossy else [])],
                                capture_output=True, text=True)
         output = check.stdout + check.stderr
-        if check.returncode != 0:
+        status = check.returncode
+        if lossy_relay is not None:
+            lossy_relay.terminate()
+            lossy_relay.wait(10)
+            with open(summary) as f:
+                lines, agree = check_relay(json.load(f), output, lossy)
+            output += "\n".join(lines) + ("" if agree else "\nFAILED: the relay's counts and LivePlayer's differ.")
+            status = status or (0 if agree else 1)
+        if status != 0:
             output += "\nmediamtx's log:\n" + "\n".join(log[-30:])
-        return output.strip(), check.returncode
+        return output.strip(), status
     finally:
         stop.set()
-        for process in (push, server):
+        for process in (lossy_relay, push, server):
             if process is not None:
                 process.terminate()
                 try:
@@ -300,6 +357,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--frames", type=int, default=250, help="frames to show for each method (default 250)")
     parser.add_argument("--report", help="also write the results as Markdown")
+    parser.add_argument("--only", help="only the runs whose label has this text")
     args = parser.parse_args()
     if not os.path.exists(MCDEC):
         sys.exit(f"Build tools/ManagedCodecs.Cli in Release first ({MCDEC}).")
@@ -316,9 +374,19 @@ def main():
                 ("JPEG, digest", "digest", mjpeg, "tcp", False), ("H.264, digest, RTP over UDP only", "digest", h264, "udp", False),
                 ("H.264 and AAC, digest", "digest", sound, "tcp", True),
                 ("H.264 and AAC, digest, RTP over UDP only", "digest", sound, "udp", True),
-                ("H.264, digest, RTSPS", "digest", h264, "tcp", False, True))
-        for label, method, clip, transports, audio, *tls in runs:
-            output, status = run(method, binary, clip, folder, args.frames, transports, audio, bool(tls and tls[0]))
+                ("H.264, digest, RTSPS", "digest", h264, "tcp", False, True),
+                ("H.264 over UDP, packets sent twice and reordered", "digest", h264, "udp", False, False, REORDERING),
+                ("H.264 over UDP, 2% of the packets lost for 6 s", "digest", h264, "udp", False, False, LOSING),
+                ("H.264 and AAC over UDP, 2% of the packets lost for 6 s", "digest", sound, "udp", True, False, LOSING))
+        for label, method, clip, transports, audio, *more in runs:
+            if args.only and args.only not in label:
+                continue
+            tls, relay = (*more, False, None)[:2]
+
+            # A run through the relay goes on for 16 s: 6 s of impairing, a receiver report after it (one every 5 s), and
+            # 3 s of clean frames.
+            frames = max(args.frames, 400) if relay else args.frames
+            output, status = run(method, binary, clip, folder, frames, transports, audio, tls, relay)
             verdict = "passed" if status == 0 else "FAILED"
             print(f"== {label}: {verdict}\n{output}\n", flush=True)
             report += [f"**{label}**: {verdict}", "", "```", output, "```", ""]

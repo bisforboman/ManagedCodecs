@@ -13,7 +13,7 @@ using ManagedCodecs.Mp3;
 //   ffmpeg -benchmark -threads 1 -stream_loop 9 -i samples/h264-bench-720p.mp4 -f null -
 if (args.Length == 0 || args.Contains("-h") || args.Contains("--help"))
 {
-    Console.WriteLine("usage: mcdec <file> [--loops N] [--threads N] [--borrow-frames] [--zero-copy] [--conceal] | mcdec --hash [--loops N] <file>... | mcdec --dump <file> <prefix> | mcdec --packets <file> | mcdec --thumbnail-hash <file>... | mcdec --thumbnail <file> <out.rgba> | mcdec --live <url> <file> [--frames N] [--audio] [--certificate-hash SHA256]");
+    Console.WriteLine("usage: mcdec <file> [--loops N] [--threads N] [--borrow-frames] [--zero-copy] [--conceal] | mcdec --hash [--loops N] <file>... | mcdec --dump <file> <prefix> | mcdec --packets <file> | mcdec --thumbnail-hash <file>... | mcdec --thumbnail <file> <out.rgba> | mcdec --live <url> <file> [--frames N] [--audio] [--certificate-hash SHA256] [--lossy]");
     Console.WriteLine("  Demuxes and decodes the file's video and audio N times (default 1), like ffmpeg -stream_loop N-1.");
     Console.WriteLine("  --threads N: decode up to N H.264 pictures, or HE-AAC channels, at once, each on a thread of its own (default 1).");
     Console.WriteLine("  --borrow-frames: H.264 frames point into the decoder's pictures instead of being copied out.");
@@ -22,7 +22,7 @@ if (args.Length == 0 || args.Contains("-h") || args.Contains("--help"))
     Console.WriteLine("  --hash: prints a SHA-256 of each file's decoded output instead (tools/wasm-check.sh compares them).");
     Console.WriteLine("  --thumbnail-hash <file>...: prints each file's VideoProbe facts and a small thumbnail's size, time and SHA-256 (tools/wasm-check.sh compares them).");
     Console.WriteLine("  --thumbnail: writes the file's thumbnail (480 x 480 at most) as raw RGBA and prints its size and time and the file's VideoProbe facts; tools/realworld.py compares them.");
-    Console.WriteLine("  --live <rtsp:// or http:// URL> <file> [--frames N]: plays the live stream with LivePlayer until N frames (default 250) are shown, each checked against the file's frames; --audio plays the sound too (RtspSource.Audio), each chunk checked against the file's; --certificate-hash pins an rtsps:// server's certificate (RtspSource.CertificateHash); tools/rtsp-nightly.py runs it.");
+    Console.WriteLine("  --live <rtsp:// or http:// URL> <file> [--frames N]: plays the live stream with LivePlayer until N frames (default 250) are shown, each checked against the file's frames; --audio plays the sound too (RtspSource.Audio), each chunk checked against the file's; --certificate-hash pins an rtsps:// server's certificate (RtspSource.CertificateHash); --lossy expects lost packets and damage, but no reconnect and the last 75 frames (and chunks) the file's again (tools/rtsp-lossy-relay.py); tools/rtsp-nightly.py runs it.");
     Console.WriteLine("  --dump: writes <prefix>.video.md5 (each frame's MD5, as ffmpeg -f framemd5) and <prefix>.audio.f32 (as -f f32le); tools/realworld.py compares them.");
     Console.WriteLine("  --packets: prints the file's streams and every packet as the demuxer gives it (stream, pts, dts, duration, size, keyframe, MD5), nothing decoded; tools/realworld.py compares them with ffprobe's.");
     return args.Length == 0 ? 1 : 0;
@@ -66,7 +66,7 @@ if (args[0] == "--live")
 
     int hashAt = Array.IndexOf(args, "--certificate-hash");
     string? certificateHash = hashAt >= 0 && hashAt + 1 < args.Length ? args[hashAt + 1] : null;
-    return LiveCheck.Run(args[1], args[2], liveFrames, TimeSpan.FromSeconds(60 + (liveFrames / 10)), args.Contains("--audio"), certificateHash);
+    return LiveCheck.Run(args[1], args[2], liveFrames, TimeSpan.FromSeconds(60 + (liveFrames / 10)), args.Contains("--audio"), certificateHash, args.Contains("--lossy"));
 }
 
 #endif

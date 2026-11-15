@@ -42,9 +42,9 @@ in between. That comparison is not measured here.
 | `tools/ManagedCodecs.Cli` | `mcdec`: decodes a file and times it, to compare with `ffmpeg -benchmark` (`--threads N` for H.264 frame threading and HE-AAC's channels) |
 | `tools/ManagedCodecs.Godot` | A Godot 4 (.NET) node that plays a video into an `ImageTexture` and an `AudioStreamGenerator` with `ManagedCodecs.Playback`, as an addon (`addons/managedcodecs/`, a global class) to copy into a game; CI builds it with the Godot .NET SDK, Godot has not run it |
 | `src/ManagedCodecs.Avalonia` | `LiveView`: a `LivePlayer`'s newest frame in an Avalonia control, laid out as an `Image`; the `ManagedCodecs.Avalonia` package (see Live cameras) |
-| `src/ManagedCodecs.Wpf` | `LiveView`: the same in WPF (net10.0-windows); the `ManagedCodecs.Wpf` package, built and packed on Linux, not yet run on Windows |
+| `src/ManagedCodecs.Wpf` | `LiveView`: the same in WPF (net10.0-windows); the `ManagedCodecs.Wpf` package, built and packed on Linux, drawn on Windows by `windows.yml` |
 | `tools/ManagedCodecs.Avalonia.Sample` | `mclive`: an Avalonia window showing a camera with `ManagedCodecs.Avalonia`'s `LiveView` (issue #462); run on Linux under Xvfb against FFmpeg's `-f mpjpeg` |
-| `tools/ManagedCodecs.Wpf.Sample` | `mclive-wpf`: the same in WPF with `ManagedCodecs.Wpf`'s `LiveView`; CI builds it on Linux, nobody has run it on Windows yet |
+| `tools/ManagedCodecs.Wpf.Sample` | `mclive-wpf`: the same in WPF with `ManagedCodecs.Wpf`'s `LiveView`; CI builds it on Linux, and `windows.yml` runs it on Windows (`--frames`, a check of what WPF draws) |
 | `tools/ManagedCodecs.MonoGame.Sample` | `mcplay`: a MonoGame `Game` around `VideoTexture` (`ManagedCodecs.MonoGame`) (its README has the 1080p measurements; issue #254) |
 | `tools/ManagedCodecs.Unity.Sample` | A Unity `MonoBehaviour` that plays a video into a `Texture2D` and an `AudioClip` with the `ManagedCodecs.Unity` package (its `MediaPlayer`); CI compiles it against stubs of UnityEngine, Unity has not run it |
 | `tools/make-samples.sh` | Generates the test samples and FFmpeg's references |

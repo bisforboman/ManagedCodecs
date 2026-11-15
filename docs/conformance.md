@@ -140,7 +140,7 @@ damaged frame or reconnect. The first run, in the cloud sandbox (2026-11-11): 15
 40 units skipped while waiting for the first IDR picture after joining, 5.8 ms to decode and 1.0 ms to convert a frame.
 A clip other than the one streamed fails it from the first frame.
 
-- Not tried yet: live555, an IP camera.
+- Not tried yet: an IP camera. live555: below, "live555MediaServer".
 
 ### JPEG over RTP
 
@@ -350,6 +350,65 @@ reports are the tests' own, so the checks are of the arithmetic and of which tim
   sync held 968 of 976 pictures for the sound (tools/ManagedCodecs.MonoGame.Sample/README.md).
 - **Not tried yet:** a camera's own sender reports. JPEG over RTSP's times have no test of their own (a JPEG frame is
   its packets' picture, with nothing reordered).
+
+### live555MediaServer
+
+Many cameras' RTSP servers are built on live555. `tools/live555-check.py` builds live555MediaServer (LIVE555
+2026.11.08, the source from Ubuntu's archive, pinned by SHA-256) and plays its files with `mcdec --live`, as the nightly
+run does mediamtx's. By hand in the cloud session (2026-11-15), not in any workflow yet. The server streams a file once,
+from its start for each reader, so each clip is longer than its run; every frame shown and every chunk taken must be
+the clip's, with no lost packet, damaged frame or reconnect.
+
+| Run | Shown | What it showed |
+|---|---|---|
+| `.264`, 720p25 libx264 with B pictures, RTP over the connection | 400 frames | all the clip's |
+| `.264` without B pictures | 400 | all the clip's |
+| `.mkv`, 640x360 H.264 and AAC LC, `--audio` | 400, 766 chunks | all the clip's, the first chunk too |
+| `.264`, 640x360, held for 90 s | 2250 in 92.1 s | all the clip's, no reconnect |
+| `.264` with B pictures, RTP over UDP only (461 to the connection) | 400 | all the clip's, none lost |
+| `.mkv` with `--audio`, UDP only | 400, 766 chunks | all the clip's |
+| `.264` held for 90 s, UDP only | 2250 in 92.1 s | all the clip's, no reconnect |
+| `.264` with B pictures, Digest | 400 | all the clip's |
+
+- **What live555 sends:**
+  - `Content-Base: rtsp://host/file/`, `a=control:*` for the session and `a=control:track1` a track, and
+    `Session: <id>;timeout=65`. All were read as they are.
+  - H.264 as `packetization-mode=1` with `sprop-parameter-sets`. The frame rate is the SPS's timing (libx264 writes
+    it: 25 fps here); without it live555 assumes 30 fps (its source; not tried).
+  - With B pictures its RTP timestamps go up by a frame in decoding order: it doesn't know the pictures' order. The
+    frames' times still came out a frame apart, in order (the first 23, over the connection).
+  - AAC as `MPEG4-GENERIC`, `mode=AAC-hbr`, one access unit a packet (its sink allows no more), the first real
+    sender of that here.
+  - Sender reports: over UDP `RgbaFrame.CaptureTime` was null for the first second and set by the 100th frame. Over
+    the connection it wasn't looked at.
+  - To a UDP SETUP: `destination`, `source`, `client_port` and `server_port=6972-6973`, no `ssrc`.
+- **live555MediaServer has no options**, so the script patches its `main()` to read environment variables: a user and
+  password (its own `ACCESS_CONTROL` code, with ours instead of fixed ones; live555 has Digest only) and
+  `RTSPServer::disableStreamingRTPOverTCP()`, with which it answers 461 to RTP over the connection. The library is built
+  as it is.
+- **Liveness** (the first server here that drops a silent reader). live555 ends a session it has heard nothing from
+  for 65 s: an RTSP request with the session's id counts, and so does an RTCP receiver report (its source, and
+  measured). With `LivePlayer` changed for the measurement only, 640x360 held for 90 s, over the connection and over
+  UDP alike:
+  - neither keep-alives nor receiver reports: the packets stopped at 65 s, the player stalled for 5 s and reconnected
+    (1 reconnect, 2250 frames in 97.8 s);
+  - receiver reports only: played on, no reconnect;
+  - `GET_PARAMETER` keep-alives only (every 32 s, half the timeout): played on, no reconnect.
+
+  So live555MediaServer itself needs no receiver reports from a reader that sends keep-alives. A camera built on
+  live555 that doesn't count `GET_PARAMETER` would need them; none was in reach.
+- **At a file's end** live555 sends an RTCP BYE and stops, leaving the connection open. `LivePlayer` doesn't read BYE
+  (docs/decisions/2026-11-15-live-rtcp.md, point 4): it stalls for 5 s, reconnects, and the file plays again from its
+  start (620 frames of a 500-frame clip: 1 reconnect, all the clip's).
+- **Each IDR picture cost a frame not shown** with B pictures (`dropped` 8 of 408, 45 of 2295: one a 2 s GOP). Probably
+  the decoder gives its held frames at once at an IDR picture, and the player shows the newest; not looked into.
+  Without B pictures, none.
+- **G.711:** live555MediaServer serves it only from a `.wav` (static payload types 0 and 8, no `a=rtpmap`), which has
+  no video: `LivePlayer` fails with "The camera's SDP has no H.264 or JPEG video track", as it does for any audio-only
+  stream. Its Matroska demuxer leaves an A-law track out of the SDP. So G.711 beside video wasn't tried. (FFmpeg's .wav
+  needs `-bitexact`: live555 answers 404 to one with a `LIST` chunk.)
+- **Not tried:** RTSP over HTTP (which live555 offers on port 80, 8000 or 8080), RTSPS and SRTP (it has them, by
+  code), H.265 and its other formats, multicast, a file the SPS of which has no timing, and a camera built on live555.
 
 ## Real films
 

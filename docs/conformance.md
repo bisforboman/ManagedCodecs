@@ -283,6 +283,55 @@ checks are of the packets and the player.
 - **Not tried yet:** an IP camera (their G.711 and one access unit a packet are covered by recordings and hand-made
   packets only), GStreamer's `rtpmp4gpay`, and a fragmented access unit from a real sender.
 
+### RTCP receiver reports
+
+Every RTSP session sends a receiver report a track every 5 seconds (RFC 3550, 6.4.2;
+docs/decisions/2026-11-15-live-rtcp.md). No sender's RTCP is recorded, so the checks are against the RFC's definitions,
+by a parser and sender reports of the tests' own.
+
+- **`RtcpSessionTests`**, on hand-made packets:
+  - A.3's counts: the packets expected from the sequence numbers, across their wrap; reordering loses nothing;
+    duplicates count as received, so the loss can be negative; the fraction is of each interval's packets and never
+    negative.
+  - 6.4.1's interarrival jitter, within 3 timestamp units of its formula in floating point over 500 random arrivals,
+    the RTP timestamp wrapping on the way; 0 for evenly spaced arrivals.
+  - The last sender report's NTP time echoed (its middle 32 bits) with the time since it came, also when it came
+    before the stream's first packet; not another SSRC's; truncated RTCP, another version and other packet types
+    ignored.
+  - A stream whose SSRC changes is counted from there.
+- **`LiveRtcpTests`**, through `LivePlayer` on the test's clock:
+  - Over the connection: nothing before 5 seconds, then a report on channel 1 and one on channel 3 (the audio's), each
+    naming its stream's SSRC and last sequence number, no loss, and the server's sender report with 5 seconds since
+    it; again 5 seconds later.
+  - Over UDP: the reports reach the server's RTCP port, and a sequence number the server skipped counts as one lost.
+- **Mutation entries:** the fraction's floor at 0, a sender report echoed only to its own stream, and the reports'
+  sending over UDP.
+- **Not tried yet:** a camera or server that drops a reader without them. mediamtx plays with and without.
+
+### Capture times
+
+Over RTSP, `RgbaFrame.CaptureTime` and `AudioChunk.CaptureTime` place each picture and sound on the camera's clock, by
+its RTP timestamp and the track's last sender report (docs/decisions/2026-11-15-live-rtcp.md, point 3). The sender
+reports are the tests' own, so the checks are of the arithmetic and of which timestamp a frame takes.
+
+| Recording (make-samples.sh, `-c copy -f rtp`) | What it has |
+|---|---|
+| `h264-b-motion.rtp` | B pictures (a pyramid): the units' RTP timestamps run 0, 4, 2, 1, 3, 8, 6, 5, 7... frames |
+
+- **`RtcpSessionTests`**: a timestamp after and before the report's, across the timestamp's wrap, at 90 kHz and 8 kHz,
+  NTP's era after 2036, null before the first report and after another SSRC's.
+- **`LiveRtcpTests`**, through `LivePlayer`:
+  - A picture and a sound each take their own track's report, and both are null before it (H.264 and AAC, one frame
+    a packet).
+  - With B pictures, the k-th frame out has the k-th smallest timestamp, though its unit has another.
+  - A B picture sent twice makes the decoder give a frame more than it was given pictures: the frames after it still
+    have their own times.
+  - Several AAC frames in a packet: each is later than the one before by that one's length.
+- **Mutation entries:** the frame's own time rather than its unit's (in `H264Decoder` and in `LivePlayer`), another
+  stream's report placing nothing, and the later frames of an AAC packet.
+- **Not tried yet:** a camera's own sender reports. JPEG over RTSP's times have no test of their own (a JPEG frame is
+  its packets' picture, with nothing reordered).
+
 ## Real films
 
 Every sample above is a test pattern encoded to isolate a feature. `tools/realworld.py` (nightly, `realworld.yml`, a job
@@ -658,6 +707,28 @@ field order for separate fields (its decoder does, from the bitstream), so those
 metadata instead: the aspect ratio over the display rectangle (4:3 over 720x576 is 16:15), BER local lengths, a tag
 the primer doesn't map, an unknown duration (-1), header metadata without a preface or a primer pack or with a
 property past its set, which partition's header metadata is read (closed first), and drop-frame timecodes.
+
+The picture descriptor's colour (ST 377-1 Annex G) is compared the same way (`color_range`, `color_primaries`,
+`color_transfer` and `color_space` in name.headers.json): the Color Primaries, Transfer Characteristic and Coding
+Equations labels (the SMPTE registers' 04.01.01.01 labels, as ITU-T H.273's code points), and the range by the CDCI
+descriptor's black and white reference levels and colour range at its component depth. mxf-h264-colour-hlg has
+BT.2020, HLG and limited range in the descriptor alone, mxf-h264-colour-conflict BT.2020 and PQ in the descriptor
+against BT.709 and full range in the VUI, mxf-h264-colour-full full range (0, 255, 256), and mxf-h264-422-10 (10-bit
+4:2:2 intra-only H.264) limited range at 10 bits (64, 940, 897); the ProRes, DNxHR, D-10 and interlaced H.264
+samples carry what FFmpeg's muxers write by default, limited range's levels and no label. `MxfDemuxer.Video` gives the descriptor's values, and decoded frames the VUI's where it speaks, else the
+descriptor's, as ffprobe lists them frame by frame (name.color; `MxfConformanceTests`). The rest is hand-made:
+
+- Labels: FFmpeg's muxer writes one label for several code points (BT.709's transfer for SMPTE 170M's, BT.601's
+  equations for BT.470 BG's and SMPTE 170M's matrix, BT.470's transfer for gamma 2.2) and never most of the others.
+  `MxfHeaderTests` writes every label of the three lists into a descriptor; the expectations are what FFmpeg 6.1's
+  demuxer reads from a sample with the label patched in (BT.601's equations as bt470bg, BT.470's transfer as gamma
+  2.2, the deprecated SMPTE 274M/296M transfer as bt709, the cinema mezzanine's primaries as smpte428). Two labels
+  FFmpeg 6.1 doesn't know are read by the registers' definition: sRGB's transfer and ICtCp's equations. Labels
+  without a code point (gamma 2.6, the camera logs and gamuts, ACES, P3 D60) stay unspecified.
+- Range: ST 377-1 gives the levels, not a rule for telling the range by them, so the rule is FFmpeg's, measured
+  the same way on 33 combinations: limited for 16, 235 and 225 scaled to the depth; full for 0 (or no black level),
+  the depth's largest value and a colour range of that or one more; unspecified for anything else (8-bit levels at
+  10 bits, a missing white level, colour range or depth).
 
 
 `MxfConformanceTests` compares every packet of every sample's video and first audio stream with FFmpeg's (`ffprobe

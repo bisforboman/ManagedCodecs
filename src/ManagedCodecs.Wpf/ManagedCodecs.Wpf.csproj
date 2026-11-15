@@ -22,6 +22,11 @@
     <None Include="PACKAGE.md" Pack="true" PackagePath="\" />
   </ItemGroup>
 
+  <!-- mclive-wpf's self-check (its frames option, .github/workflows/windows.yml) drives LiveView.Show and reads its bitmap. -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="mclive-wpf" />
+  </ItemGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\ManagedCodecs.Playback\ManagedCodecs.Playback.csproj" />
   </ItemGroup>

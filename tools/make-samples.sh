@@ -930,6 +930,28 @@ ff -f lavfi -i testsrc2=s=160x120:r=25 -t 1 -c:v mpeg2video samples/mxf-mpeg2.mx
 # files under 64 KiB, tools/ManagedCodecs.Fuzz), the other MXF samples being larger.
 ff -f lavfi -i testsrc2=s=64x48:r=25 -f lavfi -i sine=sample_rate=48000 -t 0.32 -c:v libx264 -pix_fmt yuv420p -g 4 \
   -c:a pcm_s16le samples/mxf-h264-small.mxf
+# The picture descriptor's colour (ST 377-1 Annex G: the Color Primaries, Transfer Characteristic and Coding Equations
+# labels, and the range by the black and white reference levels), which FFmpeg's muxer writes from -color_primaries,
+# -color_trc, -colorspace and -color_range; remuxed from raw H.264 so that the descriptor and the VUI can differ.
+# mxf-h264-colour-hlg: BT.2020, HLG, limited range in the descriptor alone (the VUI says nothing: the frames take the
+# descriptor's). mxf-h264-colour-conflict: BT.2020, PQ, limited in the descriptor against BT.709, full range in the VUI
+# (the frames take the VUI's). mxf-h264-colour-full: full range by the levels (0, 255, 256), SMPTE 170M primaries, and
+# a transfer and matrix FFmpeg's muxer writes as BT.709's and BT.601's labels (bt709 and bt470bg read back).
+# mxf-h264-422-10: 10-bit 4:2:2 intra-only H.264 (High 4:2:2 Intra, the issue's "AVC-Intra-like" file), whose limited
+# range is 64, 940 and 897 at its component depth of 10.
+mxfcolour=$(mktemp -d)
+ff -f lavfi -i testsrc2=s=160x120:r=25 -t 0.4 -c:v libx264 -pix_fmt yuv420p "$mxfcolour/plain.h264"
+ff -f lavfi -i testsrc2=s=160x120:r=25 -t 0.4 -c:v libx264 -pix_fmt yuv420p -color_primaries bt709 -color_trc bt709 \
+  -colorspace bt709 -color_range pc "$mxfcolour/bt709.h264"
+ff -r 25 -i "$mxfcolour/plain.h264" -c copy -color_primaries bt2020 -color_trc arib-std-b67 -colorspace bt2020nc \
+  -color_range tv samples/mxf-h264-colour-hlg.mxf
+ff -r 25 -i "$mxfcolour/bt709.h264" -c copy -color_primaries bt2020 -color_trc smpte2084 -colorspace bt2020nc \
+  -color_range tv samples/mxf-h264-colour-conflict.mxf
+ff -r 25 -i "$mxfcolour/plain.h264" -c copy -color_primaries smpte170m -color_trc smpte170m -colorspace smpte170m \
+  -color_range pc samples/mxf-h264-colour-full.mxf
+rm -r "$mxfcolour"
+ff -f lavfi -i testsrc2=s=160x120:r=25 -t 0.4 -c:v libx264 -pix_fmt yuv422p10le -profile:v high422 -x264-params keyint=1 \
+  -color_primaries bt709 -color_trc bt709 -colorspace bt709 -color_range tv samples/mxf-h264-422-10.mxf
 # Clip-wrapped essence, from FFmpeg's OP-Atom muxer (-f mxf_opatom, ST 390: one track a file, the whole clip one
 # essence element, though its essence container labels say frame wrapping): H.264 found by the index entries' stream
 # offsets, DNxHR SQ by the index's constant EditUnitByteCount (no entries), and 24-bit PCM (48 kHz mono, all it writes)
@@ -969,7 +991,7 @@ mxf_cut samples/mxf-opatom-pcm.mxf samples/mxf-opatom-pcm-cut.mxf 0 1 40000
 # pattern, material package and start timecode.
 for f in samples/mxf-*.mxf; do
   ffprobe -v error -nofind_stream_info -of json -show_entries \
-    stream=index,codec_name,codec_type,width,height,field_order,time_base,duration_ts,sample_rate,channels,bits_per_sample:stream_tags=file_package_umid:format_tags=operational_pattern_ul,material_package_umid,timecode \
+    stream=index,codec_name,codec_type,width,height,field_order,time_base,duration_ts,sample_rate,channels,bits_per_sample,color_range,color_space,color_transfer,color_primaries:stream_tags=file_package_umid:format_tags=operational_pattern_ul,material_package_umid,timecode \
     "$f" > "${f%.mxf}.headers.json"
 done
 # MxfDemuxer's packets: name.packets.csv as ffprobe lists them (keyframe flags from libavformat's parsers, durations it
@@ -984,6 +1006,10 @@ for f in samples/mxf-*.mxf; do
   # presentation times, and its command line would drop a frame and retime the rest otherwise).
   if [ "$(ffprobe -v error -select_streams v:0 -show_entries stream=codec_name -of csv=p=0 "$f")" = h264 ]; then
     ff -idct simple -noautorotate -i "$f" -fps_mode passthrough -map 0:v -f framemd5 "${f%.mxf}.h264.framemd5"
+    # name.color: each decoded frame's colour as ffprobe lists it (the VUI's, else the descriptor's), as for MP4.
+    ffprobe -v error -select_streams v:0 -of compact=p=0 \
+      -show_entries frame=color_range,color_space,color_primaries,color_transfer,chroma_location,sample_aspect_ratio "$f" \
+      > "${f%.mxf}.color"
   fi
   # name.pcm.f32: the first audio stream decoded, for PcmDecoder on MXF's little-endian PCM.
   if [ -n "$(ffprobe -v error -select_streams a:0 -show_entries stream=index -of csv=p=0 "$f")" ]; then
@@ -992,7 +1018,7 @@ for f in samples/mxf-*.mxf; do
 done
 # mxf-h264-pcm-cut-video's last picture is cut short: FFmpeg's decoder conceals it, H264Decoder refuses it (outside
 # ConcealErrors, whose own tests cover concealment), so its frames have no reference; its packets do.
-rm -f samples/mxf-h264-pcm-cut-video.h264.framemd5
+rm -f samples/mxf-h264-pcm-cut-video.h264.framemd5 samples/mxf-h264-pcm-cut-video.color
 
 # ---- FFmpeg's references ----
 # name.framemd5: decoded frames. name.packets.csv: demuxed packets as ffprobe lists them (the demuxer's own timestamps,
@@ -1189,8 +1215,11 @@ done
 # RtpH264DepacketizerTests: depacketized, they must give back the MP4's samples NAL unit for NAL unit. h264-main-slices
 # puts the parameter sets and small slices into STAP-A and sends single NAL units; h264-bench-720p cuts most slices into
 # FU-A. The MP4's avcC goes to the SDP as sprop-parameter-sets (docs/decisions/2026-11-10-live-rtsp-h264.md).
+# h264-b-motion has B pictures, sent in decoding order with their presentation times as RTP timestamps, which so don't
+# rise from packet to packet: for LiveRtcpTests, where each frame shown must take its own picture's timestamp
+# (docs/decisions/2026-11-15-live-rtcp.md, point 3).
 port=5040
-for f in samples/h264-main-slices.mp4 samples/h264-bench-720p.mp4; do
+for f in samples/h264-main-slices.mp4 samples/h264-bench-720p.mp4 samples/h264-b-motion.mp4; do
   python3 tools/rtp-record.py "$port" "${f%.mp4}.rtp" &
   recorder=$!
   sleep 0.5

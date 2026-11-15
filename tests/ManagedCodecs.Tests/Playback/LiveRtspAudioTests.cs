@@ -290,14 +290,14 @@ public class LiveRtspAudioTests
     }
 
     // The video recording's SDP with the audio recording's track after it, each with a control URL.
-    private static string TwoTracks(string recording)
+    internal static string TwoTracks(string recording)
     {
         string audio = File.ReadAllText(TestSamples.PathOf(recording + ".sdp"));
         return RtspTestServer.SdpOf(Slices).TrimEnd() + "\r\n" + audio.Substring(audio.IndexOf("m=audio", StringComparison.Ordinal)).TrimEnd() + "\r\na=control:trackID=2\r\n";
     }
 
     // For each packet, the stereo samples of the chunks its access units decode to, by a decoder of the test's own.
-    private static List<List<float[]>> Expected(SdpAudioTrack track, List<byte[]> packets)
+    internal static List<List<float[]>> Expected(SdpAudioTrack track, List<byte[]> packets)
     {
         var decoder = AudioPipeline.CreateDecoder(new AudioStreamInfo(track.Codec, track.SampleRate, track.Channels, 0, new Rational(1, track.SampleRate), track.Config, 0));
         var depacketizer = new RtpAudioDepacketizer(track);

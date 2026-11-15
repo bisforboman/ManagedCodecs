@@ -209,6 +209,27 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.Containers/Mxf/MxfDemuxer.cs",
          find="_audioStart = Start(audio.StreamIndex, Rescale(pts, timeBase, audio.TimeBase));", replace="",
          tests="FullyQualifiedName~MxfConformanceTests|DisplayName~mxf"),
+    # The range by the descriptor's reference levels is FFmpeg's reading, not a rule of ST 377-1: full range takes a
+    # missing black level for 0, a colour range of the largest value or one more ...
+    dict(file="src/ManagedCodecs.Containers/Mxf/MxfHeader.cs",
+         find="(black ?? 0) == 0 && white == largest && (range == largest || range == largest + 1)",
+         replace="black == 0 && white == largest && (range == largest || range == largest + 1)",
+         tests="FullyQualifiedName~MxfHeaderTests"),
+    dict(file="src/ManagedCodecs.Containers/Mxf/MxfHeader.cs",
+         find="(black ?? 0) == 0 && white == largest && (range == largest || range == largest + 1)",
+         replace="(black ?? 0) == 0 && white == largest && range == largest + 1",
+         tests="FullyQualifiedName~MxfHeaderTests"),
+    # ... and limited range the levels at the component depth, colour range included (16, 235 and 225 at 8 bits).
+    dict(file="src/ManagedCodecs.Containers/Mxf/MxfHeader.cs",
+         find="white == 235u << (depth - 8) && range == (14u << (depth - 4)) + 1", replace="white == 235u << (depth - 8)",
+         tests="FullyQualifiedName~MxfHeaderTests"),
+    # BT.601's coding equations are BT.470 BG's matrix to FFmpeg, and BT.470's transfer gamma 2.2.
+    dict(file="src/ManagedCodecs.Containers/Mxf/MxfLabels.cs",
+         find="0x01 => ColorMatrix.Bt470BG,", replace="0x01 => ColorMatrix.Smpte170M,",
+         tests="FullyQualifiedName~MxfHeaderTests"),
+    dict(file="src/ManagedCodecs.Containers/Mxf/MxfLabels.cs",
+         find="0x01 => ColorTransfer.Gamma22,", replace="0x01 => ColorTransfer.Gamma28,",
+         tests="FullyQualifiedName~MxfHeaderTests"),
     # Clip-wrapped sound comes in pieces of a 25th of a second, FFmpeg's reading (mxf-opatom-pcm: 1920 samples).
     dict(file="src/ManagedCodecs.Containers/Mxf/MxfDemuxer.cs",
          find="audio.AudioSamplingRate.Numerator / 25)", replace="audio.AudioSamplingRate.Numerator / 50)",
@@ -794,13 +815,43 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
          find=" || (ssrc is { } expected && (packet.Length < 12 || Ssrc(packet) != expected)))", replace=")",
          tests="FullyQualifiedName~LiveRtspUdpTests.PutsPacketsBackInOrderAndIgnoresDuplicatesAndStrangers"),
+    # ---- RTCP receiver reports (docs/decisions/2026-11-15-live-rtcp.md), which no recording carries: duplicates
+    # outnumbering losses in an interval give a fraction of 0, not a negative one read as a large one ...
+    dict(file="src/ManagedCodecs.Playback/Rtsp/RtcpSession.cs",
+         find="expectedInterval <= 0 || lostInterval <= 0 ? 0", replace="expectedInterval <= 0 ? 0",
+         tests="FullyQualifiedName~RtcpSessionTests.CountsDuplicatesAsReceivedSoThatLossCanBeNegative"),
+    # ... a sender report is echoed only while the stream is from the SSRC that sent it ...
+    dict(file="src/ManagedCodecs.Playback/Rtsp/RtcpSession.cs",
+         find="_senderReportArrival is not null && _senderReportSource == _source;", replace="_senderReportArrival is not null;",
+         tests="FullyQualifiedName~RtcpSessionTests.StartsAgainWhenTheStreamsSsrcChanges"),
+    # ... and over UDP the reports go from the RTCP port to the server's.
+    dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
+         find="senders.Add((rtcp, Sender(udp, serverRtcp)));", replace="",
+         tests="FullyQualifiedName~LiveRtcpTests.ReportsOverUdpFromTheRtcpPortWithWhatWasLost"),
+    # ---- Capture times (docs/decisions/2026-11-15-live-rtcp.md, point 3), which need B pictures to tell a frame from
+    # its unit: the live decoder's frames keep their own packets' times, not FFmpeg's for a stream with none ...
+    dict(file="src/ManagedCodecs.H264/H264Decoder.cs",
+         find="if (_lengthSize == 0 && !PacketTimes)", replace="if (_lengthSize == 0)",
+         tests="FullyQualifiedName~LiveRtcpTests.GivesEachFrameItsOwnPicturesTimeWhenBPicturesComeOutOfOrder"),
+    # ... and the frame shown takes its own, not that of the unit whose decoding put it out ...
+    dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
+         find="queued.Rtcp.CaptureTime((uint)frame.Pts)", replace="queued.Rtcp.CaptureTime(unit.Timestamp)",
+         tests="FullyQualifiedName~LiveRtcpTests.GivesEachFrameItsOwnPicturesTimeWhenBPicturesComeOutOfOrder"),
+    # ... another stream's sender report places nothing ...
+    dict(file="src/ManagedCodecs.Playback/Rtsp/RtcpSession.cs",
+         find="if (_senderReportArrival is null || (_any && _senderReportSource != _source))", replace="if (_senderReportArrival is null)",
+         tests="FullyQualifiedName~RtcpSessionTests.PlacesAnRtpTimestampOnTheCamerasClock"),
+    # ... and an AAC packet's later frames come after its first.
+    dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
+         find="queued.Rtcp.CaptureTime(queued.Timestamp)?.AddTicks(sincePacket)", replace="queued.Rtcp.CaptureTime(queued.Timestamp)",
+         tests="FullyQualifiedName~LiveRtcpTests.PlacesAnAacPacketsLaterFramesByTheLengthOfThoseBeforeThem"),
     # ---- Audio over RTSP (docs/decisions/2026-11-15-live-rtsp-audio.md): no second SETUP unless RtspSource.Audio asks ...
     dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
          find="if (source.Audio && sdp.Audio is { } audioTrack)", replace="if (sdp.Audio is { } audioTrack)",
          tests="FullyQualifiedName~LiveRtspAudioTests.SetsUpNoAudioUnlessAskedTo"),
     # ... the audio's packets don't count against a stall, on the RTSP connection ...
     dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
-         find="                audio!(message.Data);", replace="                Touch();\n                audio!(message.Data);",
+         find="                audio.Handle(message.Data);", replace="                Touch();\n                audio.Handle(message.Data);",
          tests="DisplayName~ConnectsAgainWhenTheVideoStallsThoughAudioStillComes"),
     # ... or over UDP ...
     dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",

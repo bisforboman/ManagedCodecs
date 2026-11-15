@@ -147,6 +147,32 @@ public sealed class LiveView : FrameworkElement
         _subscribed = on;
     }
 
+    /// <summary>The bitmap the last frame was written into, or null before the first (mclive-wpf's self-check reads it).</summary>
+    internal WriteableBitmap? Bitmap => _bitmap;
+
+    /// <summary>
+    /// Writes a frame into the bitmap (made anew when the size changes), its red and blue swapped into BGRA in place, and
+    /// asks for a redraw. The frame stays the caller's to give back.
+    /// </summary>
+    internal void Show(RgbaFrame frame)
+    {
+        if (_bitmap is null || _bitmap.PixelWidth != frame.Width || _bitmap.PixelHeight != frame.Height)
+        {
+            _bitmap = new WriteableBitmap(frame.Width, frame.Height, 96, 96, PixelFormats.Bgra32, null);
+            InvalidateMeasure();
+        }
+
+        var pixels = frame.Pixels;
+        for (int i = 0; i < pixels.Length; i += 4)
+        {
+            (pixels[i], pixels[i + 2]) = (pixels[i + 2], pixels[i]);
+        }
+
+        _bitmap.WritePixels(new Int32Rect(0, 0, frame.Width, frame.Height), pixels, frame.Width * 4, 0);
+        ShownFrames++;
+        InvalidateVisual();
+    }
+
     // Each rendered frame while loaded: the newest decoded frame into the bitmap.
     private void OnRendering(object? sender, EventArgs e)
     {
@@ -157,26 +183,11 @@ public sealed class LiveView : FrameworkElement
 
         try
         {
-            if (_bitmap is null || _bitmap.PixelWidth != frame.Width || _bitmap.PixelHeight != frame.Height)
-            {
-                _bitmap = new WriteableBitmap(frame.Width, frame.Height, 96, 96, PixelFormats.Bgra32, null);
-                InvalidateMeasure();
-            }
-
-            var pixels = frame.Pixels;
-            for (int i = 0; i < pixels.Length; i += 4)
-            {
-                (pixels[i], pixels[i + 2]) = (pixels[i + 2], pixels[i]);
-            }
-
-            _bitmap.WritePixels(new Int32Rect(0, 0, frame.Width, frame.Height), pixels, frame.Width * 4, 0);
+            Show(frame);
         }
         finally
         {
             Player.Return(frame);
         }
-
-        ShownFrames++;
-        InvalidateVisual();
     }
 }

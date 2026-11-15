@@ -187,6 +187,13 @@ public sealed class H264Decoder : IVideoDecoder
     public bool ConcealErrors { get; init; }
 
     /// <summary>
+    /// An Annex B stream's frames keep the times their own packets were given, as a container's do, where the packets
+    /// do carry presentation times (RTP's timestamps, LivePlayer), in place of FFmpeg's times for a stream that has
+    /// only its decoding order (InTimeOrder).
+    /// </summary>
+    internal bool PacketTimes { get; init; }
+
+    /// <summary>
     /// Decodes one packet, which holds one picture (MP4 sample), and returns the frames ready for
     /// display. A field picture is half a frame: the first of a pair gives no frame, the second
     /// the whole frame, with the first one's timestamp.
@@ -542,8 +549,9 @@ public sealed class H264Decoder : IVideoDecoder
         frame.FieldOrder = job.Interlacing.Order;
         frame.IsCodedAsFields = job.Interlacing.CodedAsFields;
         job.Signal.Apply(frame, _stream);
-        if (_lengthSize == 0)
+        if (_lengthSize == 0 && !PacketTimes)
         {
+            // With PacketTimes none are kept, and InTimeOrder then leaves each frame its own.
             _decodeTimes.Add(job.Pts);
             _timesDepth = _stream?.FramesFromZero == true ? 0 : ReorderDepth(state.Sps);
         }

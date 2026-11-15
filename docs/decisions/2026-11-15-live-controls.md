@@ -58,7 +58,9 @@ falls through to the MJPEG path: a fix for the samples whatever is decided here.
 - `LiveViewTests` renders the Avalonia control in Avalonia's headless platform with Skia drawing: a window holding a
   `LiveView` whose player reads a loopback MJPEG server, captured, its pixels the decoded frame's within a level (a
   test that fails without the copy into the bitmap, or without the drawing). The WPF control is built and packed in
-  CI only.
+  CI on Linux, and drawn on Windows by `.github/workflows/windows.yml` (weekly, and on pull requests that change it):
+  `mclive-wpf --frames` feeds each frame to the control and compares what WPF draws of its bitmap with the decoded
+  frame.
 - The samples (`mclive`, `mclive-wpf`) use the controls, and take `rtsps://` URLs, which they used to send down the
   MJPEG path. `mclive` showed 50 frames through the control under Xvfb against FFmpeg's `-f mpjpeg`.
 

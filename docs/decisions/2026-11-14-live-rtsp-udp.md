@@ -104,6 +104,7 @@ built. With 1 (a), no public API changes.
 
 ## Since
 
+- Decision 3 changed (2026-11-15): receiver reports are sent, always (docs/decisions/2026-11-15-live-rtcp.md).
 - Built (2026-11-14):
   - `RtpReorderBuffer`, `RtpUdpPorts` and `RtspTransport` (internal, Playback).
   - `LivePlayer`'s fallback on 461, with one packet pump per transport feeding the same H.264 and JPEG handlers.

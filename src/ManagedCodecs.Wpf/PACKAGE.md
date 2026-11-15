@@ -20,5 +20,5 @@ player.Dispose();
 - **Layout as an `Image`:** `Stretch` (`Uniform` by default) and `StretchDirection`.
 - **Sound:** WPF has no way to play raw samples without a platform API, so `LivePlayer.TakeAudio()` is the
   application's to play.
-- **Requirements:** .NET 10 on Windows (`net10.0-windows`). Built and packed in CI on Linux; not yet run on Windows.
+- **Requirements:** .NET 10 on Windows (`net10.0-windows`). Built and packed in CI on Linux; drawn on a Windows runner weekly (the repository's `mclive-wpf --frames`).
 - More: [the repository](https://github.com/bisforboman/ManagedCodecs) (README, Live cameras).

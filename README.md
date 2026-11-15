@@ -114,7 +114,7 @@ and code that reproduces FFmpeg's reading where it differs from the spec), and n
   stripping and zlib, the display rotation, DiscardPadding; VP9, AV1, Opus and other codecs this library doesn't decode
   by their Codec IDs; MP3 as `CodecIds.Mp3` in MP4 and Matroska), raw AAC (ADTS), raw MP3 (gapless by the LAME
   tag, as FFmpeg's), `.wav` files (`WavDemuxer`: PCM, IMA ADPCM and MP3, packets as FFmpeg's, seeking by packet), MXF
-  (`MxfDemuxer`: OP1a, frame-wrapped essence, clip-wrapped OP-Atom files, D-10's AES3 sound, the start timecode, files cut short or still being written, H.264 and PCM decoded, ProRes, DNxHR and MPEG-2 named; issue #469) and raw H.264 (`.h264`,
+  (`MxfDemuxer`: OP1a, frame-wrapped essence, clip-wrapped OP-Atom files, D-10's AES3 sound, the start timecode, the picture descriptor's colour, files cut short or still being written, H.264 and PCM decoded, ProRes, DNxHR and MPEG-2 named; issue #469) and raw H.264 (`.h264`,
   `.264`: access units as FFmpeg's parser cuts them, timed by the SPS's VUI, seeking to IDR pictures;
   docs/decisions/2026-11-09-raw-h264.md), with
   packets and timestamps as FFmpeg's demuxers give them.
@@ -519,7 +519,8 @@ if (player.TakeLatest() is { } frame)
   It authenticates with Digest or Basic, takes RTP over the RTSP connection (no UDP ports, through NAT), and sends
   keep-alives at half the session's timeout. A server that refuses that (461) gets asked for RTP over UDP instead:
   two local ports, a packet from each to open a NAT, only the server's packets (its address and SSRC), and a 50 ms
-  window that puts reordered packets back in order.
+  window that puts reordered packets back in order. Either way an RTCP receiver report goes back every 5 seconds for
+  each track (what arrived, what was lost), for cameras that drop a reader they hear nothing from.
   - Every picture is decoded, as later ones are predicted from it, with concealment for lost packets
     (`LiveStatistics.LostPackets`).
   - If decoding falls more than `MaxLag` (1 s) behind the camera, pictures are skipped up to the next IDR picture
@@ -541,7 +542,11 @@ if (player.TakeLatest() is { } frame)
   that is AAC (RFC 3640's `MPEG4-GENERIC`, AAC LC and HE-AAC) or G.711 (A-law, µ-law), set up beside the video on the
   same transport. `player.TakeAudio()` returns it as float stereo chunks, in order, for the application's sound output
   (as `MediaPlayer.TakeAudio()` does).
-  - No lip sync: the picture and the sound each come as soon as they are decoded.
+  - Lip sync is the application's, by capture times: the picture and the sound each come as soon as they are decoded,
+    and `RgbaFrame.CaptureTime` and `AudioChunk.CaptureTime` say when the camera captured each, on the camera's own
+    clock (from the RTCP sender reports; null until a track's first, usually within seconds). The sound is normally
+    the later one, by what the sound output buffers: show a picture once the sound being heard has reached its time,
+    or show the newest at once for the least delay.
   - Half a second waits at most. Past that the oldest chunk is dropped (`LiveStatistics.DroppedAudioFrames`), so a
     sound that plays slower than the camera sends never falls further behind.
   - Sound never stops the picture: a camera that refuses the audio's SETUP plays without it (`Error` says why), audio

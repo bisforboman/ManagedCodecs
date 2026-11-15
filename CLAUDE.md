@@ -87,7 +87,8 @@ IDCT's arithmetic, tables cross-checked against Apache-2.0 decoders).
   StyleBro, a new release of an encoder behind the committed samples), `vulnerable-packages.yml` (weekly: NuGet
   packages with advisories, direct or transitive, `tools/vulnerable-packages.py`; one issue per streak; every build
   already fails on them, NU1901-NU1904 being errors: docs/decisions/2026-11-06-vulnerable-packages.md), `codeql.yml`
-  (code scanning, not required).
+  (code scanning, not required), `windows.yml` (weekly, and on PRs that change it: `mclive-wpf --frames` on a Windows
+  runner, the only job not on Linux; not required).
 
 ## Gotchas beside the code
 

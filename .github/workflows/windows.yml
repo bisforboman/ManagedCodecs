@@ -1,0 +1,55 @@
+name: Windows
+
+# Runs mclive-wpf (tools/ManagedCodecs.Wpf.Sample, around ManagedCodecs.Wpf's LiveView), which every other job only builds, on Linux: Windows runners have
+# a desktop session a WPF window opens in. tools/mjpeg-http-server.py serves committed JPEGs as a camera would, and
+# `--frames` makes the sample check itself: every frame it shows is compared with what WPF drew of the bitmap, so the
+# order of red and blue and the rows are checked, not only that it ran (issue #526,
+# docs/decisions/2026-11-15-live-controls-and-sound.md). Weekly, on demand, and on pull requests that change the
+# sample, the control (src/ManagedCodecs.Wpf), the server or this workflow; not a required check.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '47 3 * * 3'
+  pull_request:
+    paths: ['.github/workflows/windows.yml', 'tools/ManagedCodecs.Wpf.Sample/**', 'src/ManagedCodecs.Wpf/**', 'tools/mjpeg-http-server.py']
+
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  mclive-wpf:
+    runs-on: windows-2025
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Build
+        run: dotnet build tools/ManagedCodecs.Wpf.Sample -c Release
+
+      # 100 frames of samples/gstreamer/jpeg-422 (320x240, 5 JPEGs in a loop) at 25 fps: 4 seconds. The sample exits 0,
+      # 1 if the player gave up, 2 if WPF drew a frame unlike the decoded one. It is a windowed program, which a shell
+      # doesn't wait for: Start-Process does, with a limit in case its window stays.
+      - name: Run mclive-wpf against MJPEG over HTTP
+        shell: pwsh
+        run: |
+          $server = Start-Process python -ArgumentList 'tools/mjpeg-http-server.py', 'samples/gstreamer/jpeg-422', '--port', '8090' -PassThru -NoNewWindow
+          $run = Start-Process 'tools/ManagedCodecs.Wpf.Sample/bin/Release/net10.0-windows/mclive-wpf.exe' `
+            -ArgumentList 'http://127.0.0.1:8090/video.mjpg', '--frames', '100' `
+            -PassThru -RedirectStandardOutput out.txt -RedirectStandardError err.txt
+          $null = $run.Handle   # without it PowerShell forgets the exit code
+          $exited = $run.WaitForExit(120000)
+          if (-not $exited) { $run.Kill() }
+          Stop-Process -Id $server.Id -Force
+          Get-Content out.txt, err.txt
+          Get-Content out.txt | Add-Content $env:GITHUB_STEP_SUMMARY
+          if (-not $exited) { Write-Error 'mclive-wpf did not exit within 2 minutes'; exit 3 }
+          if ((Get-Content out.txt | Measure-Object -Line).Lines -lt 2) { Write-Error 'mclive-wpf printed no result'; exit 4 }
+          exit $run.ExitCode

@@ -13,11 +13,31 @@ run time.
 
 ## Unreleased
 
+New public API (`CaptureTime`), hence the next version is a minor one; code built against 0.17 keeps working.
+
 ### Added
 
 - ManagedCodecs.Avalonia and ManagedCodecs.Wpf, two new packages: `LiveView`, a control that shows a `LivePlayer`'s
   newest frame on each frame the UI renders, laid out as an `Image` (`Stretch`, `StretchDirection`). The application
   makes, starts and disposes the player. docs/decisions/2026-11-15-live-controls.md.
+- Playback: lip sync for live cameras, by capture times. Over RTSP, `RgbaFrame.CaptureTime` and
+  `AudioChunk.CaptureTime` say when the camera captured the picture and the sound, on the camera's own clock (from the
+  RTP timestamps and each track's RTCP sender reports), so an application can delay whichever is early by what its
+  sound output buffers. Null until the track's first sender report, and from files and MJPEG over HTTP. The player
+  still holds nothing back: each comes as soon as it is decoded. docs/decisions/2026-11-15-live-rtcp.md.
+
+### Changed
+
+- Playback: an RTSP session now sends RTCP receiver reports, one a track every 5 seconds, on the RTSP connection or
+  from the RTCP port over UDP (loss, jitter, and the camera's last sender report echoed). Cameras and servers that drop
+  a reader they hear no RTCP from keep playing. docs/decisions/2026-11-15-live-rtcp.md.
+
+### Fixed
+
+- Containers: `MxfDemuxer.Video` carries the picture descriptor's colour (`ColorPrimaries`, `ColorTransfer`,
+  `ColorMatrix`, and `ColorRange` by its black and white reference levels), as FFmpeg's demuxer reads it; it was left
+  unspecified. Decoded H.264 frames take it where the stream's VUI says nothing, as with MP4's 'colr', so HDR and
+  full-range MXF files are no longer shown as unspecified. docs/decisions/2026-11-15-mxf-colour-and-what-is-left.md.
 
 ## 0.17.0 – 2026-11-15
 

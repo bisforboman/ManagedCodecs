@@ -780,6 +780,26 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
          find=" || (ssrc is { } expected && (packet.Length < 12 || Ssrc(packet) != expected)))", replace=")",
          tests="FullyQualifiedName~LiveRtspUdpTests.PutsPacketsBackInOrderAndIgnoresDuplicatesAndStrangers"),
+    # ---- Audio over RTSP (docs/decisions/2026-11-15-live-rtsp-audio.md): no second SETUP unless RtspSource.Audio asks ...
+    dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
+         find="if (source.Audio && sdp.Audio is { } audioTrack)", replace="if (sdp.Audio is { } audioTrack)",
+         tests="FullyQualifiedName~LiveRtspAudioTests.SetsUpNoAudioUnlessAskedTo"),
+    # ... the audio's packets don't count against a stall, on the RTSP connection ...
+    dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
+         find="                audio!(message.Data);", replace="                Touch();\n                audio!(message.Data);",
+         tests="DisplayName~ConnectsAgainWhenTheVideoStallsThoughAudioStillComes"),
+    # ... or over UDP ...
+    dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
+         find="                    if (watched)\n", replace="                    if (true)\n",
+         tests="DisplayName~ConnectsAgainWhenTheVideoStallsThoughAudioStillComes"),
+    # ... half a second of decoded audio waits at most, the oldest going first ...
+    dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
+         find="while (_audio.Count > 0 && _audioQueuedTicks + ticks > AudioQueue.Ticks)", replace="while (false)",
+         tests="FullyQualifiedName~LiveRtspAudioTests.DropsTheOldestAudioPastHalfASecond"),
+    # ... and a fragmented AAC access unit (which FFmpeg never sends) ends, dropped, where another one's packets start.
+    dict(file="src/ManagedCodecs.Playback/RtpAudioDepacketizer.cs",
+         find="if (_fragmentSize >= 0 && (header.Timestamp != _fragmentTimestamp || size != _fragmentSize))", replace="if (false)",
+         tests="FullyQualifiedName~RtpAudioDepacketizerTests.DropsAFragmentedAccessUnitWhenAnotherStartsBeforeItsEnd"),
     # MJPEG over HTTP: the first delimiter line names the boundary, whatever the header said (cameras get it wrong).
     dict(file="src/ManagedCodecs.Playback/MultipartReader.cs",
          find="            if (_first)\n", replace="            if (_boundary is null)\n",

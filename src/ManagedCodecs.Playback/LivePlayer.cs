@@ -16,13 +16,16 @@ namespace ManagedCodecs.Playback;
 /// (<see cref="LiveStatistics.SkippedFrames"/>). H.264: every picture is decoded (later ones are predicted from it)
 /// until decoding falls <see cref="RtspSource.MaxLag"/> behind; then pictures are skipped up to the next IDR picture.
 /// A dropped or stalled connection is made again, after 0.5 s and then up to 10 s apart, and <see cref="State"/> and
-/// <see cref="Error"/> say what is happening.
+/// <see cref="Error"/> say what is happening. With <see cref="RtspSource.Audio"/>, the camera's AAC or G.711 sound is
+/// decoded too, on a thread of its own, and taken with <see cref="TakeAudio"/>: every chunk in order, with no lip sync,
+/// up to half a second waiting (past it the oldest is dropped, <see cref="LiveStatistics.DroppedAudioFrames"/>).
 /// </summary>
 /// <remarks>
-/// <see cref="TakeLatest"/> and <see cref="Return"/> are for one thread, the UI's. A software decoder costs CPU a frame:
+/// <see cref="TakeLatest"/> and <see cref="Return"/> are for one thread, the UI's (<see cref="TakeAudio"/> may be
+/// called on another, the audio thread). A software decoder costs CPU a frame:
 /// a wall of cameras wants their low-resolution substreams.
 /// docs/decisions/2026-11-10-live-mjpeg-over-http.md, docs/decisions/2026-11-10-live-rtsp-h264.md,
-/// docs/decisions/2026-11-12-live-rtsp-jpeg.md.
+/// docs/decisions/2026-11-12-live-rtsp-jpeg.md, docs/decisions/2026-11-15-live-rtsp-audio.md.
 /// </remarks>
 public sealed class LivePlayer : IDisposable
 {
@@ -33,6 +36,9 @@ public sealed class LivePlayer : IDisposable
     private static readonly TimeSpan FirstBackoff = TimeSpan.FromSeconds(0.5);
     private static readonly TimeSpan MaxBackoff = TimeSpan.FromSeconds(10);
 
+    // How much decoded audio waits for TakeAudio (docs/decisions/2026-11-15-live-rtsp-audio.md, decision 3).
+    private static readonly TimeSpan AudioQueue = TimeSpan.FromSeconds(0.5);
+
     private readonly ILiveClock _clock;
     private readonly HttpClient? _client;
     private readonly bool _ownsClient;
@@ -41,6 +47,16 @@ public sealed class LivePlayer : IDisposable
     private readonly AutoResetEvent _received = new(false);
     private readonly Thread _thread;
     private readonly ConcurrentBag<byte[]> _spare = [];
+    private readonly ConcurrentQueue<QueuedAudio> _audioUnits = new();
+    private readonly AutoResetEvent _audioReceived = new(false);
+    private readonly Queue<AudioChunk> _audio = new();
+    private readonly Thread? _audioThread;
+    private long _audioQueuedTicks;
+    private volatile AudioStreamInfo? _audioInfo;
+    private volatile string? _skippedAudio;
+    private long _audioDecoded;
+    private long _audioDropped;
+    private long _audioDamaged;
     private Task? _reader;
     private Received? _pending;
     private RgbaFrame? _latest;
@@ -90,6 +106,10 @@ public sealed class LivePlayer : IDisposable
         RtspSource = source;
         _clock = clock;
         _thread = new Thread(DecodeRtsp) { IsBackground = true, Name = "ManagedCodecs live decoding" };
+        if (source.Audio)
+        {
+            _audioThread = new Thread(DecodeAudio) { IsBackground = true, Name = "ManagedCodecs live audio decoding" };
+        }
     }
 
     /// <summary>The MJPEG over HTTP source played, or null for an RTSP player (<see cref="RtspSource"/>).</summary>
@@ -97,6 +117,21 @@ public sealed class LivePlayer : IDisposable
 
     /// <summary>The RTSP source played, or null for an MJPEG over HTTP player (<see cref="Source"/>).</summary>
     public RtspSource? RtspSource { get; }
+
+    /// <summary>
+    /// The camera's audio as it plays, once connected: its codec (<see cref="CodecIds.Aac"/>,
+    /// <see cref="CodecIds.PcmAlaw"/> or <see cref="CodecIds.PcmMulaw"/>), and the rate and channels its SDP gives (an
+    /// <see cref="AudioChunk"/> says the decoder's own rate, HE-AAC's twice this). Null without
+    /// <see cref="RtspSource.Audio"/>, before the first connection, and when the camera has no audio that plays
+    /// (<see cref="SkippedAudioCodec"/>) or refused to send it (<see cref="Error"/>).
+    /// </summary>
+    public AudioStreamInfo? Audio => _audioInfo;
+
+    /// <summary>
+    /// With <see cref="RtspSource.Audio"/>, when the camera has audio but none that plays (<see cref="Audio"/> is null):
+    /// the SDP's name for its first audio format (<c>MP4A-LATM</c>, <c>G726-32</c>, <c>opus</c>). Null otherwise.
+    /// </summary>
+    public string? SkippedAudioCodec => _skippedAudio;
 
     // While decoding waits for an IDR picture, a test may hold it before each access unit (falling behind on purpose).
     internal SemaphoreSlim? DecodeGate { get; set; }
@@ -133,6 +168,9 @@ public sealed class LivePlayer : IDisposable
                 Interlocked.Read(ref _convertTicks) * perFrame)
             {
                 LostPackets = Interlocked.Read(ref _lost),
+                DecodedAudioFrames = Interlocked.Read(ref _audioDecoded),
+                DroppedAudioFrames = Interlocked.Read(ref _audioDropped),
+                DamagedAudioFrames = Interlocked.Read(ref _audioDamaged),
             };
         }
     }
@@ -150,6 +188,7 @@ public sealed class LivePlayer : IDisposable
         {
             _origin = _clock.Elapsed;
             _thread.Start();
+            _audioThread?.Start();
             _reader = Task.Run(ReadAsync);
         }
     }
@@ -167,6 +206,28 @@ public sealed class LivePlayer : IDisposable
         }
 
         return frame;
+    }
+
+    /// <summary>
+    /// The next decoded audio, in order, or null when none waits (or ever will: no <see cref="RtspSource.Audio"/>, or
+    /// <see cref="Audio"/> is null). Take it as the sound has room for it: no more than half a second waits, and past
+    /// that the oldest chunk is dropped (<see cref="LiveStatistics.DroppedAudioFrames"/>), so a sound that plays slower
+    /// than the camera sends loses a chunk now and then rather than falling ever further behind. Not synchronized with
+    /// the picture: each comes as soon as it is decoded.
+    /// </summary>
+    public AudioChunk? TakeAudio()
+    {
+        lock (_audio)
+        {
+            if (_audio.Count == 0)
+            {
+                return null;
+            }
+
+            var chunk = _audio.Dequeue();
+            _audioQueuedTicks -= Ticks(chunk);
+            return chunk;
+        }
     }
 
     /// <summary>
@@ -192,10 +253,12 @@ public sealed class LivePlayer : IDisposable
 
         _stop.Cancel();
         _received.Set();
+        _audioReceived.Set();
         DecodeGate?.Release(int.MaxValue / 2);
         if (Volatile.Read(ref _started) != 0)
         {
             _thread.Join(TimeSpan.FromSeconds(2));
+            _audioThread?.Join(TimeSpan.FromSeconds(2));
             try
             {
                 _reader?.Wait(TimeSpan.FromSeconds(2));
@@ -351,7 +414,9 @@ public sealed class LivePlayer : IDisposable
         var watchdog = WatchAsync(connection, cancel);
         RtspConnection? rtsp = null;
         RtpUdpPorts? udp = null;
+        AudioSession? audio = null;
         Task? keepAlive = null;
+        Task? audioPump = null;
         try
         {
             rtsp = await RtspConnection.ConnectAsync(source.Uri.Host, source.Port, source.Credential, cancel.Token).ConfigureAwait(false);
@@ -396,6 +461,19 @@ public sealed class LivePlayer : IDisposable
 
             var transport = RtspTransport.Parse(setup.Header("Transport"));
 
+            // The audio, when asked for: a second SETUP in the same session, on the transport the video's got
+            // (docs/decisions/2026-11-15-live-rtsp-audio.md).
+            _skippedAudio = source.Audio ? sdp.SkippedAudio : null;
+            _audioInfo = null;
+            if (source.Audio && sdp.Audio is { } audioTrack)
+            {
+                audio = await SetupAudioAsync(rtsp, audioTrack, Sdp.Resolve(baseUrl, audioTrack.Control), udp is not null, transport.Channel, cancel.Token).ConfigureAwait(false);
+                if (audio?.Udp is { } audioPorts)
+                {
+                    cancel.Token.Register(audioPorts.Dispose);
+                }
+            }
+
             string sessionUrl = Sdp.Resolve(baseUrl, sdp.SessionControl);
             await Request(rtsp, "PLAY", sessionUrl, [new("Range", "npt=0.000-")], cancel.Token).ConfigureAwait(false);
             keepAlive = KeepAliveAsync(rtsp, getParameter ? "GET_PARAMETER" : "OPTIONS", sessionUrl, timeout, cancel.Token);
@@ -403,7 +481,7 @@ public sealed class LivePlayer : IDisposable
             var handle = track.Codec == SdpCodec.Jpeg ? JpegPackets(track.PayloadType, connection) : H264Packets(track, connection);
             if (udp is null)
             {
-                await PumpTcpAsync(rtsp, transport.Channel, handle, cancel.Token).ConfigureAwait(false);
+                await PumpTcpAsync(rtsp, transport.Channel, handle, audio?.Channel ?? -1, audio?.Handle, cancel.Token).ConfigureAwait(false);
             }
             else
             {
@@ -413,7 +491,19 @@ public sealed class LivePlayer : IDisposable
                     udp.Punch(new IPEndPoint(server, serverRtp), new IPEndPoint(server, transport.ServerRtcpPort ?? serverRtp + 1));
                 }
 
-                await PumpUdpAsync(rtsp, udp, server, transport.Ssrc, handle, cancel.Token).ConfigureAwait(false);
+                if (audio?.Udp is { } audioUdp)
+                {
+                    var audioServer = Plain(audio.Transport.Source ?? rtsp.RemoteEndPoint.Address);
+                    if (audio.Transport.ServerRtpPort is { } audioRtp)
+                    {
+                        audioUdp.Punch(new IPEndPoint(audioServer, audioRtp), new IPEndPoint(audioServer, audio.Transport.ServerRtcpPort ?? audioRtp + 1));
+                    }
+
+                    // Until the session ends (the token): the video's pump decides when that is.
+                    audioPump = PumpUdpAsync(Task.Delay(Timeout.Infinite, cancel.Token), audioUdp, audioServer, audio.Transport.Ssrc, audio.Handle, watched: false, cancel.Token);
+                }
+
+                await PumpUdpAsync(DrainAsync(rtsp, cancel.Token), udp, server, transport.Ssrc, handle, watched: true, cancel.Token).ConfigureAwait(false);
             }
         }
         finally
@@ -421,12 +511,118 @@ public sealed class LivePlayer : IDisposable
             cancel.Cancel();
             rtsp?.Dispose();
             udp?.Dispose();
+            audio?.Udp?.Dispose();
             await watchdog.ConfigureAwait(false);
+            if (audioPump is not null)
+            {
+                try
+                {
+                    await audioPump.ConfigureAwait(false);
+                }
+                catch (Exception)
+                {
+                    // The session ended (cancelled, or its ports closed): the video's pump has said why.
+                }
+            }
+
             if (keepAlive is not null)
             {
                 await keepAlive.ConfigureAwait(false);
             }
         }
+    }
+
+    // The audio track's decoder and SETUP. Null, with Error saying why, when the decoder refuses the SDP's config or the
+    // camera the SETUP: the video plays on without sound (a failing connection still throws, as for the video).
+    private async Task<AudioSession?> SetupAudioAsync(RtspConnection rtsp, SdpAudioTrack track, string url, bool overUdp, int videoChannel, CancellationToken token)
+    {
+        var info = new AudioStreamInfo(track.Codec, track.SampleRate, track.Channels, 0, new Rational(1, track.SampleRate), track.Config, 1);
+        IAudioDecoder decoder;
+        try
+        {
+            decoder = AudioPipeline.CreateDecoder(info);
+        }
+        catch (Exception e)
+        {
+            if (e is not (InvalidDataException or NotSupportedException))
+            {
+                throw;
+            }
+
+            _error = e;
+            return null;
+        }
+
+        var ports = overUdp ? RtpUdpPorts.Bind(rtsp.LocalEndPoint.Address) : null;
+        try
+        {
+            string asked = ports is null ? "RTP/AVP/TCP;unicast;interleaved=2-3" : $"RTP/AVP;unicast;client_port={ports.RtpPort}-{ports.RtcpPort}";
+            var setup = await rtsp.RequestAsync("SETUP", url, [new("Transport", asked)], token).ConfigureAwait(false);
+            if (setup.Status is < 200 or >= 300)
+            {
+                _error = new IOException($"The camera answered {setup.Status} {setup.Reason} to the audio track's SETUP: playing without audio.");
+                ports?.Dispose();
+                return null;
+            }
+
+            var transport = RtspTransport.Parse(setup.Header("Transport"));
+
+            // An answer that names no channel (read as 0) would put the audio on the video's: the one asked for.
+            int channel = transport.Channel == videoChannel ? 2 : transport.Channel;
+            _audioInfo = info;
+            return new AudioSession(AudioPackets(track, decoder), channel, ports, transport);
+        }
+        catch (Exception)
+        {
+            ports?.Dispose();
+            throw;
+        }
+    }
+
+    // Audio over RTP: AAC's access units (RFC 3640) or G.711's samples to the audio decoding thread, in order. They
+    // don't feed the stall watchdog or the state: sound without a picture is not a camera playing.
+    private Action<byte[]> AudioPackets(SdpAudioTrack track, IAudioDecoder decoder)
+    {
+        var depacketizer = new RtpAudioDepacketizer(track);
+        var frames = new List<byte[]>();
+        long lost = 0;
+        long damaged = 0;
+        bool off = false;
+        return packet =>
+        {
+            if (off)
+            {
+                return;
+            }
+
+            try
+            {
+                depacketizer.Add(packet, frames);
+            }
+            catch (NotSupportedException e)
+            {
+                // Interleaved access units: no sound from this camera, and the picture goes on.
+                _error = e;
+                _audioInfo = null;
+                off = true;
+                return;
+            }
+
+            Interlocked.Add(ref _lost, depacketizer.LostPackets - lost);
+            lost = depacketizer.LostPackets;
+            Interlocked.Add(ref _audioDamaged, depacketizer.Damaged - damaged);
+            damaged = depacketizer.Damaged;
+            foreach (var frame in frames)
+            {
+                _audioUnits.Enqueue(new QueuedAudio(frame, decoder));
+            }
+
+            if (frames.Count > 0)
+            {
+                frames.Clear();
+                _audioReceived.Set();
+            }
+        };
     }
 
     // H.264 over RTP (RFC 6184): access units in order to the decoding thread, each with its arrival time.
@@ -496,28 +692,33 @@ public sealed class LivePlayer : IDisposable
         };
     }
 
-    // RTP interleaved on the RTSP connection: the packets of the track's channel, until the connection ends.
-    private async Task PumpTcpAsync(RtspConnection rtsp, int channel, Action<byte[]> handle, CancellationToken token)
+    // RTP interleaved on the RTSP connection: the packets of the video's channel, and of the audio's when it has one,
+    // until the connection ends. Only the video's count against a stall.
+    private async Task PumpTcpAsync(RtspConnection rtsp, int channel, Action<byte[]> handle, int audioChannel, Action<byte[]>? audio, CancellationToken token)
     {
         while (await rtsp.ReadAsync(token).ConfigureAwait(false) is { } message)
         {
-            if (!message.IsPacket || message.Channel != channel)
+            if (message.IsPacket && message.Channel == channel)
             {
-                continue; // keep-alives' answers, RTCP
+                Touch();
+                handle(message.Data);
+            }
+            else if (message.IsPacket && message.Channel == audioChannel)
+            {
+                audio!(message.Data);
             }
 
-            Touch();
-            handle(message.Data);
+            // Else keep-alives' answers, RTCP.
         }
     }
 
     // RTP over UDP: the server's packets (its address, and its SSRC when SETUP's answer gave one) through the reorder
-    // window, until the RTSP connection, which still carries the keep-alives, ends.
-    private async Task PumpUdpAsync(RtspConnection rtsp, RtpUdpPorts udp, IPAddress server, uint? ssrc, Action<byte[]> handle, CancellationToken token)
+    // window, until control ends: the video's is the read of the RTSP connection, which still carries the keep-alives.
+    // The video's packets (watched) count against a stall; the audio's don't.
+    private async Task PumpUdpAsync(Task control, RtpUdpPorts udp, IPAddress server, uint? ssrc, Action<byte[]> handle, bool watched, CancellationToken token)
     {
         var reorder = new RtpReorderBuffer(ReorderWindow);
         var ready = new List<byte[]>();
-        var control = DrainAsync(rtsp, token);
         var never = Task.Delay(Timeout.Infinite, token);
         Task<(byte[] Packet, IPEndPoint From)>? receive = null;
         try
@@ -544,7 +745,11 @@ public sealed class LivePlayer : IDisposable
                         continue; // not this session's stream
                     }
 
-                    Touch();
+                    if (watched)
+                    {
+                        Touch();
+                    }
+
                     reorder.Add(packet, _clock.Elapsed, ready);
                 }
                 else
@@ -756,6 +961,69 @@ public sealed class LivePlayer : IDisposable
         }
     }
 
+    // The audio, every frame in order: a frame the decoder rejects is skipped, and what it gives waits for TakeAudio.
+    private void DecodeAudio()
+    {
+        var token = _stop.Token;
+        try
+        {
+            while (!token.IsCancellationRequested)
+            {
+                _audioReceived.WaitOne();
+                while (!token.IsCancellationRequested && _audioUnits.TryDequeue(out var queued))
+                {
+                    AudioFrame frame;
+                    try
+                    {
+                        frame = queued.Decoder.Decode(queued.Data);
+                    }
+                    catch (Exception e)
+                    {
+                        if (e is not (InvalidDataException or NotSupportedException))
+                        {
+                            throw;
+                        }
+
+                        Interlocked.Increment(ref _audioDamaged);
+                        continue;
+                    }
+
+                    if (frame.SampleCount > 0)
+                    {
+                        Interlocked.Increment(ref _audioDecoded);
+                        Queue(AudioPipeline.ToStereo(frame));
+                    }
+                }
+            }
+        }
+        catch (Exception e)
+        {
+            // A bug: thrown on this thread it would end the process.
+            Fail(e);
+        }
+    }
+
+    // A chunk for TakeAudio: past half a second waiting, the oldest go (decision 3 of
+    // docs/decisions/2026-11-15-live-rtsp-audio.md).
+    private void Queue(AudioChunk chunk)
+    {
+        long ticks = Ticks(chunk);
+        lock (_audio)
+        {
+            while (_audio.Count > 0 && _audioQueuedTicks + ticks > AudioQueue.Ticks)
+            {
+                _audioQueuedTicks -= Ticks(_audio.Dequeue());
+                Interlocked.Increment(ref _audioDropped);
+            }
+
+            _audio.Enqueue(chunk);
+            _audioQueuedTicks += ticks;
+        }
+    }
+
+    // A chunk's length: its stereo samples at its rate.
+    private static long Ticks(AudioChunk chunk) => chunk.Samples.Length / 2 * TimeSpan.TicksPerSecond / chunk.SampleRate;
+
     private void ShowH264(H264Decoder decoder, RtpAccessUnit unit, TimeSpan time, long pts, ref bool waitForIdr)
     {
         long start = Stopwatch.GetTimestamp();
@@ -856,6 +1124,7 @@ public sealed class LivePlayer : IDisposable
         SetState(LiveState.Failed);
         _stop.Cancel();
         _received.Set();
+        _audioReceived.Set();
     }
 
     // Failed and Stopped are final.
@@ -882,6 +1151,12 @@ public sealed class LivePlayer : IDisposable
     }
 
     private sealed record QueuedUnit(RtpAccessUnit Unit, TimeSpan Time, int Generation);
+
+    // An audio frame and its connection's decoder (a new connection starts a new one).
+    private sealed record QueuedAudio(byte[] Data, IAudioDecoder Decoder);
+
+    // The audio track as set up: where its packets go, its channel on the RTSP connection or its UDP ports, and SETUP's answer.
+    private sealed record AudioSession(Action<byte[]> Handle, int Channel, RtpUdpPorts? Udp, RtspTransport Transport);
 
     private sealed class Connection
     {

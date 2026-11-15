@@ -13,7 +13,7 @@ internal sealed record RtspRequest(int Connection, string Method, string Url, Di
 
 /// <summary>
 /// An RTSP 1.0 server on the loopback interface, for LivePlayer's RTSP tests: OPTIONS, DESCRIBE (<see cref="Sdp"/>),
-/// SETUP (RTP over the connection, channels 0 and 1), PLAY, keep-alives, with Basic or Digest authentication checked
+/// SETUP (RTP over the connection, on the channels asked for: 0 and 1, and 2 and 3 for a second track), PLAY, keep-alives, with Basic or Digest authentication checked
 /// by its own MD5 (not the client's code), and a status of a test's choosing for any method. After PLAY,
 /// <see cref="OnPlay"/> sends the packets while the server goes on answering requests.
 /// </summary>
@@ -66,6 +66,9 @@ internal sealed class RtspTestServer : IDisposable
 
     /// <summary>A status (and reason) to answer a method with in place of the usual answer, by method and connection.</summary>
     public Func<string, int, (int Status, string Reason)?>? Status { get; set; }
+
+    /// <summary>A status (and reason) to answer a request with in place of the usual answer (the audio track's SETUP).</summary>
+    public Func<RtspRequest, (int Status, string Reason)?>? StatusOf { get; set; }
 
     public ConcurrentQueue<RtspRequest> Requests { get; } = new();
 
@@ -138,7 +141,7 @@ internal sealed class RtspTestServer : IDisposable
             var writing = new SemaphoreSlim(1, 1);
             var reader = new StreamReader(stream, Encoding.UTF8);
             Task? playing = null;
-            IPEndPoint? udpClient = null;
+            var udpClients = new List<IPEndPoint>(); // a track's each, in SETUP's order
             using var connection = CancellationTokenSource.CreateLinkedTokenSource(token);
             try
             {
@@ -149,7 +152,7 @@ internal sealed class RtspTestServer : IDisposable
                     var (status, reason, headers, body) = Answer(request, index);
                     if (request.Method == "SETUP" && status == 200 && ClientPort(request) is { } port)
                     {
-                        udpClient = new IPEndPoint(IPAddress.Loopback, port);
+                        udpClients.Add(new IPEndPoint(IPAddress.Loopback, port));
                     }
 
                     var head = new StringBuilder($"RTSP/1.0 {status} {reason}\r\nCSeq: {cseq}\r\n");
@@ -177,7 +180,7 @@ internal sealed class RtspTestServer : IDisposable
 
                     if (request.Method == "PLAY" && status == 200 && playing is null)
                     {
-                        var play = new RtspPlay(stream, writing, index, connection.Token, udpClient is { } target ? (_rtp, target) : null);
+                        var play = new RtspPlay(stream, writing, index, connection.Token, udpClients.Count > 0 ? (_rtp, udpClients.ToArray()) : null);
                         playing = Task.Run(async () =>
                         {
                             try
@@ -214,6 +217,11 @@ internal sealed class RtspTestServer : IDisposable
             return (forced.Status, forced.Reason, [], "");
         }
 
+        if (StatusOf?.Invoke(request) is { } chosen)
+        {
+            return (chosen.Status, chosen.Reason, [], "");
+        }
+
         if (Credential is not null && !Authorized(request))
         {
             string challenge = Digest
@@ -229,7 +237,7 @@ internal sealed class RtspTestServer : IDisposable
             "SETUP" when ClientPort(request) is { } port =>
                 (200, "OK", [("Session", $"S{index}ession;timeout={SessionTimeout}"), ("Transport", $"RTP/AVP;unicast;client_port={port}-{port + 1};server_port={RtpEndPoint.Port}-{((IPEndPoint)_rtcp.Client.LocalEndPoint!).Port}{(Ssrc is { } ssrc ? $";ssrc={ssrc:X8}" : "")}")], ""),
             "SETUP" when UdpOnly => (461, "Unsupported Transport", [], ""),
-            "SETUP" => (200, "OK", [("Session", $"S{index}ession;timeout={SessionTimeout}"), ("Transport", "RTP/AVP/TCP;unicast;interleaved=0-1")], ""),
+            "SETUP" => (200, "OK", [("Session", $"S{index}ession;timeout={SessionTimeout}"), ("Transport", "RTP/AVP/TCP;unicast;interleaved=" + (Regex.Match(request.Headers.GetValueOrDefault("Transport", ""), @"interleaved=(\d+-\d+)") is { Success: true } asked ? asked.Groups[1].Value : "0-1"))], ""),
             _ => (200, "OK", [], ""),
         };
     }
@@ -289,13 +297,13 @@ internal sealed class RtspTestServer : IDisposable
 }
 
 /// <summary>What a test's <see cref="RtspTestServer.OnPlay"/> sends with: packets interleaved on the connection.</summary>
-internal sealed class RtspPlay(Stream stream, SemaphoreSlim writing, int connection, CancellationToken token, (UdpClient Socket, IPEndPoint Client)? udp = null)
+internal sealed class RtspPlay(Stream stream, SemaphoreSlim writing, int connection, CancellationToken token, (UdpClient Socket, IPEndPoint[] Clients)? udp = null)
 {
     /// <summary>Whether SETUP chose RTP over UDP: <see cref="SendAsync"/> then sends from the server's RTP port.</summary>
     public bool Udp => udp is not null;
 
     /// <summary>Where the client receives RTP over UDP.</summary>
-    public IPEndPoint? UdpClient => udp?.Client;
+    public IPEndPoint? UdpClient => udp?.Clients[0];
 
     public int Connection { get; } = connection;
 
@@ -304,11 +312,12 @@ internal sealed class RtspPlay(Stream stream, SemaphoreSlim writing, int connect
     /// <summary>Close the connection once OnPlay returns (a camera that drops the stream).</summary>
     public bool CloseAfter { get; set; }
 
+    // Over UDP, a channel's packets go to its track's port: channel 0 to the first SETUP's, channel 2 to the second's.
     public async Task SendAsync(byte[] packet, int channel = 0)
     {
         if (udp is { } target)
         {
-            await target.Socket.SendAsync(packet, target.Client, Token);
+            await target.Socket.SendAsync(packet, target.Clients[channel / 2], Token);
             return;
         }
 

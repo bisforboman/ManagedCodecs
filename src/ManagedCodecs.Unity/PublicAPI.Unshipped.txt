@@ -1,3 +1,1 @@
 #nullable enable
-ManagedCodecs.Playback.RtspSource.CertificateHash.get -> string?
-ManagedCodecs.Playback.RtspSource.CertificateHash.init -> void

@@ -44,7 +44,8 @@ if (player.IsFinished) { /* the video has ended; player.Error says why if it end
 
 `LivePlayer` shows a camera serving MJPEG over HTTP (ESP32-CAM, mjpg-streamer, OctoPrint, most IP cameras'
 `video.mjpg`), or H.264 or JPEG over RTSP (`new LivePlayer(new RtspSource(new Uri("rtsp://user:password@camera/stream1")))`:
-Digest or Basic, RTP over the RTSP connection, or over UDP when the camera refuses that). The UI takes the newest frame on its render tick, older ones are
+Digest or Basic, RTP over the RTSP connection, or over UDP when the camera refuses that; `rtsps://` over TLS, with
+`CertificateHash` for a camera's self-signed certificate). The UI takes the newest frame on its render tick, older ones are
 dropped and counted, and a dropped or stalled connection is made again.
 
 ```csharp

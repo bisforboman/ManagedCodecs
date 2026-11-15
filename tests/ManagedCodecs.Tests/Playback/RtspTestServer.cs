@@ -72,7 +72,10 @@ internal sealed class RtspTestServer : IDisposable
 
     public ConcurrentQueue<RtspRequest> Requests { get; } = new();
 
-    public Uri Uri => new($"rtsp://127.0.0.1:{((IPEndPoint)_listener.LocalEndpoint).Port}/stream");
+    public Uri Uri => new($"{(Certificate is null ? "rtsp://127.0.0.1" : "rtsps://localhost")}:{((IPEndPoint)_listener.LocalEndpoint).Port}/stream");
+
+    /// <summary>Serve RTSPS: each connection over TLS with this certificate (and its private key).</summary>
+    public System.Security.Cryptography.X509Certificates.X509Certificate2? Certificate { get; set; }
 
     public int Connections => Volatile.Read(ref _connections);
 
@@ -137,7 +140,22 @@ internal sealed class RtspTestServer : IDisposable
     {
         using (client)
         {
-            var stream = client.GetStream();
+            Stream stream = client.GetStream();
+            if (Certificate is { } certificate)
+            {
+                var tls = new System.Net.Security.SslStream(stream);
+                try
+                {
+                    await tls.AuthenticateAsServerAsync(certificate);
+                }
+                catch (Exception e) when (e is System.Security.Authentication.AuthenticationException or IOException)
+                {
+                    return; // the client refused the certificate
+                }
+
+                stream = tls;
+            }
+
             var writing = new SemaphoreSlim(1, 1);
             var reader = new StreamReader(stream, Encoding.UTF8);
             Task? playing = null;

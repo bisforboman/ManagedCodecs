@@ -6,7 +6,9 @@ Digest), an MJPEG one with Digest, which mediamtx sends as JPEG over RTP (RFC 24
 docs/decisions/2026-11-12-live-rtsp-jpeg.md), and the H.264 one again with mediamtx serving RTP over UDP only: it
 answers 461 to RTP over the RTSP connection, and LivePlayer takes UDP (docs/decisions/2026-11-14-live-rtsp-udp.md).
 And an H.264 clip with AAC sound, over both transports, played with RtspSource.Audio (`mcdec --live --audio`): each
-chunk of audio taken must be the clip's too (docs/decisions/2026-11-15-live-rtsp-audio.md).
+chunk of audio taken must be the clip's too (docs/decisions/2026-11-15-live-rtsp-audio.md). And the H.264 clip over
+RTSPS (mediamtx with `rtspEncryption: strict` and a certificate openssl makes, pinned by `--certificate-hash`;
+docs/decisions/2026-11-15-live-rtsps.md).
 Fails on a frame not in the clip, a lost packet, a damaged frame, a reconnect, or too few frames. mediamtx is
 downloaded once, pinned by SHA-256, into samples/realworld/ (gitignored). Nightly (realworld.yml), not on pull
 requests: the required checks use the loopback server in the tests.
@@ -19,6 +21,7 @@ import argparse
 import hashlib
 import os
 import platform
+import ssl
 import socket
 import struct
 import subprocess
@@ -41,6 +44,15 @@ MEDIAMTX = {
 
 USER, PASSWORD = "viewer", "s3cret"
 PORT = 8554
+TLS_PORT = 8322
+
+# RTSPS only: TLS on its own port, RTP inside it (or SRTP, which LivePlayer doesn't take).
+TLS = """\
+rtspEncryption: "strict"
+rtspsAddress: :{tls_port}
+rtspServerKey: {key}
+rtspServerCert: {cert}
+"""
 
 # One RTP transport (tcp, or udp to check LivePlayer's fallback to it), the publisher from this machine without a password, a reader with one.
 CONFIG = """\
@@ -221,12 +233,26 @@ def wait_for_port(port, seconds=20):
     sys.exit(f"Nothing is listening on port {port}.")
 
 
-def run(method, binary, clip, folder, frames, transports="tcp", audio=False):
-    """mediamtx with one authentication method and one transport (tcp or udp), the clip pushed to it, then
-    mcdec --live; its output and status."""
-    config = os.path.join(folder, f"mediamtx-{method}-{transports}.yml")
+def make_certificate(folder):
+    """A self-signed certificate for localhost, as a camera has (openssl), and its SHA-256 for --certificate-hash."""
+    key, cert = os.path.join(folder, "server.key"), os.path.join(folder, "server.crt")
+    subprocess.run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", key, "-out", cert, "-days", "2",
+                    "-subj", "/CN=localhost", "-addext", "subjectAltName=DNS:localhost,IP:127.0.0.1"],
+                   check=True, capture_output=True)
+    with open(cert) as f:
+        return key, cert, hashlib.sha256(ssl.PEM_cert_to_DER_cert(f.read())).hexdigest()
+
+
+def run(method, binary, clip, folder, frames, transports="tcp", audio=False, tls=False):
+    """mediamtx with one authentication method and one transport (tcp or udp), over RTSPS with tls, the clip pushed
+    to it, then mcdec --live; its output and status."""
+    config = os.path.join(folder, f"mediamtx-{method}-{transports}{'-tls' if tls else ''}.yml")
     with open(config, "w") as f:
         f.write(CONFIG.format(port=PORT, method=method, user=USER, password=PASSWORD, transports=transports))
+        if tls:
+            key, cert, digest = make_certificate(folder)
+            f.write(TLS.format(tls_port=TLS_PORT, key=key, cert=cert))
+    scheme, host, port = ("rtsps", "localhost", TLS_PORT) if tls else ("rtsp", "127.0.0.1", PORT)
     log = []
     published = threading.Event()
     # In the temporary folder: mediamtx writes a self-signed certificate (auto.crt, auto.key) where it runs.
@@ -242,17 +268,18 @@ def run(method, binary, clip, folder, frames, transports="tcp", audio=False):
     push = None
     stop = threading.Event()
     try:
-        wait_for_port(PORT)
+        wait_for_port(port)
         if clip.endswith(".avi"):
             publisher = threading.Thread(target=publish_jpeg, args=(record_rtp(clip), stop), daemon=True)
             publisher.start()
         else:
             push = subprocess.Popen(["ffmpeg", "-v", "error", "-re", "-stream_loop", "-1", "-i", clip, "-c", "copy",
-                                     "-f", "rtsp", "-rtsp_transport", transports, f"rtsp://127.0.0.1:{PORT}/live"])
+                                     "-f", "rtsp", "-rtsp_transport", transports, f"{scheme}://{host}:{port}/live"])
         if not published.wait(20):
             return "\n".join(["The push never reached mediamtx.", *log[-20:]]), 1
-        url = f"rtsp://{USER}:{PASSWORD}@127.0.0.1:{PORT}/live"
-        check = subprocess.run(["dotnet", MCDEC, "--live", url, clip, "--frames", str(frames), *(["--audio"] if audio else [])],
+        url = f"{scheme}://{USER}:{PASSWORD}@{host}:{port}/live"
+        check = subprocess.run(["dotnet", MCDEC, "--live", url, clip, "--frames", str(frames), *(["--audio"] if audio else []),
+                                *(["--certificate-hash", digest] if tls else [])],
                                capture_output=True, text=True)
         output = check.stdout + check.stderr
         if check.returncode != 0:
@@ -288,9 +315,10 @@ def main():
         runs = (("H.264, basic", "basic", h264, "tcp", False), ("H.264, digest", "digest", h264, "tcp", False),
                 ("JPEG, digest", "digest", mjpeg, "tcp", False), ("H.264, digest, RTP over UDP only", "digest", h264, "udp", False),
                 ("H.264 and AAC, digest", "digest", sound, "tcp", True),
-                ("H.264 and AAC, digest, RTP over UDP only", "digest", sound, "udp", True))
-        for label, method, clip, transports, audio in runs:
-            output, status = run(method, binary, clip, folder, args.frames, transports, audio)
+                ("H.264 and AAC, digest, RTP over UDP only", "digest", sound, "udp", True),
+                ("H.264, digest, RTSPS", "digest", h264, "tcp", False, True))
+        for label, method, clip, transports, audio, *tls in runs:
+            output, status = run(method, binary, clip, folder, args.frames, transports, audio, bool(tls and tls[0]))
             verdict = "passed" if status == 0 else "FAILED"
             print(f"== {label}: {verdict}\n{output}\n", flush=True)
             report += [f"**{label}**: {verdict}", "", "```", output, "```", ""]

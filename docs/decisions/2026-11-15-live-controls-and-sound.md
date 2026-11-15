@@ -139,3 +139,16 @@ So no new package and no public API: nothing for PublicAPI.Unshipped.txt, releas
   the version here also played without running dry (one run each, the machine busy with make-samples.sh).
 - **Follow-up to #534**, once it has merged: the start rule and the bound by time, and the measurement in the sample's
   README. Nobody has heard either version: the VM has no sound device.
+- **Built** (2026-11-15):
+  - Item 3, sound: #534 (the other session's live mode in `mcplay`), then #539, the follow-up above. On the merged
+    code the tone had 6 and 4 gaps in two more runs, and none with #539. The numbers are in the sample's README.
+  - Item 1, Windows: #538. `mclive-wpf --frames N` compares each frame with what WPF draws of the bitmap,
+    `tools/mjpeg-http-server.py` serves committed JPEGs without FFmpeg, and `.github/workflows/windows.yml` runs the
+    two on `windows-2025`. Its first run showed 100 frames, each drawn as decoded, and a run without the swap of red
+    and blue failed at the first frame (docs/conformance.md, MJPEG over HTTP).
+- **Decision 2 was overtaken** (2026-11-15). Asked again in the other session, the owner decided to build both
+  packages now, `ManagedCodecs.Avalonia` and `ManagedCodecs.Wpf`, each with a `LiveView` that takes the application's
+  `LivePlayer`: docs/decisions/2026-11-15-live-controls.md and PR #542. That decision is the later one and stands;
+  "not yet" above is what was answered here first. Decisions 1, 3 and 4 are as built.
+- **Not done:** MAUI (not now, as decided), sound in `mclive` and `mclive-wpf`, RTSP on Windows. Nobody has heard the
+  sound or looked at the WPF window.

@@ -3,9 +3,20 @@
 A sample for issue #254 (docs/decisions/2026-10-31-game-engines.md): plays an MP4, Matroska or AVI (H.264 or MJPEG,
 AAC or MP3 audio) in a MonoGame window with the `ManagedCodecs.MonoGame` package's `VideoTexture`, to show what in-game video
 costs. Not a media player: no seeking; space pauses, Escape quits. A file without video (.wav, raw MP3 or AAC) plays
-its sound alone, the window black, through `ManagedCodecs.Playback`'s `AudioPlayer` (`AudioOnly.cs`).
+its sound alone, the window black, through `ManagedCodecs.MonoGame`'s `AudioTrack`. A camera's URL plays live
+(`LiveView.cs`, issue #526): `LivePlayer`'s newest picture each frame of the game, and over RTSP or RTSPS the camera's
+sound (`RtspSource.Audio`, `LivePlayer.TakeAudio`) through a dynamic sound, as it comes, with no lip sync; up to six
+chunks queue in the sound, and past that a chunk is dropped rather than letting the delay grow. Escape quits; a final
+error (a wrong password, a refused certificate) ends it, and the title shows the state, the frames, the packets lost
+and the sound.
 
     dotnet run -c Release --project tools/ManagedCodecs.MonoGame.Sample -- <file.mp4>
+    dotnet run -c Release --project tools/ManagedCodecs.MonoGame.Sample -- rtsp://user:password@camera/stream1
+    dotnet run -c Release --project tools/ManagedCodecs.MonoGame.Sample -- rtsps://camera/stream1 --certificate-hash <SHA-256>
+
+Live mode was run under Xvfb (2026-11-15) against mediamtx 1.21.3 serving FFmpeg's push of a 640x360 H.264 clip with
+48 kHz AAC: the picture played, about 47 sound frames a second were decoded and none dropped, no packet lost. The VM
+has no sound device, so the sound went to OpenAL's null output, unheard: nobody has listened to it yet.
 
 - `VideoTexture` (`ManagedCodecs.MonoGame`) runs `ManagedCodecs.Playback`'s `MediaPlayer`, which demuxes and decodes
   ahead on a thread of its own (H.264 with frame threading, up to 4 threads) and converts each frame to RGBA on the CPU

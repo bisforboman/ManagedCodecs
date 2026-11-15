@@ -136,7 +136,7 @@ internal sealed class PlayerGame : Game
 
         live.Update();
         var s = live.Player.Statistics;
-        string sound = live.Player.Audio is { } a ? $", sound {a.Codec} {a.SampleRate} Hz ({s.DecodedAudioFrames} frames, {s.DroppedAudioFrames + live.DroppedChunks} dropped)"
+        string sound = live.Player.Audio is { } a ? $", sound {a.Codec} {a.SampleRate} Hz ({s.DecodedAudioFrames} frames, {s.DroppedAudioFrames} dropped, ran dry {live.RanDry})"
             : live.Player.SkippedAudioCodec is { } skipped ? $", sound {skipped} not played" : ", no sound";
         Window.Title = $"mcplay: {live.Player.State}, {s.DecodedFrames} frames, {s.DroppedFrames} dropped, {s.LostPackets} packets lost{sound}";
     }

@@ -13,11 +13,22 @@ namespace ManagedCodecs.MonoGameSample;
 /// </summary>
 internal sealed class LiveView : IDisposable
 {
-    // Buffers queued ahead of the sound, each a decoded chunk (a frame of AAC, 20 to 40 ms of G.711): past this, chunks
-    // are dropped rather than queued, so that a sound that fell behind doesn't keep a growing delay.
-    private const int MaxQueuedBuffers = 6;
+    // The most sound queued ahead: the delay it adds at worst. What is decoded beyond it stays in the player, whose own
+    // queue (half a second) drops the oldest and counts it (LiveStatistics.DroppedAudioFrames), so a camera running
+    // faster than the sound card loses a chunk now and then and the delay doesn't grow.
+    private static readonly TimeSpan MaxQueued = TimeSpan.FromMilliseconds(250);
 
+    // The sound queued before it starts, and before it starts again after running dry. A packet carries several frames
+    // (FFmpeg's 3 or 4 of AAC, 64 to 85 ms) and they arrive together: started on the first chunk, the sound has nothing
+    // left when the next packet is a few milliseconds late, and gaps a mixing period long (about 19 ms) follow, a few
+    // every minute (measured: the README).
+    private static readonly TimeSpan StartQueued = TimeSpan.FromMilliseconds(100);
+
+    // How long each buffer in the sound plays, oldest first, and their sum.
+    private readonly Queue<TimeSpan> _queued = new();
     private readonly GraphicsDevice _device;
+    private TimeSpan _queuedTime;
+    private bool _running;
     private DynamicSoundEffectInstance? _sound;
     private int _soundRate;
     private bool _noAudio;
@@ -34,8 +45,8 @@ internal sealed class LiveView : IDisposable
 
     public LivePlayer Player { get; }
 
-    /// <summary>Chunks dropped here because the sound had too many queued.</summary>
-    public long DroppedChunks { get; private set; }
+    /// <summary>How often the sound ran out of buffers while playing.</summary>
+    public long RanDry { get; private set; }
 
     /// <summary>Takes the newest picture into the texture and queues the sound that came since.</summary>
     public void Update()
@@ -52,9 +63,32 @@ internal sealed class LiveView : IDisposable
             Player.Return(frame);
         }
 
-        while (Player.TakeAudio() is { } chunk)
+        // The buffers the sound has finished: all but its PendingBufferCount, which counts the one playing.
+        if (_sound is not null)
+        {
+            while (_queued.Count > _sound.PendingBufferCount)
+            {
+                _queuedTime -= _queued.Dequeue();
+            }
+
+            if (_running && _queued.Count == 0)
+            {
+                _running = false;
+                RanDry++;
+                _sound.Stop();
+            }
+        }
+
+        // Without a sound device everything is taken and dropped.
+        while ((_noAudio || _queuedTime < MaxQueued) && Player.TakeAudio() is { } chunk)
         {
             Play(chunk);
+        }
+
+        if (_sound is not null && !_running && _queuedTime >= StartQueued)
+        {
+            _sound.Play();
+            _running = true;
         }
     }
 
@@ -89,6 +123,9 @@ internal sealed class LiveView : IDisposable
         if (_sound is null || _soundRate != chunk.SampleRate)
         {
             _sound?.Dispose();
+            _queued.Clear();
+            _queuedTime = TimeSpan.Zero;
+            _running = false;
             try
             {
                 _sound = new DynamicSoundEffectInstance(chunk.SampleRate, AudioChannels.Stereo);
@@ -101,17 +138,10 @@ internal sealed class LiveView : IDisposable
             }
         }
 
-        if (_sound.PendingBufferCount >= MaxQueuedBuffers)
-        {
-            DroppedChunks++;
-            return;
-        }
-
         _sound.SubmitBuffer(ToPcm16(chunk.Samples));
-        if (_sound.State != SoundState.Playing)
-        {
-            _sound.Play();
-        }
+        var duration = TimeSpan.FromTicks((long)(chunk.Samples.Length / 2) * TimeSpan.TicksPerSecond / chunk.SampleRate);
+        _queued.Enqueue(duration);
+        _queuedTime += duration;
     }
 
     // Float samples to 16-bit little-endian, rounded and clamped, as VideoTexture gives them to its sound.

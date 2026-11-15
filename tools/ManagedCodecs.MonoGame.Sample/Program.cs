@@ -26,5 +26,12 @@ if (typeof(H264Decoder).Assembly.GetCustomAttribute<DebuggableAttribute>() is { 
 }
 
 using var game = new PlayerGame(args[0], certificateHash);
+
+// Ctrl+C ends a live view as Escape does, so that its last title line is printed.
+Console.CancelKeyPress += (_, e) =>
+{
+    e.Cancel = true;
+    game.Quit();
+};
 game.Run();
 return 0;

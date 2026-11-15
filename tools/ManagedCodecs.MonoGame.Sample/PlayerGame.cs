@@ -25,6 +25,7 @@ internal sealed class PlayerGame : Game
     private AudioTrack? _audio;
     private LiveView? _live;
     private bool _spaceDown;
+    private int _quit;
 
     public PlayerGame(string path, string? certificateHash = null)
     {
@@ -35,6 +36,9 @@ internal sealed class PlayerGame : Game
         Window.Title = Path.GetFileName(path);
         IsMouseVisible = true;
     }
+
+    /// <summary>Ends a live view at its next update, as Escape does (Ctrl+C, from another thread).</summary>
+    public void Quit() => Volatile.Write(ref _quit, 1);
 
     protected override void LoadContent()
     {
@@ -74,6 +78,12 @@ internal sealed class PlayerGame : Game
     protected override void Update(GameTime gameTime)
     {
         var keyboard = Keyboard.GetState();
+        if (_live is null && Volatile.Read(ref _quit) != 0)
+        {
+            Exit();
+            return;
+        }
+
         if (_live is { } live)
         {
             UpdateLive(live, keyboard);
@@ -123,13 +133,15 @@ internal sealed class PlayerGame : Game
     // A live camera: escape quits; a final error (a wrong password, a refused certificate) ends it too.
     private void UpdateLive(LiveView live, KeyboardState keyboard)
     {
-        if (keyboard.IsKeyDown(Keys.Escape) || live.Player.State == ManagedCodecs.Playback.LiveState.Failed)
+        if (keyboard.IsKeyDown(Keys.Escape) || Volatile.Read(ref _quit) != 0 || live.Player.State == ManagedCodecs.Playback.LiveState.Failed)
         {
             if (live.Player.Error is { } error)
             {
                 Console.Error.WriteLine($"mcplay: {error.Message}");
             }
 
+            // The title's last line, for a run nobody watched (under Xvfb, ended with Ctrl+C).
+            Console.Error.WriteLine(Window.Title);
             Exit();
             return;
         }
@@ -138,7 +150,8 @@ internal sealed class PlayerGame : Game
         var s = live.Player.Statistics;
         string sound = live.Player.Audio is { } a ? $", sound {a.Codec} {a.SampleRate} Hz ({s.DecodedAudioFrames} frames, {s.DroppedAudioFrames} dropped, ran dry {live.RanDry})"
             : live.Player.SkippedAudioCodec is { } skipped ? $", sound {skipped} not played" : ", no sound";
-        Window.Title = $"mcplay: {live.Player.State}, {s.DecodedFrames} frames, {s.DroppedFrames} dropped, {s.LostPackets} packets lost{sound}";
+        string sync = live.SyncedFrames > 0 ? $", lip sync: {live.SyncedFrames} pictures waited for the sound ({live.MeanWaitMilliseconds:F0} ms a picture, the sound {live.LastOffsetMilliseconds:F0} ms past the last)" : "";
+        Window.Title = $"mcplay: {live.Player.State}, {s.DecodedFrames} frames, {s.DroppedFrames} dropped, {s.LostPackets} packets lost{sound}{sync}";
     }
 
     // A sound-only file: escape quits, space pauses, and it ends with its sound.

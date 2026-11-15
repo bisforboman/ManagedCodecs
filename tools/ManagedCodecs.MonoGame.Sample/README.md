@@ -5,7 +5,8 @@ AAC or MP3 audio) in a MonoGame window with the `ManagedCodecs.MonoGame` package
 costs. Not a media player: no seeking; space pauses, Escape quits. A file without video (.wav, raw MP3 or AAC) plays
 its sound alone, the window black, through `ManagedCodecs.MonoGame`'s `AudioTrack`. A camera's URL plays live
 (`LiveView.cs`, issue #526): `LivePlayer`'s newest picture each frame of the game, and over RTSP or RTSPS the camera's
-sound (`RtspSource.Audio`, `LivePlayer.TakeAudio`) through a dynamic sound, as it comes, with no lip sync. The sound
+sound (`RtspSource.Audio`, `LivePlayer.TakeAudio`) through a dynamic sound, as it comes, the picture waiting for it
+(lip sync, below). The sound
 starts once 100 ms is queued (and again after running dry), and at most 250 ms is queued: the rest waits in the
 player, whose own queue drops the oldest (`LiveStatistics.DroppedAudioFrames`) rather than letting the delay grow. Escape quits; a final
 error (a wrong password, a refused certificate) ends it, and the title shows the state, the frames, the packets lost
@@ -17,6 +18,21 @@ and the sound.
 
 Live mode was run under Xvfb (2026-11-15) against mediamtx 1.21.3 serving FFmpeg's push of a 640x360 H.264 clip with
 48 kHz AAC: the picture played, about 47 sound frames a second were decoded and none dropped, no packet lost.
+
+**Lip sync** (docs/decisions/2026-11-15-live-rtcp.md, point 3). The sound is heard later than its picture arrives, by
+what is queued ahead of it, so `LiveView` keeps the pictures it takes (12 at most) and shows one once the sound being
+heard was captured when it was: `RgbaFrame.CaptureTime` against the `AudioChunk.CaptureTime` of the buffer playing and
+how long that has played. Without those times (before the camera's first RTCP sender reports, MJPEG over HTTP, no
+sound, a sound that ran dry) the picture is the newest, at once, as before; so is one more than a second ahead of the
+sound, whose times then aren't of one clock. The title says how many pictures waited, how long on average, and how
+far the sound was past the last one shown. Ctrl+C ends a live view as Escape does and prints the title's last line.
+
+Run under Xvfb (2026-11-15) against mediamtx 1.21.3 serving FFmpeg's push of a 640x360 H.264 clip (25 frames a
+second) with 48 kHz AAC, OpenAL's null output, 40 s: 968 of 976 pictures shown had waited for the sound, 348 ms on
+average (the 100 to 250 ms queued in the sound, and FFmpeg's 64 to 85 ms of AAC a packet), the sound 6 ms past the
+last one; no sound dropped, none ran dry. So mediamtx's sender reports place both tracks, and the picture's delay is
+what the sound's queue costs. Those figures are the sample's own arithmetic: nobody has watched and listened, and what
+the sound device buffers after the mix isn't counted, so the sound is heard that much later still.
 
 **The live sound, measured** (2026-11-15, the same setup, the clip's sound a 440 Hz tone). The VM has no sound device,
 but OpenAL Soft writes what it mixed to a file (`drivers=wave` in the file `ALSOFT_CONF` names), and a gap in a steady

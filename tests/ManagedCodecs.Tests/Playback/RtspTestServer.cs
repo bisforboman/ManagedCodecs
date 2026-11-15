@@ -42,6 +42,18 @@ internal sealed class RtspTestServer : IDisposable
     /// </summary>
     public bool UdpOnly { get; set; }
 
+    /// <summary>
+    /// Answer 461 to every SETUP but one for multicast, as mediamtx set to multicast only does, and send each track to
+    /// a group of its own from this address on (the next track's is the next address), all on <see cref="MulticastPort"/>.
+    /// </summary>
+    public IPAddress? MulticastGroup { get; set; }
+
+    /// <summary>The groups' RTP port; RTCP is the next.</summary>
+    public int MulticastPort { get; set; }
+
+    /// <summary>With <see cref="MulticastGroup"/>: leave the group and port out of SETUP's answer.</summary>
+    public bool MulticastUnnamed { get; set; }
+
     /// <summary>The SSRC SETUP's answer gives for UDP, or null to give none.</summary>
     public uint? Ssrc { get; set; }
 
@@ -173,8 +185,15 @@ internal sealed class RtspTestServer : IDisposable
                 {
                     Requests.Enqueue(request);
                     string cseq = request.Headers.GetValueOrDefault("CSeq", "0");
-                    var (status, reason, headers, body) = Answer(request, index);
-                    if (request.Method == "SETUP" && status == 200 && ClientPort(request) is { } port)
+                    var (status, reason, headers, body) = Answer(request, index, udpClients.Count);
+                    if (request.Method == "SETUP" && status == 200 && MulticastGroup is { } group)
+                    {
+                        // Sent on the loopback interface, where the client joins for a connection to this machine.
+                        _rtp.Client.SetSocketOption(SocketOptionLevel.IP, SocketOptionName.MulticastInterface, IPAddress.Loopback.GetAddressBytes());
+                        _rtcp.Client.SetSocketOption(SocketOptionLevel.IP, SocketOptionName.MulticastInterface, IPAddress.Loopback.GetAddressBytes());
+                        udpClients.Add(new IPEndPoint(GroupOf(group, udpClients.Count), MulticastPort));
+                    }
+                    else if (request.Method == "SETUP" && status == 200 && ClientPort(request) is { } port)
                     {
                         udpClients.Add(new IPEndPoint(IPAddress.Loopback, port));
                     }
@@ -234,7 +253,14 @@ internal sealed class RtspTestServer : IDisposable
         }
     }
 
-    private (int Status, string Reason, List<(string, string)> Headers, string Body) Answer(RtspRequest request, int index)
+    private static IPAddress GroupOf(IPAddress first, int track)
+    {
+        var bytes = first.GetAddressBytes();
+        bytes[3] += (byte)track;
+        return new IPAddress(bytes);
+    }
+
+    private (int Status, string Reason, List<(string, string)> Headers, string Body) Answer(RtspRequest request, int index, int tracks)
     {
         if (Status?.Invoke(request.Method, index) is { } forced)
         {
@@ -258,6 +284,9 @@ internal sealed class RtspTestServer : IDisposable
         {
             "OPTIONS" => (200, "OK", [("Public", "OPTIONS, DESCRIBE, SETUP, PLAY, GET_PARAMETER, TEARDOWN")], ""),
             "DESCRIBE" => (200, "OK", [("Content-Base", Uri + "/"), ("Content-Type", "application/sdp")], Sdp),
+            "SETUP" when MulticastGroup is { } group => request.Headers.GetValueOrDefault("Transport", "").Contains("multicast", StringComparison.Ordinal)
+                ? (200, "OK", [("Session", $"S{index}ession;timeout={SessionTimeout}"), ("Transport", MulticastUnnamed ? "RTP/AVP;multicast" : $"RTP/AVP;multicast;destination={GroupOf(group, tracks)};port={MulticastPort}-{MulticastPort + 1};ttl=1{(Ssrc is { } stream ? $";ssrc={stream:X8}" : "")}")], "")
+                : (461, "Unsupported Transport", [], ""),
             "SETUP" when ClientPort(request) is { } port =>
                 (200, "OK", [("Session", $"S{index}ession;timeout={SessionTimeout}"), ("Transport", $"RTP/AVP;unicast;client_port={port}-{port + 1};server_port={RtpEndPoint.Port}-{((IPEndPoint)_rtcp.Client.LocalEndPoint!).Port}{(Ssrc is { } ssrc ? $";ssrc={ssrc:X8}" : "")}")], ""),
             "SETUP" when UdpOnly => (461, "Unsupported Transport", [], ""),

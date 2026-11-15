@@ -376,6 +376,27 @@ The first run found the three differences those sections describe; the H.264 vid
 the three films added later, two matched at once; the third's frames were FFmpeg's but for its last row, which FFmpeg
 crops by the container's size.
 
+### MXF from other writers
+
+Every MXF sample is FFmpeg's own muxers' (or GStreamer's, which adds nothing to them). `tools/realworld.py` also reads
+three files from other writers (its PACKET_FILES; a job each), whose codec this library only names, so they are
+compared packet by packet: `mcdec --packets` against FFmpeg's demuxer's own packets (`ffprobe -fflags
++nofillin+noparse -show_data_hash MD5`), for the video and the first sound track: the codec's name, the sound's rate
+and channels, the number of packets, each one's size and MD5, and its presentation and decode times where FFmpeg
+gives any. The cloud sessions can't download them (archive.org's data hosts are refused there), so the comparison was
+first run in CI, on the branch.
+
+- Two of archive.org's `mxfburger` files (Public Domain Mark, pinned by the SHA-1 archive.org lists), a 9-second
+  advertisement: MPEG-2 at 29.97 with B pictures and temporal offsets, 280 pictures, with 16-bit mono and with 24-bit
+  5.1 PCM. Their first run found that `MxfDemuxer` never applied a reordered picture's offsets (Temporal offsets,
+  under MXF demuxing).
+- The first 32 MiB of a NASA broadcast file of 2.6 GB (jsc-pao-video-collection; by HTTP range, pinned by those bytes'
+  SHA-256), read as a file cut short: MPEG-2 and 24-bit PCM, 274 packets each, and seven more streams in FFmpeg's
+  reading (the other sound tracks among them), which are not compared.
+
+Not compared there: keyframe flags (FFmpeg's demuxer itself gives none) and the header's facts beyond the codec and
+the sound's format.
+
 ## SIMD and ARM64
 
 MJPEG: AVX2 IDCT, DC-only blocks, single-lookup coefficient decoding, buffer reuse, and for machines
@@ -758,9 +779,16 @@ what the file says, the file is followed and the test says so:
   MPEG-2 no decode times, and libavformat's start at -1; the test compares them a frame on.
 - Audio duration in the header: FFmpeg rescales the track's edit units to samples, rounded to the nearest (6 frames at
   29.97 are 9609.6 samples: 9610).
-- Temporal offsets: FFmpeg's muxer writes H.264 unreordered (PosTableIndex 0, offsets 0), so its packets' pts are their
-  dts though libx264 writes B pictures. `MxfConformanceTests` rewrites an index to check that offsets are applied only
-  to an element the index says is reordered, and that the random access flag sets the keyframes.
+- Temporal offsets (ST 377-1 11.2.3, Table 28): they lead from display order to stored order, the picture shown n-th
+  being stored at n plus its offset, and apply where a delta entry has PosTableIndex -1 (the picture's, which is the
+  second where a system item comes first). FFmpeg's demuxer then starts the decode times early by the largest offset,
+  and so does `MxfDemuxer`. FFmpeg's muxer writes them for MPEG-2 only: mxf-mpeg2-b (two B pictures between anchors)
+  has presentation times 0 3 1 2 6 4 5 and decode times from -1, as FFmpeg's. It writes H.264 unreordered
+  (PosTableIndex 0, offsets 0), so those packets' pts are their dts though libx264 writes B pictures.
+  `MxfConformanceTests` rewrites an H.264 sample's index to check that the offsets are applied whichever delta entry
+  says reordered and not without one, and that the random access flag sets the keyframes. mxf-mpeg2-b's GOPs are open:
+  the index gives their I pictures no random access flag, so only its first packet is a keyframe here, where
+  libavformat's parser marks every I picture one (the test lets that sample's differ, and no other's).
 - Clip-wrapped essence (FFmpeg's OP-Atom muxer, `-f mxf_opatom`: one track a file, the whole clip one element, though
   its essence container labels say frame wrapping): mxf-opatom-h264 is cut by the index entries' stream offsets,
   mxf-opatom-dnxhr by the index's constant edit unit size (no entries), each packet an edit unit as FFmpeg's;

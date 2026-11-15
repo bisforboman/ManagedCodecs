@@ -78,17 +78,17 @@ public sealed class LiveViewTests
     }
 
     [Fact]
-    public void TakesNoRoomWithoutAFrame()
+    public async Task TakesNoRoomWithoutAFrame()
     {
         using var session = HeadlessUnitTestSession.StartNew(typeof(TestApp));
-        var size = session.Dispatch(
+        var size = await session.Dispatch(
             () =>
             {
                 var view = new LiveView();
                 view.Measure(new Size(640, 480));
                 return view.DesiredSize;
             },
-            CancellationToken.None).GetAwaiter().GetResult();
+            CancellationToken.None);
         Assert.Equal(default, size);
     }
 

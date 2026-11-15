@@ -272,6 +272,20 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.Containers/Mxf/MxfDemuxer.cs",
          find="if (!partial || !Klv.Matches(key, EssenceElementPrefix) || length <= valueStart)", replace="if (true)",
          tests="DisplayName~mxf-h264-pcm-cut"),
+    # RTSPS (docs/decisions/2026-11-15-live-rtsps.md): rtsps' default port 322, no plain UDP over TLS, and the
+    # certificate check, pinned or the system's.
+    dict(file="src/ManagedCodecs.Playback/RtspSource.cs",
+         find="Uri.Port > 0 ? Uri.Port : Secure ? 322 : 554;", replace="Uri.Port > 0 ? Uri.Port : 554;",
+         tests="FullyQualifiedName~LiveRtspsTests"),
+    dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
+         find="if (setup.Status == 461 && source.Secure)", replace="if (false)",
+         tests="FullyQualifiedName~LiveRtspsTests"),
+    dict(file="src/ManagedCodecs.Playback/Rtsp/RtspConnection.cs",
+         find="return sha.ComputeHash(certificate.GetRawCertData()).AsSpan().SequenceEqual(pinned);", replace="return true;",
+         tests="FullyQualifiedName~LiveRtspsTests"),
+    dict(file="src/ManagedCodecs.Playback/Rtsp/RtspConnection.cs",
+         find="return errors == SslPolicyErrors.None;", replace="return true;",
+         tests="FullyQualifiedName~LiveRtspsTests"),
     # Following a file as it is written (Refresh): the element the writer is in waits until whole.
     dict(file="src/ManagedCodecs.Containers/Mxf/MxfDemuxer.cs",
          find="if (!partial || !Klv.Matches(key, EssenceElementPrefix) || length <= valueStart)",

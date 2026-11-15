@@ -419,7 +419,16 @@ public sealed class LivePlayer : IDisposable
         Task? audioPump = null;
         try
         {
-            rtsp = await RtspConnection.ConnectAsync(source.Uri.Host, source.Port, source.Credential, cancel.Token).ConfigureAwait(false);
+            try
+            {
+                rtsp = await RtspConnection.ConnectAsync(source.Uri.Host, source.Port, source.Credential, source.Secure, source.PinnedCertificate, cancel.Token).ConfigureAwait(false);
+            }
+            catch (System.Security.Authentication.AuthenticationException e)
+            {
+                // A refused certificate (or a server that speaks no TLS) is the same on the next try.
+                throw new FatalException(e);
+            }
+
             using var close = cancel.Token.Register(rtsp.Dispose);
             string url = source.RequestUrl;
             var options = await Request(rtsp, "OPTIONS", url, [], cancel.Token).ConfigureAwait(false);
@@ -438,6 +447,13 @@ public sealed class LivePlayer : IDisposable
             // docs/decisions/2026-11-14-live-rtsp-udp.md).
             string trackUrl = Sdp.Resolve(baseUrl, track.Control);
             var setup = await rtsp.RequestAsync("SETUP", trackUrl, [new("Transport", "RTP/AVP/TCP;unicast;interleaved=0-1")], cancel.Token).ConfigureAwait(false);
+            if (setup.Status == 461 && source.Secure)
+            {
+                // Over RTSPS the media stays inside TLS: UDP beside it would be in the clear, and encrypted UDP is SRTP
+                // keyed by MIKEY, which isn't supported (decision 2 of docs/decisions/2026-11-15-live-rtsps.md).
+                throw new FatalException(new NotSupportedException("The RTSPS server refuses RTP over the TLS connection (461) and wants SRTP over UDP, which isn't supported."));
+            }
+
             if (setup.Status == 461)
             {
                 udp = RtpUdpPorts.Bind(rtsp.LocalEndPoint.Address);

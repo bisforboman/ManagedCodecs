@@ -16,20 +16,23 @@ namespace ManagedCodecs.Cli;
 /// FFmpeg's push of the file in a loop. Prints the statistics; fails on a frame not in the file, a lost packet, a
 /// damaged frame, a reconnect, or too few frames before the time is up. With <c>--audio</c> it plays the stream's sound
 /// too (<see cref="RtspSource.Audio"/>) and checks each chunk taken against the file's decoded audio
-/// (docs/decisions/2026-11-15-live-rtsp-audio.md).
+/// (docs/decisions/2026-11-15-live-rtsp-audio.md). An <c>rtsps://</c> URL with <c>--certificate-hash</c> pins the server's
+/// certificate (docs/decisions/2026-11-15-live-rtsps.md).
 /// </summary>
 [SuppressMessage("Security", "CA5351:Do Not Use Broken Cryptographic Algorithms", Justification = "MD5 to compare frames with the file's: a checksum, not security.")]
 public static class LiveCheck
 {
     /// <summary>Plays <paramref name="url"/> until <paramref name="frames"/> frames are shown; 0 when all is well.</summary>
-    public static int Run(string url, string reference, int frames, TimeSpan timeout, bool audio = false)
+    public static int Run(string url, string reference, int frames, TimeSpan timeout, bool audio = false, string? certificateHash = null)
     {
         var known = ReferenceHashes(reference);
         Console.WriteLine($"{Path.GetFileName(reference)}: {known.Count} distinct frames.");
         var (knownAudio, audioSeconds) = audio ? ReferenceAudio(reference) : ([], 0);
 
         var uri = new Uri(url);
-        using var player = uri.Scheme == "rtsp" ? new LivePlayer(new RtspSource(uri) { Audio = audio }) : new LivePlayer(new MjpegHttpSource(uri));
+        using var player = uri.Scheme is "rtsp" or "rtsps"
+            ? new LivePlayer(new RtspSource(uri) { Audio = audio, CertificateHash = certificateHash })
+            : new LivePlayer(new MjpegHttpSource(uri));
         player.Start();
         var clock = Stopwatch.StartNew();
         int shown = 0;

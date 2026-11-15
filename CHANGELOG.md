@@ -11,6 +11,15 @@ share internals, so each depends on the others at exactly its own version (`[X]`
 then reports a mix of versions (NU1107, or NU1608 for a newer one referenced directly) rather than letting it fail at
 run time.
 
+## Unreleased
+
+### Added
+
+- Playback: RTSPS. `RtspSource` takes `rtsps://` URLs (port 322 by default) and plays them over TLS, RTP inside the
+  encrypted connection; `RtspSource.CertificateHash` pins a camera's certificate by its SHA-256 (most are
+  self-signed), else the system validates it. A server that wants SRTP over UDP instead (461) is refused with an error
+  that says so. docs/decisions/2026-11-15-live-rtsps.md.
+
 ## 0.16.0 – 2026-11-15
 
 Sound from live cameras (`RtspSource.Audio`, `LivePlayer.TakeAudio`: AAC and G.711 over RTSP), and MXF files still

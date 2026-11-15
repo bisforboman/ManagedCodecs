@@ -218,6 +218,24 @@ it on purpose.
   clip's, with none lost or damaged and no reconnects.
 - **Not tried yet:** a real network that loses or reorders packets, a NAT between camera and viewer, and an IP camera.
 
+### RTSPS
+
+`RtspSource` takes `rtsps://` URLs: RTSP over TLS, RTP interleaved inside it (docs/decisions/2026-11-15-live-rtsps.md).
+
+- **`LiveRtspsTests`** gives `RtspTestServer` a self-signed certificate the test makes, and serves FFmpeg's recorded RTP
+  inside TLS:
+  - with the certificate pinned (`CertificateHash`), every unit is received and decoded, none lost or damaged;
+  - without a pin (the system's validation) or with another certificate's, the player fails at once, without sending a
+    request, and doesn't try again;
+  - a 461 over TLS ends with the SRTP error, without a second SETUP for plain UDP;
+  - rtsps' default port is 322, and the hash is read with colons or without.
+- **Mutation entries:** the default port, the refusal of plain UDP over TLS, and both certificate checks.
+- **mediamtx 1.21.3, nightly** (tools/rtsp-nightly.py), with `rtspEncryption: strict` and a certificate openssl makes,
+  pinned by `mcdec --live --certificate-hash`, FFmpeg pushing over RTSPS. Measured for the note: it accepts RTP
+  over the TLS connection, answers plain UDP with 461 and SRTP without MIKEY with 400. The first run (2026-11-15) showed
+  100 frames, all the clip's, with none lost or damaged and no reconnects.
+- **Not tried yet:** an IP camera's or an NVR's RTSPS, and TLS through a proxy.
+
 ### Audio over RTSP
 
 With `RtspSource.Audio`, `LivePlayer` sets up the camera's first AAC or G.711 audio track beside the video

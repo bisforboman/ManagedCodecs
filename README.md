@@ -529,7 +529,12 @@ if (player.TakeLatest() is { } frame)
     Q RFC 2435 reserves.
   - Checked against GStreamer's RTSP server by hand, and nightly against mediamtx, over UDP too (docs/conformance.md,
     H.264 over RTSP, JPEG over RTP, RTP over UDP).
-  - Not yet: multicast, RTSPS, H.265, JPEG over 2040 pixels.
+  - **RTSPS:** an `rtsps://` URL (port 322 by default) plays over TLS, RTP inside the encrypted connection; a server
+    that refuses that (461) wants SRTP over UDP, which isn't supported. The certificate is validated by the system, or
+    pinned: `new RtspSource(uri) { CertificateHash = "AB:CD:..." }` accepts that certificate (its SHA-256, as a browser
+    or `openssl x509 -fingerprint -sha256` shows it) and no other, as most cameras' are self-signed
+    (docs/decisions/2026-11-15-live-rtsps.md).
+  - Not yet: multicast, SRTP, H.265, JPEG over 2040 pixels.
 - **Sound:** `new RtspSource(uri) { Audio = true }` plays the camera's sound too: the first audio track of its SDP
   that is AAC (RFC 3640's `MPEG4-GENERIC`, AAC LC and HE-AAC) or G.711 (A-law, µ-law), set up beside the video on the
   same transport. `player.TakeAudio()` returns it as float stereo chunks, in order, for the application's sound output

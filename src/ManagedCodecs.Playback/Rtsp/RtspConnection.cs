@@ -1,5 +1,8 @@
 using System.Net;
+using System.Net.Security;
 using System.Net.Sockets;
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 
 namespace ManagedCodecs.Playback.Rtsp;
@@ -25,10 +28,10 @@ internal sealed class RtspConnection : IDisposable
     private int _end;
     private int _sequence;
 
-    private RtspConnection(TcpClient tcp, NetworkCredential? credential)
+    private RtspConnection(TcpClient tcp, Stream stream, NetworkCredential? credential)
     {
         _tcp = tcp;
-        _stream = tcp.GetStream();
+        _stream = stream;
         _credential = credential;
     }
 
@@ -41,19 +44,33 @@ internal sealed class RtspConnection : IDisposable
     /// <summary>The server's end: where RTP over UDP comes from, unless SETUP's answer names a source.</summary>
     public IPEndPoint RemoteEndPoint => (IPEndPoint)_tcp.Client.RemoteEndPoint!;
 
-    public static async Task<RtspConnection> ConnectAsync(string host, int port, NetworkCredential? credential, CancellationToken token)
+    /// <summary>
+    /// Connects to <paramref name="host"/>; with <paramref name="secure"/>, then over TLS (RTSPS: the server name checked
+    /// against the certificate), the certificate accepted by the system's validation or, where <paramref name="pinned"/>
+    /// is given, only if its SHA-256 is that.
+    /// </summary>
+    /// <exception cref="System.Security.Authentication.AuthenticationException">The TLS handshake failed, or the certificate was refused.</exception>
+    public static async Task<RtspConnection> ConnectAsync(string host, int port, NetworkCredential? credential, bool secure, byte[]? pinned, CancellationToken token)
     {
         var tcp = new TcpClient { NoDelay = true };
         try
         {
-            // netstandard2.1 has no ConnectAsync with a token: closing the client ends the attempt.
+            // netstandard2.1 has no ConnectAsync (or TLS handshake) with a token: closing the client ends the attempt.
+            Stream stream;
             using (token.Register(tcp.Dispose))
             {
                 await tcp.ConnectAsync(host, port).ConfigureAwait(false);
+                stream = tcp.GetStream();
+                if (secure)
+                {
+                    var tls = new SslStream(stream, false, (_, certificate, _, errors) => Accepts(certificate, errors, pinned));
+                    await tls.AuthenticateAsClientAsync(host).ConfigureAwait(false);
+                    stream = tls;
+                }
             }
 
             token.ThrowIfCancellationRequested();
-            return new RtspConnection(tcp, credential);
+            return new RtspConnection(tcp, stream, credential);
         }
         catch
         {
@@ -221,8 +238,29 @@ internal sealed class RtspConnection : IDisposable
     /// <inheritdoc/>
     public void Dispose()
     {
+        _stream.Dispose();
         _tcp.Dispose();
         _writing.Dispose();
+    }
+
+    /// <summary>
+    /// Whether a server's certificate is accepted: with a pinned SHA-256, exactly the certificate it is the hash of,
+    /// whatever its chain, name or dates (a camera's self-signed one); without, only one the system validates.
+    /// </summary>
+    internal static bool Accepts(X509Certificate? certificate, SslPolicyErrors errors, byte[]? pinned)
+    {
+        if (pinned is null)
+        {
+            return errors == SslPolicyErrors.None;
+        }
+
+        if (certificate is null)
+        {
+            return false;
+        }
+
+        using var sha = SHA256.Create();
+        return sha.ComputeHash(certificate.GetRawCertData()).AsSpan().SequenceEqual(pinned);
     }
 
     // Where the head ends (its blank line's first byte), or -1 when it isn't all read yet.

@@ -4,7 +4,9 @@ namespace ManagedCodecs.Playback;
 
 /// <summary>
 /// A camera serving H.264 or JPEG over RTSP (RTSP 1.0, RTP over the RTSP connection, or over UDP when the camera answers
-/// 461 to that): what a <see cref="LivePlayer"/> connects to. Most IP cameras serve it, at a URL their manual gives (<c>rtsp://camera/stream1</c>, often with a
+/// 461 to that), or over RTSPS (<c>rtsps://</c>: RTSP over TLS, RTP over the encrypted connection only, the certificate
+/// validated by the system or pinned by <see cref="CertificateHash"/>; docs/decisions/2026-11-15-live-rtsps.md): what a
+/// <see cref="LivePlayer"/> connects to. Most IP cameras serve it, at a URL their manual gives (<c>rtsp://camera/stream1</c>, often with a
 /// substream at a lower resolution: show a wall of cameras from those). The first H.264 or JPEG video track of the
 /// camera's SDP plays. docs/decisions/2026-11-10-live-rtsp-h264.md, docs/decisions/2026-11-12-live-rtsp-jpeg.md,
 /// docs/decisions/2026-11-14-live-rtsp-udp.md. With <see cref="Audio"/>, its sound too.
@@ -12,22 +14,22 @@ namespace ManagedCodecs.Playback;
 public sealed class RtspSource
 {
     /// <summary>A source whose credentials, if any, are in the URL (<c>rtsp://user:password@camera/stream</c>).</summary>
-    /// <param name="uri">The stream's absolute rtsp URL.</param>
+    /// <param name="uri">The stream's absolute rtsp or rtsps URL.</param>
     public RtspSource(Uri uri)
         : this(uri, null)
     {
     }
 
     /// <summary>A source with credentials of its own (used in place of any in the URL).</summary>
-    /// <param name="uri">The stream's absolute rtsp URL.</param>
+    /// <param name="uri">The stream's absolute rtsp or rtsps URL.</param>
     /// <param name="credential">The user name and password the camera asks for (Basic or Digest); null for none.</param>
-    /// <exception cref="ArgumentException">Not an absolute rtsp URL.</exception>
+    /// <exception cref="ArgumentException">Not an absolute rtsp or rtsps URL.</exception>
     public RtspSource(Uri uri, NetworkCredential? credential)
     {
         ArgumentNullException.ThrowIfNull(uri);
-        if (!uri.IsAbsoluteUri || !uri.Scheme.Equals("rtsp", StringComparison.OrdinalIgnoreCase))
+        if (!uri.IsAbsoluteUri || !(uri.Scheme.Equals("rtsp", StringComparison.OrdinalIgnoreCase) || uri.Scheme.Equals("rtsps", StringComparison.OrdinalIgnoreCase)))
         {
-            throw new ArgumentException("Not an absolute rtsp URL.", nameof(uri));
+            throw new ArgumentException("Not an absolute rtsp or rtsps URL.", nameof(uri));
         }
 
         Uri = uri;
@@ -61,11 +63,69 @@ public sealed class RtspSource
     /// </summary>
     public bool Audio { get; init; }
 
+    /// <summary>
+    /// For an <c>rtsps://</c> source, the SHA-256 of the certificate the camera presents, in hex (64 digits; colons and
+    /// spaces between them, as browsers and <c>openssl x509 -fingerprint -sha256</c> show it, are ignored): that
+    /// certificate is accepted whatever its chain, name or dates, and no other. Null (the default) leaves the check to the
+    /// system: a trusted chain and the URL's host name. Most cameras' certificates are self-signed, or name the device
+    /// rather than its address, so they need this. Not used for <c>rtsp://</c>.
+    /// </summary>
+    /// <exception cref="ArgumentException">Not 32 bytes of hex.</exception>
+    public string? CertificateHash
+    {
+        get => _certificateHash;
+        init
+        {
+            _pinned = value is null ? null : ParseHash(value);
+            _certificateHash = value;
+        }
+    }
+
+    private readonly string? _certificateHash;
+    private readonly byte[]? _pinned;
+
+    // Whether the source is rtsps: RTSP over TLS.
+    internal bool Secure => Uri.Scheme.Equals("rtsps", StringComparison.OrdinalIgnoreCase);
+
+    // The pinned certificate's SHA-256, or null for the system's validation.
+    internal byte[]? PinnedCertificate => _pinned;
+
     // The URL as sent: without its user info, which goes into an Authorization header instead.
     internal string RequestUrl =>
         Uri.GetComponents(UriComponents.SchemeAndServer | UriComponents.PathAndQuery, UriFormat.UriEscaped);
 
-    internal int Port => Uri.Port > 0 ? Uri.Port : 554;
+    // rtsp's port 554, rtsps' 322 (IANA), unless the URL gives one.
+    internal int Port => Uri.Port > 0 ? Uri.Port : Secure ? 322 : 554;
+
+    private static byte[] ParseHash(string hex)
+    {
+        var digits = new System.Text.StringBuilder(64);
+        foreach (char c in hex)
+        {
+            if (c is ':' or ' ' or '-')
+            {
+                continue;
+            }
+
+            digits.Append(c);
+        }
+
+        if (digits.Length != 64)
+        {
+            throw new ArgumentException("A certificate's SHA-256 is 64 hex digits.", nameof(CertificateHash));
+        }
+
+        var bytes = new byte[32];
+        for (int i = 0; i < 32; i++)
+        {
+            if (!byte.TryParse(digits.ToString(2 * i, 2), System.Globalization.NumberStyles.HexNumber, System.Globalization.CultureInfo.InvariantCulture, out bytes[i]))
+            {
+                throw new ArgumentException("A certificate's SHA-256 is 64 hex digits.", nameof(CertificateHash));
+            }
+        }
+
+        return bytes;
+    }
 
     private static NetworkCredential? FromUserInfo(Uri uri)
     {

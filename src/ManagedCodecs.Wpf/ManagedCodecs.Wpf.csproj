@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- ManagedCodecs.Playback for WPF (issue #526, docs/decisions/2026-11-15-live-controls.md): LiveView shows a
+       LivePlayer's newest frame, drawn as an Image is. Windows only to run; CI builds and packs it on Linux
+       (EnableWindowsTargeting brings the Windows Desktop reference assemblies from nuget.org), and runs it nowhere. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <RootNamespace>ManagedCodecs.Wpf</RootNamespace>
+    <PackageId>ManagedCodecs.Wpf</PackageId>
+    <Description>Live cameras in WPF: LiveView shows a LivePlayer's newest frame (MJPEG over HTTP, H.264 or JPEG over RTSP and RTSPS), decoded in pure managed C# by ManagedCodecs.Playback, no native libraries.</Description>
+    <PackageTags>$(PackageTags);playback;live;camera;rtsp;ip-camera;wpf</PackageTags>
+    <!-- New in the release after 0.17.0: no earlier version on nuget.org to validate against (a restore of the baseline
+         fails, NU1101). The baseline pull request after the release that first ships it removes this line. -->
+    <PackageValidationBaselineVersion></PackageValidationBaselineVersion>
+  </PropertyGroup>
+
+  <!-- Its own page on nuget.org in place of the shared PACKAGE.md (Directory.Build.props). -->
+  <ItemGroup>
+    <None Remove="$(MSBuildThisFileDirectory)..\..\PACKAGE.md" />
+    <None Include="PACKAGE.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+  <!-- mclive-wpf's self-check (its frames option, .github/workflows/windows.yml) drives LiveView.Show and reads its bitmap. -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="mclive-wpf" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ManagedCodecs.Playback\ManagedCodecs.Playback.csproj" />
+  </ItemGroup>
+
+</Project>

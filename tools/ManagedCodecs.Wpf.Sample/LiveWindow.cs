@@ -3,28 +3,28 @@ using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using ManagedCodecs.Playback;
+using ManagedCodecs.Wpf;
 
 namespace ManagedCodecs.WpfSample;
 
 /// <summary>
-/// A window that shows the camera: on each frame WPF renders (<see cref="CompositionTarget.Rendering"/>), the newest
-/// decoded frame, if there is one, is written into a <see cref="WriteableBitmap"/>, and the status line says what the
-/// player is doing. WPF has no RGBA pixel format, so each frame's red and blue are swapped into BGRA first, in place:
-/// the frame is the window's until it goes back to the player.
+/// A window that shows the camera with ManagedCodecs.Wpf's <see cref="LiveView"/>, which shows the newest decoded frame
+/// on each frame WPF renders (<see cref="CompositionTarget.Rendering"/>); on each of those the status line says what
+/// the player is doing.
 /// </summary>
 /// <remarks>
-/// With a number of frames to show (<c>--frames</c>), a check of itself, for a machine nobody watches: each frame is
-/// compared with what WPF draws of the bitmap (<see cref="Drawn"/>), and after the last the status line goes to
-/// standard output and the application exits: 0, 1 if the player gave up, 2 if a frame was drawn wrong.
+/// With a number of frames to show (<c>--frames</c>), a check of itself, for a machine nobody watches: the window
+/// takes each frame from the player and hands it to the control (<c>LiveView.Show</c>), then compares the decoded
+/// frame with what WPF draws of the control's bitmap (<see cref="Drawn"/>), so the control's red and blue swap and its
+/// rows are what is checked. After the last frame the status line goes to standard output and the application exits:
+/// 0, 1 if the player gave up, 2 if a frame was drawn wrong.
 /// </remarks>
 internal sealed class LiveWindow : Window
 {
     private readonly LivePlayer _player;
-    private readonly Image _image = new() { Stretch = Stretch.Uniform };
+    private readonly LiveView _view = new();
     private readonly TextBlock _status = new() { Margin = new Thickness(8, 4, 8, 4), FontFamily = new FontFamily("Consolas"), Foreground = Brushes.White };
     private readonly int _frames;
-    private WriteableBitmap? _bitmap;
-    private int _shown;
     private long _differentRedAndBlue;
     private string? _drawnWrong;
 
@@ -40,13 +40,20 @@ internal sealed class LiveWindow : Window
         DockPanel.SetDock(status, Dock.Bottom);
         var panel = new DockPanel { Background = Brushes.Black };
         panel.Children.Add(status);
-        panel.Children.Add(_image);
+        panel.Children.Add(_view);
         Content = panel;
 
-        _player = uri.Scheme == "rtsp"
+        _player = uri.Scheme is "rtsp" or "rtsps"
             ? new LivePlayer(new RtspSource(uri))
             : new LivePlayer(new MjpegHttpSource(uri));
         _player.Start();
+
+        // Checking itself, the window feeds the control; otherwise the control reads the player on its own.
+        if (frames == 0)
+        {
+            _view.Player = _player;
+        }
+
         CompositionTarget.Rendering += OnRendering;
     }
 
@@ -59,49 +66,33 @@ internal sealed class LiveWindow : Window
 
     private void OnRendering(object? sender, EventArgs e)
     {
-        if (_player.TakeLatest() is { } frame)
+        if (_frames > 0 && _player.TakeLatest() is { } frame)
         {
-            Show(frame);
-            _player.Return(frame);
-            _shown++;
+            try
+            {
+                var decoded = (byte[])frame.Pixels.Clone();
+                _view.Show(frame);
+                _drawnWrong ??= Compare(decoded, Drawn(_view.Bitmap!), frame.Width, ref _differentRedAndBlue);
+            }
+            finally
+            {
+                _player.Return(frame);
+            }
         }
 
         var s = _player.Statistics;
-        _status.Text = $"{_player.State}  received {s.ReceivedFrames}  shown {_shown}  skipped {s.SkippedFrames}  dropped {s.DroppedFrames}  "
+        _status.Text = $"{_player.State}  received {s.ReceivedFrames}  shown {_view.ShownFrames}  skipped {s.SkippedFrames}  dropped {s.DroppedFrames}  "
             + $"damaged {s.DamagedFrames}  reconnects {s.Reconnects}  decode {s.DecodeMilliseconds:F1} ms  convert {s.ConvertMilliseconds:F1} ms"
             + (_player.Error is { } error ? $"  {error.GetType().Name}: {error.Message}" : "");
 
-        if (_frames > 0 && (_drawnWrong is not null || _player.State == LiveState.Failed || _shown >= _frames))
+        if (_frames > 0 && (_drawnWrong is not null || _player.State == LiveState.Failed || _view.ShownFrames >= _frames))
         {
             // Not a single pixel with red unlike blue would mean the check couldn't tell the two swapped.
-            _drawnWrong ??= _shown > 0 && _differentRedAndBlue == 0 ? "no pixel had red unlike blue, so the check of their order saw nothing" : null;
+            _drawnWrong ??= _view.ShownFrames > 0 && _differentRedAndBlue == 0 ? "no pixel had red unlike blue, so the check of their order saw nothing" : null;
             Console.WriteLine(_status.Text);
             Console.WriteLine(_drawnWrong ?? $"every frame drawn as decoded ({_differentRedAndBlue} pixels with red unlike blue)");
             CompositionTarget.Rendering -= OnRendering;
             Application.Current.Shutdown(_drawnWrong is not null ? 2 : _player.State == LiveState.Failed ? 1 : 0);
-        }
-    }
-
-    // Writes a frame into the bitmap (a new one when the size changes), as BGRA.
-    private void Show(RgbaFrame frame)
-    {
-        if (_bitmap is null || _bitmap.PixelWidth != frame.Width || _bitmap.PixelHeight != frame.Height)
-        {
-            _bitmap = new WriteableBitmap(frame.Width, frame.Height, 96, 96, PixelFormats.Bgra32, null);
-            _image.Source = _bitmap;
-        }
-
-        var pixels = frame.Pixels;
-        byte[]? decoded = _frames > 0 ? (byte[])pixels.Clone() : null;
-        for (int i = 0; i < pixels.Length; i += 4)
-        {
-            (pixels[i], pixels[i + 2]) = (pixels[i + 2], pixels[i]);
-        }
-
-        _bitmap.WritePixels(new Int32Rect(0, 0, frame.Width, frame.Height), pixels, frame.Width * 4, 0);
-        if (decoded is not null)
-        {
-            _drawnWrong ??= Compare(decoded, Drawn(_bitmap), frame.Width, ref _differentRedAndBlue);
         }
     }
 

@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- ManagedCodecs.Playback for Avalonia (issue #526, docs/decisions/2026-11-15-live-controls.md): LiveView shows a
+       LivePlayer's newest frame, drawn as an Image is. net10.0, like the other packages. -->
+  <PropertyGroup>
+    <RootNamespace>ManagedCodecs.Avalonia</RootNamespace>
+    <PackageId>ManagedCodecs.Avalonia</PackageId>
+    <Description>Live cameras in Avalonia: LiveView shows a LivePlayer's newest frame (MJPEG over HTTP, H.264 or JPEG over RTSP and RTSPS), decoded in pure managed C# by ManagedCodecs.Playback, no native libraries. Windows, macOS and Linux.</Description>
+    <PackageTags>$(PackageTags);playback;live;camera;rtsp;ip-camera;avalonia</PackageTags>
+    <!-- New in the release after 0.17.0: no earlier version on nuget.org to validate against (a restore of the baseline
+         fails, NU1101). The baseline pull request after the release that first ships it removes this line. -->
+    <PackageValidationBaselineVersion></PackageValidationBaselineVersion>
+  </PropertyGroup>
+
+  <!-- Its own page on nuget.org in place of the shared PACKAGE.md (Directory.Build.props). -->
+  <ItemGroup>
+    <None Remove="$(MSBuildThisFileDirectory)..\..\PACKAGE.md" />
+    <None Include="PACKAGE.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="ManagedCodecs.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ManagedCodecs.Playback\ManagedCodecs.Playback.csproj" />
+  </ItemGroup>
+
+</Project>

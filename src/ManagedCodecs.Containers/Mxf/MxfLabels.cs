@@ -144,6 +144,19 @@ internal static class MxfLabels
 
     public static ReadOnlySpan<byte> VerticalSubsampling => Element(0x02, 0x04, 0x01, 0x05, 0x01, 0x10, 0x00); // 3308
 
+    /// <summary>Transfer Characteristic (3210, once Capture Gamma), Coding Equations (321A) and Color Primaries (3219): each a label, <see cref="Transfer"/>, <see cref="Matrix"/> and <see cref="Primaries"/>.</summary>
+    public static ReadOnlySpan<byte> TransferCharacteristic => Element(0x02, 0x04, 0x01, 0x02, 0x01, 0x01, 0x01, 0x02);
+
+    public static ReadOnlySpan<byte> CodingEquations => Element(0x02, 0x04, 0x01, 0x02, 0x01, 0x01, 0x03, 0x01);
+
+    public static ReadOnlySpan<byte> ColorPrimaries => Element(0x09, 0x04, 0x01, 0x02, 0x01, 0x01, 0x06, 0x01);
+
+    public static ReadOnlySpan<byte> BlackRefLevel => Element(0x01, 0x04, 0x01, 0x05, 0x03, 0x03, 0x00); // 3304
+
+    public static ReadOnlySpan<byte> WhiteRefLevel => Element(0x01, 0x04, 0x01, 0x05, 0x03, 0x04, 0x00); // 3305
+
+    public static ReadOnlySpan<byte> ColorRange => Element(0x02, 0x04, 0x01, 0x05, 0x03, 0x05, 0x00); // 3306
+
     public static ReadOnlySpan<byte> AudioSamplingRate => Element(0x05, 0x04, 0x02, 0x03, 0x01, 0x01, 0x01); // 3D03
 
     public static ReadOnlySpan<byte> ChannelCount => Element(0x05, 0x04, 0x02, 0x01, 0x01, 0x04, 0x00); // 3D07
@@ -234,6 +247,69 @@ internal static class MxfLabels
             ? $"pcm_s{bits}le"
             : null;
 
+    // ---- Colour (the registers' TransferCharacteristic, CodingEquations and ColorPrimaries labels: 04.01.01.01, then
+    // 01, 02 or 03, then the value), as ITU-T H.273's code points. FFmpeg 6.1's demuxer reads each label below the same
+    // (ffprobe on a file with the label patched in), but for the two it doesn't know: sRGB and ICtCp.
+
+    /// <summary>
+    /// The transfer characteristic <paramref name="label"/> names, or unspecified for none known. BT.470's is gamma 2.2
+    /// to FFmpeg (its muxer writes the label for that), SMPTE 274M and 296M's (deprecated) is BT.709's, BT.2020's the
+    /// 10-bit code point; gamma 2.6 and the camera logs have no code point.
+    /// </summary>
+    public static ColorTransfer Transfer(ReadOnlySpan<byte> label) => ColourValue(label, 0x01) switch
+    {
+        0x01 => ColorTransfer.Gamma22,
+        0x02 or 0x04 => ColorTransfer.Bt709,
+        0x03 => ColorTransfer.Smpte240M,
+        0x05 => ColorTransfer.Bt1361,
+        0x06 => ColorTransfer.Linear,
+        0x07 => ColorTransfer.Smpte428,
+        0x08 => ColorTransfer.Xvycc,
+        0x09 => ColorTransfer.Bt2020TenBit,
+        0x0A => ColorTransfer.Smpte2084,
+        0x0B => ColorTransfer.AribStdB67,
+        0x0D => ColorTransfer.Srgb,
+        _ => ColorTransfer.Unspecified,
+    };
+
+    /// <summary>
+    /// The matrix the coding equations <paramref name="label"/> names, or unspecified for none known. BT.601's one
+    /// label stands for both BT.470 BG and SMPTE 170M (the same equations): BT.470 BG, as FFmpeg reads it.
+    /// </summary>
+    public static ColorMatrix Matrix(ReadOnlySpan<byte> label) => ColourValue(label, 0x02) switch
+    {
+        0x01 => ColorMatrix.Bt470BG,
+        0x02 => ColorMatrix.Bt709,
+        0x03 => ColorMatrix.Smpte240M,
+        0x04 => ColorMatrix.YCgCo,
+        0x05 => ColorMatrix.Identity,
+        0x06 => ColorMatrix.Bt2020Ncl,
+        0x07 => ColorMatrix.ICtCp,
+        _ => ColorMatrix.Unspecified,
+    };
+
+    /// <summary>
+    /// The colour primaries <paramref name="label"/> names, or unspecified for none known. The cinema mezzanine's
+    /// (SMPTE ST 2067-40) are the DCDM's XYZ, SMPTE ST 428-1's; ACES, P3 D60 and the camera gamuts have no code point.
+    /// </summary>
+    public static ColorPrimaries Primaries(ReadOnlySpan<byte> label) => ColourValue(label, 0x03) switch
+    {
+        0x01 => ManagedCodecs.ColorPrimaries.Smpte170M,
+        0x02 => ManagedCodecs.ColorPrimaries.Bt470BG,
+        0x03 => ManagedCodecs.ColorPrimaries.Bt709,
+        0x04 => ManagedCodecs.ColorPrimaries.Bt2020,
+        0x05 or 0x08 => ManagedCodecs.ColorPrimaries.Smpte428,
+        0x06 => ManagedCodecs.ColorPrimaries.Smpte432,
+        0x0A => ManagedCodecs.ColorPrimaries.Smpte431,
+        _ => ManagedCodecs.ColorPrimaries.Unspecified,
+    };
+
+    /// <summary>Byte 14 of a colour label of <paramref name="kind"/> (byte 13: 1 transfer, 2 equations, 3 primaries), or 0 for another label.</summary>
+    private static int ColourValue(ReadOnlySpan<byte> label, byte kind) =>
+        IsLabel(label) && label[8..13].SequenceEqual((ReadOnlySpan<byte>)[0x04, 0x01, 0x01, 0x01, kind]) && label[14] == 0 && label[15] == 0
+            ? label[13]
+            : 0;
+
     /// <summary>Whether <paramref name="container"/> is the D-10 mapping (SMPTE ST 386: generic container byte 14 01h).</summary>
     public static bool IsD10Container(ReadOnlySpan<byte> container) => IsGenericContainer(container) && container[13] == 0x01;
 
@@ -244,7 +320,7 @@ internal static class MxfLabels
     private static bool IsGenericContainer(ReadOnlySpan<byte> label) =>
         IsLabel(label) && label[8..13].SequenceEqual((ReadOnlySpan<byte>)[0x0D, 0x01, 0x03, 0x01, 0x02]);
 
-    /// <summary>A property's label: 06.0E.2B.34.01.01.01, the registry version, its bytes 9 to 14, then two zeros.</summary>
-    private static byte[] Element(byte version, byte b9, byte b10, byte b11, byte b12, byte b13, byte b14) =>
-        [0x06, 0x0E, 0x2B, 0x34, 0x01, 0x01, 0x01, version, b9, b10, b11, b12, b13, b14, 0x00, 0x00];
+    /// <summary>A property's label: 06.0E.2B.34.01.01.01, the registry version, its bytes 9 to 14 (or 15), then zeros.</summary>
+    private static byte[] Element(byte version, byte b9, byte b10, byte b11, byte b12, byte b13, byte b14, byte b15 = 0x00) =>
+        [0x06, 0x0E, 0x2B, 0x34, 0x01, 0x01, 0x01, version, b9, b10, b11, b12, b13, b14, b15, 0x00];
 }

@@ -64,6 +64,12 @@ public class MxfHeaderTests
                 Assert.Equal(expected.TryGetProperty("field_order", out var order) && order.GetString() == "progressive", track.FrameLayout == 0);
                 Assert.Equal(expected.GetProperty("time_base").GetString(), $"{track.EditRate.Denominator}/{track.EditRate.Numerator}");
                 Assert.Equal(DurationTs(expected), track.Duration);
+
+                // The descriptor's colour: the three labels and the range its reference levels give.
+                string? Name(string key) => expected.TryGetProperty(key, out var value) ? value.GetString() : null;
+                Assert.True(
+                    ColorReferences.Same(Name("color_range"), Name("color_primaries"), Name("color_transfer"), Name("color_space"), track.ColorRange, track.ColorPrimaries, track.ColorTransfer, track.ColorMatrix),
+                    $"range {track.ColorRange}, primaries {track.ColorPrimaries}, transfer {track.ColorTransfer}, matrix {track.ColorMatrix}; FFmpeg's {Name("color_range")}, {Name("color_primaries")}, {Name("color_transfer")}, {Name("color_space")}.");
             }
             else
             {
@@ -125,6 +131,138 @@ public class MxfHeaderTests
         Assert.Equal((48000, 1), sound.AudioSamplingRate);
         Assert.Equal(2, sound.Channels);
         Assert.Equal(3u, sound.FileTrackId);
+    }
+
+    /// <summary>
+    /// Every colour label of the SMPTE registers with a code point in ITU-T H.273 (byte 14 of 04.01.01.01.kind.value),
+    /// in a hand-made descriptor: FFmpeg's muxer writes only some, and one label for two code points (BT.709's transfer
+    /// for SMPTE 170M's, BT.601's equations for both BT.470 BG's and SMPTE 170M's). The expectations are what FFmpeg
+    /// 6.1's demuxer reads from a file with the label patched in, but for sRGB (transfer 0D) and ICtCp (equations 07),
+    /// which it doesn't know. The registry version (byte 8) is ignored; a label that isn't one of these is unspecified.
+    /// </summary>
+    [Theory]
+    [InlineData(1, 0x01, 4)] // BT.470: gamma 2.2 to FFmpeg
+    [InlineData(1, 0x02, 1)]
+    [InlineData(1, 0x03, 7)]
+    [InlineData(1, 0x04, 1)] // SMPTE 274M and 296M (deprecated): BT.709's
+    [InlineData(1, 0x05, 12)]
+    [InlineData(1, 0x06, 8)]
+    [InlineData(1, 0x07, 17)]
+    [InlineData(1, 0x08, 11)]
+    [InlineData(1, 0x09, 14)]
+    [InlineData(1, 0x0A, 16)]
+    [InlineData(1, 0x0B, 18)]
+    [InlineData(1, 0x0C, 2)] // gamma 2.6: no code point
+    [InlineData(1, 0x0D, 13)] // sRGB
+    [InlineData(1, 0x0E, 2)] // a camera log
+    [InlineData(1, 0x00, 2)]
+    [InlineData(2, 0x01, 5)]
+    [InlineData(2, 0x02, 1)]
+    [InlineData(2, 0x03, 7)]
+    [InlineData(2, 0x04, 8)]
+    [InlineData(2, 0x05, 0)] // GBR
+    [InlineData(2, 0x06, 9)]
+    [InlineData(2, 0x07, 14)] // ICtCp
+    [InlineData(2, 0x08, 2)]
+    [InlineData(3, 0x01, 6)]
+    [InlineData(3, 0x02, 5)]
+    [InlineData(3, 0x03, 1)]
+    [InlineData(3, 0x04, 9)]
+    [InlineData(3, 0x05, 10)]
+    [InlineData(3, 0x06, 12)]
+    [InlineData(3, 0x07, 2)] // ACES: no code point
+    [InlineData(3, 0x08, 10)] // the cinema mezzanine's: XYZ, as the DCDM's
+    [InlineData(3, 0x09, 2)] // P3 D60
+    [InlineData(3, 0x0A, 11)]
+    [InlineData(3, 0x0B, 2)]
+    public void ReadsTheDescriptorsColourLabels(byte kind, byte value, int codePoint)
+    {
+        (ColorTransfer, ColorMatrix, ColorPrimaries) Read(byte[] label)
+        {
+            var file = new HeaderBuilder();
+            file.Preface();
+            file.Picture(trackId: 1, fileTrackId: 2, trackNumber: 1, layout: 0, storedHeight: 576, aspect: null, more: [(kind switch { 1 => (ushort)0x3210, 2 => (ushort)0x321A, _ => (ushort)0x3219 }, label)]);
+            var track = MxfHeader.Build(file.Partition, file.Read()).Tracks[0];
+            Assert.Equal(ColorRange.Unspecified, track.ColorRange);
+            return (track.ColorTransfer, track.ColorMatrix, track.ColorPrimaries);
+        }
+
+        byte[] label = Convert.FromHexString("060E2B340401010D0401010100000000");
+        label[12] = kind;
+        label[13] = value;
+        var expected = (kind == 1 ? (ColorTransfer)codePoint : ColorTransfer.Unspecified, kind == 2 ? (ColorMatrix)codePoint : ColorMatrix.Unspecified, kind == 3 ? (ColorPrimaries)codePoint : ColorPrimaries.Unspecified);
+        Assert.Equal(expected, Read(label));
+
+        // Another registry version names the same label; a longer label (byte 15 set) or another kind of label doesn't.
+        label[7] = 0x01;
+        Assert.Equal(expected, Read(label));
+        label[14] = 0x01;
+        Assert.Equal((ColorTransfer.Unspecified, ColorMatrix.Unspecified, ColorPrimaries.Unspecified), Read(label));
+        label[14] = 0x00;
+        label[4] = 0x01;
+        Assert.Equal((ColorTransfer.Unspecified, ColorMatrix.Unspecified, ColorPrimaries.Unspecified), Read(label));
+        Assert.Equal((ColorTransfer.Unspecified, ColorMatrix.Unspecified, ColorPrimaries.Unspecified), Read(label[..8]));
+    }
+
+    /// <summary>
+    /// The range by the CDCI descriptor's black and white reference levels, colour range and component depth, as
+    /// FFmpeg 6.1's demuxer reads each combination (ffprobe on mxf-h264-colour-hlg with the values patched, or the
+    /// property's tag made one the primer doesn't map: -1 here): limited for BT.601's levels at the depth, full for 0, the
+    /// largest value and that or one more, where black may be missing; anything else unspecified.
+    /// </summary>
+    [Theory]
+    [InlineData(16, 235, 225, 8, ColorRange.Limited)]
+    [InlineData(64, 940, 897, 10, ColorRange.Limited)]
+    [InlineData(256, 3760, 3585, 12, ColorRange.Limited)]
+    [InlineData(0, 255, 256, 8, ColorRange.Full)]
+    [InlineData(0, 255, 255, 8, ColorRange.Full)]
+    [InlineData(0, 1023, 1024, 10, ColorRange.Full)]
+    [InlineData(0, 1023, 1023, 10, ColorRange.Full)]
+    [InlineData(0, 4095, 4096, 12, ColorRange.Full)]
+    [InlineData(-1, 255, 256, 8, ColorRange.Full)]
+    [InlineData(0, 255, 225, 8, ColorRange.Unspecified)]
+    [InlineData(16, 235, 256, 8, ColorRange.Unspecified)]
+    [InlineData(16, 255, 256, 8, ColorRange.Unspecified)]
+    [InlineData(1, 254, 254, 8, ColorRange.Unspecified)]
+    [InlineData(0, 254, 255, 8, ColorRange.Unspecified)]
+    [InlineData(0, 235, 225, 8, ColorRange.Unspecified)]
+    [InlineData(16, 240, 225, 8, ColorRange.Unspecified)]
+    [InlineData(16, 235, 225, 10, ColorRange.Unspecified)] // 8-bit levels at 10 bits
+    [InlineData(0, 255, 256, 10, ColorRange.Unspecified)]
+    [InlineData(16, 235, 225, 0, ColorRange.Unspecified)] // no depth to scale by
+    [InlineData(0, 255, 256, 0, ColorRange.Unspecified)]
+    [InlineData(16, 235, 225, -1, ColorRange.Unspecified)]
+    [InlineData(0, 255, 256, -1, ColorRange.Unspecified)]
+    [InlineData(-1, 235, 225, 8, ColorRange.Unspecified)]
+    [InlineData(16, -1, 225, 8, ColorRange.Unspecified)]
+    [InlineData(0, -1, 256, 8, ColorRange.Unspecified)]
+    [InlineData(16, 235, -1, 8, ColorRange.Unspecified)]
+    [InlineData(0, 255, -1, 8, ColorRange.Unspecified)]
+    [InlineData(-1, -1, 225, 8, ColorRange.Unspecified)]
+    [InlineData(-1, -1, 256, 8, ColorRange.Unspecified)]
+    [InlineData(-1, -1, -1, 8, ColorRange.Unspecified)]
+    [InlineData(0, 0xFFFF, 0x10000, 16, ColorRange.Full)]
+    [InlineData(0, 0x1FFFF, 0x20000, 17, ColorRange.Unspecified)] // no such depth
+    [InlineData(0, 127, 128, 7, ColorRange.Unspecified)]
+    public void TellsTheRangeByTheReferenceLevels(long black, long white, long range, int depth, ColorRange expected)
+    {
+        var more = new List<(ushort, byte[])>();
+        foreach (var (tag, value) in new[] { ((ushort)0x3304, black), ((ushort)0x3305, white), ((ushort)0x3306, range), ((ushort)0x3301, (long)depth) })
+        {
+            if (value >= 0)
+            {
+                byte[] bytes = new byte[4];
+                BinaryPrimitives.WriteUInt32BigEndian(bytes, (uint)value);
+                more.Add((tag, bytes));
+            }
+        }
+
+        var file = new HeaderBuilder();
+        file.Preface();
+        file.Picture(trackId: 1, fileTrackId: 2, trackNumber: 1, layout: 0, storedHeight: 576, aspect: null, more: more);
+        var track = MxfHeader.Build(file.Partition, file.Read()).Tracks[0];
+        Assert.Equal(expected, track.ColorRange);
+        Assert.Equal((ColorPrimaries.Unspecified, ColorTransfer.Unspecified, ColorMatrix.Unspecified), (track.ColorPrimaries, track.ColorTransfer, track.ColorMatrix));
     }
 
     [Fact]
@@ -246,7 +384,7 @@ public class MxfHeaderTests
 
         public void Preface() => _hasPreface = true;
 
-        public void Picture(uint trackId, uint fileTrackId, uint trackNumber, byte layout, uint storedHeight, (int, int)? aspect)
+        public void Picture(uint trackId, uint fileTrackId, uint trackNumber, byte layout, uint storedHeight, (int, int)? aspect, List<(ushort, byte[])>? more = null)
         {
             var props = new List<(ushort, byte[])>
             {
@@ -262,6 +400,7 @@ public class MxfHeaderTests
                 props.Add((0x320E, [.. I32(a.Item1), .. I32(a.Item2)]));
             }
 
+            props.AddRange(more ?? []);
             AddEssence(trackId, fileTrackId, trackNumber, MxfTrackKind.Picture, 0x0128, props);
         }
 
@@ -436,6 +575,13 @@ public class MxfHeaderTests
             [0x320C] = Convert.FromHexString("060E2B34010101010401030104000000"),
             [0x320E] = Convert.FromHexString("060E2B34010101010401010101000000"),
             [0x3201] = Convert.FromHexString("060E2B34010101020401060100000000"),
+            [0x3210] = Convert.FromHexString("060E2B34010101020401020101010200"),
+            [0x321A] = Convert.FromHexString("060E2B34010101020401020101030100"),
+            [0x3219] = Convert.FromHexString("060E2B34010101090401020101060100"),
+            [0x3301] = Convert.FromHexString("060E2B3401010102040105030A000000"),
+            [0x3304] = Convert.FromHexString("060E2B34010101010401050303000000"),
+            [0x3305] = Convert.FromHexString("060E2B34010101010401050304000000"),
+            [0x3306] = Convert.FromHexString("060E2B34010101020401050305000000"),
             [0x3D03] = Convert.FromHexString("060E2B34010101050402030101010000"),
             [0x3D07] = Convert.FromHexString("060E2B34010101050402010104000000"),
             [0x3D01] = Convert.FromHexString("060E2B34010101040402030304000000"),

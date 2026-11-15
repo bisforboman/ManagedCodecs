@@ -645,6 +645,13 @@ what the file says, the file is followed and the test says so:
   default); a file cut inside its header metadata is refused (`ReadsAClipCutShortAsOnePacket`). A clip-wrapped file cut
   short whose index survives (none of FFmpeg's muxers write one before the essence) is refused: no file shows what
   FFmpeg does there.
+- Files still being written (`MxfDemuxer.Refresh`): FFmpeg has nothing to compare with (its demuxer reads a file as far
+  as it is when opened), so `MxfFollowTests` grows samples under the demuxer, a few kilobytes at a time over the
+  finished file's bytes (mxf-h264-pcm, mxf-h264-pipe, mxf-h264-index with its body partitions' index segments, and
+  mxf-d10-pcm24's AES3 sound), and checks that the calls give every packet of a read of the finished file once, whole,
+  with its sequence and times, and in the end the same listing and streams; that the element the writer is in waits
+  until whole (a file opened cut short gives it to `ReadPackets` until the first `Refresh`); and that clip-wrapped
+  essence is refused.
 
 `PcmDecoderTests` decodes every sample's audio exactly as FFmpeg does (name.pcm.f32), and `SeekTests` seeks in every
 sample. `MxfConformanceTests` decodes the H.264 samples' frames with one and four threads and compares each with

@@ -11,6 +11,14 @@ share internals, so each depends on the others at exactly its own version (`[X]`
 then reports a mix of versions (NU1107, or NU1608 for a newer one referenced directly) rather than letting it fail at
 run time.
 
+## Unreleased
+
+### Added
+
+- Containers: `MxfDemuxer.Refresh()` follows an MXF file that is still being written (a recorder's output): each call
+  gives the packets written whole since the last, the element the writer is still in held back until whole; they are
+  the packets and times a read of the finished file gives. Clip-wrapped (OP-Atom) essence isn't followed.
+
 ## 0.15.0 – 2026-11-14
 
 Sound-only playback in MonoGame (`AudioTrack`), MXF start timecodes (`MxfDemuxer.StartTimecode`, `Timecode`) and MXF

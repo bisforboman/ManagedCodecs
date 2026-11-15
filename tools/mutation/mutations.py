@@ -272,6 +272,11 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.Containers/Mxf/MxfDemuxer.cs",
          find="if (!Klv.Matches(key, EssenceElementPrefix) || length <= valueStart)", replace="if (true)",
          tests="DisplayName~mxf-h264-pcm-cut"),
+    # Following a file as it is written (Refresh): the element the writer is in waits until whole.
+    dict(file="src/ManagedCodecs.Containers/Mxf/MxfDemuxer.cs",
+         find="if (!partial || !Klv.Matches(key, EssenceElementPrefix) || length <= valueStart)",
+         replace="if (!Klv.Matches(key, EssenceElementPrefix) || length <= valueStart)",
+         tests="FullyQualifiedName~MxfFollowTests"),
     # A cut 8-channel AES3 element keeps a sample whose kept channels' words are there (mxf-d10-pcm24-cut).
     dict(file="src/ManagedCodecs.Containers/Mxf/MxfDemuxer.cs",
          find="(size - header.Length + ((8 - _aes3Channels) * 4)) / (8 * 4)", replace="(size - header.Length) / (8 * 4)",

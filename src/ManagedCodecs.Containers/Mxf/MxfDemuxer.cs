@@ -36,7 +36,8 @@ namespace ManagedCodecs.Containers;
 /// A file cut short (a recording that never closed, a partial download) is read as far as it goes, as FFmpeg's demuxer
 /// reads it: the essence element the end falls in is the last packet, of the bytes there (an 8-channel AES3 element's
 /// samples whose kept channels are there); a clip-wrapped sound track whose index was cut off with the footer is still
-/// cut into pieces where its edit unit is a sample. A growing file is read as far as it was written when opened.
+/// cut into pieces where its edit unit is a sample. A growing file is read as far as it was written when opened, and
+/// followed as it grows by <see cref="Refresh"/>.
 /// </para>
 /// <para>
 /// The size is the sampled rectangle's (the picture a decoder gives, without the stored padding of a macroblock row),
@@ -63,6 +64,20 @@ public sealed class MxfDemuxer : IDemuxer
 
     // The packet (an index into _packets) of the essence element a file cut short ends in, or -1.
     private int _cut = -1;
+
+    // The tracks read, their stream indexes, and what the walk has found so far: where it stopped (the next item, or
+    // the element it ended in), each track's packet count, the index tables by BodySID; and how many packets Refresh has
+    // given. Refresh walks on from _walkEnd.
+    private MxfTrack? _video;
+    private MxfTrack? _audio;
+    private int _videoIndex = -1;
+    private int _audioIndex = -1;
+    private readonly Dictionary<uint, MxfIndex> _indexes = [];
+    private long _walkEnd;
+    private long _videoCount;
+    private long _audioCount;
+    private int _given;
+    private bool _clipWrapped;
 
     // Where each stream's read starts, as a sequence: 0 until a Seek moves it.
     private long _videoStart;
@@ -109,7 +124,9 @@ public sealed class MxfDemuxer : IDemuxer
                 _aes3Bytes = audio.QuantizationBits / 8;
             }
 
-            var indexes = Walk(partitions.Header.End, video, videoIndex, audio, audioIndex);
+            (_video, _videoIndex, _audio, _audioIndex) = (video, videoIndex, audio, audioIndex);
+            var indexes = _indexes;
+            Walk(partitions.Header.End, partial: true);
             if (video is not null && indexes.TryGetValue(video.BodySid, out var videoTable))
             {
                 SplitClip(videoIndex, videoTable, 0, 0);
@@ -131,32 +148,7 @@ public sealed class MxfDemuxer : IDemuxer
                 }
             }
 
-            if (video is not null)
-            {
-                Time(video, videoIndex, indexes.TryGetValue(video.BodySid, out var index) ? index : null);
-                long count = _packets.Count(p => p.StreamIndex == videoIndex);
-                Video = new VideoStreamInfo(
-                    VideoCodec(video.Codec),
-                    video.SampledWidth,
-                    video.SampledHeight,
-                    (double)video.EditRate.Numerator / video.EditRate.Denominator,
-                    count,
-                    new Rational(video.EditRate.Denominator, video.EditRate.Numerator),
-                    ReadOnlyMemory<byte>.Empty,
-                    videoIndex);
-            }
-
-            if (audio is not null)
-            {
-                int rate = audio.AudioSamplingRate.Numerator;
-                Time(audio, audioIndex, null);
-                var packets = _packets.Where(p => p.StreamIndex == audioIndex).ToList();
-                Audio = new AudioStreamInfo(audio.Codec is { } codec ? AudioCodec(codec) : "unknown", rate, audio.Channels, packets.Count, new Rational(1, rate), ReadOnlyMemory<byte>.Empty, audioIndex)
-                {
-                    Duration = packets.Count == 0 ? 0 : packets[^1].Pts + packets[^1].Duration,
-                };
-            }
-
+            Describe();
             if (Video is null && Audio is null)
             {
                 throw new NotSupportedException("The MXF file has no picture or sound track with essence in it.");
@@ -174,10 +166,10 @@ public sealed class MxfDemuxer : IDemuxer
     }
 
     /// <summary>The material package's first picture track, or null if it has none with essence in the file.</summary>
-    public VideoStreamInfo? Video { get; }
+    public VideoStreamInfo? Video { get; private set; }
 
     /// <summary>The material package's first sound track, or null if it has none with essence in the file.</summary>
-    public AudioStreamInfo? Audio { get; }
+    public AudioStreamInfo? Audio { get; private set; }
 
     /// <summary>
     /// The start of the material package's first timecode track (SMPTE ST 377-1 B.17: its timecode component's start,
@@ -193,6 +185,69 @@ public sealed class MxfDemuxer : IDemuxer
 
     /// <inheritdoc cref="AviDemuxer.ReadPacketsAsync"/>
     public IAsyncEnumerable<Packet> ReadPacketsAsync(CancellationToken cancellationToken = default) => ReadSteps.RunAsync(_stream, Steps(), "MXF", cancellationToken);
+
+    /// <summary>
+    /// Reads a file that is still being written (a recorder's output, watched as it grows): gives the packets of the
+    /// essence elements written whole since the last call, in file order, each read as it is enumerated; the first call
+    /// gives every whole packet so far. Their <see cref="Packet.Sequence"/> and times are those a read of the finished
+    /// file gives, and <see cref="ReadPackets"/>, <see cref="Video"/> and <see cref="Audio"/> include them from then on.
+    /// The element the writer is still in is held back until it is whole (a file cut short read only by
+    /// <see cref="ReadPackets"/> gives it as it is, the last packet), so poll this, as often as the caller likes, until
+    /// the file is finished: its footer written, or nothing new for long enough.
+    /// </summary>
+    /// <exception cref="NotSupportedException">The file's essence is clip-wrapped.</exception>
+    /// <exception cref="InvalidDataException">What was written since is malformed.</exception>
+    /// <remarks>
+    /// Keyframe flags and presentation times that come from an index table are those of the index tables read so far:
+    /// FFmpeg's muxer writes them in the footer (or in body partitions after the essence they index), so until then a
+    /// picture packet is a keyframe only for an intra-only codec or as the first, and its presentation time is its decode
+    /// time; <see cref="ReadPacketInfo"/> gives them as the indexes read since say. Clip-wrapped essence (an OP-Atom
+    /// file's single element a track) is whole only once the clip is finished, so it is not followed.
+    /// </remarks>
+    public IEnumerable<Packet> Refresh()
+    {
+        if (_clipWrapped)
+        {
+            throw new NotSupportedException("A clip-wrapped MXF file (OP-Atom) can't be followed as it is written: its essence is one element a track.");
+        }
+
+        try
+        {
+            if (_cut >= 0)
+            {
+                // The element the file ended in when opened: dropped, and read again whole by the walk.
+                if (_packets[_cut].StreamIndex == _videoIndex)
+                {
+                    _videoCount--;
+                }
+                else
+                {
+                    _audioCount--;
+                }
+
+                _packets.RemoveAt(_cut);
+                _positions.RemoveAt(_cut);
+                _lengths.RemoveAt(_cut);
+                _cut = -1;
+            }
+
+            Walk(_walkEnd, partial: false);
+            Describe();
+        }
+        catch (Exception e)
+        {
+            if (!Malformed.IsMalformedInput(e))
+            {
+                throw;
+            }
+
+            throw Malformed.Wrap(e, "MXF");
+        }
+
+        int from = Math.Min(_given, _packets.Count);
+        _given = _packets.Count;
+        return ReadSteps.Run(_stream, Steps(from, _given), "MXF");
+    }
 
     /// <summary>The packets <see cref="ReadPackets"/> gives, in its order and with its values, without their data and with no read of the file.</summary>
     public IEnumerable<PacketInfo> ReadPacketInfo() => _packets.Where(Included);
@@ -282,13 +337,14 @@ public sealed class MxfDemuxer : IDemuxer
     private bool Included(PacketInfo packet) =>
         packet.StreamIndex == Video?.StreamIndex ? packet.Sequence >= _videoStart : packet.Sequence >= _audioStart;
 
-    // Each included packet's read and packet, in file order.
-    private IEnumerable<ReadStep> Steps()
+    // Each included packet's read and packet, in file order; or, for Refresh, those from `from` to `to`, all of them.
+    private IEnumerable<ReadStep> Steps(int from = 0, int to = -1)
     {
-        for (int i = 0; i < _packets.Count; i++)
+        bool all = to >= 0;
+        for (int i = from; i < (all ? to : _packets.Count); i++)
         {
             var info = _packets[i];
-            if (!Included(info))
+            if (!all && !Included(info))
             {
                 continue;
             }
@@ -310,18 +366,19 @@ public sealed class MxfDemuxer : IDemuxer
     }
 
     /// <summary>
-    /// Walks every KLV item after the header partition pack: the essence elements of the two tracks become packets (in
-    /// file order, timed later by <see cref="Time"/>), index table segments are read; the rest is skipped. Returns the
-    /// index tables by BodySID.
+    /// Walks the KLV items from <paramref name="start"/> to the end of the file as it is now: the essence elements of the
+    /// two tracks become packets (in file order, timed later by <see cref="Time"/>), index table segments are read into
+    /// <see cref="_indexes"/>; the rest is skipped. An essence element the end falls in is a packet of the bytes there
+    /// where <paramref name="partial"/> (opening), else left for a later walk (<see cref="Refresh"/>). Sets
+    /// <see cref="_walkEnd"/> to where a later walk goes on.
     /// </summary>
-    private Dictionary<uint, MxfIndex> Walk(long start, MxfTrack? video, int videoIndex, MxfTrack? audio, int audioIndex)
+    private void Walk(long start, bool partial)
     {
-        var indexes = new Dictionary<uint, MxfIndex>();
+        var (video, videoIndex, audio, audioIndex, indexes) = (_video, _videoIndex, _audio, _audioIndex, _indexes);
         Span<byte> key = stackalloc byte[Klv.KeyLength];
         long length = _stream.Length;
-        long videoCount = 0;
-        long audioCount = 0;
-        for (long position = start; position < length && Klv.TryReadHeader(_stream, position, key, out long valueStart, out long size);)
+        long position = start;
+        for (; position < length && Klv.TryReadHeader(_stream, position, key, out long valueStart, out long size);)
         {
             // A file cut short (a recording that never closed, a partial download): the essence element the end falls in
             // is a packet of the bytes there, as FFmpeg's demuxer gives it (flagged corrupt), and the last; an index
@@ -329,7 +386,7 @@ public sealed class MxfDemuxer : IDemuxer
             long next = checked(valueStart + size);
             if (next > length)
             {
-                if (!Klv.Matches(key, EssenceElementPrefix) || length <= valueStart)
+                if (!partial || !Klv.Matches(key, EssenceElementPrefix) || length <= valueStart)
                 {
                     break;
                 }
@@ -348,14 +405,14 @@ public sealed class MxfDemuxer : IDemuxer
 
                 if (video is not null && number == video.TrackNumber)
                 {
-                    _packets.Add(new PacketInfo(videoIndex, videoCount++, (int)size, false, 0, 0, 0));
+                    _packets.Add(new PacketInfo(videoIndex, _videoCount++, (int)size, false, 0, 0, 0));
                     _positions.Add(valueStart);
                     _lengths.Add((int)size);
                 }
                 else if (audio is not null && number == audio.TrackNumber)
                 {
                     int pcm = _aes3Channels > 0 ? Aes3PcmSize(valueStart, size, _cut >= 0) : (int)size;
-                    _packets.Add(new PacketInfo(audioIndex, audioCount++, pcm, true, 0, 0, 0));
+                    _packets.Add(new PacketInfo(audioIndex, _audioCount++, pcm, true, 0, 0, 0));
                     _positions.Add(valueStart);
                     _lengths.Add((int)size);
                 }
@@ -379,13 +436,13 @@ public sealed class MxfDemuxer : IDemuxer
 
             if (_cut >= 0)
             {
-                break;
+                break; // the element the file ends in: a later walk reads it again from its key
             }
 
             position = next;
         }
 
-        return indexes;
+        _walkEnd = position;
     }
 
     // Whether a generic container element numbered trackNumber (its key's bytes 13 to 16) is an 8-channel AES3 element:
@@ -516,6 +573,8 @@ public sealed class MxfDemuxer : IDemuxer
             return;
         }
 
+        _clipWrapped = true;
+
         _packets.RemoveAt(at);
         _positions.RemoveAt(at);
         _lengths.RemoveAt(at);
@@ -524,6 +583,35 @@ public sealed class MxfDemuxer : IDemuxer
             _packets.Insert(at + k, element with { Sequence = k, Size = (int)pieces[k].Length });
             _positions.Insert(at + k, position + pieces[k].Offset);
             _lengths.Insert(at + k, (int)pieces[k].Length);
+        }
+    }
+
+    /// <summary>Times every packet (<see cref="Time"/>) and describes the two streams by the packets found so far.</summary>
+    private void Describe()
+    {
+        if (_video is { } video)
+        {
+            Time(video, _videoIndex, _indexes.TryGetValue(video.BodySid, out var index) ? index : null);
+            Video = new VideoStreamInfo(
+                VideoCodec(video.Codec),
+                video.SampledWidth,
+                video.SampledHeight,
+                (double)video.EditRate.Numerator / video.EditRate.Denominator,
+                _packets.Count(p => p.StreamIndex == _videoIndex),
+                new Rational(video.EditRate.Denominator, video.EditRate.Numerator),
+                ReadOnlyMemory<byte>.Empty,
+                _videoIndex);
+        }
+
+        if (_audio is { } audio)
+        {
+            int rate = audio.AudioSamplingRate.Numerator;
+            Time(audio, _audioIndex, null);
+            var packets = _packets.Where(p => p.StreamIndex == _audioIndex).ToList();
+            Audio = new AudioStreamInfo(audio.Codec is { } codec ? AudioCodec(codec) : "unknown", rate, audio.Channels, packets.Count, new Rational(1, rate), ReadOnlyMemory<byte>.Empty, _audioIndex)
+            {
+                Duration = packets.Count == 0 ? 0 : packets[^1].Pts + packets[^1].Duration,
+            };
         }
     }
 

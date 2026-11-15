@@ -82,6 +82,12 @@ Real streams, by hand:
   a frame; a screenshot showed testsrc2's bars in order and its frame counter. Its HTTP server sends the body as
   `Content-Type: application/octet-stream`, not multipart, so `LivePlayer` reads that type as multipart too (it refused
   it at first); its parts carry `Content-type` and `Content-length` in lower case and the boundary `ffmpeg`.
+- **On Windows, in WPF** (`.github/workflows/windows.yml`, weekly and on pull requests that change the sample; the only
+  job not on Linux): `tools/mjpeg-http-server.py` serving `samples/gstreamer/jpeg-422` (320x240, 5 JPEGs in a loop at
+  25 fps) to `mclive-wpf --frames 100` on `windows-2025`. Each frame shown is compared with what WPF draws of the
+  bitmap (a `RenderTargetBitmap`), so the order of red and blue and the rows are checked. The first run (2026-11-15):
+  100 frames shown of 102 received, each drawn as decoded. With the swap of red and blue taken out it failed at the
+  first frame. Nobody has looked at the window, and RTSP hasn't been run on Windows.
 - Not tried yet: mjpg-streamer, an ESP32-CAM, an IP camera.
 
 ### H.264 over RTP

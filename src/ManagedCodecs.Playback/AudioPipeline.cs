@@ -142,7 +142,7 @@ internal sealed class PlayedAudio
             }
 
             _sampleRate = frame.SampleRate;
-            (left ? _left : _right).AddRange(frame.Samples[0].AsSpan(0, frame.SampleCount));
+            (left ? _left : _right).AddRange(new ArraySegment<float>(frame.Samples[0], 0, frame.SampleCount));
             return Pair(Math.Min(_left.Count, _right.Count));
         }
 

@@ -11,7 +11,10 @@ share internals, so each depends on the others at exactly its own version (`[X]`
 then reports a mix of versions (NU1107, or NU1608 for a newer one referenced directly) rather than letting it fail at
 run time.
 
-## Unreleased
+## 0.17.0 – 2026-11-15
+
+Live cameras over RTSPS: `rtsps://` URLs over TLS, a camera's certificate pinned by `RtspSource.CertificateHash`. New
+public API, hence a minor version; code built against 0.16 keeps working.
 
 ### Added
 

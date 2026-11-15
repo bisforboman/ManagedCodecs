@@ -24,6 +24,8 @@ public class LiveRtspAudioTests
     [InlineData("heaac-stereo-44k", false, 44100)]
     [InlineData("wav-alaw-codes", false, 8000)] // the static payload type 8
     [InlineData("wav-mulaw-codes", true, 8000)] // PCMU/8000/2
+    [InlineData("aac-stereo-48k-latm", false, 48000)] // MP4A-LATM
+    [InlineData("aac-stereo-48k-latm", true, 48000)]
     public void PlaysTheAudioAsTheDecoderDecodesIt(string recording, bool udp, int chunkRate)
     {
         var track = RtpAudioDepacketizerTests.Track(recording);
@@ -149,7 +151,7 @@ public class LiveRtspAudioTests
     }
 
     [Theory]
-    [InlineData("m=audio 0 RTP/AVP 96\r\na=rtpmap:96 MP4A-LATM/16000/1\r\na=fmtp:96 cpresent=0;config=400028103fc0\r\n", "MP4A-LATM", null)]
+    [InlineData("m=audio 0 RTP/AVP 96\r\na=rtpmap:96 MP4A-LATM/16000/1\r\na=fmtp:96 cpresent=1;config=400028103fc0\r\n", "MP4A-LATM", null)] // its config in the stream, which is not read
 
     // An AudioSpecificConfig the decoder refuses (object type 5 bits of 0): no SETUP for it, and Error says why.
     [InlineData("m=audio 0 RTP/AVP 96\r\na=rtpmap:96 MPEG4-GENERIC/48000/2\r\na=fmtp:96 mode=AAC-hbr;sizelength=13;indexlength=3;indexdeltalength=3;config=0190\r\n", null, "config")]

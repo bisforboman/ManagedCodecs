@@ -338,7 +338,7 @@ MUTATIONS = [
     # RTSPS (docs/decisions/2026-11-15-live-rtsps.md): rtsps' default port 322, no plain UDP over TLS, and the
     # certificate check, pinned or the system's.
     dict(file="src/ManagedCodecs.Playback/RtspSource.cs",
-         find="Uri.Port > 0 ? Uri.Port : Secure ? 322 : 554;", replace="Uri.Port > 0 ? Uri.Port : 554;",
+         find=": HttpTunnel ? (Secure ? 443 : 80) : Secure ? 322 : 554;", replace=": HttpTunnel ? (Secure ? 443 : 80) : 554;",
          tests="FullyQualifiedName~LiveRtspsTests"),
     dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
          find="if (setup.Status == 461 && source.Secure)", replace="if (false)",
@@ -829,6 +829,16 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
          find="TimeSpan.FromTicks(timeout.Ticks / 2)", replace="timeout",
          tests="FullyQualifiedName~LiveRtspTests.KeepsTheSessionAliveAtHalfItsTimeout"),
+    # RTSP over HTTP (issue #527): no receiver reports through the tunnel, as live555 ended a tunnelled session at
+    # 65 s for them (docs/decisions/2026-11-16-live-rtsp-http.md) ...
+    dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
+         find="                if (!source.HttpTunnel)\n                {\n                    senders.Add(",
+         replace="                if (true)\n                {\n                    senders.Add(",
+         tests="FullyQualifiedName~LiveRtspHttpTests.KeepsTheSessionByKeepAlivesAndSendsNoReceiverReports"),
+    # ... and a 461 inside the tunnel is final: UDP beside it is what the tunnel is there to avoid.
+    dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
+         find="if (setup.Status == 461 && source.HttpTunnel)", replace="if (false)",
+         tests="FullyQualifiedName~LiveRtspHttpTests.DoesNotFallBackToUdpBesideTheTunnel"),
     # ---- JPEG over RTP (RFC 2435; docs/decisions/2026-11-12-live-rtsp-jpeg.md), rules neither FFmpeg's nor GStreamer's
     # packetizer reaches (both send Q 255 with the tables in every frame): Q below 128 scales K.1's tables by
     # Appendix A ...

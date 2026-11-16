@@ -380,6 +380,7 @@ public class MediaPlayerTests
             { Codec: CodecIds.Mp3 } audio => new Mp3Decoder(audio),
             { Codec: CodecIds.AdpcmImaWav } audio => new ImaAdpcmDecoder(audio),
             { Codec: CodecIds.AdpcmMs } audio => new MsAdpcmDecoder(audio),
+            { Codec: CodecIds.AdpcmG726 } audio => new G726Decoder(audio),
             { } audio when PcmDecoder.CanDecode(audio.Codec) => new PcmDecoder(audio),
             _ => null,
         };

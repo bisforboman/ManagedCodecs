@@ -305,6 +305,57 @@ public class LiveRtspUdpTests
     }
 
     [Fact]
+    public void PlaysOnWhenTheFirstIdrPictureLostAPacket()
+    {
+        // The 720p recording, whose parameter sets come only in the SDP, twice over; a packet of the first IDR picture
+        // never arrives. That unit, which the parameter sets came before, is skipped while the player waits for an IDR
+        // picture: the second pass's must bring them again, or no picture is ever shown on this connection.
+        const string Name = "h264-bench-720p";
+        var once = RtpH264DepacketizerTests.Recording(Name);
+        const uint length = 90000 * 2; // its 50 frames at 25 a second
+        var packets = once.Concat(once.Select((p, i) => Renumbered(p, (ushort)(SequenceOf(once[0]) + once.Count + i), TimestampOf(p) + length))).ToList();
+        var units = LiveRtspTests.AccessUnitsOf(packets);
+        var expected = LiveRtspTests.ExpectedFrames(Name, units);
+        int second = units.FindIndex(u => SequenceOf(u[0]) == (ushort)(SequenceOf(once[0]) + once.Count));
+        using var gate = new SemaphoreSlim(0);
+        using var server = new RtspTestServer(RtspTestServer.SdpOf(Name), async play =>
+        {
+            for (int i = 0; i < units.Count; i++)
+            {
+                foreach (var packet in units[i].Where(p => p != units[0][1]))
+                {
+                    await play.SendAsync(packet);
+                }
+
+                if (i >= second)
+                {
+                    await gate.WaitAsync(play.Token);
+                }
+            }
+
+            await Task.Delay(Timeout.Infinite, play.Token);
+        })
+        {
+            UdpOnly = true,
+            Ssrc = SsrcOf(once[0]),
+        };
+
+        using var player = new LivePlayer(new RtspSource(server.Uri) { MaxLag = TimeSpan.FromHours(1), StallTimeout = TimeSpan.FromMinutes(10) });
+        player.Start();
+        for (int i = second; i < units.Count; i++)
+        {
+            var frame = WaitFor(player, player.TakeLatest);
+            Assert.Equal(expected[i], frame.Pixels);
+            player.Return(frame);
+            gate.Release();
+        }
+
+        var statistics = player.Statistics;
+        Assert.Equal((1L, 0L), (statistics.LostPackets, statistics.Reconnects));
+        Assert.True(statistics.SkippedFrames >= second - 1, $"{statistics.SkippedFrames} skipped.");
+    }
+
+    [Fact]
     public void SaysUdpWasInUseWhenNothingCame()
     {
         using var server = new RtspTestServer(JpegSdp, play => Task.Delay(Timeout.Infinite, play.Token)) { UdpOnly = true };
@@ -319,6 +370,22 @@ public class LiveRtspUdpTests
     }
 
     private static string JpegSdp => "v=0\r\ns=-\r\nt=0 0\r\nm=video 0 RTP/AVP 26\r\na=control:trackID=1\r\n";
+
+    private static ushort SequenceOf(byte[] packet) => (ushort)((packet[2] << 8) | packet[3]);
+
+    private static uint TimestampOf(byte[] packet) => (uint)((packet[4] << 24) | (packet[5] << 16) | (packet[6] << 8) | packet[7]);
+
+    private static byte[] Renumbered(byte[] packet, ushort sequence, uint timestamp)
+    {
+        var copy = (byte[])packet.Clone();
+        copy[2] = (byte)(sequence >> 8);
+        copy[3] = (byte)sequence;
+        copy[4] = (byte)(timestamp >> 24);
+        copy[5] = (byte)(timestamp >> 16);
+        copy[6] = (byte)(timestamp >> 8);
+        copy[7] = (byte)timestamp;
+        return copy;
+    }
 
     private static uint SsrcOf(byte[] packet) => (uint)((packet[8] << 24) | (packet[9] << 16) | (packet[10] << 8) | packet[11]);
 

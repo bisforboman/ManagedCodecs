@@ -241,6 +241,19 @@ it on purpose.
     and reordering), `LostPackets` was still exactly the packets dropped (144, and 1622 of 3956), with no reconnect. At
     30% most pictures waited for the next IDR picture (743 of 1499 skipped), and 300 frames took 64 s. The receiver
     reports then trail what was dropped by up to their 5 s.
+- **`LossyNetworkTests`**, a network simulated on the test's own clock: each recording played three times over as one
+  stream (`h264-main-slices`, `h264-bench-720p`, `h264-b-motion`; AAC from FFmpeg's and GStreamer's packetizers),
+  through 0.5 to 3% loss, 2% repeated packets, 5% reordered within the 50 ms window and 1% delayed past it, six seeds
+  each, then the reorder window, the depacketizer and the decoder as `LivePlayer` chains them:
+  - The window passes packets on in order, each once, and the depacketizer counts as lost exactly what it never passed.
+  - A unit not marked damaged is the clean stream's byte for byte, and a unit that came whole is not marked damaged.
+  - H.264: every frame the decoder doesn't mark damaged is the clean stream's frame of that time, bit for bit, and an
+    IDR picture that came whole gives a clean frame. AAC: every access unit that comes out is the clean stream's.
+  - They found two bugs, which neither the twelve-seed test above (JPEG) nor the relay's runs reached. A gap inside
+    a picture also marked the next, whole picture damaged (`DamagedFrames` counted too many). And a stream whose
+    parameter sets come only in the SDP, whose first IDR picture lost a packet, never showed a picture: they came
+    before that picture alone, which was skipped, and every later IDR picture failed for want of them.
+    `LiveRtspUdpTests` checks the second through `LivePlayer`: the second pass's frames are shown.
 - **Not tried yet:** a real lossy network (Wi-Fi, a WAN), a NAT between camera and viewer, and an IP camera.
 
 ### RTSPS

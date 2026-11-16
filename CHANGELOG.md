@@ -13,10 +13,18 @@ run time.
 
 ## Unreleased
 
-New public API (`CaptureTime`), hence the next version is a minor one; code built against 0.17 keeps working.
+New public API (`CaptureTime`, `AudioTracks`, `SelectAudio`, `AudioTrack`), hence the next version is a minor one; code built against 0.17 keeps working.
 
 ### Added
 
+- Containers: sound tracks after the first. `IDemuxer.AudioTracks` lists a file's audio streams and
+  `IDemuxer.SelectAudio` chooses which of them `ReadPackets` gives, one or several in one pass; `Audio` is the first
+  one chosen, and until a choice is made the file's first audio stream is read alone, as before. `MxfDemuxer` lists
+  every sound track (broadcast MXF's mono track a channel), each with the packets FFmpeg's demuxer gives for it; the
+  other demuxers still list their first audio stream only (to follow, issue #535).
+  docs/decisions/2026-11-15-sound-tracks.md.
+- Playback: `PlaybackOptions.AudioTrack` chooses which audio track `MediaPlayer` and `AudioPlayer` play, counted from
+  0 in the file's order; a file with tracks but not that many is refused (`ArgumentOutOfRangeException`).
 - ManagedCodecs.Avalonia and ManagedCodecs.Wpf, two new packages: `LiveView`, a control that shows a `LivePlayer`'s
   newest frame on each frame the UI renders, laid out as an `Image` (`Stretch`, `StretchDirection`). The application
   makes, starts and disposes the player. docs/decisions/2026-11-15-live-controls.md.
@@ -28,6 +36,9 @@ New public API (`CaptureTime`), hence the next version is a minor one; code buil
 
 ### Changed
 
+- Playback: an MXF file with a mono sound track a channel now plays in stereo: the first track left and the second
+  right (or the track `PlaybackOptions.AudioTrack` names and the one after it), where the first track alone played on
+  both speakers. A mono track with no mono track of the same codec and rate after it still plays on both.
 - Playback: an RTSP session now sends RTCP receiver reports, one a track every 5 seconds, on the RTSP connection or
   from the RTCP port over UDP (loss, jitter, and the camera's last sender report echoed). Cameras and servers that drop
   a reader they hear no RTCP from keep playing. docs/decisions/2026-11-15-live-rtcp.md.
@@ -38,6 +49,11 @@ New public API (`CaptureTime`), hence the next version is a minor one; code buil
   says (MPEG-2 with B pictures, as broadcast MXF has it): they were the stored order's, each packet's pts its dts. The
   decode times now start before 0 by the reordering's depth, as FFmpeg's. Found by the nightly check's first MXF files
   from other writers (`tools/realworld.py`, packet by packet against FFmpeg).
+- Playback: a live H.264 camera whose parameter sets come only in its SDP (`sprop-parameter-sets`, as FFmpeg's
+  packetizer sends them) showed no picture at all on that connection, though `State` said `Playing`, when a packet
+  of the first IDR picture was lost: the parameter sets came before that picture alone, and it was skipped. They now
+  come before every IDR picture until the stream sends its own.
+- Playback: `LiveStatistics.DamagedFrames` counted a whole H.264 picture after one that lost a packet as damaged too.
 - Containers: `MxfDemuxer.Video` carries the picture descriptor's colour (`ColorPrimaries`, `ColorTransfer`,
   `ColorMatrix`, and `ColorRange` by its black and white reference levels), as FFmpeg's demuxer reads it; it was left
   unspecified. Decoded H.264 frames take it where the stream's VUI says nothing, as with MP4's 'colr', so HDR and

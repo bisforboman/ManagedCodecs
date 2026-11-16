@@ -14,14 +14,22 @@ public class MxfFollowTests
     [InlineData("mxf-h264-pipe.mxf", 30011)]
     [InlineData("mxf-h264-index.mxf", 65537)]
     [InlineData("mxf-d10-pcm24.mxf", 100003)]
-    public void GivesEveryPacketOnceAsTheFileGrows(string sampleName, int step)
+    [InlineData("mxf-h264-mono4.mxf", 4093)]
+    [InlineData("mxf-h264-mono4.mxf", 4093, new[] { 4, 2 })]
+    public void GivesEveryPacketOnceAsTheFileGrows(string sampleName, int step, int[]? tracks = null)
     {
         byte[] file = File.ReadAllBytes(TestSamples.PathOf(sampleName));
         using var finished = new MxfDemuxer(new MemoryStream(file));
-        var expected = finished.ReadPackets().ToList();
-
         var growing = new GrowingStream(file, file.Length / 5);
         using var demuxer = new MxfDemuxer(growing);
+        if (tracks is not null)
+        {
+            // Of several sound tracks, the selected ones are followed (unasked, the first).
+            finished.SelectAudio(tracks);
+            demuxer.SelectAudio(tracks);
+        }
+
+        var expected = finished.ReadPackets().ToList();
         var given = new List<Packet>();
         while (true)
         {

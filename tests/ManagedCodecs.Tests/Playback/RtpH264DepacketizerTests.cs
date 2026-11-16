@@ -130,7 +130,7 @@ public class RtpH264DepacketizerTests
     }
 
     [Fact]
-    public void PutsTheSdpsParameterSetsBeforeTheFirstUnitOnly()
+    public void PutsTheSdpsParameterSetsBeforeTheFirstUnitAndEachIdrPicture()
     {
         var parameterSets = RtpH264Depacketizer.ParseParameterSets("Z0LAH9kAUAW7ARAAAAMAEAAAAwMg8YMkgA==,aMuMsg==");
         Assert.Equal(2, parameterSets.Length);
@@ -143,6 +143,19 @@ public class RtpH264DepacketizerTests
         depacketizer.Add(Packet(2, 3000, true, [0x41, 2]), units);
         Assert.Equal([.. parameterSets, [0x65, 1]], SplitAnnexB(units[0].Data));
         Assert.Equal([[0x41, 2]], SplitAnnexB(units[1].Data));
+
+        // Before each later IDR picture too: a decoder that never got the first unit (its IDR picture lost a packet,
+        // skipped) has nothing else to decode by.
+        depacketizer.Add(Packet(3, 6000, true, [0x65, 3]), units);
+        Assert.Equal([.. parameterSets, [0x65, 3]], SplitAnnexB(units[2].Data));
+
+        // Until the stream sends its own, which may be newer: then none of the SDP's.
+        depacketizer.Add(Packet(4, 9000, false, [0x67, 9]), units);
+        depacketizer.Add(Packet(5, 9000, false, [0x68, 9]), units);
+        depacketizer.Add(Packet(6, 9000, true, [0x65, 4]), units);
+        depacketizer.Add(Packet(7, 12000, true, [0x65, 5]), units);
+        Assert.Equal([[0x67, 9], [0x68, 9], [0x65, 4]], SplitAnnexB(units[3].Data));
+        Assert.Equal([[0x65, 5]], SplitAnnexB(units[4].Data));
     }
 
     [Fact]
@@ -196,6 +209,23 @@ public class RtpH264DepacketizerTests
             Packet(3, 3000, true, [0x41, 2]),
             Packet(4, 6000, true, [0x41, 3]));
         Assert.Equal([false, true, false], units.Select(u => u.Damaged));
+    }
+
+    [Fact]
+    public void AGapInsideAUnitDamagesOnlyThatUnit()
+    {
+        // A unit of three single NAL units (slices) whose middle packet is lost, its marker kept: the next unit,
+        // whole, isn't damaged. Its marker lost too, the next unit is (the gap may have taken its start).
+        var units = Run(
+            Packet(1, 0, false, [0x65, 1]),
+            Packet(3, 0, true, [0x65, 3]),
+            Packet(4, 3000, true, [0x41, 4]));
+        Assert.Equal([true, false], units.Select(u => u.Damaged));
+
+        units = Run(
+            Packet(1, 0, false, [0x65, 1]),
+            Packet(4, 3000, true, [0x41, 4]));
+        Assert.Equal([true, true], units.Select(u => u.Damaged));
     }
 
     [Fact]

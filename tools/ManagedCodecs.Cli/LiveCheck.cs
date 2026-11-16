@@ -17,13 +17,22 @@ namespace ManagedCodecs.Cli;
 /// damaged frame, a reconnect, or too few frames before the time is up. With <c>--audio</c> it plays the stream's sound
 /// too (<see cref="RtspSource.Audio"/>) and checks each chunk taken against the file's decoded audio
 /// (docs/decisions/2026-11-15-live-rtsp-audio.md). An <c>rtsps://</c> URL with <c>--certificate-hash</c> pins the server's
-/// certificate (docs/decisions/2026-11-15-live-rtsps.md).
+/// certificate (docs/decisions/2026-11-15-live-rtsps.md). With <c>--lossy</c> the network in between loses packets
+/// for a while and then stops (tools/rtsp-lossy-relay.py): lost packets, damaged frames and frames not the file's are
+/// expected, but no reconnect, and the last <see cref="LossyTail"/> frames and chunks must be the file's again (but for the
+/// chunk that starts a loop of the file).
 /// </summary>
 [SuppressMessage("Security", "CA5351:Do Not Use Broken Cryptographic Algorithms", Justification = "MD5 to compare frames with the file's: a checksum, not security.")]
 public static class LiveCheck
 {
+    /// <summary>
+    /// With <c>--lossy</c>, the frames (and audio chunks) at the end that must be the file's: 3 s at 25 frames a
+    /// second, longer than the 2 s between the nightly clips' IDR pictures, which end a loss's damage.
+    /// </summary>
+    public const int LossyTail = 75;
+
     /// <summary>Plays <paramref name="url"/> until <paramref name="frames"/> frames are shown; 0 when all is well.</summary>
-    public static int Run(string url, string reference, int frames, TimeSpan timeout, bool audio = false, string? certificateHash = null)
+    public static int Run(string url, string reference, int frames, TimeSpan timeout, bool audio = false, string? certificateHash = null, bool lossy = false)
     {
         var known = ReferenceHashes(reference);
         Console.WriteLine($"{Path.GetFileName(reference)}: {known.Count} distinct frames.");
@@ -39,6 +48,8 @@ public static class LiveCheck
         int unknown = 0;
         int chunks = 0;
         int unknownChunks = 0;
+        int lastUnknown = 0;
+        var unknownChunkNumbers = new List<int>();
         while (shown < frames && clock.Elapsed < timeout && player.State is not (LiveState.Failed or LiveState.Stopped))
         {
             while (player.TakeAudio() is { } chunk)
@@ -47,6 +58,7 @@ public static class LiveCheck
                 if (!knownAudio.Contains(Hash(System.Runtime.InteropServices.MemoryMarshal.AsBytes(chunk.Samples.AsSpan()))))
                 {
                     unknownChunks++;
+                    unknownChunkNumbers.Add(chunks);
                 }
             }
 
@@ -60,7 +72,11 @@ public static class LiveCheck
             if (!known.Contains(Hash(frame.Pixels)))
             {
                 unknown++;
-                Console.WriteLine($"Frame {shown} ({frame.Width}x{frame.Height}, at {frame.Time.TotalSeconds:0.000} s) is none of the file's.");
+                lastUnknown = shown;
+                if (!lossy)
+                {
+                    Console.WriteLine($"Frame {shown} ({frame.Width}x{frame.Height}, at {frame.Time.TotalSeconds:0.000} s) is none of the file's.");
+                }
             }
 
             player.Return(frame);
@@ -73,7 +89,16 @@ public static class LiveCheck
             + $"decode {s.DecodeMilliseconds:0.0} ms, convert {s.ConvertMilliseconds:0.0} ms a frame.");
 
         bool ok = shown == frames && unknown == 0 && s.LostPackets == 0 && s.DamagedFrames == 0 && s.Reconnects == 0;
-        if (audio)
+        if (lossy)
+        {
+            // The audio's last chunks may hold one that isn't the file's: the first of a loop of the file (below).
+            int lateChunks = unknownChunkNumbers.Count(number => number > chunks - LossyTail);
+            Console.WriteLine($"lossy: the last frame not in the file was number {lastUnknown}; the last {LossyTail} must be the file's."
+                + (audio ? $" audio {player.Audio?.Codec ?? "none"}: {chunks} chunks taken, {unknownChunks} not in the file, {lateChunks} of them among the last {LossyTail} (1 allowed: a loop's first)." : ""));
+            ok = shown == frames && s.Reconnects == 0 && player.State == LiveState.Playing && lastUnknown <= shown - LossyTail
+                && (!audio || (player.Audio is not null && chunks > LossyTail && lateChunks <= 1 && s.DroppedAudioFrames == 0));
+        }
+        else if (audio)
         {
             // A frame's samples overlap the frame's before it (AAC LC without PNS depends on nothing earlier), so a
             // chunk is the file's unless the frame before it wasn't the file's previous one: the first one taken, and

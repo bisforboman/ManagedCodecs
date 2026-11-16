@@ -447,9 +447,10 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.Containers/Mp4/Mp4Demuxer.cs",
          find="if (Sizes[i] != 0 && IsKeyframe(i) && Pts(i) <= pts)", replace="if (Sizes[i] != 0 && IsKeyframe(i) && Pts(i) < pts)",
          tests="FullyQualifiedName~SeekTests"),
-    # The other stream starts at the same instant, not at its beginning.
+    # The other stream starts at the same instant, not at its beginning (seeking by the audio, the video's start).
     dict(file="src/ManagedCodecs.Containers/Mp4/Mp4Demuxer.cs",
-         find="int otherStart = otherBase is { } b ? other.KeyframeAtOrBefore(Timestamps.Rescale(pts, seekedBase, b)) : 0;", replace="int otherStart = 0;",
+         find="_videoStart = Video is { } v ? _video.KeyframeAtOrBefore(Timestamps.Rescale(pts, timeBase, v.TimeBase)) : 0;",
+         replace="_videoStart = Video is { } v && timeBase == v.TimeBase ? _video.KeyframeAtOrBefore(pts) : 0;",
          tests="FullyQualifiedName~SeekTests"),
 
     # ---- Matroska (as FFmpeg reads it)

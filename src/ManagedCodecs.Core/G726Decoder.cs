@@ -17,9 +17,9 @@ namespace ManagedCodecs;
 /// <para>
 /// Implemented from the Recommendation's algorithm (G.726's computational details: the fixed-point arithmetic of each
 /// block, whose names the comments give, and its tables), read with the Sun Microsystems g72x reference code (public
-/// domain) as the cross-check, and proven on the Recommendation's digital test sequences (its Appendix II: every
-/// decoder sequence, at each rate, through the G.711 outputs). It is exact to the Recommendation, not to FFmpeg, whose
-/// adpcm_g726 decoder gives other samples (docs/decisions/2026-11-15-g726.md).
+/// domain) as the cross-check. Its samples are tools/g726-reference.py's, every one, on every sample file; that tool
+/// passes the Recommendation's digital test sequences (its Appendix II: all 56, at each rate). It is exact to the
+/// Recommendation, not to FFmpeg, whose adpcm_g726 decoder gives other samples (docs/decisions/2026-11-15-g726.md).
 /// </para>
 /// </remarks>
 public sealed class G726Decoder : IAudioDecoder

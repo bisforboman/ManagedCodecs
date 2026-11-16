@@ -11,9 +11,12 @@ share internals, so each depends on the others at exactly its own version (`[X]`
 then reports a mix of versions (NU1107, or NU1608 for a newer one referenced directly) rather than letting it fail at
 run time.
 
-## Unreleased
+## 0.18.0 – 2026-11-16
 
-New public API (`CaptureTime`, `AudioTracks`, `SelectAudio`, `AudioTrack`), hence the next version is a minor one; code built against 0.17 keeps working.
+Live cameras in Avalonia and WPF: two new packages, ManagedCodecs.Avalonia and ManagedCodecs.Wpf, with a `LiveView`
+control; lip sync for RTSP cameras by capture times (`CaptureTime`), and RTCP receiver reports; and sound tracks after
+the first (`AudioTracks`, `SelectAudio`, `PlaybackOptions.AudioTrack`), MXF's mono tracks playing as left and right.
+New public API, hence a minor version; code built against 0.17 keeps working.
 
 ### Added
 

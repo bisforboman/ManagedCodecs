@@ -1,1 +1,14 @@
 #nullable enable
+ManagedCodecs.Avalonia.LiveView
+ManagedCodecs.Avalonia.LiveView.LiveView() -> void
+ManagedCodecs.Avalonia.LiveView.Player.get -> ManagedCodecs.Playback.LivePlayer?
+ManagedCodecs.Avalonia.LiveView.Player.set -> void
+ManagedCodecs.Avalonia.LiveView.ShownFrames.get -> long
+ManagedCodecs.Avalonia.LiveView.Stretch.get -> Avalonia.Media.Stretch
+ManagedCodecs.Avalonia.LiveView.Stretch.set -> void
+ManagedCodecs.Avalonia.LiveView.StretchDirection.get -> Avalonia.Media.StretchDirection
+ManagedCodecs.Avalonia.LiveView.StretchDirection.set -> void
+override ManagedCodecs.Avalonia.LiveView.Render(Avalonia.Media.DrawingContext! context) -> void
+static readonly ManagedCodecs.Avalonia.LiveView.PlayerProperty -> Avalonia.StyledProperty<ManagedCodecs.Playback.LivePlayer?>!
+static readonly ManagedCodecs.Avalonia.LiveView.StretchDirectionProperty -> Avalonia.StyledProperty<Avalonia.Media.StretchDirection>!
+static readonly ManagedCodecs.Avalonia.LiveView.StretchProperty -> Avalonia.StyledProperty<Avalonia.Media.Stretch>!

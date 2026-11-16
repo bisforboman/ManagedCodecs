@@ -161,6 +161,7 @@ ManagedCodecs.Containers.Mp4Demuxer.Seek(long pts, int streamIndex) -> void
 ManagedCodecs.Containers.Mp4Demuxer.Video.get -> ManagedCodecs.VideoStreamInfo?
 ManagedCodecs.Containers.MxfDemuxer
 ManagedCodecs.Containers.MxfDemuxer.Audio.get -> ManagedCodecs.AudioStreamInfo?
+ManagedCodecs.Containers.MxfDemuxer.AudioTracks.get -> System.Collections.Generic.IReadOnlyList<ManagedCodecs.AudioStreamInfo!>!
 ManagedCodecs.Containers.MxfDemuxer.Dispose() -> void
 ManagedCodecs.Containers.MxfDemuxer.MxfDemuxer(System.IO.Stream! stream, bool leaveOpen = false) -> void
 ManagedCodecs.Containers.MxfDemuxer.ReadPacketInfo() -> System.Collections.Generic.IEnumerable<ManagedCodecs.PacketInfo>!
@@ -168,6 +169,7 @@ ManagedCodecs.Containers.MxfDemuxer.ReadPackets() -> System.Collections.Generic.
 ManagedCodecs.Containers.MxfDemuxer.ReadPacketsAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerable<ManagedCodecs.Packet>!
 ManagedCodecs.Containers.MxfDemuxer.Refresh() -> System.Collections.Generic.IEnumerable<ManagedCodecs.Packet>!
 ManagedCodecs.Containers.MxfDemuxer.Seek(long pts, int streamIndex) -> void
+ManagedCodecs.Containers.MxfDemuxer.SelectAudio(params int[]! streamIndexes) -> void
 ManagedCodecs.Containers.MxfDemuxer.StartTimecode.get -> ManagedCodecs.Timecode?
 ManagedCodecs.Containers.MxfDemuxer.Video.get -> ManagedCodecs.VideoStreamInfo?
 ManagedCodecs.Containers.WavDemuxer
@@ -206,9 +208,11 @@ ManagedCodecs.IAudioDecoder.Decode(ManagedCodecs.Packet packet) -> ManagedCodecs
 ManagedCodecs.IAudioDecoder.Decode(System.ReadOnlySpan<byte> packet) -> ManagedCodecs.AudioFrame!
 ManagedCodecs.IDemuxer
 ManagedCodecs.IDemuxer.Audio.get -> ManagedCodecs.AudioStreamInfo?
+ManagedCodecs.IDemuxer.AudioTracks.get -> System.Collections.Generic.IReadOnlyList<ManagedCodecs.AudioStreamInfo!>!
 ManagedCodecs.IDemuxer.ReadPackets() -> System.Collections.Generic.IEnumerable<ManagedCodecs.Packet>!
 ManagedCodecs.IDemuxer.ReadPacketsAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerable<ManagedCodecs.Packet>!
 ManagedCodecs.IDemuxer.Seek(long pts, int streamIndex) -> void
+ManagedCodecs.IDemuxer.SelectAudio(params int[]! streamIndexes) -> void
 ManagedCodecs.IDemuxer.Video.get -> ManagedCodecs.VideoStreamInfo?
 ManagedCodecs.IVideoDecoder
 ManagedCodecs.IVideoDecoder.Decode(ManagedCodecs.Packet packet) -> System.Collections.Generic.IReadOnlyList<ManagedCodecs.VideoFrame!>!
@@ -341,6 +345,7 @@ ManagedCodecs.PixelFormat.Yuv444P14 = 19 -> ManagedCodecs.PixelFormat
 ManagedCodecs.PixelFormat.Yuv444P9 = 11 -> ManagedCodecs.PixelFormat
 ManagedCodecs.PixelFormatExtensions
 ManagedCodecs.Playback.AudioChunk
+ManagedCodecs.Playback.AudioChunk.CaptureTime.get -> System.DateTime?
 ManagedCodecs.Playback.AudioChunk.SampleRate.get -> int
 ManagedCodecs.Playback.AudioChunk.Samples.get -> float[]!
 ManagedCodecs.Playback.AudioPlayer
@@ -431,6 +436,8 @@ ManagedCodecs.Playback.MjpegHttpSource.StallTimeout.init -> void
 ManagedCodecs.Playback.MjpegHttpSource.Uri.get -> System.Uri!
 ManagedCodecs.Playback.PlaybackOptions
 ManagedCodecs.Playback.PlaybackOptions.<Clone>$() -> ManagedCodecs.Playback.PlaybackOptions!
+ManagedCodecs.Playback.PlaybackOptions.AudioTrack.get -> int?
+ManagedCodecs.Playback.PlaybackOptions.AudioTrack.init -> void
 ManagedCodecs.Playback.PlaybackOptions.DecoderThreads.get -> int
 ManagedCodecs.Playback.PlaybackOptions.DecoderThreads.init -> void
 ManagedCodecs.Playback.PlaybackOptions.Equals(ManagedCodecs.Playback.PlaybackOptions? other) -> bool
@@ -457,6 +464,7 @@ ManagedCodecs.Playback.PlaybackStatistics.Equals(ManagedCodecs.Playback.Playback
 ManagedCodecs.Playback.PlaybackStatistics.PlaybackStatistics() -> void
 ManagedCodecs.Playback.PlaybackStatistics.PlaybackStatistics(long DecodedFrames, double DecodeMilliseconds, long ConvertedFrames, double ConvertMilliseconds, long DroppedFrames) -> void
 ManagedCodecs.Playback.RgbaFrame
+ManagedCodecs.Playback.RgbaFrame.CaptureTime.get -> System.DateTime?
 ManagedCodecs.Playback.RgbaFrame.Height.get -> int
 ManagedCodecs.Playback.RgbaFrame.Pixels.get -> byte[]!
 ManagedCodecs.Playback.RgbaFrame.SampleAspectRatio.get -> ManagedCodecs.Rational

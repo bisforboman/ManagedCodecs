@@ -6,7 +6,7 @@ namespace ManagedCodecs.Playback;
 /// Turns RTP packets carrying audio back into what a decoder takes: AAC's access units (RFC 3640, modes AAC-hbr and
 /// AAC-lbr: an AU header section, then the access units, several to a packet or one fragmented over packets), or
 /// AAC's as LATM (RFC 6416: audioMuxElements, each a length and an access unit, or several, whole in a packet or over
-/// packets up to the marker bit), or G.711's samples (RFC 3551: a packet's payload as it is). A gap in the sequence
+/// packets up to the marker bit), or G.711's samples and G.726's codes (RFC 3551: a packet's payload as it is). A gap in the sequence
 /// numbers drops the fragmented access unit or audioMuxElement it cut; nothing stands in for what was lost
 /// (docs/decisions/2026-11-15-live-rtsp-audio.md).
 /// </summary>
@@ -47,7 +47,7 @@ internal sealed class RtpAudioDepacketizer
 
     /// <summary>
     /// Adds an RTP packet (header included), appending to <paramref name="completed"/> the access units it completes
-    /// (AAC), or its samples (G.711).
+    /// (AAC), or its payload (G.711's samples, G.726's codes).
     /// </summary>
     /// <exception cref="NotSupportedException">AAC access units interleaved (a non-zero index, RFC 3640, 3.2.3.1).</exception>
     public void Add(ReadOnlySpan<byte> packet, List<byte[]> completed)

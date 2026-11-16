@@ -128,7 +128,8 @@ public sealed class LivePlayer : IDisposable
 
     /// <summary>
     /// The camera's audio as it plays, once connected: its codec (<see cref="CodecIds.Aac"/>,
-    /// <see cref="CodecIds.PcmAlaw"/> or <see cref="CodecIds.PcmMulaw"/>), and the rate and channels its SDP gives (an
+    /// <see cref="CodecIds.PcmAlaw"/>, <see cref="CodecIds.PcmMulaw"/>, or G.726 as <see cref="CodecIds.AdpcmG726Le"/>
+    /// or <see cref="CodecIds.AdpcmG726"/>, the bits a code its CodecPrivate), and the rate and channels its SDP gives (an
     /// <see cref="AudioChunk"/> says the decoder's own rate, HE-AAC's twice this). Null without
     /// <see cref="RtspSource.Audio"/>, before the first connection, and when the camera has no audio that plays
     /// (<see cref="SkippedAudioCodec"/>) or refused to send it (<see cref="Error"/>).
@@ -137,7 +138,7 @@ public sealed class LivePlayer : IDisposable
 
     /// <summary>
     /// With <see cref="RtspSource.Audio"/>, when the camera has audio but none that plays (<see cref="Audio"/> is null):
-    /// the SDP's name for its first audio format (<c>MP4A-LATM</c>, <c>G726-32</c>, <c>opus</c>). Null otherwise.
+    /// the SDP's name for its first audio format (<c>MP4A-LATM</c>, <c>opus</c>). Null otherwise.
     /// </summary>
     public string? SkippedAudioCodec => _skippedAudio;
 
@@ -712,7 +713,8 @@ public sealed class LivePlayer : IDisposable
         }
     }
 
-    // Audio over RTP: AAC's access units (RFC 3640) or G.711's samples to the audio decoding thread, in order. They
+    // Audio over RTP: AAC's access units (RFC 3640) or G.711's samples and G.726's codes (a packet's payload, which
+    // G726Decoder decodes on from the last one's state) to the audio decoding thread, in order. They
     // don't feed the stall watchdog or the state: sound without a picture is not a camera playing.
     private Action<byte[]> AudioPackets(SdpAudioTrack track, IAudioDecoder decoder, RtcpSession rtcp)
     {

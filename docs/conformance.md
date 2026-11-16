@@ -864,7 +864,7 @@ Sun Microsystems' public-domain g72x code (as SoX carries it; 24, 32 and 40 kbit
 files, gave `G726Decoder`'s samples, every one. FFmpeg's output is kept as name.g726.ffmpeg.f32 to show the difference;
 nothing checks it. Also: RTP's packing (from each byte's least significant bit) decodes alike, packets cut anywhere
 between codes give the same samples, a packet's bits after its last whole code are ignored, and the format tag in mono
-at 2 to 5 bits only. Over RTSP: docs/conformance.md, Audio over RTSP.
+at 2 to 5 bits only. Over RTSP: Audio over RTSP, above.
 
 `Seek` starts at the packet whose samples hold the time (every packet is a keyframe), among the packets listed when
 opening: the tail of a read from the start, as `IDemuxer.Seek` asks and `SeekTests` checks on every .wav sample.

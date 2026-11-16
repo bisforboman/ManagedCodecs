@@ -355,7 +355,15 @@ internal sealed class Rdd36FrameWriter
         public void ExpGolomb(int symbol, int order)
         {
             uint value = (uint)symbol + (1u << order);
-            int length = 32 - System.Numerics.BitOperations.LeadingZeroCount(value);
+
+            // The value's bits, counted by hand: under the Unity build (-p:UnityBuild=true) BitOperations is both the
+            // runtime's and that assembly's polyfill.
+            int length = 0;
+            for (uint rest = value; rest != 0; rest >>= 1)
+            {
+                length++;
+            }
+
             Bits(0, length - order - 1);
             Bits(value, length);
         }

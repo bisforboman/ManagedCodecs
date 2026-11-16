@@ -11,9 +11,12 @@ share internals, so each depends on the others at exactly its own version (`[X]`
 then reports a mix of versions (NU1107, or NU1608 for a newer one referenced directly) rather than letting it fail at
 run time.
 
-## Unreleased
+## 0.18.0 – 2026-11-16
 
-New public API (`CaptureTime`, `AudioTracks`, `SelectAudio`, `AudioTrack`), hence the next version is a minor one; code built against 0.17 keeps working.
+Live cameras in Avalonia and WPF: two new packages, ManagedCodecs.Avalonia and ManagedCodecs.Wpf, with a `LiveView`
+control; lip sync for RTSP cameras by capture times (`CaptureTime`), and RTCP receiver reports; and sound tracks after
+the first (`AudioTracks`, `SelectAudio`, `PlaybackOptions.AudioTrack`), MXF's mono tracks playing as left and right.
+New public API, hence a minor version; code built against 0.17 keeps working.
 
 ### Added
 
@@ -24,7 +27,8 @@ New public API (`CaptureTime`, `AudioTracks`, `SelectAudio`, `AudioTrack`), henc
   other demuxers still list their first audio stream only (to follow, issue #535).
   docs/decisions/2026-11-15-sound-tracks.md.
 - Playback: `PlaybackOptions.AudioTrack` chooses which audio track `MediaPlayer` and `AudioPlayer` play, counted from
-  0 in the file's order; a file with tracks but not that many is refused (`ArgumentOutOfRangeException`).
+  0 in the file's order (null, the default, plays the demuxer's `Audio`); a file with tracks but not that many is
+  refused (`ArgumentOutOfRangeException`).
 - ManagedCodecs.Avalonia and ManagedCodecs.Wpf, two new packages: `LiveView`, a control that shows a `LivePlayer`'s
   newest frame on each frame the UI renders, laid out as an `Image` (`Stretch`, `StretchDirection`). The application
   makes, starts and disposes the player. docs/decisions/2026-11-15-live-controls.md.

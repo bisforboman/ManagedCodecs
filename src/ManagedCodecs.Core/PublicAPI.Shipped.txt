@@ -104,9 +104,11 @@ ManagedCodecs.IAudioDecoder.Decode(ManagedCodecs.Packet packet) -> ManagedCodecs
 ManagedCodecs.IAudioDecoder.Decode(System.ReadOnlySpan<byte> packet) -> ManagedCodecs.AudioFrame!
 ManagedCodecs.IDemuxer
 ManagedCodecs.IDemuxer.Audio.get -> ManagedCodecs.AudioStreamInfo?
+ManagedCodecs.IDemuxer.AudioTracks.get -> System.Collections.Generic.IReadOnlyList<ManagedCodecs.AudioStreamInfo!>!
 ManagedCodecs.IDemuxer.ReadPackets() -> System.Collections.Generic.IEnumerable<ManagedCodecs.Packet>!
 ManagedCodecs.IDemuxer.ReadPacketsAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerable<ManagedCodecs.Packet>!
 ManagedCodecs.IDemuxer.Seek(long pts, int streamIndex) -> void
+ManagedCodecs.IDemuxer.SelectAudio(params int[]! streamIndexes) -> void
 ManagedCodecs.IDemuxer.Video.get -> ManagedCodecs.VideoStreamInfo?
 ManagedCodecs.IVideoDecoder
 ManagedCodecs.IVideoDecoder.Decode(ManagedCodecs.Packet packet) -> System.Collections.Generic.IReadOnlyList<ManagedCodecs.VideoFrame!>!

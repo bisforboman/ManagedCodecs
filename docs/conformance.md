@@ -422,7 +422,7 @@ Decoding straight into the output frame: opt-in, `MjpegDecoder.ZeroCopy` (6% few
 
 ## MP4 demuxing
 
-`VideoProbe` (ManagedCodecs.Thumbnails) is checked against ffprobe on every MP4, Matroska and AVI sample with H.264 or MJPEG
+`VideoProbe` (ManagedCodecs.Thumbnails) is checked against ffprobe on every MP4, Matroska, AVI and MXF sample with H.264 or MJPEG
 video (make-samples.sh's name.probe.json): `format=duration` within 1.5 µs, width and height, sample aspect ratio,
 rotation, average frame rate and the audio stream's rate and channels. The duration is the streams' container
 durations as FFmpeg reads them: MP4's edits' length, but no longer than the samples they take (JM's field-picture
@@ -433,7 +433,13 @@ outlasts its video, and the file lasts as long as ffprobe says), except PCM's, w
 ends nothing (avi-mjpeg-pcm-u8's runs 0.2 s past its video; the camera AVIs' a few ms); Matroska's Segment Duration, which
 FFmpeg takes as the file's own, from the earliest packet (AAC's, 21 ms before the video, at its CodecDelay), not each
 stream's start plus it; without one (mkv-h264-live) ffprobe gives no duration, and the probe's, from the first packet
-to the end of the last, is checked against ffprobe's packets. H.264's size is the decoder's frame size
+to the end of the last, is checked against ffprobe's packets. MXF's are the header metadata's track durations (the
+material package's, ST 377-1 B.11), as FFmpeg's demuxer reads them, the sound's rescaled from edit units to samples and
+rounded to the nearest (`MxfConformanceTests` compares both streams' with name.headers.json); a file cut short keeps the
+header's, longer than its packets (mxf-h264-pcm-cut lasts 2 s, as ffprobe says, its packets 1.2 s); a file written to
+a pipe has none (FFmpeg's muxer can't go back to write them), and ffprobe then gives no duration: the probe's, from the
+first packet to the end of the last, is checked against ffprobe's packets, the sound's alone where the pipe file has
+lost its index (mxf-h264-pipe-norip: ffprobe lists no video times there). H.264's size is the decoder's frame size
 from the SPS, which can crop the container's.
 
 MP3 (decoded: MP3, below) is `CodecIds.Mp3`: h264-mp3 (FFmpeg's MP4 muxer: `mp4a`, object type 0x6B) and

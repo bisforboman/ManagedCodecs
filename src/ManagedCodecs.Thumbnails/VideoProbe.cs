@@ -4,7 +4,8 @@ namespace ManagedCodecs.Thumbnails;
 
 /// <summary>
 /// The basic facts of a video file, as ffprobe reports them, without decoding a frame: <see cref="Read(Stream)"/> reads
-/// the container's headers and sample tables (MP4), block headers (Matroska) or chunk headers (AVI) and nothing else.
+/// the container's headers and sample tables (MP4), block headers (Matroska), chunk headers (AVI) or header metadata
+/// and KLV keys (MXF), and nothing else.
 /// </summary>
 public static class VideoProbe
 {
@@ -23,7 +24,7 @@ public static class VideoProbe
     /// position.
     /// </summary>
     /// <exception cref="ArgumentException">The stream is not seekable.</exception>
-    /// <exception cref="InvalidDataException">The file is not AVI, MP4 or Matroska, is malformed, or has no video stream.</exception>
+    /// <exception cref="InvalidDataException">The file is not AVI, MP4, Matroska or MXF, is malformed, or has no video stream.</exception>
     /// <exception cref="NotSupportedException">The video is in a codec this library does not decode (HEVC, VP9, AV1, ...).</exception>
     public static VideoInfo Read(Stream stream)
     {
@@ -78,7 +79,8 @@ public static class VideoProbe
     /// lasting its container duration (<see cref="VideoStreamInfo.Duration"/>), or to the end of its last packet where
     /// the container gives none (except in AVI, where such a stream, audio with a dwSampleSize, ends nothing: FFmpeg gives it
     /// no duration and reads no packets for one). Matroska's: the Segment's Duration, or, in a file without one (a live recording, for
-    /// which ffprobe gives none), from the first packet shown to the end of the last.
+    /// which ffprobe gives none), from the first packet shown to the end of the last. MXF's streams last their header's
+    /// track durations, which a file written to a pipe lacks: there its packets'.
     /// </summary>
     /// <returns>The duration, and the earliest stream's start in seconds (ffprobe's <c>format=start_time</c>).</returns>
     internal static (TimeSpan Duration, double Start) Timing(IDemuxer demuxer)

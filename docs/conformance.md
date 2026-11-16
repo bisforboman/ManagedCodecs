@@ -301,6 +301,7 @@ checks are of the packets and the player.
 | `heaac-stereo-44k.rtp` | the same | HE-AAC (the FDK encoder's stream), 3 to 5 a packet |
 | `wav-alaw-codes.rtp` | FFmpeg, RFC 3551 | A-law mono as the static payload type 8, no `a=rtpmap` |
 | `wav-mulaw-codes.rtp` | the same | µ-law stereo as `PCMU/8000/2` |
+| `aac-stereo-48k-latm.rtp` | FFmpeg, `-rtpflags latm`: RFC 6416's `MP4A-LATM`, `cpresent=0` | AAC LC, an access unit an audioMuxElement, an element a packet |
 | `gstreamer/aac-single.rtp` (committed, tools/gst-audio-record.py) | GStreamer 1.24's `rtpmp4gpay`, RFC 3640, `mode=AAC-hbr` | AAC LC (FFmpeg's encoder through `avenc_aac`), one access unit a packet |
 | `gstreamer/aac-fragmented.rtp` | the same with `mtu=200` | every access unit over 3 to 5 packets: 163 packets for 41 |
 | `gstreamer/alaw.rtp`, `gstreamer/mulaw.rtp` | GStreamer's `rtppcmapay`, `rtppcmupay` | the static payload types 8 and 0 with no `a=rtpmap`, 1024 samples a packet |
@@ -322,7 +323,8 @@ checks are of the packets and the player.
     over UDP, HE-AAC, A-law, µ-law over UDP), and the audio's SETUP is in the video's session, on channels 2 and 3 or
     a port pair of its own.
   - Without `Audio` there is one SETUP and no sound, even from a server that sends it.
-  - The audio's SETUP refused, LATM, and a `config` the decoder refuses: the video plays, `Audio` is null, and
+  - The audio's SETUP refused, LATM with its config in the stream (`cpresent=1`), and a `config` the decoder refuses:
+    the video plays, `Audio` is null, and
     `Error` or `SkippedAudioCodec` says why.
   - 94 frames never taken leave the newest 23 (0.49 s) and count 71 dropped.
   - A lost packet and a frame the decoder rejects are counted, and the sound goes on.
@@ -343,6 +345,21 @@ checks are of the packets and the player.
   169 packets each, none dropped or damaged, no packet lost; `latm` named by `SkippedAudioCodec` and not played. Its
   sender reports gave both tracks capture times (`mcplay`'s lip sync held 471 to 483 of about 540 pictures, 31 to
   102 ms each), and the sessions took the receiver reports.
+- **AAC as LATM** (RFC 6416, issue #527; `RtpLatmTests`):
+  - FFmpeg's recording gives back the MP4's access units byte for byte; the AudioSpecificConfig taken out of its
+    StreamMuxConfig (`400023203fc0`: `1190`) is the MP4's, less the MP4's sync extension, which says no more.
+  - `LatmConfig` reads StreamMuxConfigs built bit by bit: FFmpeg's, GStreamer's (with the backward-compatible sync
+    extension), 2 and 64 access units an element, SBR signalled first, SBR and PS in the sync extension, and
+    `audioMuxVersion` 1 with the config's length given. It refuses what cameras don't send (several programs or layers,
+    frames of a fixed length, `audioMuxVersionA` 1, a program config element, an object type other than AAC LC).
+  - The SDP: `cpresent=0` with a config plays; `cpresent` left out (1) or a config it can't read is skipped and named.
+  - Hand-made packets: an element over three packets with two access units, a length of 255 and over; data after the
+    access units left alone; an element missing its first, a middle or its last packet dropped (after a gap the next
+    one is given only if its lengths add up to exactly its bytes, as nothing marks an element's first packet); lengths
+    that run past the element; an element larger than its access units can be.
+  - `LiveRtspAudioTests` plays the recording through `LivePlayer`, over the connection and over UDP.
+  - **GStreamer 1.24's `rtpmp4apay`, by hand** (2026-11-15, its RTSP server with the H.264 pattern): with its default
+    MTU and with `mtu=300` (each element over packets), 280 chunks each in 6 s, none dropped or damaged, no packet lost.
 - **Not tried yet:** an IP camera (their G.711 and one access unit a packet are covered by GStreamer's and FFmpeg's
   packetizers only).
 

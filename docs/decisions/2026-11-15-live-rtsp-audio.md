@@ -148,5 +148,12 @@ Asked with the multiple-choice prompt; the owner took each recommendation (2026-
     played each beside the H.264 pattern; LATM is named and skipped. docs/conformance.md, Audio over RTSP.
   - Unlike FFmpeg's packetizer (64 to 320 ms of AAC a packet), GStreamer's sends each frame as it is encoded.
 
+- AAC as LATM (2026-11-16, issue #527): decision 1's option (c), left out then, built after all from #527's list.
+  `MP4A-LATM` with `cpresent=0` plays: the SDP's StreamMuxConfig is read for the AudioSpecificConfig (`LatmConfig`,
+  internal: one program, one layer, AAC LC, frames of a length given in each element, as cameras, FFmpeg and GStreamer
+  send), and each audioMuxElement, whole in a packet or over packets up to the marker bit, is taken apart into its
+  access units. No public API. Checked against FFmpeg's packetizer and GStreamer's by hand (docs/conformance.md,
+  Audio over RTSP).
+
 New public API (`RtspSource.Audio`, `LivePlayer.TakeAudio`, `Audio` and `SkippedAudioCodec`, the statistics), so the
 next minor version, with a CHANGELOG line under "Unreleased" when it is built.

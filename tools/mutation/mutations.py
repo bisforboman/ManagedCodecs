@@ -177,6 +177,43 @@ MUTATIONS = [
          find="long pts = state.Bytes / blockSize;", replace="long pts = state.Position; state.Position += length / blockSize;",
          tests="FullyQualifiedName~AviDemuxerTests"),
 
+    # ---- Several sound tracks (docs/decisions/2026-11-16-audio-tracks.md): FFmpeg's choice and reading, measured
+    # The track FFmpeg's command line plays: the default flag before the channels ...
+    dict(file="src/ManagedCodecs.Containers/AudioTracks.cs",
+         find="a.IsDefault != b.IsDefault ? a.IsDefault : a.Channels > b.Channels", replace="a.Channels > b.Channels",
+         tests="FullyQualifiedName~AudioTracksTests"),
+    # ... and the channels between equals (mkv-audio-nodefault).
+    dict(file="src/ManagedCodecs.Containers/AudioTracks.cs",
+         find="a.IsDefault != b.IsDefault ? a.IsDefault : a.Channels > b.Channels", replace="a.IsDefault && !b.IsDefault",
+         tests="FullyQualifiedName~AudioTracksTests"),
+    # Matroska's missing Language and FlagDefault are the specification's defaults, and "und" is no language to ffprobe.
+    dict(file="src/ManagedCodecs.Containers/Matroska/MatroskaDemuxer.cs",
+         find='public string Language { get; set; } = "eng";', replace='public string Language { get; set; } = "und";',
+         tests="FullyQualifiedName~AudioTracksTests"),
+    dict(file="src/ManagedCodecs.Containers/Matroska/MatroskaDemuxer.cs",
+         find="public bool FlagDefault { get; set; } = true;", replace="public bool FlagDefault { get; set; }",
+         tests="FullyQualifiedName~AudioTracksTests"),
+    dict(file="src/ManagedCodecs.Containers/Matroska/MatroskaDemuxer.cs",
+         find='Language = audio.Language == "und" ? null : audio.Language,', replace="Language = audio.Language,",
+         tests="FullyQualifiedName~AudioTracksTests"),
+    # An audio track it can't read is left out only while another can be read.
+    dict(file="src/ManagedCodecs.Containers/Matroska/MatroskaDemuxer.cs",
+         find="if (track.Unsupported is null || audio.TrueForAll(t => t.Unsupported is not null))", replace="if (true)",
+         tests="FullyQualifiedName~MatroskaDemuxerTests"),
+    # MP4's language: FFmpeg's Macintosh codes, 0x7FFF none, and the packed letters' top bit ignored.
+    dict(file="src/ManagedCodecs.Containers/Mp4/Mp4Demuxer.cs",
+         find="0x7FFF => null,", replace="0x7FFF => \"und\",",
+         tests="FullyQualifiedName~AudioTracksTests"),
+    dict(file="src/ManagedCodecs.Containers/Mp4/Mp4Demuxer.cs",
+         find="letters[0] = (char)(((c >> 10) & 31) + 0x60);", replace="letters[0] = (char)((c >> 10) + 0x60);",
+         tests="FullyQualifiedName~AudioTracksTests"),
+    # A track chosen after a seek starts at the time sought.
+    dict(file="src/ManagedCodecs.Containers/Mp4/Mp4Demuxer.cs",
+         find="_audioStart = _sought is { } sought ?", replace="_audioStart = _sought is { } sought && false ?",
+         tests="FullyQualifiedName~AudioTracksTests"),
+    dict(file="src/ManagedCodecs.Containers/Matroska/MatroskaDemuxer.cs",
+         find="for (int slot = 0; slot < _tracks.Length; slot++)", replace="for (int slot = 0; slot < 2; slot++)",
+         tests="FullyQualifiedName~AudioTracksTests"),
     # ---- MXF partitions (SMPTE ST 377-1): rules only some files reach
     # A key's byte 8 (the registry version) is ignored: earlier encoders wrote the fill item's with version 1 (6.3.3).
     dict(file="src/ManagedCodecs.Containers/Mxf/Klv.cs",

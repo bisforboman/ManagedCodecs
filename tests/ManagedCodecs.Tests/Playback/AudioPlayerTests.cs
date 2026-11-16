@@ -199,11 +199,28 @@ public class AudioPlayerTests
         Assert.Null(alone.Flush());
     }
 
+    /// <summary>
+    /// Unset, <see cref="PlaybackOptions.AudioTrack"/> plays the track the demuxer gives unasked, wherever it is in the
+    /// list; a number counts from 0 in the file's order, whichever that is.
+    /// </summary>
+    [Fact]
+    public void PlaysTheDemuxersAudioUnasked()
+    {
+        static AudioStreamInfo Stereo(int index) => new(CodecIds.PcmS16Le, 48000, 2, 0, new Rational(1, 48000), default, index);
+        var demuxer = new Tracks(true, Stereo(1), Stereo(2)) { Unasked = 1 };
+        Assert.Equal(2, PlayedAudio.Choose(demuxer, new PlaybackOptions())!.Track.StreamIndex);
+        Assert.Equal(1, PlayedAudio.Choose(demuxer, new PlaybackOptions { AudioTrack = 0 })!.Track.StreamIndex);
+        Assert.Equal(1, PlayedAudio.Choose(new Tracks(true, Stereo(1), Stereo(2)), new PlaybackOptions())!.Track.StreamIndex);
+    }
+
     private sealed class Tracks(bool several, params AudioStreamInfo[] tracks) : IDemuxer
     {
+        /// <summary>Which track <see cref="Audio"/> is.</summary>
+        public int Unasked { get; init; }
+
         public VideoStreamInfo? Video => null;
 
-        public AudioStreamInfo? Audio => tracks[0];
+        public AudioStreamInfo? Audio => tracks[Unasked];
 
         public IReadOnlyList<AudioStreamInfo> AudioTracks => several ? tracks : [tracks[0]];
 

@@ -154,6 +154,7 @@ checks every rebuilt JPEG decodes to exactly what the JPEG that was packetized d
 | `gstreamer/jpeg-422.rtp` | GStreamer 1.24's `rtpjpegpay` | 0 (4:2:2) | 255 |
 | `gstreamer/jpeg-420-restart.rtp` | GStreamer, JPEGs with a restart marker every MCU row | 65 | 255 |
 | `gstreamer/jpeg-422-restart.rtp` | GStreamer, the same in 4:2:2 | 64 | 255 |
+| `gstreamer/jpeg-large.rtp` | GStreamer, 2048x64: wider than RFC 2435's header can say, which then gives 0 | 1 | 255 |
 
 - **GStreamer's recordings are committed** (decision 2), with the JPEGs that went in: 320x240, 5 frames each, made by
   tools/gst-jpeg-record.py from Pillow's JPEGs (quality 50, standard Huffman tables), about 230 KB.
@@ -169,6 +170,16 @@ checks every rebuilt JPEG decodes to exactly what the JPEG that was packetized d
 - **Loss:** a frame missing its first, a middle or its last packet is dropped and the others are kept.
 - **Refused:** reserved types, dynamic types and reserved Q values throw `NotSupportedException`.
 - **Tables:** the depacketizer's copies of T.81's tables equal `ManagedCodecs.Mjpeg`'s.
+- **Over 2040 pixels** (issue #527): RFC 2435's header gives the size in 8-pixel units in a byte, so a larger frame's
+  is 0, and the size comes from elsewhere:
+  - GStreamer's server puts it in the SDP (`a=x-dimensions:2048,64`; `gstreamer/jpeg-large.sdp` is its answer to
+    DESCRIBE, recorded by tools/gst-jpeg-record.py): its recording rebuilds to the JPEGs that went in;
+  - RFC 6064's `a=framesize:26 2592-1944` is read too, for the track's payload type only, and wins over
+    `a=x-dimensions`;
+  - ONVIF's RTP header extension (profile 0xFFD8, or 0xFFFF where it goes on), which carries the frame's own JPEG
+    marker segments: its SOF0's size wins over the SDP's. Hand-made packets: the extension added to GStreamer's,
+    after padding and another segment; another profile, no SOF0, a SOF0 cut short or not marker segments give no size;
+  - with no size from anywhere the frame can't be rebuilt, and the player ends with `NotSupportedException`, as before.
 - **Mutation entries:** Q below 128, the reused tables, and the fragment offset check.
 
 `LiveRtspJpegTests` plays GStreamer's recordings through `LivePlayer`:
@@ -176,6 +187,7 @@ checks every rebuilt JPEG decodes to exactly what the JPEG that was packetized d
   no `a=rtpmap`, one has `a=rtpmap:96 JPEG/90000`.
 - An incomplete frame is dropped and counted (`DamagedFrames`, `LostPackets`).
 - A reserved type ends the player with `NotSupportedException`.
+- GStreamer's 2048x64 recording with its server's SDP shows each frame at 2048x64, the JPEG that was sent.
 
 `RtspProtocolTests` checks the SDP choice: the first H.264 or JPEG video track in SDP order (decision 3).
 
@@ -185,6 +197,8 @@ Real servers:
   (`jpegenc ! rtpjpegpay`, 640x480), with Digest.
   - Each played 100 frames at 25 fps, with none damaged or lost and no reconnects.
   - Decoding took 0.7 to 0.8 ms a frame and converting 0.6 ms.
+  - At 2560x1440 (2026-11-16), over 2040 pixels: 50 frames at 2560x1440, none damaged or lost, 6.0 ms to decode and
+    3.8 ms to convert a frame.
 - **mediamtx 1.21.3, nightly** (tools/rtsp-nightly.py, with Digest).
   - mediamtx drops every frame of FFmpeg's own JPEG push ("received wrong fragment"). The same packets with the one
     table sent as two pass, so it seems to need two tables. Its source wasn't read to confirm.

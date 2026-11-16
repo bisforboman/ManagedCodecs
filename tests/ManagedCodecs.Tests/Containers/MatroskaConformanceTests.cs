@@ -24,7 +24,6 @@ public class MatroskaConformanceTests
         var lines = File.ReadAllLines(TestSamples.ReferenceOf(sampleName, ".packets.framemd5"));
 
         using var demuxer = MatroskaDemuxer.Open(TestSamples.PathOf(sampleName));
-        var packets = demuxer.ReadPackets().ToList();
 
         // framemd5 numbers streams as FFmpeg maps them: video first, then audio.
         var streams = new List<(int Index, long Count, ReadOnlyMemory<byte> CodecPrivate)>();
@@ -33,18 +32,38 @@ public class MatroskaConformanceTests
             streams.Add((video.StreamIndex, video.FrameCount, video.CodecPrivate));
         }
 
-        if (demuxer.Audio is { } audio)
+        // Every sound track (several in mp4-audio-tracks and mkv-audio-tracks), each read after choosing it; framemd5
+        // maps only the one FFmpeg's command line plays, which the demuxer chooses by default.
+        int? played = demuxer.Audio?.StreamIndex;
+        foreach (var audio in demuxer.AudioStreams)
         {
             streams.Add((audio.StreamIndex, audio.FrameCount, audio.CodecPrivate));
         }
 
+        var reads = streams.Where(s => s.Index != demuxer.Video?.StreamIndex).ToDictionary(s => s.Index, s =>
+        {
+            demuxer.SelectAudio(s.Index);
+            return demuxer.ReadPackets().ToList();
+        });
+        if (played is { } chosen)
+        {
+            demuxer.SelectAudio(chosen);
+        }
+
+        var packets = demuxer.ReadPackets().ToList();
+
         Assert.Equal(expected.Select(e => e.StreamIndex).Distinct().Order(), streams.Select(s => s.Index).Order());
-        Assert.Equal(expected.Select(e => e.StreamIndex), packets.Select(p => p.StreamIndex)); // file order
+        Assert.Equal(expected.Where(e => e.StreamIndex == demuxer.Video?.StreamIndex || e.StreamIndex == played).Select(e => e.StreamIndex), packets.Select(p => p.StreamIndex)); // file order
         for (int mapped = 0; mapped < streams.Count; mapped++)
         {
             var (index, count, codecPrivate) = streams[mapped];
-            var extradata = FrameMd5.ParseExtradata(lines, mapped);
-            if (extradata is null)
+            int? framemd5Index = index == demuxer.Video?.StreamIndex ? 0 : index == played ? (demuxer.Video is null ? 0 : 1) : null;
+            var extradata = framemd5Index is { } m ? FrameMd5.ParseExtradata(lines, m) : null;
+            if (framemd5Index is null)
+            {
+                // Not in framemd5 (FFmpeg's command line maps one sound track).
+            }
+            else if (extradata is null)
             {
                 Assert.True(codecPrivate.IsEmpty, $"Stream {index}: FFmpeg reports no extradata but we found some.");
             }
@@ -55,7 +74,7 @@ public class MatroskaConformanceTests
 
             var theirs = expected.Where(e => e.StreamIndex == index).ToList();
             var filed = own.Where(e => e.StreamIndex == index).ToList();
-            var ours = packets.Where(p => p.StreamIndex == index).ToList();
+            var ours = (reads.TryGetValue(index, out var read) ? read : packets).Where(p => p.StreamIndex == index).ToList();
             Assert.Equal(theirs.Count, ours.Count);
             Assert.Equal(theirs.Count, count);
 

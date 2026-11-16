@@ -845,6 +845,18 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
          find="senders.Add((rtcp, Sender(udp, serverRtcp)));", replace="",
          tests="FullyQualifiedName~LiveRtcpTests.ReportsOverUdpFromTheRtcpPortWithWhatWasLost"),
+    # ---- A lossy network (LossyNetworkTests, issue #527): a gap inside a unit ended by its own marker damages only it ...
+    dict(file="src/ManagedCodecs.Playback/RtpH264Depacketizer.cs",
+         find="            _gapBeforeNext = false;\n            completed.Add(Complete(damaged: false));", replace="            completed.Add(Complete(damaged: false));",
+         tests="FullyQualifiedName~RtpH264DepacketizerTests.AGapInsideAUnitDamagesOnlyThatUnit"),
+    # ... the SDP's parameter sets come before every IDR picture, or one that lost a packet leaves none to decode by ...
+    dict(file="src/ManagedCodecs.Playback/RtpH264Depacketizer.cs",
+         find="var put = _first || (_keyframe && !_inBand && !_ownParameterSets) ? _parameterSets : [];", replace="var put = _first ? _parameterSets : [];",
+         tests="FullyQualifiedName~LiveRtspUdpTests.PlaysOnWhenTheFirstIdrPictureLostAPacket"),
+    # ... until the stream sends its own, which may be newer than the SDP's.
+    dict(file="src/ManagedCodecs.Playback/RtpH264Depacketizer.cs",
+         find="var put = _first || (_keyframe && !_inBand && !_ownParameterSets) ? _parameterSets : [];", replace="var put = _first || _keyframe ? _parameterSets : [];",
+         tests="FullyQualifiedName~RtpH264DepacketizerTests.PutsTheSdpsParameterSetsBeforeTheFirstUnitAndEachIdrPicture"),
     # ---- Capture times (docs/decisions/2026-11-15-live-rtcp.md, point 3), which need B pictures to tell a frame from
     # its unit: the live decoder's frames keep their own packets' times, not FFmpeg's for a stream with none ...
     dict(file="src/ManagedCodecs.H264/H264Decoder.cs",

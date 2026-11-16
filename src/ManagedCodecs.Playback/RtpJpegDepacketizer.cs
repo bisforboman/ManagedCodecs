@@ -35,7 +35,7 @@ internal sealed class RtpJpegDepacketizer
     private int _expected = -1;
 
     /// <param name="payloadType">The SDP's payload type for the track (26, RFC 3551's static one, unless mapped); -1 for any.</param>
-    /// <param name="width">The SDP's frame width (<see cref="SdpVideoTrack.Width"/>), for frames whose header says 0; else 0.</param>
+    /// <param name="width">The SDP's frame width (<see cref="Rtsp.SdpVideoTrack.Width"/>), for frames whose header says 0; else 0.</param>
     /// <param name="height">The SDP's frame height, likewise.</param>
     public RtpJpegDepacketizer(int payloadType = 26, int width = 0, int height = 0)
     {

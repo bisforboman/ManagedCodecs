@@ -6,12 +6,17 @@ audio is within 2^-17, the conformance tests' tolerance. It also probes each fil
 the tests' band of FFmpeg's scaler at the same size and time. The films are pinned by SHA-256 and cached in
 samples/realworld/ (gitignored).
 
+MXF files from writers other than FFmpeg (PACKET_FILES, issue #469) carry codecs this library mostly only names, so
+they are compared packet by packet instead (mcdec --packets against ffprobe): the streams' facts, and every packet's
+size, MD5 and times. A large one is read by an HTTP range, its first megabytes, as a file cut short.
+
 Usage (from the repository root, after a Release build of tools/ManagedCodecs.Cli):
   tools/realworld.py [name ...] [--report realworld.md]
   tools/realworld.py --list
 """
 
 import argparse
+import fractions
 import hashlib
 import json
 import os
@@ -83,6 +88,25 @@ FILMS = {
         "A Nikon Coolpix's QuickTime file (CC BY-NC-SA 2.0): 320x240 MJPEG 4:2:2 ('jpeg') at 15 frames a second, 33 s, no audio, a 'pnot' preview box first"),
 }
 
+# name: (url, pin, bytes, what it is). MXF files not written by FFmpeg, compared packet by packet (compare_packets).
+# The pin is "sha1:..." (archive.org lists each file's SHA-1) or a SHA-256; bytes is None for the whole file, else how
+# many of its first bytes are read (an HTTP range: the file is then one cut short, and the pin is those bytes').
+# The files are only downloaded here, never redistributed.
+PACKET_FILES = {
+    "hamburger_16bit_mono.mxf": (
+        "https://archive.org/download/mxfburger/hamburger_16bit_mono.mxf",
+        "sha1:e1ac0324cc72801d95dfe2b8c4edbd8c07a69d1d", None,
+        "A drive-in cinema advertisement (Public Domain Mark), 9 s, mono 16-bit sound"),
+    "hamburger_24bit_5.1.mxf": (
+        "https://archive.org/download/mxfburger/hamburger_24bit_5.1.mxf",
+        "sha1:c527eef437565004b1073deb2934e979d30be57d", None,
+        "The same advertisement with 5.1 24-bit sound"),
+    "nasa_russian_eva_44.mxf": (
+        "https://archive.org/download/Russian-EVA-44-VR-Lab-Animation_613184.mxf/Russian-EVA-44-VR-Lab-Animation_613184.mxf",
+        "9aa9bba1fbb7fcb55f4b7f897634f204629c436153e54f9f232741127a2c21b1", 32 << 20,
+        "NASA's broadcast file (jsc-pao-video-collection, a US government work), its first 32 MiB of 2.6 GB"),
+}
+
 
 def fail(message):
     print(f"::error::{message}" if os.environ.get("GITHUB_ACTIONS") else message, file=sys.stderr)
@@ -97,18 +121,34 @@ def sha256(path):
     return digest.hexdigest()
 
 
+def digest_of(path, algorithm):
+    digest = hashlib.new(algorithm)
+    with open(path, "rb") as f:
+        while chunk := f.read(1 << 20):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def fetch(name):
-    url, pinned, _ = FILMS[name]
+    if name in PACKET_FILES:
+        url, pinned, limit, _ = PACKET_FILES[name]
+    else:
+        (url, pinned, _), limit = FILMS[name], None
     path = os.path.join(CACHE, name)
     if not os.path.exists(path):
         os.makedirs(CACHE, exist_ok=True)
-        request = urllib.request.Request(url, headers={"User-Agent": "ManagedCodecs real-world check"})
+        headers = {"User-Agent": "ManagedCodecs real-world check"}
+        if limit:
+            headers["Range"] = f"bytes=0-{limit - 1}"
+        request = urllib.request.Request(url, headers=headers)
         for attempt in range(1, 5):
             print(f"downloading {url}" + (f" (try {attempt})" if attempt > 1 else ""), flush=True)
             try:
                 with urllib.request.urlopen(request, timeout=60) as response, open(path + ".part", "wb") as out:
-                    while chunk := response.read(1 << 20):
+                    left = limit
+                    while (left is None or left > 0) and (chunk := response.read(min(1 << 20, left or 1 << 20))):
                         out.write(chunk)
+                        left = None if left is None else left - len(chunk)
                 if url.endswith(".zip"):
                     with zipfile.ZipFile(path + ".part") as archive, archive.open(archive.namelist()[0]) as film, \
                             open(path + ".film", "wb") as out:
@@ -123,10 +163,14 @@ def fetch(name):
                 if attempt == 4:
                     fail(f"{name}: download failed: {e}")
                 time.sleep(10 * attempt)
-    actual = sha256(path)
-    if pinned and actual != pinned:
+    algorithm, _, expected = pinned.rpartition(":")
+    actual = digest_of(path, algorithm or "sha256")
+    if not pinned:
+        # Not pinned yet (a file no session could download): the log gives the digest to pin.
+        print(f"{name}: not pinned; {os.path.getsize(path)} bytes, SHA-256 {actual}", flush=True)
+    elif actual != expected:
         os.remove(path)
-        fail(f"{name}: SHA-256 {actual}, expected {pinned}")
+        fail(f"{name}: {algorithm or 'sha256'} {actual}, expected {expected}")
     return path
 
 
@@ -237,30 +281,148 @@ def compare(name, work):
     return f"| `{name}` | {'match' if ok else '**differs**'} | {video} | {audio} | {thumbnail} |", ok
 
 
+def ffprobe_packets(path):
+    """ffprobe's streams (as the header says, nothing decoded) and packets as FFmpeg's demuxer itself gives them."""
+    def run(*args):
+        result = subprocess.run(["ffprobe", "-v", "error", *args, path], capture_output=True, text=True, check=False)
+        # A file cut short ends in an error after its last packet; what was printed until then still counts.
+        if result.returncode != 0 and not result.stdout:
+            fail(f"ffprobe {path} failed:\n{result.stderr}")
+        return result.stdout
+
+    streams = json.loads(run("-nofind_stream_info", "-of", "json", "-show_entries",
+                             "stream=index,codec_type,codec_name,sample_rate,channels,time_base"))["streams"]
+    # +nofillin+noparse: without what libavformat fills in or its parsers cut (src/ManagedCodecs.Containers/CLAUDE.md).
+    packets = []
+    for line in run("-fflags", "+nofillin+noparse", "-show_packets", "-show_data_hash", "MD5", "-show_entries",
+                    "packet=stream_index,pts,dts,size,data_hash", "-of", "csv=p=0").splitlines():
+        fields = line.split(",")
+        if len(fields) >= 5 and fields[0].isdigit():
+            number = lambda text: None if text == "N/A" else int(text)
+            packets.append((int(fields[0]), number(fields[1]), number(fields[2]), int(fields[3]), fields[4].removeprefix("MD5:")))
+    return streams, packets
+
+
+def compare_packets(path):
+    """
+    What differs between mcdec's packets of the video and first audio stream and FFmpeg's demuxer's, as a list of
+    problems (empty: they match), and a summary. Compared: the codec's name, the audio's rate and channels, the number
+    of packets, each one's size and MD5, and its pts and dts where FFmpeg's demuxer gives one (it gives none where it
+    reads no index: MxfConformanceTests), as times, each side's ticks by its own time base. A file cut short ends in a
+    partial packet, which both give.
+    """
+    run = subprocess.run(["dotnet", MCDEC, "--packets", path], capture_output=True, text=True, check=False)
+    if run.returncode != 0:
+        return [f"mcdec --packets failed: {run.stderr.strip().splitlines()[-1] if run.stderr.strip() else run.returncode}"], ""
+    ours_streams = {}
+    ours = {}
+    for line in run.stdout.splitlines():
+        if line.startswith("stream "):
+            _, index, kind, codec, *facts, base = line.split()
+            ours_streams[kind] = (int(index), codec, facts, fractions.Fraction(base))
+            ours[int(index)] = []
+        elif line:
+            index, pts, dts, _, size, _, md5 = line.split(",")
+            ours[int(index)].append((int(pts), int(dts), int(size), md5))
+
+    streams, packets = ffprobe_packets(path)
+    problems = []
+    summary = []
+    for kind in ("video", "audio"):
+        theirs_stream = next((s for s in streams if s["codec_type"] == kind), None)
+        if kind not in ours_streams:
+            if theirs_stream is not None:
+                problems.append(f"no {kind} stream, FFmpeg has {theirs_stream['codec_name']}")
+            continue
+        index, codec, facts, base = ours_streams[kind]
+        if theirs_stream is None:
+            problems.append(f"{kind} stream {codec}, FFmpeg has none")
+            continue
+        if codec.lower() != theirs_stream["codec_name"]:
+            problems.append(f"{kind} codec {codec}, FFmpeg's {theirs_stream['codec_name']}")
+        if kind == "audio" and facts != [theirs_stream["sample_rate"], str(theirs_stream["channels"])]:
+            problems.append(f"audio {' '.join(facts)}, FFmpeg's {theirs_stream['sample_rate']} {theirs_stream['channels']}")
+        their_base = fractions.Fraction(theirs_stream["time_base"])
+        theirs = [p[1:] for p in packets if p[0] == theirs_stream["index"]]
+        mine = ours[index]
+        timed = 0
+        if len(mine) != len(theirs):
+            problems.append(f"{kind}: {len(mine)} packets, FFmpeg's {len(theirs)}")
+        for i, ((pts, dts, size, md5), (their_pts, their_dts, their_size, their_md5)) in enumerate(zip(mine, theirs)):
+            if (size, md5) != (their_size, their_md5):
+                problems.append(f"{kind} packet {i}: {size} bytes {md5}, FFmpeg's {their_size} bytes {their_md5}")
+                break
+            wrong = [f"{what} {own} x {base}, FFmpeg's {their} x {their_base}"
+                     for what, own, their in (("pts", pts, their_pts), ("dts", dts, their_dts))
+                     if their is not None and own * base != their * their_base]
+            if wrong:
+                problems.append(f"{kind} packet {i}: {'; '.join(wrong)}")
+                # The times around it, for the log: ours, then FFmpeg's demuxer's.
+                for j in range(max(0, i - 2), min(len(mine), len(theirs), i + 14)):
+                    print(f"  {kind} packet {j}: pts {mine[j][0]} dts {mine[j][1]}; FFmpeg's pts {theirs[j][0]} dts {theirs[j][1]}", flush=True)
+                break
+            timed += their_pts is not None
+        summary.append(f"{kind} {codec}: {len(mine)} packets ({timed} with FFmpeg's times)")
+    others = len(streams) - sum(1 for kind in ("video", "audio") if any(s["codec_type"] == kind for s in streams))
+    if others:
+        summary.append(f"{others} more streams in FFmpeg's reading, not compared")
+    return problems, "; ".join(summary)
+
+
+def compare_packet_file(name):
+    """A report line for a PACKET_FILES entry, and whether it matched."""
+    problems, summary = compare_packets(fetch(name))
+    print(f"{name}: {summary}", flush=True)
+    for problem in problems:
+        print(f"{name}: {problem}", flush=True)
+    return f"| `{name}` | {'match' if not problems else '**differs**'} | {summary} | {'; '.join(problems)} |", not problems
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("names", nargs="*", help="films to check (default: all)")
     parser.add_argument("--list", action="store_true")
     parser.add_argument("--work", default=os.path.join(CACHE, "work"))
     parser.add_argument("--report", help="Markdown table to write")
+    parser.add_argument("--packets", metavar="FILE", action="append",
+                        help="compare a local file's packets with ffprobe's instead (to try the comparison on samples/*.mxf)")
     args = parser.parse_args()
     if args.list:
         for name, (url, _, what) in FILMS.items():
             print(f"{name}: {what} ({url})")
+        for name, (url, _, _, what) in PACKET_FILES.items():
+            print(f"{name}: {what} ({url})")
         return
+    if args.packets:
+        failed = False
+        for path in args.packets:
+            problems, summary = compare_packets(path)
+            print(f"{os.path.basename(path)}: {summary}" + "".join(f"\n  {p}" for p in problems))
+            failed |= bool(problems)
+        sys.exit(1 if failed else 0)
 
-    names = args.names or list(FILMS)
-    unknown = [n for n in names if n not in FILMS]
+    names = args.names or [*FILMS, *PACKET_FILES]
+    unknown = [n for n in names if n not in FILMS and n not in PACKET_FILES]
     if unknown:
         fail(f"unknown films: {', '.join(unknown)} (--list shows them)")
     os.makedirs(args.work, exist_ok=True)
-    lines = ["| Film | Result | Video | Audio | Probe and thumbnail |", "| --- | --- | --- | --- | --- |"]
+    lines = []
     all_ok = True
-    for name in names:
+    films = [n for n in names if n in FILMS]
+    if films:
+        lines += ["| Film | Result | Video | Audio | Probe and thumbnail |", "| --- | --- | --- | --- | --- |"]
+    for name in films:
         line, ok = compare(name, args.work)
         lines.append(line)
         all_ok &= ok
-    report = "\n".join(lines) + "\n"
+    packet_files = [n for n in names if n in PACKET_FILES]
+    if packet_files:
+        lines += ["" if films else None, "| File | Result | Packets | Differences |", "| --- | --- | --- | --- |"]
+    for name in packet_files:
+        line, ok = compare_packet_file(name)
+        lines.append(line)
+        all_ok &= ok
+    report = "\n".join(line for line in lines if line is not None) + "\n"
     print(report)
     if args.report:
         with open(args.report, "w", encoding="utf-8") as out:

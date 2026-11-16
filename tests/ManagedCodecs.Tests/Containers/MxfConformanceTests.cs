@@ -45,7 +45,12 @@ public class MxfConformanceTests
             Assert.True((e.Pts ?? p.Pts) == p.Pts, $"{at}: pts {p.Pts}, FFmpeg's {e.Pts}");
             Assert.True(e.Size == p.Data.Length, $"{at}: size {p.Data.Length}, FFmpeg's {e.Size}");
             Assert.True(e.Md5 == FrameMd5.Hash(p.Data.Span), $"{at}: other data than FFmpeg's");
-            Assert.True(e.IsKeyframe == p.IsKeyframe, $"{at}: keyframe {p.IsKeyframe}, FFmpeg's {e.IsKeyframe}");
+
+            // libavformat's MPEG-2 parser marks every I picture a keyframe; the index gives an open GOP's (B pictures
+            // before it in display order lean on the GOP before) no random access flag, which is followed here
+            // (mxf-mpeg2-b: only its first picture is one).
+            bool openGop = sampleName == "mxf-mpeg2-b.mxf" && e.IsKeyframe && !p.IsKeyframe && p.StreamIndex == mxf.Video?.StreamIndex && p.Sequence > 0;
+            Assert.True(e.IsKeyframe == p.IsKeyframe || openGop, $"{at}: keyframe {p.IsKeyframe}, FFmpeg's {e.IsKeyframe}");
             Assert.True(e.Duration == p.Duration, $"{at}: duration {p.Duration}, FFmpeg's {e.Duration}");
 
             // FFmpeg's demuxer's own decode times; where it gives none (audio; DNxHR's and D-10's constant-size index,
@@ -221,27 +226,40 @@ public class MxfConformanceTests
     [Fact]
     public void AppliesTheIndexTablesTemporalOffsetsAndFlags()
     {
-        // FFmpeg's muxer writes H.264 unreordered (PosTableIndex 0, temporal offsets 0): rewritten here, the first delta
-        // entry says reordered (-1), edit unit 1 shows two later and 3 two earlier (11.2.3, Table 28), and edit unit
-        // 0 loses its random access flag while 2 gains it.
+        // FFmpeg's muxer writes H.264 unreordered (PosTableIndex 0, temporal offsets 0): rewritten here, the picture's
+        // delta entry (the second: a system item comes first) says reordered (-1), and the offsets are those of an I
+        // picture, a P picture and the two B pictures before it, as MPEG-2 files have them (11.2.3, Table 28: the
+        // picture shown n-th is stored at n plus its offset; mxf-mpeg2-b): shown 1 and 2 are stored at 2 and 3, shown
+        // 3 at 1. Decode times start early by the largest offset. Edit unit 0 loses its random access flag while 2
+        // gains it.
         byte[] file = File.ReadAllBytes(TestSamples.PathOf("mxf-h264-pcm.mxf"));
         var (deltas, entries, entryLength) = IndexArrays(file);
-        file[deltas + 8] = 0xFF;
-        file[entries + 8 + entryLength] = 2;
+        int deltaLength = (int)System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(file.AsSpan(deltas + 4));
+        file[deltas + 8 + deltaLength] = 0xFF;
+        file[entries + 8 + entryLength] = 1;
+        file[entries + 8 + (2 * entryLength)] = 1;
         file[entries + 8 + (3 * entryLength)] = unchecked((byte)-2);
         file[entries + 8 + 2] &= 0x7F;
         file[entries + 8 + (2 * entryLength) + 2] |= 0x80;
 
         using var demuxer = new MxfDemuxer(new MemoryStream(file));
         var video = demuxer.ReadPacketInfo().Where(p => p.StreamIndex == demuxer.Video!.StreamIndex).ToList();
-        Assert.Equal([0L, 3, 2, 1, 4], video.Take(5).Select(p => p.Pts));
-        Assert.Equal([0L, 1, 2, 3, 4], video.Take(5).Select(p => p.Dts));
+        Assert.Equal([0L, 3, 1, 2, 4], video.Take(5).Select(p => p.Pts));
+        Assert.Equal([-1L, 0, 1, 2, 3], video.Take(5).Select(p => p.Dts));
         Assert.Equal([false, false, true, false], video.Take(4).Select(p => p.IsKeyframe));
 
-        // The same offsets without the reordering flag are not applied (they belong to another element).
+        // The first delta entry alone saying so is enough too (a file whose picture is the edit unit's first element).
+        file[deltas + 8 + deltaLength] = 0;
+        file[deltas + 8] = 0xFF;
+        using var first = new MxfDemuxer(new MemoryStream(file));
+        Assert.Equal([0L, 3, 1, 2], first.ReadPacketInfo().Where(p => p.StreamIndex == first.Video!.StreamIndex).Take(4).Select(p => p.Pts));
+
+        // The same offsets with no element flagged as reordered are not applied.
         file[deltas + 8] = 0;
         using var unordered = new MxfDemuxer(new MemoryStream(file));
-        Assert.Equal([0L, 1, 2, 3], unordered.ReadPacketInfo().Where(p => p.StreamIndex == unordered.Video!.StreamIndex).Take(4).Select(p => p.Pts));
+        var plain = unordered.ReadPacketInfo().Where(p => p.StreamIndex == unordered.Video!.StreamIndex).Take(4).ToList();
+        Assert.Equal([0L, 1, 2, 3], plain.Select(p => p.Pts));
+        Assert.Equal([0L, 1, 2, 3], plain.Select(p => p.Dts));
     }
 
     [Fact]

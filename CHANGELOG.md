@@ -34,6 +34,10 @@ New public API (`CaptureTime`), hence the next version is a minor one; code buil
 
 ### Fixed
 
+- Containers: `MxfDemuxer` gives a reordered picture's packets their presentation and decode times as the index table
+  says (MPEG-2 with B pictures, as broadcast MXF has it): they were the stored order's, each packet's pts its dts. The
+  decode times now start before 0 by the reordering's depth, as FFmpeg's. Found by the nightly check's first MXF files
+  from other writers (`tools/realworld.py`, packet by packet against FFmpeg).
 - Containers: `MxfDemuxer.Video` carries the picture descriptor's colour (`ColorPrimaries`, `ColorTransfer`,
   `ColorMatrix`, and `ColorRange` by its black and white reference levels), as FFmpeg's demuxer reads it; it was left
   unspecified. Decoded H.264 frames take it where the stream's VUI says nothing, as with MP4's 'colr', so HDR and

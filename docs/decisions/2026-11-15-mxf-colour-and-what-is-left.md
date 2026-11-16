@@ -103,3 +103,23 @@ issue of its own, not a slice of #469.
   those samples now say limited range; progressive H.264 and MPEG-2 get nothing.
 - **No new public API:** `VideoStreamInfo`'s properties were there. The four samples are in make-samples.sh, with
   name.color references for the MXF H.264 samples.
+
+## Outcome (files from other writers)
+
+- **How:** `mcdec --packets` lists a file's streams and packets, nothing decoded, and `tools/realworld.py` compares
+  them with FFmpeg's demuxer's own (`ffprobe -fflags +nofillin+noparse -show_data_hash MD5`): the codec's name, the
+  sound's rate and channels, the number of packets, each one's size and MD5, and its times where FFmpeg gives any.
+  A job a file in `realworld.yml`, run on the branch before the pull request.
+- **Files:** two of archive.org's `mxfburger` (Public Domain Mark; pinned by the SHA-1 archive.org lists): MPEG-2 at
+  29.97 with B pictures, 16-bit mono and 24-bit 5.1 PCM. And the first 32 MiB of a NASA broadcast file (2.6 GB) by
+  HTTP range, read as a file cut short: MPEG-2 and 24-bit PCM, and seven more streams in FFmpeg's reading, not compared.
+- **First run:** the NASA head matched packet for packet. The `mxfburger` files matched in data and differed in
+  times, which was a bug here that FFmpeg's own files could show too, once asked for B pictures (`-c:v mpeg2video
+  -bf 2`, now mxf-mpeg2-b):
+  - the picture's delta entry is the second (a system item comes first), and only the first was looked at, so the
+    temporal offsets were never applied;
+  - the offsets lead from display order to stored order (the picture shown n-th is stored at n + offset), not the
+    other way; the hand-made test's offsets (+2 and -2, a swap) read the same both ways;
+  - decode times start early by the largest offset (-1 for these), so that no picture is shown before it is decoded.
+- **Left as it is:** an open GOP's I picture is no keyframe here (the index gives it no random access flag), where
+  libavformat's parser marks every I picture one.

@@ -81,6 +81,17 @@ The repository's CLAUDE.md (process, core idea, cross-cutting gotchas) applies t
   FFmpeg reads for a label or a level its muxer never writes, patch the value's bytes in a sample and run ffprobe
   (the expectations of `MxfHeaderTests` were made that way); the SMPTE registers (registry.smpte-ra.org, Labels.xml
   and Elements.xml) answer from the cloud sandbox.
+- MXF reordering: FFmpeg's `-f mxf` muxer writes temporal offsets only for MPEG-2 (`-bf 2`: the picture's delta
+  entry, the second after the system item's, has PosTableIndex -1), never for H.264. The offsets lead from display
+  order to stored order (the picture shown n-th is stored at n + offset), and FFmpeg's demuxer's decode times then
+  start at minus the largest offset. An open GOP's I picture has no random access flag in the index, though
+  libavformat's parser marks it a keyframe.
+- MXF from other writers: none can be downloaded in the cloud sandbox (archive.org's data hosts are refused), so they
+  are checked in CI only: `tools/realworld.py`'s PACKET_FILES, `mcdec --packets` against `ffprobe -fflags
+  +nofillin+noparse`. Run `realworld.yml` on the branch (workflow_dispatch) and read the job's log; a difference in
+  times prints both sides' around the packet. `tools/realworld.py --packets <file>` runs the comparison on a local
+  file (every samples/mxf-*.mxf passes it). What the first files showed is in
+  docs/decisions/2026-11-15-mxf-colour-and-what-is-left.md.
 - MXF packets: FFmpeg's demuxer itself gives no keyframe flags (libavformat's parsers and its intra-only rule add
   them), no durations, and no video times where it reads no index entries (DNxHR's constant-size index; the footer's
   index of a pipe-written file without a random index pack, which it never reaches); compare against `.packets.csv`

@@ -33,6 +33,10 @@ jobs:
           - spinning_skull_mjpeg.avi
           - canon_mvi_5143_mjpeg.avi
           - nikon_dscn0520_mjpeg.mov
+          # MXF from writers other than FFmpeg, packet by packet against ffprobe (realworld.py's PACKET_FILES, #469).
+          - hamburger_16bit_mono.mxf
+          - hamburger_24bit_5.1.mxf
+          - nasa_russian_eva_44.mxf
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 

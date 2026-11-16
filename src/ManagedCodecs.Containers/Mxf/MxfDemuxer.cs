@@ -586,7 +586,14 @@ public sealed class MxfDemuxer : IDemuxer
         }
     }
 
-    /// <summary>Times every packet (<see cref="Time"/>) and describes the two streams by the packets found so far.</summary>
+    /// <summary>
+    /// Times every packet (<see cref="Time"/>) and describes the two streams by the packets found so far. A stream's
+    /// <see cref="VideoStreamInfo.Duration"/> is its material package track's (ST 377-1 B.11), as FFmpeg's demuxer gives
+    /// it: the picture's in edit units, the sound's rescaled from edit units to samples, rounded to the nearest. A file
+    /// cut short keeps the header's, longer than its packets, as ffprobe does. Where the header doesn't say (a file
+    /// written to a pipe: -1), the picture's is 0, as the container says nothing, and the sound's runs to its last
+    /// packet's end.
+    /// </summary>
     private void Describe()
     {
         if (_video is { } video)
@@ -606,6 +613,7 @@ public sealed class MxfDemuxer : IDemuxer
                 ColorPrimaries = video.ColorPrimaries,
                 ColorTransfer = video.ColorTransfer,
                 ColorMatrix = video.ColorMatrix,
+                Duration = video.Duration ?? 0,
             };
         }
 
@@ -616,7 +624,9 @@ public sealed class MxfDemuxer : IDemuxer
             var packets = _packets.Where(p => p.StreamIndex == _audioIndex).ToList();
             Audio = new AudioStreamInfo(audio.Codec is { } codec ? AudioCodec(codec) : "unknown", rate, audio.Channels, packets.Count, new Rational(1, rate), ReadOnlyMemory<byte>.Empty, _audioIndex)
             {
-                Duration = packets.Count == 0 ? 0 : packets[^1].Pts + packets[^1].Duration,
+                Duration = audio.Duration is { } units && audio.EditRate.Numerator > 0
+                    ? ((2 * units * rate * audio.EditRate.Denominator) + audio.EditRate.Numerator) / (2L * audio.EditRate.Numerator)
+                    : packets.Count == 0 ? 0 : packets[^1].Pts + packets[^1].Duration,
             };
         }
     }

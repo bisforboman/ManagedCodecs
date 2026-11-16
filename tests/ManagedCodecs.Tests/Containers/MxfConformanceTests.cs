@@ -64,9 +64,14 @@ public class MxfConformanceTests
             sequences[p.StreamIndex] = sequence + 1;
         }
 
+        // Each stream's duration is its header's track duration, as ffprobe's (name.headers.json's duration_ts: the
+        // sound's rescaled to samples), longer than the packets in a file cut short; where the header gives none (a
+        // file written to a pipe), the picture's is 0 and the sound's runs to its last packet's end.
+        var durations = HeaderDurations(sampleName);
         if (mxf.Video is { } video)
         {
             Assert.Equal(sequences[video.StreamIndex], video.FrameCount);
+            Assert.Equal(durations.GetValueOrDefault(video.StreamIndex) ?? 0, video.Duration);
         }
 
         if (mxf.Audio is { } audio)
@@ -74,8 +79,18 @@ public class MxfConformanceTests
             Assert.Equal(sequences[audio.StreamIndex], audio.FrameCount);
             Assert.Equal(new Rational(1, audio.SampleRate), audio.TimeBase);
             var last = packets.Last(p => p.StreamIndex == audio.StreamIndex);
-            Assert.Equal(last.Pts + last.Duration, audio.Duration);
+            Assert.Equal(durations.GetValueOrDefault(audio.StreamIndex) ?? (last.Pts + last.Duration), audio.Duration);
         }
+    }
+
+    // ffprobe's duration_ts for each stream, from the header metadata (name.headers.json, -nofind_stream_info); null
+    // where it gives none.
+    private static Dictionary<int, long?> HeaderDurations(string sampleName)
+    {
+        using var json = System.Text.Json.JsonDocument.Parse(File.ReadAllText(TestSamples.ReferenceOf(sampleName, ".headers.json")));
+        return json.RootElement.GetProperty("streams").EnumerateArray().ToDictionary(
+            s => s.GetProperty("index").GetInt32(),
+            s => s.TryGetProperty("duration_ts", out var d) ? d.GetInt64() : (long?)null);
     }
 
     public static TheoryData<string, int> H264Samples()

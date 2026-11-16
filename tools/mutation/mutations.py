@@ -196,6 +196,17 @@ MUTATIONS = [
          find="if (TryFromFooter(stream, runIn, header, out partitions))", replace="if (false)",
          tests="FullyQualifiedName~MxfPartitionTests"),
     # ---- MXF demuxer (packets as FFmpeg's)
+    # A stream lasts its header's track duration, as ffprobe's, longer than the packets in a file cut short
+    # (mxf-h264-pcm-cut) ...
+    dict(file="src/ManagedCodecs.Containers/Mxf/MxfDemuxer.cs",
+         find="Duration = video.Duration ?? 0,", replace="Duration = 0,",
+         tests="FullyQualifiedName~MxfConformanceTests|FullyQualifiedName~VideoProbeTests"),
+    # ... the sound's rescaled from edit units to samples rounded to the nearest, as FFmpeg does (6 frames at 29.97
+    # are 9609.6 samples: 9610, mxf-d10-525), not truncated.
+    dict(file="src/ManagedCodecs.Containers/Mxf/MxfDemuxer.cs",
+         find="((2 * units * rate * audio.EditRate.Denominator) + audio.EditRate.Numerator) / (2L * audio.EditRate.Numerator)",
+         replace="units * rate * audio.EditRate.Denominator / audio.EditRate.Numerator",
+         tests="FullyQualifiedName~MxfConformanceTests"),
     # An intra-only codec's packets are all keyframes, whatever the index says (FFmpeg's muxer leaves ProRes without
     # the random access flag: mxf-prores-pcm16).
     dict(file="src/ManagedCodecs.Containers/Mxf/MxfDemuxer.cs",

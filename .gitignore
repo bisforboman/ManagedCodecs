@@ -29,6 +29,8 @@ samples/*.color
 samples/*.display
 samples/*.probe.json
 samples/*.headers.json
+samples/*.audiotracks.json
+samples/*.audioplayed
 samples/*.rgba
 samples/*.flags
 samples/*.csv

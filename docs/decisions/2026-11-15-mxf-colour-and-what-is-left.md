@@ -121,5 +121,7 @@ issue of its own, not a slice of #469.
   - the offsets lead from display order to stored order (the picture shown n-th is stored at n + offset), not the
     other way; the hand-made test's offsets (+2 and -2, a swap) read the same both ways;
   - decode times start early by the largest offset (-1 for these), so that no picture is shown before it is decoded.
-- **Left as it is:** an open GOP's I picture is no keyframe here (the index gives it no random access flag), where
-  libavformat's parser marks every I picture one.
+- **Left as it was, then changed (the owner, 2026-11-16):** an open GOP's I picture was no keyframe here (the index
+  gives it no random access flag), where libavformat's parser marks every I picture one. MPEG-2's I pictures are now
+  keyframes by the index entry's prediction flags (neither set), as FFmpeg's, which a seek to one wants too: the I
+  picture and what follows it decode, only the B pictures shown before it lean on the GOP before.

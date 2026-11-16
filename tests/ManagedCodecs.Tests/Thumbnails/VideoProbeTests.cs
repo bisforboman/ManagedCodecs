@@ -41,7 +41,7 @@ public class VideoProbeTests
 
         foreach (var file in Directory.EnumerateFiles(directory).Order())
         {
-            if (Path.GetExtension(file) is ".avi" or ".mp4" or ".mkv" && File.Exists(Path.ChangeExtension(file, ".probe.json"))
+            if (Path.GetExtension(file) is ".avi" or ".mp4" or ".mkv" or ".mxf" && File.Exists(Path.ChangeExtension(file, ".probe.json"))
                 && TestSamples.CodecOf(Path.GetRelativePath(directory, file)) is CodecIds.H264 or CodecIds.Mjpeg)
             {
                 files.Add(Path.GetRelativePath(directory, file));
@@ -123,13 +123,28 @@ public class VideoProbeTests
         }
     }
 
-    // From the earliest packet's pts to the latest end (pts + duration) in ffprobe's packet list, in the 1/1000 time base
-    // of a Matroska file.
+    // From the earliest packet's pts to the latest end (pts + duration) in ffprobe's packet list, in seconds: a Matroska
+    // file's ticks are 1/1000, an MXF file's each stream's own time base (name.headers.json). An MXF file written to a
+    // pipe has no duration in its header; without its index (mxf-h264-pipe-norip) ffprobe lists no video times, so the
+    // sound's packets give the span alone.
     private static double PacketSpan(string name)
     {
+        var timeBases = new Dictionary<int, double>();
+        if (Path.GetExtension(name) == ".mxf")
+        {
+            using var headers = JsonDocument.Parse(File.ReadAllText(TestSamples.ReferenceOf(name, ".headers.json")));
+            foreach (var stream in headers.RootElement.GetProperty("streams").EnumerateArray())
+            {
+                var parts = stream.GetProperty("time_base").GetString()!.Split('/');
+                timeBases[stream.GetProperty("index").GetInt32()] = double.Parse(parts[0], CultureInfo.InvariantCulture) / double.Parse(parts[1], CultureInfo.InvariantCulture);
+            }
+        }
+
         var packets = File.ReadAllLines(TestSamples.ReferenceOf(name, ".packets.csv")).Select(line => line.Split(','))
-            .Select(f => (Pts: long.Parse(f[1], CultureInfo.InvariantCulture), Duration: long.Parse(f[3], CultureInfo.InvariantCulture))).ToList();
-        return (packets.Max(p => p.Pts + p.Duration) - packets.Min(p => p.Pts)) / 1000.0;
+            .Where(f => f[1] != "N/A")
+            .Select(f => (Base: timeBases.GetValueOrDefault(int.Parse(f[0], CultureInfo.InvariantCulture), 1 / 1000.0), Pts: long.Parse(f[1], CultureInfo.InvariantCulture), Duration: long.Parse(f[3], CultureInfo.InvariantCulture)))
+            .ToList();
+        return packets.Max(p => (p.Pts + p.Duration) * p.Base) - packets.Min(p => p.Pts * p.Base);
     }
 
     [Theory]

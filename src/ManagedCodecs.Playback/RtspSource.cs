@@ -9,7 +9,8 @@ namespace ManagedCodecs.Playback;
 /// <see cref="LivePlayer"/> connects to. Most IP cameras serve it, at a URL their manual gives (<c>rtsp://camera/stream1</c>, often with a
 /// substream at a lower resolution: show a wall of cameras from those). The first H.264 or JPEG video track of the
 /// camera's SDP plays. docs/decisions/2026-11-10-live-rtsp-h264.md, docs/decisions/2026-11-12-live-rtsp-jpeg.md,
-/// docs/decisions/2026-11-14-live-rtsp-udp.md. With <see cref="Audio"/>, its sound too.
+/// docs/decisions/2026-11-14-live-rtsp-udp.md. With <see cref="Audio"/>, its sound too, or its sound alone when it has no
+/// video track.
 /// </summary>
 public sealed class RtspSource
 {
@@ -59,7 +60,11 @@ public sealed class RtspSource
     /// Whether to play the camera's sound too: the first AAC (RFC 3640) or G.711 audio track of its SDP, taken with
     /// <see cref="LivePlayer.TakeAudio"/>. False by default: the session is then for the video alone. A camera with no
     /// such track, or one that refuses to send it, plays its video without sound (<see cref="LivePlayer.Audio"/>,
-    /// <see cref="LivePlayer.SkippedAudioCodec"/>). docs/decisions/2026-11-15-live-rtsp-audio.md.
+    /// <see cref="LivePlayer.SkippedAudioCodec"/>). docs/decisions/2026-11-15-live-rtsp-audio.md. A stream with sound and
+    /// no H.264 or JPEG video track plays only with this on: the sound alone, which then makes the player
+    /// <see cref="LiveState.Playing"/> and is what <see cref="StallTimeout"/> watches, and
+    /// <see cref="LivePlayer.TakeLatest"/> stays null; without it, or with sound that doesn't play, the player fails
+    /// (docs/decisions/2026-11-16-live-audio-only.md).
     /// </summary>
     public bool Audio { get; init; }
 

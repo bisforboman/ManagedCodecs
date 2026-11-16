@@ -529,8 +529,8 @@ if (player.TakeLatest() is { } frame)
   - JPEG (RFC 2435: 4:2:0 and 4:2:2, restart markers, in-band or computed tables) is rebuilt into whole JPEGs and
     decoded as MJPEG over HTTP is, the newest waiting; an incomplete frame is dropped (`DamagedFrames`).
   - Final answers: 401 after the challenge's answer, 403, 404, 454, 461 to both RTP over the connection and over UDP
-    (multicast only), an SDP with no H.264 or JPEG track or with H.264 in RTP's interleaved mode, and a JPEG type or
-    Q RFC 2435 reserves.
+    (multicast only), an SDP with no H.264 or JPEG track (unless it has sound and `Audio` is on: below) or with H.264
+    in RTP's interleaved mode, and a JPEG type or Q RFC 2435 reserves.
   - Checked against GStreamer's RTSP server by hand, and nightly against mediamtx, over UDP too (docs/conformance.md,
     H.264 over RTSP, JPEG over RTP, RTP over UDP).
   - **RTSPS:** an `rtsps://` URL (port 322 by default) plays over TLS, RTP inside the encrypted connection; a server
@@ -553,6 +553,10 @@ if (player.TakeLatest() is { } frame)
   - Sound never stops the picture: a camera that refuses the audio's SETUP plays without it (`Error` says why), audio
     of another kind (LATM, G.726, Opus) is named by `SkippedAudioCodec`, and lost packets are a gap in the sound.
   - Off by default: without `Audio` the session is for the video alone.
+  - **Sound only:** a stream with an audio track and no H.264 or JPEG one plays with `Audio` on, the sound as the
+    session's one track: its packets make the player `Playing` and are what `StallTimeout` watches, and `TakeLatest()`
+    stays null (`LivePlayer.Audio` says what plays). Without `Audio`, or with sound that doesn't play, the player fails
+    and `Error` says why (docs/decisions/2026-11-16-live-audio-only.md).
   - `mclive` and `mclive-wpf` stay silent (neither Avalonia nor WPF plays raw samples without a native library or a
     platform API).
   - Checked nightly against mediamtx, over the connection and over UDP (docs/conformance.md, Audio over RTSP).

@@ -27,7 +27,8 @@ New public API, hence a minor version; code built against 0.17 keeps working.
   other demuxers still list their first audio stream only (to follow, issue #535).
   docs/decisions/2026-11-15-sound-tracks.md.
 - Playback: `PlaybackOptions.AudioTrack` chooses which audio track `MediaPlayer` and `AudioPlayer` play, counted from
-  0 in the file's order; a file with tracks but not that many is refused (`ArgumentOutOfRangeException`).
+  0 in the file's order (null, the default, plays the demuxer's `Audio`); a file with tracks but not that many is
+  refused (`ArgumentOutOfRangeException`).
 - ManagedCodecs.Avalonia and ManagedCodecs.Wpf, two new packages: `LiveView`, a control that shows a `LivePlayer`'s
   newest frame on each frame the UI renders, laid out as an `Image` (`Stretch`, `StretchDirection`). The application
   makes, starts and disposes the player. docs/decisions/2026-11-15-live-controls.md.

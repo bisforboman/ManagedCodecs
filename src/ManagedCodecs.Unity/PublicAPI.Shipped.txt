@@ -436,7 +436,7 @@ ManagedCodecs.Playback.MjpegHttpSource.StallTimeout.init -> void
 ManagedCodecs.Playback.MjpegHttpSource.Uri.get -> System.Uri!
 ManagedCodecs.Playback.PlaybackOptions
 ManagedCodecs.Playback.PlaybackOptions.<Clone>$() -> ManagedCodecs.Playback.PlaybackOptions!
-ManagedCodecs.Playback.PlaybackOptions.AudioTrack.get -> int
+ManagedCodecs.Playback.PlaybackOptions.AudioTrack.get -> int?
 ManagedCodecs.Playback.PlaybackOptions.AudioTrack.init -> void
 ManagedCodecs.Playback.PlaybackOptions.DecoderThreads.get -> int
 ManagedCodecs.Playback.PlaybackOptions.DecoderThreads.init -> void

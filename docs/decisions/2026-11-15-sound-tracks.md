@@ -73,7 +73,10 @@ public interface IDemuxer
 
 ## The players (the second pull request)
 
-- `PlaybackOptions.AudioTrack` counts the demuxer's `AudioTracks` from 0. A file with tracks but not that many is
+- `PlaybackOptions.AudioTrack` (an `int?`) counts the demuxer's `AudioTracks` from 0; null, the default, plays the
+  demuxer's own `Audio`, so a demuxer that picks its default track as FFmpeg does (MP4's and Matroska's, to come)
+  plays that one. It was an `int` defaulting to 0 when #554 merged and became nullable before 0.18.0 shipped it (the
+  owner, 2026-11-16), so the later default rule breaks nothing. A file with tracks but not that many is
   refused when opened (`ArgumentOutOfRangeException`); a file with no audio plays silent (`MediaPlayer`) or is refused
   as before (`AudioPlayer`), whatever the option says. `Audio` and `SkippedAudioCodec` speak of the chosen track.
 - **Folding is MXF's alone** (`demuxer is MxfDemuxer`): in MP4 or Matroska two mono tracks are two languages as likely

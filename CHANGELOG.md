@@ -11,6 +11,23 @@ share internals, so each depends on the others at exactly its own version (`[X]`
 then reports a mix of versions (NU1107, or NU1608 for a newer one referenced directly) rather than letting it fail at
 run time.
 
+## Unreleased
+
+Fixes only, hence the next version is a patch.
+
+### Fixed
+
+- Thumbnails: `VideoProbe` gives an MXF file's duration as ffprobe's; it gave 0 for every MXF file, so
+  `VideoThumbnail` took its frame at the start rather than 10% in.
+- Containers: `MxfDemuxer`'s streams last their header's track durations, as FFmpeg's demuxer reads them: the
+  video's `Duration` was 0, and each sound track's ran to its last packet, short of the header's in a file cut short.
+  The sound's is rescaled to samples and rounded to the nearest, as FFmpeg's; a file written to a pipe, whose header
+  gives none, is as before.
+- Containers: `MxfDemuxer` marks every MPEG-2 I picture a keyframe, as libavformat's parser does: an open GOP's I
+  picture, which the index gives no random access flag, was none, and in a file cut before its index (which went with
+  the footer) only the first picture was one; it now reads the picture header's coding type there. Seeking lands on
+  them too. Found by the nightly check (`tools/realworld.py`, which now compares keyframes and durations too).
+
 ## 0.18.0 – 2026-11-16
 
 Live cameras in Avalonia and WPF: two new packages, ManagedCodecs.Avalonia and ManagedCodecs.Wpf, with a `LiveView`

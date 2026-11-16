@@ -68,10 +68,9 @@ internal sealed class PlayedAudio
     /// <exception cref="ArgumentOutOfRangeException"><see cref="PlaybackOptions.AudioTrack"/> is negative, or the file has audio tracks but not that many.</exception>
     public static PlayedAudio? Choose(IDemuxer demuxer, PlaybackOptions options)
     {
-        int index = options.AudioTrack;
-        if (index < 0)
+        if (options.AudioTrack < 0)
         {
-            throw new ArgumentOutOfRangeException(nameof(options), index, "PlaybackOptions.AudioTrack is negative.");
+            throw new ArgumentOutOfRangeException(nameof(options), options.AudioTrack, "PlaybackOptions.AudioTrack is negative.");
         }
 
         var tracks = demuxer.AudioTracks;
@@ -79,6 +78,10 @@ internal sealed class PlayedAudio
         {
             return null;
         }
+
+        // Unasked, the track the demuxer reads unasked (its Audio), wherever it is in the list.
+        int index = options.AudioTrack
+            ?? Math.Max(0, tracks.ToList().FindIndex(t => t.StreamIndex == demuxer.Audio?.StreamIndex));
 
         if (index >= tracks.Count)
         {

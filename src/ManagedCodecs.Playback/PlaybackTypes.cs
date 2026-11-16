@@ -22,14 +22,15 @@ public sealed record PlaybackOptions
     public bool Loop { get; init; }
 
     /// <summary>
-    /// Which of the file's audio tracks to play, counted from 0 in the file's order (<see cref="IDemuxer.AudioTracks"/>):
-    /// 0, the default, is the first, as before. A file with audio tracks but not this many is refused
-    /// (<see cref="ArgumentOutOfRangeException"/>); one with no audio at all plays silent whatever this says.
+    /// Which of the file's audio tracks to play, counted from 0 in the file's order (<see cref="IDemuxer.AudioTracks"/>);
+    /// null, the default, for the one the demuxer reads unasked (<see cref="IDemuxer.Audio"/>: the file's first today).
+    /// A file with audio tracks but not this many is refused (<see cref="ArgumentOutOfRangeException"/>); one with no
+    /// audio at all plays silent whatever this says.
     /// In an MXF file, where a mono track is usually one channel of the programme, a mono track plays as the left
     /// channel and the next track, if it is mono of the same codec and rate, as the right; any other mono track
     /// plays on both.
     /// </summary>
-    public int AudioTrack { get; init; }
+    public int? AudioTrack { get; init; }
 }
 
 /// <summary>A decoded video frame as RGBA, and when to show it.</summary>

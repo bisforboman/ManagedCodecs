@@ -157,6 +157,11 @@ public class AudioPlayerTests
         Assert.Throws<ArgumentOutOfRangeException>(() => new AudioPlayer(TestSamples.PathOf(Name), new PlaybackOptions { AudioTrack = 2 }));
         Assert.Throws<ArgumentOutOfRangeException>(() => new AudioPlayer(TestSamples.PathOf(Name), new PlaybackOptions { AudioTrack = -1 }));
         Assert.Throws<ArgumentOutOfRangeException>(() => new AudioPlayer(TestSamples.PathOf("wav-pcm-s16.wav"), new PlaybackOptions { AudioTrack = 1 }));
+
+        // Unasked (null), the demuxer's own Audio: the first track; 0 names the same one.
+        Assert.Null(new PlaybackOptions().AudioTrack);
+        using var unasked = new AudioPlayer(TestSamples.PathOf(Name), new PlaybackOptions { AudioTrack = null });
+        Assert.Equal(1, unasked.Audio.StreamIndex);
     }
 
     /// <summary>

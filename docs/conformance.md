@@ -390,23 +390,30 @@ crops by the container's size.
 ### MXF from other writers
 
 Every MXF sample is FFmpeg's own muxers' (or GStreamer's, which adds nothing to them). `tools/realworld.py` also reads
-three files from other writers (its PACKET_FILES; a job each), whose codec this library only names, so they are
+four files from other writers (its PACKET_FILES; a job each), whose codec this library only names, so they are
 compared packet by packet: `mcdec --packets` against FFmpeg's demuxer's own packets (`ffprobe -fflags
 +nofillin+noparse -show_data_hash MD5`), for the video and the first sound track: the codec's name, the sound's rate
 and channels, the number of packets, each one's size and MD5, and its presentation and decode times where FFmpeg
-gives any. The cloud sessions can't download them (archive.org's data hosts are refused there), so the comparison was
-first run in CI, on the branch.
+gives any; each stream's duration against the header's as ffprobe reads it (`-nofind_stream_info`'s `duration_ts`);
+and each packet's keyframe flag and duration against ffprobe's default listing, where libavformat adds them (its
+parsers and its intra-only rule: FFmpeg's demuxer itself gives none), wherever that listing holds the same packets
+(a parser can cut a file's last partial packet otherwise). Every samples/mxf-*.mxf passes the same comparison
+(`tools/realworld.py --packets`). The cloud sessions can't download the files (archive.org's data hosts are refused
+there), so the comparison was first run in CI, on the branch.
 
 - Two of archive.org's `mxfburger` files (Public Domain Mark, pinned by the SHA-1 archive.org lists), a 9-second
   advertisement: MPEG-2 at 29.97 with B pictures and temporal offsets, 280 pictures, with 16-bit mono and with 24-bit
   5.1 PCM. Their first run found that `MxfDemuxer` never applied a reordered picture's offsets (Temporal offsets,
-  under MXF demuxing).
+  under MXF demuxing), and that an open GOP's I picture, which the index gives no random access flag, is a keyframe
+  to FFmpeg.
 - The first 32 MiB of a NASA broadcast file of 2.6 GB (jsc-pao-video-collection; by HTTP range, pinned by those bytes'
   SHA-256), read as a file cut short: MPEG-2 and 24-bit PCM, 274 packets each, and seven more streams in FFmpeg's
   reading, which are not compared (what they are was not looked at).
+- The first 48 MiB of another file of that collection, 12 GB whole (pinned the same way): 3840x2160 H.264 at 59.94,
+  every picture a keyframe in the index, and eight mono 24-bit sound tracks, the first of which is compared (the others
+  wait for #535). Its first run, before the keyframes and durations were compared, matched packet for packet.
 
-Not compared there: keyframe flags (FFmpeg's demuxer itself gives none) and the header's facts beyond the codec and
-the sound's format.
+Not compared there: the header's facts beyond the codec, the sound's format and the durations.
 
 ## SIMD and ARM64
 

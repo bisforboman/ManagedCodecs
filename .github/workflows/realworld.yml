@@ -37,6 +37,7 @@ jobs:
           - hamburger_16bit_mono.mxf
           - hamburger_24bit_5.1.mxf
           - nasa_russian_eva_44.mxf
+          - nasa_crew7_4k_h264.mxf
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 

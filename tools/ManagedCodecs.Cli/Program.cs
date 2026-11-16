@@ -24,7 +24,7 @@ if (args.Length == 0 || args.Contains("-h") || args.Contains("--help"))
     Console.WriteLine("  --thumbnail: writes the file's thumbnail (480 x 480 at most) as raw RGBA and prints its size and time and the file's VideoProbe facts; tools/realworld.py compares them.");
     Console.WriteLine("  --live <rtsp:// or http:// URL> <file> [--frames N]: plays the live stream with LivePlayer until N frames (default 250) are shown, each checked against the file's frames; --audio plays the sound too (RtspSource.Audio), each chunk checked against the file's; --certificate-hash pins an rtsps:// server's certificate (RtspSource.CertificateHash); tools/rtsp-nightly.py runs it.");
     Console.WriteLine("  --dump: writes <prefix>.video.md5 (each frame's MD5, as ffmpeg -f framemd5) and <prefix>.audio.f32 (as -f f32le); tools/realworld.py compares them.");
-    Console.WriteLine("  --packets: prints the file's streams and every packet as the demuxer gives it (stream, pts, dts, duration, size, keyframe, MD5), nothing decoded; tools/realworld.py compares them with ffprobe's.");
+    Console.WriteLine("  --packets: prints the file's streams (with their durations) and every packet as the demuxer gives it (stream, pts, dts, duration, size, keyframe, MD5), nothing decoded; tools/realworld.py compares them with ffprobe's.");
     return args.Length == 0 ? 1 : 0;
 }
 

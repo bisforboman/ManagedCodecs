@@ -434,10 +434,16 @@ public sealed class LivePlayer : IDisposable
             {
                 rtsp = await RtspConnection.ConnectAsync(source.Uri.Host, source.Port, source.Credential, source.Secure, source.PinnedCertificate, source.TunnelPath, cancel.Token).ConfigureAwait(false);
             }
-            catch (HttpTunnelException e) when (e.Status is 401 or 403 or 404 or 405 or 501)
+            catch (HttpTunnelException e)
             {
-                // A camera that refuses the tunnel (or knows no such stream) answers the same on the next try.
-                throw new FatalException(e);
+                // A camera that refuses the tunnel (or knows no such stream) answers the same on the next try; anything
+                // else (busy, no HTTP answer) may pass then. No exception filter: see ExceptionFilterTests.
+                if (e.Status is 401 or 403 or 404 or 405 or 501)
+                {
+                    throw new FatalException(e);
+                }
+
+                throw;
             }
             catch (System.Security.Authentication.AuthenticationException e)
             {

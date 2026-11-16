@@ -541,9 +541,16 @@ public sealed class LivePlayer : IDisposable
             var ending = cancel.Token;
             if (udp is null)
             {
+                // Through the HTTP tunnel none: live555 (2026.11.08) takes an interleaved report in the POST for a broken
+                // request and stops hearing the keep-alives after it, so it ended the session at 65 s; without them it
+                // played on (docs/decisions/2026-11-16-live-rtsp-http.md). The keep-alives keep the session there.
                 var connected = rtsp;
-                senders.Add((rtcp, new Func<byte[], Task>(report => connected.SendPacketAsync(transport.Channel + 1, report, ending))));
-                if (audio is not null)
+                if (!source.HttpTunnel)
+                {
+                    senders.Add((rtcp, new Func<byte[], Task>(report => connected.SendPacketAsync(transport.Channel + 1, report, ending))));
+                }
+
+                if (audio is not null && !source.HttpTunnel)
                 {
                     senders.Add((audio.Rtcp, new Func<byte[], Task>(report => connected.SendPacketAsync(audio.Channel + 1, report, ending))));
                 }

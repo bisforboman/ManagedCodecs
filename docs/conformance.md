@@ -310,6 +310,25 @@ RTP over UDP to the reader alone (docs/decisions/2026-11-16-live-rtsp-multicast.
   100 frames, all the clip's, with none lost or damaged and no reconnects.
 - **Not tried yet:** an IP camera's or an NVR's RTSPS, and TLS through a proxy.
 
+### RTSP over HTTP
+
+`RtspSource.HttpTunnel` tunnels RTSP through HTTP: a GET whose answer carries what the server sends, a POST that
+carries the requests in base64, one cookie joining them (docs/decisions/2026-11-16-live-rtsp-http.md).
+
+- **`LiveRtspHttpTests`** runs `RtspTestServer` set to take only tunnelled connections:
+  - in lockstep, every H.264 frame shown through the tunnel is `H264Decoder`'s for the units so far, with Digest;
+  - a GET and a POST of the stream's path, one cookie of 22 letters and digits, their content types;
+  - the keep-alive comes through the POST at half the session's timeout, and no receiver report;
+  - over HTTPS with a pinned certificate;
+  - a GET answered 404 or 401 fails, 503 is tried again; a 461 to SETUP fails, with no UDP tried;
+  - the ports (80, 443 for `rtsps://`, else the URL's) and the path with its query.
+- **GStreamer 1.24's RTSP server, by hand** (2026-11-16, tools/gst-rtsp-server.py, Digest): its log shows the tunnel's
+  GET and POST joined; 100 frames, none lost or damaged.
+- **live555MediaServer, by hand** (2026-11-16, LIVE555 2026.11.08) on port 80: 200 frames, all the clip's, with the
+  port in the URL and without. A 640x360 session held for 90 s played on, no reconnect, once the receiver reports were
+  left out of the tunnel; with them live555 ended it at 65 s.
+- **Not tried yet:** a camera's tunnel, and an HTTP proxy between.
+
 ### Audio over RTSP
 
 With `RtspSource.Audio`, `LivePlayer` sets up the camera's first AAC or G.711 audio track beside the video

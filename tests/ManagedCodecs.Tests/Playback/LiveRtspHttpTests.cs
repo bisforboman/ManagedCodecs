@@ -6,8 +6,8 @@ namespace ManagedCodecs.Tests.Playback;
 /// <summary>
 /// RTSP over HTTP (<see cref="RtspSource.HttpTunnel"/>; docs/decisions/2026-11-16-live-rtsp-http.md) against the
 /// loopback server set to take only tunnelled connections: a GET and a POST joined by one cookie, every frame as over
-/// the RTSP connection, Digest and the receiver reports inside the POST's base64, over HTTPS too; a refused GET, and a
-/// 461 that can't fall back to UDP; the tunnel's default ports.
+/// the RTSP connection, Digest and the keep-alives inside the POST's base64 but no receiver reports, over HTTPS too; a
+/// refused GET, and a 461 that can't fall back to UDP; the tunnel's default ports.
 /// </summary>
 public class LiveRtspHttpTests
 {
@@ -71,8 +71,10 @@ public class LiveRtspHttpTests
     }
 
     [Fact]
-    public void SendsItsReceiverReportsThroughThePost()
+    public void KeepsTheSessionByKeepAlivesAndSendsNoReceiverReports()
     {
+        // live555 took an interleaved report in the POST for a broken request and lost the keep-alives after it, ending
+        // the session at 65 s: through the tunnel the keep-alives alone keep it, every half of its timeout.
         var units = LiveRtspTests.AccessUnits(Slices);
         using var server = new RtspTestServer(RtspTestServer.SdpOf(Slices), async play =>
         {
@@ -91,13 +93,12 @@ public class LiveRtspHttpTests
         using var player = new LivePlayer(new RtspSource(server.Uri) { HttpTunnel = true, StallTimeout = Unstalled }, clock);
         player.Start();
         Assert.NotNull(WaitFor(player, player.TakeLatest));
-        WaitFor(player, () => clock.WaitingFor.Contains(TimeSpan.FromSeconds(5)) ? player : null);
-        clock.Advance(TimeSpan.FromSeconds(5));
-        WaitFor(player, () => server.Interleaved.Any(p => p.Channel == 1) ? player : null);
+        WaitFor(player, () => clock.WaitingFor.Contains(TimeSpan.FromSeconds(30)) ? player : null);
+        clock.Advance(TimeSpan.FromSeconds(30));
+        WaitFor(player, () => server.Requests.Any(r => r.Method == "GET_PARAMETER") ? player : null);
 
-        var report = server.Interleaved.First(p => p.Channel == 1).Data;
-        Assert.Equal(201, report[1]);
-        Assert.Equal(units[0][0].AsSpan(8, 4).ToArray(), report.AsSpan(8, 4).ToArray());
+        Assert.Empty(server.Interleaved);
+        Assert.Equal(LiveState.Playing, player.State);
     }
 
     [Fact]

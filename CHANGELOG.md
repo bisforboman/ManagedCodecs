@@ -14,11 +14,20 @@ run time.
 ## 0.18.0 – 2026-11-16
 
 Live cameras in Avalonia and WPF: two new packages, ManagedCodecs.Avalonia and ManagedCodecs.Wpf, with a `LiveView`
-control; lip sync for RTSP cameras by capture times (`CaptureTime`), and RTCP receiver reports. New public API, hence
-a minor version; code built against 0.17 keeps working.
+control; lip sync for RTSP cameras by capture times (`CaptureTime`), and RTCP receiver reports; and sound tracks after
+the first (`AudioTracks`, `SelectAudio`, `PlaybackOptions.AudioTrack`), MXF's mono tracks playing as left and right.
+New public API, hence a minor version; code built against 0.17 keeps working.
 
 ### Added
 
+- Containers: sound tracks after the first. `IDemuxer.AudioTracks` lists a file's audio streams and
+  `IDemuxer.SelectAudio` chooses which of them `ReadPackets` gives, one or several in one pass; `Audio` is the first
+  one chosen, and until a choice is made the file's first audio stream is read alone, as before. `MxfDemuxer` lists
+  every sound track (broadcast MXF's mono track a channel), each with the packets FFmpeg's demuxer gives for it; the
+  other demuxers still list their first audio stream only (to follow, issue #535).
+  docs/decisions/2026-11-15-sound-tracks.md.
+- Playback: `PlaybackOptions.AudioTrack` chooses which audio track `MediaPlayer` and `AudioPlayer` play, counted from
+  0 in the file's order; a file with tracks but not that many is refused (`ArgumentOutOfRangeException`).
 - ManagedCodecs.Avalonia and ManagedCodecs.Wpf, two new packages: `LiveView`, a control that shows a `LivePlayer`'s
   newest frame on each frame the UI renders, laid out as an `Image` (`Stretch`, `StretchDirection`). The application
   makes, starts and disposes the player. docs/decisions/2026-11-15-live-controls.md.
@@ -30,6 +39,9 @@ a minor version; code built against 0.17 keeps working.
 
 ### Changed
 
+- Playback: an MXF file with a mono sound track a channel now plays in stereo: the first track left and the second
+  right (or the track `PlaybackOptions.AudioTrack` names and the one after it), where the first track alone played on
+  both speakers. A mono track with no mono track of the same codec and rate after it still plays on both.
 - Playback: an RTSP session now sends RTCP receiver reports, one a track every 5 seconds, on the RTSP connection or
   from the RTCP port over UDP (loss, jitter, and the camera's last sender report echoed). Cameras and servers that drop
   a reader they hear no RTCP from keep playing. docs/decisions/2026-11-15-live-rtcp.md.

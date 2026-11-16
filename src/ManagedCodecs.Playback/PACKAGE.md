@@ -37,6 +37,8 @@ if (player.IsFinished) { /* the video has ended; player.Error says why if it end
 - **Shape:** `frame.SampleAspectRatio` (anamorphic video) and `player.Video.Rotation` (phone video) are for you to
   apply when drawing.
 - **Damaged files:** play up to the damage, then end with the exception in `Error`, never thrown at the game loop.
+- **Audio tracks:** the file's first plays; `PlaybackOptions.AudioTrack` chooses another, counted from 0. An MXF
+  file's mono track a channel plays in stereo: the track chosen left, the next one right.
 - **Not a media player:** no seeking. `PlaybackOptions.Loop` plays the file again from its start, the frames' times
   running on.
 

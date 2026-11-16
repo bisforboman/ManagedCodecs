@@ -111,4 +111,8 @@ built. With 1 (a), no public API changes.
   - `RtspTestServer` over UDP.
   - The checks are in docs/conformance.md, RTP over UDP.
 - The nightly run (tools/rtsp-nightly.py) gained mediamtx with UDP only, FFmpeg pushing over UDP.
+- A network that loses, repeats and reorders (2026-11-15, issue #527): tools/rtsp-lossy-relay.py between mediamtx and
+  the player, nightly, and `LiveRtspUdpTests` by twelve seeds. Nothing in the player had to change: the reorder window
+  put back what 10 ms of holding back moved, and the packets counted lost were the ones dropped, to the packet, up to
+  30% (docs/conformance.md, RTP over UDP).
 

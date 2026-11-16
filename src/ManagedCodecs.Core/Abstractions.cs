@@ -256,11 +256,51 @@ public interface IDemuxer : IDisposable
     /// <summary>The first video stream, or null if there is none.</summary>
     VideoStreamInfo? Video { get; }
 
-    /// <summary>The first audio stream, or null if there is none (or the container does not expose audio).</summary>
+    /// <summary>
+    /// The audio stream <see cref="ReadPackets"/> gives: the file's first, or the first of those chosen with
+    /// <see cref="SelectAudio"/>. Null if there is none (or the container does not expose audio).
+    /// </summary>
     AudioStreamInfo? Audio { get; }
 
     /// <summary>
-    /// Packets of the video and audio streams, interleaved in file order; each stream's packets
+    /// Every audio stream of the file that the demuxer can give packets of, in the file's order (as FFmpeg numbers its
+    /// streams): several languages or a commentary, or broadcast MXF's mono track a channel. <see cref="Audio"/> is one
+    /// of them. This default, for a demuxer that reads one audio stream, is <see cref="Audio"/> alone.
+    /// </summary>
+    IReadOnlyList<AudioStreamInfo> AudioTracks => Audio is { } audio ? [audio] : [];
+
+    /// <summary>
+    /// Chooses the audio streams the next <see cref="ReadPackets"/> (or another read started after this call) gives,
+    /// beside the video: one, or several to read them in one pass, interleaved in file order.
+    /// <see cref="Audio"/> becomes the first one named. Until it is called the file's first audio stream is read alone.
+    /// A stream's packets are the same whichever others are read with it. This default, for a demuxer that reads one
+    /// audio stream, takes that stream only.
+    /// </summary>
+    /// <param name="streamIndexes">The <see cref="AudioStreamInfo.StreamIndex"/> of one or more of <see cref="AudioTracks"/>, each once.</param>
+    /// <exception cref="ArgumentException">No stream is named, or one twice.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">No audio stream of the demuxer has one of the indexes.</exception>
+    void SelectAudio(params int[] streamIndexes)
+    {
+        ArgumentNullException.ThrowIfNull(streamIndexes);
+        if (streamIndexes.Length == 0)
+        {
+            throw new ArgumentException("At least one audio stream must be selected.", nameof(streamIndexes));
+        }
+
+        if (streamIndexes.Length > 1 && streamIndexes.Distinct().Count() != streamIndexes.Length)
+        {
+            throw new ArgumentException("An audio stream is selected twice.", nameof(streamIndexes));
+        }
+
+        if (streamIndexes.Length > 1 || streamIndexes[0] != Audio?.StreamIndex)
+        {
+            throw new ArgumentOutOfRangeException(nameof(streamIndexes), "No audio stream of the demuxer has this index.");
+        }
+    }
+
+    /// <summary>
+    /// Packets of the video stream and of <see cref="Audio"/> (and the other audio streams chosen with
+    /// <see cref="SelectAudio"/>), interleaved in file order; each stream's packets
     /// are in decode order. <see cref="Packet.StreamIndex"/> tells them apart.
     /// </summary>
     IEnumerable<Packet> ReadPackets();

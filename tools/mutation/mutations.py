@@ -217,9 +217,10 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.Containers/Mxf/MxfDemuxer.cs",
          find="Dts = unit - delay, Pts = pts", replace="Dts = unit, Pts = pts",
          tests="FullyQualifiedName~MxfConformanceTests"),
-    # Each stream starts at its own keyframe at or before the time (the audio's every packet).
+    # Each stream starts at its own keyframe at or before the time (the audio's every packet): every sound track,
+    # those not selected too (SelectAudio after the Seek reads them from there).
     dict(file="src/ManagedCodecs.Containers/Mxf/MxfDemuxer.cs",
-         find="_audioStart = Start(audio.StreamIndex, Rescale(pts, timeBase, audio.TimeBase));", replace="",
+         find="sound.Start = Start(sound.Index, Rescale(pts, timeBase, sound.Info!.TimeBase));", replace="",
          tests="FullyQualifiedName~MxfConformanceTests|DisplayName~mxf"),
     # The range by the descriptor's reference levels is FFmpeg's reading, not a rule of ST 377-1: full range takes a
     # missing black level for 0, a colour range of the largest value or one more ...
@@ -326,8 +327,12 @@ MUTATIONS = [
          tests="FullyQualifiedName~MxfFollowTests"),
     # A cut 8-channel AES3 element keeps a sample whose kept channels' words are there (mxf-d10-pcm24-cut).
     dict(file="src/ManagedCodecs.Containers/Mxf/MxfDemuxer.cs",
-         find="(size - header.Length + ((8 - _aes3Channels) * 4)) / (8 * 4)", replace="(size - header.Length) / (8 * 4)",
+         find="(size - header.Length + ((8 - channels) * 4)) / (8 * 4)", replace="(size - header.Length) / (8 * 4)",
          tests="DisplayName~mxf-d10-pcm24-cut"),
+    # Only an MXF file's mono tracks play as left and right: elsewhere two mono tracks may be two languages (#535).
+    dict(file="src/ManagedCodecs.Playback/AudioPipeline.cs",
+         find="var right = demuxer is MxfDemuxer && track.Channels == 1", replace="var right = track.Channels == 1",
+         tests="FullyQualifiedName~AudioPlayerTests"),
     # A clip of sound the file ends in keeps its last bytes, not whole samples only (mxf-opatom-pcm-cut).
     dict(file="src/ManagedCodecs.Containers/Mxf/MxfDemuxer.cs",
          find="long whole = at == _cut ? element.Size :", replace="long whole =",

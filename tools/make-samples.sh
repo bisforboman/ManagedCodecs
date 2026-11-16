@@ -933,6 +933,14 @@ ff -f lavfi -i testsrc2=s=160x120:r=25 -t 1 -c:v mpeg2video -bf 2 -g 6 samples/m
 # files under 64 KiB, tools/ManagedCodecs.Fuzz), the other MXF samples being larger.
 ff -f lavfi -i testsrc2=s=64x48:r=25 -f lavfi -i sine=sample_rate=48000 -t 0.32 -c:v libx264 -pix_fmt yuv420p -g 4 \
   -c:a pcm_s16le samples/mxf-h264-small.mxf
+# mxf-h264-mono4: broadcast MXF's layout, a mono sound track a channel (four here, 24-bit, each a sine of its own
+# frequency so that no two tracks' packets are alike), for MxfDemuxer's AudioTracks and SelectAudio: FFmpeg's demuxer
+# gives a stream a track, and each frame's four sound elements follow its picture. (mxf-prores-pcm16 has two stereo
+# tracks.)
+ff -f lavfi -i testsrc2=s=160x120:r=25 -f lavfi -i sine=sample_rate=48000:frequency=440 \
+  -f lavfi -i sine=sample_rate=48000:frequency=550 -f lavfi -i sine=sample_rate=48000:frequency=660 \
+  -f lavfi -i sine=sample_rate=48000:frequency=880 -t 1 -map 0 -map 1 -map 2 -map 3 -map 4 -c:v libx264 -pix_fmt yuv420p \
+  -g 5 -c:a pcm_s24le samples/mxf-h264-mono4.mxf
 # The picture descriptor's colour (ST 377-1 Annex G: the Color Primaries, Transfer Characteristic and Coding Equations
 # labels, and the range by the black and white reference levels), which FFmpeg's muxer writes from -color_primaries,
 # -color_trc, -colorspace and -color_range; remuxed from raw H.264 so that the descriptor and the VUI can differ.
@@ -1019,6 +1027,12 @@ for f in samples/mxf-*.mxf; do
     ff -i "$f" -map 0:a:0 -f f32le "${f%.mxf}.pcm.f32"
   fi
 done
+# name.pairNM.f32: two mono sound tracks as FFmpeg joins them into stereo (the first left, the second right), for the
+# players' folding of MXF's mono track a channel (PlaybackOptions.AudioTrack): mxf-h264-mono4's first pair and second.
+ff -i samples/mxf-h264-mono4.mxf -filter_complex '[0:a:0][0:a:1]join=inputs=2:channel_layout=stereo' -f f32le \
+  samples/mxf-h264-mono4.pair01.f32
+ff -i samples/mxf-h264-mono4.mxf -filter_complex '[0:a:2][0:a:3]join=inputs=2:channel_layout=stereo' -f f32le \
+  samples/mxf-h264-mono4.pair23.f32
 # mxf-h264-pcm-cut-video's last picture is cut short: FFmpeg's decoder conceals it, H264Decoder refuses it (outside
 # ConcealErrors, whose own tests cover concealment), so its frames have no reference; its packets do.
 rm -f samples/mxf-h264-pcm-cut-video.h264.framemd5 samples/mxf-h264-pcm-cut-video.color

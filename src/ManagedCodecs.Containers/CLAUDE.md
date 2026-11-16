@@ -100,3 +100,8 @@ The repository's CLAUDE.md (process, core idea, cross-cutting gotchas) applies t
   `-fps_mode passthrough` it keeps every frame (`.h264.framemd5`). Its frame times there are a guess, not a reference:
   k + D on the 2-second samples, 0 2 3 5 6 7 7 7 on mxf-h264-small, and from 0 where its packets have no times;
   compare the MD5s only.
+- MXF sound tracks: `_packets` lists every sound track's packets, selected or not (SelectAudio is a filter, Refresh
+  and Seek work on all of them). FFmpeg's muxer writes a sound element a track after each frame's picture, mono for a
+  mono input (`-map` each), and its demuxer numbers the streams as the material package's tracks; `.packets.csv` holds
+  every stream, so filter it by the selected ones. Don't edit make-samples.sh while it runs: bash reads the script as
+  it goes, and the run fails at a shifted line.

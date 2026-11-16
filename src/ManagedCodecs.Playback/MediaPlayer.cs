@@ -29,6 +29,7 @@ public sealed class MediaPlayer : IDisposable
 
     private readonly IDemuxer _demuxer;
     private readonly PlaybackOptions _options;
+    private readonly PlayedAudio? _played;
     private readonly Thread _thread;
     private readonly CancellationTokenSource _stop = new();
     private readonly BlockingCollection<RgbaFrame> _frames = new(FrameQueue);
@@ -62,6 +63,7 @@ public sealed class MediaPlayer : IDisposable
     /// <param name="options">How to play it; null for the defaults.</param>
     /// <exception cref="NotSupportedException">No video stream, or one this library doesn't decode.</exception>
     /// <exception cref="InvalidDataException">Not a file of a container this library reads, or a damaged one.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">The file has audio tracks, but not the one <see cref="PlaybackOptions.AudioTrack"/> names.</exception>
     public MediaPlayer(string path, PlaybackOptions? options)
         : this(Demuxer.Open(path), options)
     {
@@ -86,6 +88,7 @@ public sealed class MediaPlayer : IDisposable
     /// <param name="options">How to play it; null for the defaults.</param>
     /// <exception cref="NotSupportedException">No video stream, or one this library doesn't decode.</exception>
     /// <exception cref="InvalidDataException">Not a file of a container this library reads, or a damaged one.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">The file has audio tracks, but not the one <see cref="PlaybackOptions.AudioTrack"/> names.</exception>
     public MediaPlayer(Stream stream, PlaybackOptions? options)
         : this(Demuxer.Open(stream), options)
     {
@@ -104,8 +107,11 @@ public sealed class MediaPlayer : IDisposable
             }
 
             Video = video;
-            Audio = demuxer.Audio is { } audio && AudioPipeline.CanPlay(audio.Codec) ? audio : null;
-            SkippedAudioCodec = Audio is null ? demuxer.Audio?.Codec : null;
+            var chosen = PlayedAudio.Choose(demuxer, _options);
+            _played = chosen is not null && AudioPipeline.CanPlay(chosen.Track.Codec) ? chosen : null;
+            _played?.Select(demuxer);
+            Audio = _played?.Track;
+            SkippedAudioCodec = _played is null ? chosen?.Track.Codec : null;
         }
         catch
         {
@@ -121,7 +127,9 @@ public sealed class MediaPlayer : IDisposable
 
     /// <summary>
     /// The audio stream played, or null for none: the file has no audio, or audio this library doesn't decode (only
-    /// AAC, MP3, PCM in AVI, QuickTime and Matroska, and IMA and Microsoft ADPCM), and plays silent.
+    /// AAC, MP3, PCM in AVI, QuickTime, Matroska and MXF, and IMA and Microsoft ADPCM), and plays silent. Of several
+    /// tracks, the one <see cref="PlaybackOptions.AudioTrack"/> names (the first unasked); of an MXF file's pair of mono
+    /// tracks played as left and right, the left one.
     /// </summary>
     public AudioStreamInfo? Audio { get; }
 
@@ -295,7 +303,7 @@ public sealed class MediaPlayer : IDisposable
         IVideoDecoder decoder = video.Codec == CodecIds.H264
             ? new H264Decoder(video) { Threads = _options.DecoderThreads > 0 ? _options.DecoderThreads : Math.Clamp(Environment.ProcessorCount - 1, 1, 4) }
             : new MjpegDecoder(video);
-        IAudioDecoder? audio = Audio is null ? null : AudioPipeline.CreateDecoder(Audio);
+        var audio = _played?.Decode();
         long shown = Interlocked.Read(ref _converted);
         foreach (var packet in _demuxer.ReadPackets())
         {
@@ -307,14 +315,15 @@ public sealed class MediaPlayer : IDisposable
                 Count(start, frames.Count);
                 Show(frames, token);
             }
-            else if (audio is not null && packet.StreamIndex == Audio!.StreamIndex && !packet.Discard)
+            else if (audio?.Decode(packet) is { } chunk)
             {
-                var frame = audio.Decode(packet);
-                if (frame.SampleCount > 0)
-                {
-                    _audio.Add(AudioPipeline.ToStereo(frame), token);
-                }
+                _audio.Add(chunk, token);
             }
+        }
+
+        if (audio?.Flush() is { } rest)
+        {
+            _audio.Add(rest, token);
         }
 
         long flushStart = Stopwatch.GetTimestamp();

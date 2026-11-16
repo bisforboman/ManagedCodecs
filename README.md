@@ -110,7 +110,7 @@ and code that reproduces FFmpeg's reading where it differs from the spec), and n
   'alaw', 'ulaw') and Matroska (A_PCM by
   BitDepth), ISO MP4 (`ipcm`, `fpcm`). `MediaPlayer` plays it beside video
   (docs/decisions/2026-11-10-pcm-containers.md).
-- **Containers**: AVI (video, and the first audio stream: MP3 in both its chunk layouts, AAC, integer and float PCM
+- **Containers**: AVI (video, and every audio stream, `AudioTracks` and `SelectAudio`: MP3 in both its chunk layouts, AAC, integer and float PCM
   and 4-bit IMA and Microsoft ADPCM, which `PcmDecoder`, `ImaAdpcmDecoder` and `MsAdpcmDecoder` decode exactly as
   FFmpeg, others by their format tag such as `0x0031` for GSM 6.10; docs/decisions/2026-11-08-avi-audio.md), MP4 (video and audio tracks, fragmented files too, edit lists of several edits),
   Matroska and WebM (video and audio tracks, every kind of lacing, BlockGroups, live files of unknown size, header

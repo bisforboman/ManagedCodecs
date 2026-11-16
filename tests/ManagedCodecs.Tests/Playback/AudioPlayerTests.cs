@@ -160,6 +160,25 @@ public class AudioPlayerTests
     }
 
     /// <summary>
+    /// <see cref="PlaybackOptions.AudioTrack"/> in an AVI file of three audio streams (MP3, PCM and AAC): each plays
+    /// alone, as its decoder gives it, mono on both speakers (only MXF's mono tracks are paired).
+    /// </summary>
+    [Theory]
+    [InlineData(0, 1)]
+    [InlineData(1, 2)]
+    [InlineData(2, 3)]
+    public void PlaysTheAviStreamTheOptionsName(int track, int streamIndex)
+    {
+        const string Name = "avi-mjpeg-three-audio.avi";
+        var expected = Expected(Name, track);
+        using var player = new AudioPlayer(TestSamples.PathOf(Name), new PlaybackOptions { AudioTrack = track });
+        Assert.Equal(streamIndex, player.Audio.StreamIndex);
+        player.Start();
+        Assert.Equal(expected, Drain(player, expected.Count + 1));
+        Assert.Null(player.Error);
+    }
+
+    /// <summary>
     /// The pairing itself, on hand-made 16-bit packets: a track's samples wait for the other's, whatever the packets'
     /// sizes and order; what one track has past the other's end plays beside silence; packets of other streams and
     /// discarded ones give nothing. And only an MXF file's mono tracks are a pair: elsewhere two mono tracks are two

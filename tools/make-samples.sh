@@ -51,6 +51,13 @@ ff -f lavfi -i testsrc2=size=160x120:rate=25 -f lavfi -i "sine=frequency=440:sam
   -c:a aac -b:a 64k samples/avi-mjpeg-aac.avi
 ff -f lavfi -i testsrc2=size=160x120:rate=25 -f lavfi -i "sine=frequency=440:sample_rate=22050" -t 1 -c:v mjpeg -q:v 5 \
   -c:a pcm_s16le samples/avi-mjpeg-pcm.avi
+# Several audio streams (AviDemuxer.AudioTracks, SelectAudio): MP3 stereo (a frame a chunk), 16-bit PCM mono
+# (dwSampleSize set: timed by bytes) and AAC, each a tone of its own, one 'strl' after another; FFmpeg's demuxer gives
+# a stream each, numbered 1 to 3 after the video.
+ff -f lavfi -i testsrc2=size=160x120:rate=25 -f lavfi -i "sine=frequency=440:sample_rate=44100" \
+  -f lavfi -i "sine=frequency=550:sample_rate=22050" -f lavfi -i "sine=frequency=660:sample_rate=48000" -t 1 \
+  -map 0 -map 1 -map 2 -map 3 -c:v mjpeg -q:v 5 -c:a:0 libmp3lame -b:a:0 64k -c:a:1 pcm_s16le -c:a:2 aac -b:a:2 64k \
+  samples/avi-mjpeg-three-audio.avi
 # 8-bit PCM, as cameras write it (PcmDecoder): unsigned, at 11.025 kHz, here in stereo for the channels' interleaving.
 # The audio runs 0.2 s past the video, as cameras' often does a little: ffprobe's duration is still the video's (VideoProbe).
 ff -f lavfi -i testsrc2=size=160x120:rate=25:d=1 -f lavfi -i "aevalsrc=0.4*sin(2*PI*440*t)|0.3*sin(2*PI*660*t):s=11025:d=1.2" \
@@ -1126,8 +1133,10 @@ for f in samples/*.avi samples/*.mp4; do
     -show_entries frame=color_range,color_space,color_primaries,color_transfer,chroma_location,sample_aspect_ratio "$f")
   if [ -n "$t" ]; then echo "$t" > "${f%.*}.color"; fi
 done
+# -map 0:v? -map 0:a?: every video and audio stream, so that a file with several audio streams (avi-mjpeg-three-audio)
+# has each one's extradata, at its own index (ffmpeg keeps one of a kind unasked).
 for f in samples/*.mp4 samples/*.mkv samples/*.webm samples/*.avi samples/*.h264 samples/*.264; do
-  ff -copyts -i "$f" -c copy -f framemd5 "${f%.*}.packets.framemd5"
+  ff -copyts -i "$f" -map 0:v? -map 0:a? -c copy -f framemd5 "${f%.*}.packets.framemd5"
   ffprobe -v error -show_packets -show_data_hash MD5 -show_entries packet=stream_index,pts,dts,duration,size,flags,data_hash \
     -of csv=p=0 "$f" > "${f%.*}.packets.csv"
 done

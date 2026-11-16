@@ -1,3 +1,5 @@
+using System.Runtime.CompilerServices;
+
 namespace ManagedCodecs.Rdd36;
 
 /// <summary>
@@ -46,6 +48,8 @@ internal static class Rdd36Idct
     /// <paramref name="dest"/>, a row every <paramref name="stride"/> samples. Rows of zeros and rows with only their
     /// first coefficient take shortcuts that give what <see cref="PutReference"/> gives.
     /// </summary>
+    // The rows' stack memory is not cleared on entry: every row is written, a row of zeros by Clear.
+    [SkipLocalsInit]
     public static void Put(ReadOnlySpan<short> block, Span<ushort> dest, int stride)
     {
         Check(block, dest, stride);
@@ -59,7 +63,7 @@ internal static class Rdd36Idct
             {
                 if (x0 == 0)
                 {
-                    // (2^14) >> 15: a row of zeros stays one (stackalloc gives no zeros by itself).
+                    // (2^14) >> 15: a row of zeros stays one (the stack is not cleared, SkipLocalsInit).
                     rows.Slice(at, 8).Clear();
                     continue;
                 }

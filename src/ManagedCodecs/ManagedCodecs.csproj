@@ -3,7 +3,7 @@
   <!-- The meta-package: no code, every ManagedCodecs package as a dependency, at this release's version. -->
   <PropertyGroup>
     <PackageId>ManagedCodecs</PackageId>
-    <Description>Pure managed C# media codecs, every package at once: MJPEG and H.264 (bit-exact with FFmpeg), AAC and HE-AAC, MP3, AVI, MP4 and ADTS demuxing. No native binaries, Native AOT friendly.</Description>
+    <Description>Pure managed C# media codecs, every package at once: MJPEG, H.264 and SMPTE RDD 36 (bit-exact with FFmpeg), AAC and HE-AAC, MP3, AVI, MP4 and ADTS demuxing. No native binaries, Native AOT friendly.</Description>
     <IncludeBuildOutput>false</IncludeBuildOutput>
     <IncludeSymbols>false</IncludeSymbols>
     <!-- NU5128: no lib/ folder, on purpose. -->

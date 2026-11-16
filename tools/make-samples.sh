@@ -1037,7 +1037,7 @@ ff -i samples/mxf-h264-mono4.mxf -filter_complex '[0:a:2][0:a:3]join=inputs=2:ch
 # ConcealErrors, whose own tests cover concealment), so its frames have no reference; its packets do.
 rm -f samples/mxf-h264-pcm-cut-video.h264.framemd5 samples/mxf-h264-pcm-cut-video.color
 
-# ---- SMPTE RDD 36 (compatible with Apple ProRes) in MOV ----
+# ---- SMPTE RDD 36 in MOV ----
 # For Rdd36Decoder (issue #461): 4:2:2, progressive, 10 bits, from FFmpeg's two encoders. No Apple-encoded file is here
 # (none found under a licence that allows it in a public repository; docs/conformance.md says so). What neither
 # encoder writes (a quantization_index above 128, stuffing, zero bytes after a component's data, bitstream version 1

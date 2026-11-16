@@ -1,6 +1,6 @@
 # ManagedCodecs
 
-Pure managed C# media decoders (MJPEG, H.264, AAC LC and HE-AAC; AVI, MP4, Matroska/WebM and ADTS demuxing; thumbnails), no native
+Pure managed C# media decoders (MJPEG, H.264, SMPTE RDD 36, AAC LC and HE-AAC; AVI, MP4, Matroska/WebM and ADTS demuxing; thumbnails), no native
 binaries: Native AOT, WebAssembly and Unity too. What each decodes and what is open: README.md, not copied here.
 
 | Topic | Where |
@@ -100,6 +100,9 @@ Read the CLAUDE.md beside the code you work on, also for a codec's samples or to
   precision.
 - src/ManagedCodecs.Mjpeg: interlaced MJPEG, gray samples, damaged images (FFmpeg as the oracle), the packet-size rule,
   the aspect ratio ffprobe reports.
+- src/ManagedCodecs.Rdd36: the rules of issue #461 (the RDD 36 PDF only, never its reference decoder or another
+  decoder's source; names), the inverse transform measured from FFmpeg, what its encoders never write and its decoder
+  refuses, tools/rdd36-rewrite.py.
 - src/ManagedCodecs.Containers: MP4 timestamps and edit lists, fragmented MP4's packet durations, what FFmpeg's
   Matroska muxer never writes and what ffprobe fills in.
 - tools/ManagedCodecs.Fuzz: fuzzing with AFL++ and SharpFuzz, reproducing findings.

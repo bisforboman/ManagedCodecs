@@ -7,11 +7,12 @@ is checked against FFmpeg sample by sample.
   pictures), 4:0:0 to 4:4:4, 8 to 14 bits, lossless; bit-exact with FFmpeg. Frame threading and error concealment on
   request.
 - **MJPEG**: baseline and extended Huffman JPEG, interlaced AVI1; bit-exact with FFmpeg.
+- **SMPTE RDD 36**: 4:2:2, progressive, 10 bits, from MOV; bit-exact with FFmpeg.
 - **AAC LC and HE-AAC** (SBR, parametric stereo): mono to 7.1, within 2^-17 of FFmpeg's float output for AAC LC.
 - **Containers**: AVI, MP4 (fragmented files and edit lists too) and raw AAC (ADTS), packets and timestamps as
   FFmpeg's demuxers give them.
 
-The packages: `ManagedCodecs` for everything, or one of `ManagedCodecs.Containers`, `ManagedCodecs.Mjpeg`,
+The packages: `ManagedCodecs` for everything, or one of `ManagedCodecs.Containers`, `ManagedCodecs.Mjpeg`, `ManagedCodecs.Rdd36`,
 `ManagedCodecs.H264` and `ManagedCodecs.Aac`, each with `ManagedCodecs.Core`. They share internals, so each depends
 on the others at exactly its own version.
 

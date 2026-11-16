@@ -428,6 +428,50 @@ the clip's, with no lost packet, damaged frame or reconnect.
   needs `-bitexact`: live555 answers 404 to one with a `LIST` chunk.)
 - **Not tried:** RTSP over HTTP (which live555 offers on port 80, 8000 or 8080), RTSPS and SRTP (it has them, by
   code), H.265 and its other formats, multicast, a file the SPS of which has no timing, and a camera built on live555.
+## SMPTE RDD 36
+
+`Rdd36Decoder` (slice 1 of issue #461): 4:2:2, progressive, 10 bits, from MOV, against FFmpeg 6.1.1's decoder:
+every frame's MD5 and pts, picture type, interlacing, colour and aspect ratio (`Rdd36ConformanceTests`, every
+`samples/rdd36-*.mov`), and the packets as FFmpeg's MOV demuxer gives them (`Mp4ConformanceTests`). RDD 36 fixes no
+inverse transform, only its accuracy; the decoder's arithmetic is FFmpeg's C one, found by measuring its output and
+qualified by Annex A of its own (docs/decisions/2026-11-15-rdd36-decoder.md). The references take `-cpuflags 0`:
+FFmpeg's x64 SIMD transform gives the same samples on all of them, and parts from its C one only for coefficients no
+picture has.
+
+Every sample is made by tools/make-samples.sh from FFmpeg's own encoders; none is Apple-encoded (no such file was
+found under a licence that allows it in a public repository), so the decoder has not seen an Apple encoder's frames.
+
+| Sample | Encoder | What it isolates |
+| --- | --- | --- |
+| `rdd36-ks-{proxy,lt,standard,hq}` | prores_ks ('Lavc') | the four 4:2:2 profiles ('apco', 'apcs', 'apcn', 'apch'); quantization_index chosen per slice for a bit rate (1 to 68); matrices in every frame header; slices of 8, 8 and 4 |
+| `rdd36-aw-{proxy,lt,standard,hq}` | prores_aw ('fmpg') | the same profiles from the other encoder, indices in a narrow band; Proxy's chroma matrix not its luma one |
+| `rdd36-prores` | `prores` | FFmpeg 6.1's third name, which is prores_aw byte for byte |
+| `rdd36-{ks,aw}-edges` | both | 330x250: a picture ending inside its last macroblocks (10 of 16 columns and rows), slices of 8, 8, 4 and 1 |
+| `rdd36-ks-slices-{1,2,4,8}` | prores_ks | log2_desired_slice_size_in_mb 0 to 3 on a row of 15 macroblocks |
+| `rdd36-ks-flat` | prores_ks | no matrix in the header: the default, 4 everywhere |
+| `rdd36-ks-coarse`, `rdd36-{ks,aw}-noise` | both | quantization_index 64 throughout (long runs, small levels); noise at index 1 (levels up to about 3700) |
+| `rdd36-{ks,aw}-colour` | both | colour in the frame header and 'colr'; prores_aw's transfer 0 (below) |
+| `rdd36-ks-sar`, `rdd36-ks-pcm`, `rdd36-ks-720p` | prores_ks | a 'pasp' of 16:11; beside a PCM track; 1280x720 HQ (450 slices) |
+| `rdd36-rw-*` | tools/rdd36-rewrite.py on `rdd36-ks-standard` | what neither encoder writes: quantization_index 97 to 224 (`index`) and the reserved 0, 225, 255 (`reserved-index`, which FFmpeg takes as 1 and 224); bitstream version 1 in 4:2:2 (`version1`); 1 and 3 zero bytes after each component's data (`zero-byte`, `zero-bytes`); frame and picture headers longer than their elements (`headers`); colour in the frame header alone and an aspect_ratio_information (`header-colour`); stuffing after the picture (all of them) |
+
+What FFmpeg's decoder refuses, and what neither encoder can be made to write, is covered by `Rdd36DecoderTests` on
+frames written by the tests' own writer (`Rdd36FrameWriter`, typed from the syntax tables): a slice header longer
+than its elements and set reserved bits (FFmpeg refuses both; RDD 36 says to use the sizes and ignore the bits),
+odd widths and heights and pictures inside one block (FFmpeg's 4:2:2 formats round sizes down), a picture's random
+quantization matrices and every quantization_index, coefficients that wrap past 16 bits, version 2 and later
+(refused, 6.4), and every truncation and every byte changed of a frame (`InvalidDataException` or
+`NotSupportedException`, nothing else). `Rdd36BitReaderTests` reads back every symbol of every codebook of Tables 9
+to 11 and the codewords the document's rules give, `Rdd36IdctTests` checks the transform against blocks measured
+from FFmpeg and runs Annex A's accuracy qualification, and the fuzz target `rdd36` takes single frames.
+
+Where the frames' properties are not FFmpeg's: a frame header's colour code 0, which RDD 36 calls unknown (Tables 5
+and 6) and FFmpeg shows as H.273's "reserved": the decoder takes the container's then, as for 2 (prores_aw writes 0
+for SMPTE 170M's transfer, beside a 'colr' that says it: `rdd36-aw-colour`). And aspect_ratio_information gives the
+frames' ratio where the container has no 'pasp' (FFmpeg ignores it; its muxer always writes a 'pasp', so no sample
+shows the difference). The range is limited, as 7.5.1 says and FFmpeg reports.
+
+Not in this slice (refused with `NotSupportedException`): interlaced frames, 4:4:4, alpha (slice 2); decoding from
+MXF (slice 3). Thumbnails and `MediaPlayer` take H.264 and MJPEG only.
 
 ## Real films
 

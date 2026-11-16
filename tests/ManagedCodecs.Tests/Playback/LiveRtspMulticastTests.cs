@@ -10,7 +10,8 @@ namespace ManagedCodecs.Tests.Playback;
 /// <c>rtspTransports: [multicast]</c> does: it answers 461 to RTP over the RTSP connection and over UDP to the reader
 /// alone, and to a SETUP for multicast names the group and its ports. The player joins the group, shows every frame
 /// as over the other transports, plays the sound from a group of its own, sends its receiver reports to the group,
-/// and holds packets to the SSRC the answer names.
+/// and holds packets to the SSRC the answer names, from whatever address they come (the server sends the group's from
+/// 127.0.0.2, its RTSP connection being on 127.0.0.1).
 /// </summary>
 public class LiveRtspMulticastTests
 {

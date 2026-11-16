@@ -22,6 +22,11 @@ internal sealed class RtspTestServer : IDisposable
     private readonly TcpListener _listener = new(IPAddress.Loopback, 0);
     private readonly UdpClient _rtp = new(new IPEndPoint(IPAddress.Loopback, 0));
     private readonly UdpClient _rtcp = new(new IPEndPoint(IPAddress.Loopback, 0));
+
+    // A group's packets, from another address than the RTSP connection's, as a camera's (mediamtx's) come from
+    // whichever of its addresses faces the network.
+    private readonly UdpClient _groupRtp = new(new IPEndPoint(IPAddress.Parse("127.0.0.2"), 0));
+    private readonly UdpClient _groupRtcp = new(new IPEndPoint(IPAddress.Parse("127.0.0.2"), 0));
     private readonly CancellationTokenSource _stop = new();
     private readonly Task _accepting;
     private int _connections;
@@ -107,6 +112,8 @@ internal sealed class RtspTestServer : IDisposable
         _listener.Stop();
         _rtp.Dispose();
         _rtcp.Dispose();
+        _groupRtp.Dispose();
+        _groupRtcp.Dispose();
         try
         {
             _accepting.Wait(TimeSpan.FromSeconds(5));
@@ -189,8 +196,8 @@ internal sealed class RtspTestServer : IDisposable
                     if (request.Method == "SETUP" && status == 200 && MulticastGroup is { } group)
                     {
                         // Sent on the loopback interface, where the client joins for a connection to this machine.
-                        _rtp.Client.SetSocketOption(SocketOptionLevel.IP, SocketOptionName.MulticastInterface, IPAddress.Loopback.GetAddressBytes());
-                        _rtcp.Client.SetSocketOption(SocketOptionLevel.IP, SocketOptionName.MulticastInterface, IPAddress.Loopback.GetAddressBytes());
+                        _groupRtp.Client.SetSocketOption(SocketOptionLevel.IP, SocketOptionName.MulticastInterface, IPAddress.Loopback.GetAddressBytes());
+                        _groupRtcp.Client.SetSocketOption(SocketOptionLevel.IP, SocketOptionName.MulticastInterface, IPAddress.Loopback.GetAddressBytes());
                         udpClients.Add(new IPEndPoint(GroupOf(group, udpClients.Count), MulticastPort));
                     }
                     else if (request.Method == "SETUP" && status == 200 && ClientPort(request) is { } port)
@@ -223,7 +230,7 @@ internal sealed class RtspTestServer : IDisposable
 
                     if (request.Method == "PLAY" && status == 200 && playing is null)
                     {
-                        var play = new RtspPlay(stream, writing, index, connection.Token, udpClients.Count > 0 ? (_rtp, _rtcp, udpClients.ToArray()) : null);
+                        var play = new RtspPlay(stream, writing, index, connection.Token, udpClients.Count == 0 ? null : MulticastGroup is null ? (_rtp, _rtcp, udpClients.ToArray()) : (_groupRtp, _groupRtcp, udpClients.ToArray()));
                         playing = Task.Run(async () =>
                         {
                             try

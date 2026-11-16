@@ -804,8 +804,11 @@ what the file says, the file is followed and the test says so:
   (PosTableIndex 0, offsets 0), so those packets' pts are their dts though libx264 writes B pictures.
   `MxfConformanceTests` rewrites an H.264 sample's index to check that the offsets are applied whichever delta entry
   says reordered and not without one, and that the random access flag sets the keyframes. mxf-mpeg2-b's GOPs are open:
-  the index gives their I pictures no random access flag, so only its first packet is a keyframe here, where
-  libavformat's parser marks every I picture one (the test lets that sample's differ, and no other's).
+  the index gives their I pictures no random access flag (their first B pictures lean on the GOP before), but
+  libavformat's parser marks every I picture a keyframe, and so does `MxfDemuxer` for MPEG-2, by the entry's prediction
+  flags (Table 28: an I picture has neither): its keyframes are FFmpeg's, as the mxfburger files' were in the nightly
+  check's logs. Not for H.264, whose keyframes FFmpeg's parser takes from the stream (IDR pictures, recovery points),
+  not from the picture type: there the random access flag alone counts (`AppliesTheIndexTablesTemporalOffsetsAndFlags`).
 - Clip-wrapped essence (FFmpeg's OP-Atom muxer, `-f mxf_opatom`: one track a file, the whole clip one element, though
   its essence container labels say frame wrapping): mxf-opatom-h264 is cut by the index entries' stream offsets,
   mxf-opatom-dnxhr by the index's constant edit unit size (no entries), each packet an edit unit as FFmpeg's;

@@ -19,7 +19,10 @@ namespace ManagedCodecs.Containers;
 /// <para>
 /// A picture packet is an edit unit: its decode time counts them (<see cref="VideoStreamInfo.TimeBase"/> is one over the
 /// edit rate), its presentation time adds the index table's temporal offset where the index says the element is
-/// reordered, and it is a keyframe where the index entry has its random access flag (without an index, the first), or
+/// reordered, and it is a keyframe where the index entry has its random access flag (without an index, the first), for
+/// MPEG-2 also where the entry has neither prediction flag (an I picture: one that opens a GOP whose first B pictures
+/// lean on the GOP before has no random access flag, and libavformat's MPEG-2 parser marks every I picture a
+/// keyframe, which a seek to it wants too: the I picture and those after it decode), or
 /// always for an intra-only codec (ProRes, VC-3, JPEG 2000, and D-10's MPEG-2, I pictures only by SMPTE ST 356), whose index entries FFmpeg's muxer leaves without it. A sound packet's times count samples, its duration its bytes over the block
 /// alignment. The essence elements are found by walking the file's KLV items once, when opening; partition packs,
 /// header metadata, index segments and fill items between them are skipped.
@@ -635,6 +638,7 @@ public sealed class MxfDemuxer : IDemuxer
     private void Time(MxfTrack track, int stream, MxfIndex? index)
     {
         bool intra = track.Codec is "prores" or "dnxhd" or "jpeg2000" || MxfLabels.IsD10Container(track.EssenceContainer ?? []);
+        bool mpeg2 = track.Codec == "mpeg2video";
         int blockAlign = _aes3Channels > 0 && track.Kind == MxfTrackKind.Sound ? _aes3Channels * _aes3Bytes : BlockAlign(track);
         long samples = 0;
 
@@ -676,7 +680,9 @@ public sealed class MxfDemuxer : IDemuxer
                 long unit = packet.Sequence;
                 var entry = index?.Entry(unit);
                 long pts = shown.TryGetValue(unit, out long display) ? display : unit;
-                bool keyframe = intra || (entry is { } f ? (f.Flags & MxfIndex.RandomAccess) != 0 : unit == 0);
+                bool keyframe = intra || (entry is { } f
+                    ? (f.Flags & MxfIndex.RandomAccess) != 0 || (mpeg2 && (f.Flags & MxfIndex.Predicted) == 0)
+                    : unit == 0);
                 _packets[i] = packet with { Dts = unit - delay, Pts = pts, Duration = 1, IsKeyframe = keyframe };
             }
         }

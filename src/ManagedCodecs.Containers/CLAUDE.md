@@ -85,7 +85,7 @@ The repository's CLAUDE.md (process, core idea, cross-cutting gotchas) applies t
   entry, the second after the system item's, has PosTableIndex -1), never for H.264. The offsets lead from display
   order to stored order (the picture shown n-th is stored at n + offset), and FFmpeg's demuxer's decode times then
   start at minus the largest offset. An open GOP's I picture has no random access flag in the index, though
-  libavformat's parser marks it a keyframe.
+  libavformat's parser marks it a keyframe; `MxfDemuxer` does too, for MPEG-2, by the entry's prediction flags.
 - MXF from other writers: none can be downloaded in the cloud sandbox (archive.org's data hosts are refused), so they
   are checked in CI only: `tools/realworld.py`'s PACKET_FILES, `mcdec --packets` against `ffprobe -fflags
   +nofillin+noparse`. Run `realworld.yml` on the branch (workflow_dispatch) and read the job's log; a difference in

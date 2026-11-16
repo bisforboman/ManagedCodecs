@@ -13,6 +13,12 @@ internal sealed class MxfIndex
     /// <summary>An index entry's random access flag (Table 28, bit 7).</summary>
     public const byte RandomAccess = 0x80;
 
+    /// <summary>
+    /// An index entry's forward and backward prediction flags (Table 28, bits 5 and 4): a P picture has the first, a B
+    /// picture both, an I picture neither.
+    /// </summary>
+    public const byte Predicted = 0x30;
+
     private readonly List<(long Start, (sbyte TemporalOffset, byte Flags, long StreamOffset)[] Entries)> _segments = [];
 
     /// <summary>The size of every edit unit (Edit Unit Byte Count, 3F05), where a segment gives one other than 0; else 0.</summary>

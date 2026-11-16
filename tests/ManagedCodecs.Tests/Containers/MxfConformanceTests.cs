@@ -46,11 +46,9 @@ public class MxfConformanceTests
             Assert.True(e.Size == p.Data.Length, $"{at}: size {p.Data.Length}, FFmpeg's {e.Size}");
             Assert.True(e.Md5 == FrameMd5.Hash(p.Data.Span), $"{at}: other data than FFmpeg's");
 
-            // libavformat's MPEG-2 parser marks every I picture a keyframe; the index gives an open GOP's (B pictures
-            // before it in display order lean on the GOP before) no random access flag, which is followed here
-            // (mxf-mpeg2-b: only its first picture is one).
-            bool openGop = sampleName == "mxf-mpeg2-b.mxf" && e.IsKeyframe && !p.IsKeyframe && p.StreamIndex == mxf.Video?.StreamIndex && p.Sequence > 0;
-            Assert.True(e.IsKeyframe == p.IsKeyframe || openGop, $"{at}: keyframe {p.IsKeyframe}, FFmpeg's {e.IsKeyframe}");
+            // An open GOP's I picture has no random access flag in the index; it is an MPEG-2 keyframe all the same, as
+            // libavformat's parser marks it (mxf-mpeg2-b: every I picture, by the entries' prediction flags).
+            Assert.True(e.IsKeyframe == p.IsKeyframe, $"{at}: keyframe {p.IsKeyframe}, FFmpeg's {e.IsKeyframe}");
             Assert.True(e.Duration == p.Duration, $"{at}: duration {p.Duration}, FFmpeg's {e.Duration}");
 
             // FFmpeg's demuxer's own decode times; where it gives none (audio; DNxHR's and D-10's constant-size index,

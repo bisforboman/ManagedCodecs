@@ -212,6 +212,15 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.Containers/Mxf/MxfDemuxer.cs",
          find="bool keyframe = intra || (entry", replace="bool keyframe = (entry",
          tests="FullyQualifiedName~MxfConformanceTests"),
+    # An MPEG-2 I picture is a keyframe without the random access flag (an open GOP's), as libavformat's parser marks
+    # it (mxf-mpeg2-b) ...
+    dict(file="src/ManagedCodecs.Containers/Mxf/MxfDemuxer.cs",
+         find="|| (mpeg2 && (f.Flags & MxfIndex.Predicted) == 0)", replace="",
+         tests="FullyQualifiedName~MxfConformanceTests"),
+    # ... MPEG-2's only: an H.264 entry's flags don't make a keyframe of it (AppliesTheIndexTablesTemporalOffsetsAndFlags).
+    dict(file="src/ManagedCodecs.Containers/Mxf/MxfDemuxer.cs",
+         find="(mpeg2 && (f.Flags & MxfIndex.Predicted) == 0)", replace="((f.Flags & MxfIndex.Predicted) == 0)",
+         tests="FullyQualifiedName~MxfConformanceTests"),
     # The temporal offsets apply only where the index says an element is reordered (11.2.3, PosTableIndex -1) ...
     dict(file="src/ManagedCodecs.Containers/Mxf/MxfDemuxer.cs",
          find="index is { HasReorderedElement: true })", replace="index is not null)",

@@ -51,7 +51,8 @@ in between. That comparison is not measured here.
 | `tools/gst-rtsp-server.py` | A GStreamer RTSP server with a live H.264 or JPEG test pattern, and a tone as AAC, G.711 or LATM (no auth, Basic or Digest), for trying `LivePlayer` by hand |
 | `tools/gst-jpeg-record.py` | Makes the committed JPEG over RTP recordings in `samples/gstreamer/` (GStreamer's `rtpjpegpay`: types 0, 64 and 65) |
 | `tools/gst-audio-record.py` | Makes the committed audio over RTP recordings there (GStreamer's `rtpmp4gpay`, one AAC access unit a packet and fragmented ones; `rtppcmapay`, `rtppcmupay`) |
-| `tools/rtsp-nightly.py` | `LivePlayer` against mediamtx serving an H.264 and an MJPEG clip, each frame checked against the clip's, and an H.264 clip with AAC sound, each chunk of audio checked too (`mcdec --live`); nightly in `realworld.yml` |
+| `tools/rtsp-nightly.py` | `LivePlayer` against mediamtx serving an H.264 and an MJPEG clip, each frame checked against the clip's, and an H.264 clip with AAC sound, each chunk of audio checked too, and over a network that loses and reorders packets (`mcdec --live`); nightly in `realworld.yml` |
+| `tools/rtsp-lossy-relay.py` | Relays an RTSP session and drops, repeats and reorders its RTP over UDP by a seeded choice, reading the client's receiver reports; `rtsp-nightly.py` puts it between mediamtx and `LivePlayer` |
 | `tools/rtp-record.py` | Records the RTP packets FFmpeg sends to a loopback UDP port, for the RTP depacketizer's tests (make-samples.sh) |
 | `tools/compare.sh` | Times mcdec and FFmpeg on the same file |
 | `tools/h264-stages.py` | Shares of H.264 decoding by stage, for mcdec and FFmpeg, from perf and callgrind profiles (docs/notes/h264-stages-2026-11.md) |

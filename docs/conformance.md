@@ -285,7 +285,7 @@ RTP over UDP to the reader alone (docs/decisions/2026-11-16-live-rtsp-multicast.
   - another sender to the same group and port, numbered as the next packet, changes no frame: only the SSRC the
     answer names is taken (a group's packets may come from any of the camera's addresses, so the address isn't held to
     unless the answer names a `source`);
-  - an answer that names no group is retried, and `RtspProtocolTests`' sibling reads `destination`, `port` and `ttl`.
+  - an answer that names no group is retried, and `destination`, `port` and `ttl` are read as mediamtx writes them.
 - **mediamtx 1.21.3, by hand** (2026-11-16), `rtspTransports: [multicast]`, FFmpeg publishing over RTMP (mediamtx
   refuses an RTSP publisher there): it answers 461 to both unicast transports, then
   `RTP/AVP;multicast;destination=224.1.0.1;port=8002-8003;ttl=127;ssrc=...`. 300 frames and 567 chunks of AAC, all the

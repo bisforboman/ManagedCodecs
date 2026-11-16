@@ -35,7 +35,7 @@ public class MatroskaConformanceTests
         // Every sound track (several in mp4-audio-tracks and mkv-audio-tracks), each read after choosing it; framemd5
         // maps only the one FFmpeg's command line plays, which the demuxer chooses by default.
         int? played = demuxer.Audio?.StreamIndex;
-        foreach (var audio in demuxer.AudioStreams)
+        foreach (var audio in demuxer.AudioTracks)
         {
             streams.Add((audio.StreamIndex, audio.FrameCount, audio.CodecPrivate));
         }

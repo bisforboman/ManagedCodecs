@@ -177,13 +177,13 @@ MUTATIONS = [
          find="long pts = state.Bytes / blockSize;", replace="long pts = state.Position; state.Position += length / blockSize;",
          tests="FullyQualifiedName~AviDemuxerTests"),
 
-    # ---- Several sound tracks (docs/decisions/2026-11-16-audio-tracks.md): FFmpeg's choice and reading, measured
+    # ---- Several sound tracks in MP4 and Matroska (docs/decisions/2026-11-15-sound-tracks.md): FFmpeg's choice and reading, measured
     # The track FFmpeg's command line plays: the default flag before the channels ...
-    dict(file="src/ManagedCodecs.Containers/AudioTracks.cs",
+    dict(file="src/ManagedCodecs.Containers/DefaultAudioTrack.cs",
          find="a.IsDefault != b.IsDefault ? a.IsDefault : a.Channels > b.Channels", replace="a.Channels > b.Channels",
          tests="FullyQualifiedName~AudioTracksTests"),
     # ... and the channels between equals (mkv-audio-nodefault).
-    dict(file="src/ManagedCodecs.Containers/AudioTracks.cs",
+    dict(file="src/ManagedCodecs.Containers/DefaultAudioTrack.cs",
          find="a.IsDefault != b.IsDefault ? a.IsDefault : a.Channels > b.Channels", replace="a.IsDefault && !b.IsDefault",
          tests="FullyQualifiedName~AudioTracksTests"),
     # Matroska's missing Language and FlagDefault are the specification's defaults, and "und" is no language to ffprobe.
@@ -209,7 +209,7 @@ MUTATIONS = [
          tests="FullyQualifiedName~AudioTracksTests"),
     # A track chosen after a seek starts at the time sought.
     dict(file="src/ManagedCodecs.Containers/Mp4/Mp4Demuxer.cs",
-         find="_audioStart = _sought is { } sought ?", replace="_audioStart = _sought is { } sought && false ?",
+         find="_audioStarts[i] = _audioTables[i].KeyframeAtOrBefore(", replace="_audioStarts[i] = 0 * _audioTables[i].KeyframeAtOrBefore(",
          tests="FullyQualifiedName~AudioTracksTests"),
     dict(file="src/ManagedCodecs.Containers/Matroska/MatroskaDemuxer.cs",
          find="for (int slot = 0; slot < _tracks.Length; slot++)", replace="for (int slot = 0; slot < 2; slot++)",

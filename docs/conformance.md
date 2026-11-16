@@ -916,6 +916,20 @@ file (FFmpeg's muxer writes no DefaultDuration for AAC; libavformat fills in 102
 to the track's next frame, which the test checks against FFmpeg's next pts; Opus's durations come from FFmpeg's
 parser, which reads the packets, so they too are compared that way.
 
+## Several sound tracks (MP4, QuickTime, Matroska)
+
+`Mp4Demuxer` and `MatroskaDemuxer` list every sound track (`AudioTracks`), with ffprobe's stream index, language, title
+and default disposition, and give the one FFmpeg's command line plays until another is chosen
+(docs/decisions/2026-11-15-sound-tracks.md, where what each file says and how FFmpeg reads it are measured).
+`AudioTracksTests` compares the list with ffprobe's (name.audiotracks.json) and `Audio` with the stream FFmpeg's command
+line maps (name.audioplayed) on every MP4, QuickTime and Matroska sample; the conformance tests compare every track's
+packets with FFmpeg's, each read alone and several in one pass. The samples: mp4-audio-tracks (the second track marked
+default), mov-audio-tracks (QuickTime's Macintosh language codes), mkv-audio-tracks (the first marked default, with
+fewer channels) and mkv-audio-nodefault (none marked: the most channels). What FFmpeg's muxers don't write is checked
+by patching: Matroska without Language or FlagDefault, or with "und", and every Macintosh language code (0 to 0x3FF)
+and the packed codes' top bit, each against ffprobe's answer. Channels are ffprobe's decoder's (HE-AAC's parametric
+stereo reports two for a mono track) and are compared on the samples made for the choice only.
+
 ## MXF demuxing
 
 `MxfDemuxer` (#469) finds a file's partitions (SMPTE ST 377-1 6.2, 7, 12), reads its header metadata (9, Annexes A,

@@ -82,7 +82,7 @@ public class MatroskaDemuxerTests
             Cluster(0, SimpleBlock(1, 0, keyframe: true, [1]), SimpleBlock(2, 0, keyframe: true, [2, 2]), SimpleBlock(3, 0, keyframe: true, [3, 3, 3, 3])));
         using (var demuxer = new MatroskaDemuxer(new MemoryStream(file)))
         {
-            Assert.Equal(2, Assert.Single(demuxer.AudioStreams).StreamIndex);
+            Assert.Equal(2, Assert.Single(demuxer.AudioTracks).StreamIndex);
             Assert.Equal([0, 2], demuxer.ReadPackets().Select(p => p.StreamIndex));
         }
 

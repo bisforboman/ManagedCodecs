@@ -4,7 +4,7 @@ using ManagedCodecs.Containers;
 namespace ManagedCodecs.Tests.Containers;
 
 /// <summary>
-/// Several sound tracks (docs/decisions/2026-11-16-audio-tracks.md): <see cref="IDemuxer.AudioStreams"/> against the
+/// Several sound tracks (docs/decisions/2026-11-16-audio-tracks.md): <see cref="IDemuxer.AudioTracks"/> against the
 /// tracks ffprobe lists (name.audiotracks.json: channels, language, title, default disposition), <see cref="IDemuxer.Audio"/>
 /// against the one FFmpeg's command line plays (name.audioplayed), and <see cref="IDemuxer.SelectAudio"/>. The samples
 /// with several tracks are mp4-audio-tracks, mov-audio-tracks, mkv-audio-tracks and mkv-audio-nodefault; every other MP4,
@@ -24,10 +24,10 @@ public class AudioTracksTests
         string played = File.ReadAllText(TestSamples.ReferenceOf(sampleName, ".audioplayed")).Trim();
 
         using var demuxer = Demuxer.Open(TestSamples.PathOf(sampleName));
-        Assert.Equal(expected.Count, demuxer.AudioStreams.Count);
+        Assert.Equal(expected.Count, demuxer.AudioTracks.Count);
         for (int i = 0; i < expected.Count; i++)
         {
-            var track = demuxer.AudioStreams[i];
+            var track = demuxer.AudioTracks[i];
             var tags = expected[i].TryGetProperty("tags", out var t) ? t : default;
             string? Tag(string name) => tags.ValueKind == JsonValueKind.Object && tags.TryGetProperty(name, out var v) ? v.GetString() : null;
             Assert.Equal(
@@ -45,7 +45,7 @@ public class AudioTracksTests
         Assert.Equal(played.Length == 0 ? null : int.Parse(played, System.Globalization.CultureInfo.InvariantCulture), demuxer.Audio?.StreamIndex);
         if (demuxer.Audio is { } audio)
         {
-            Assert.Contains(audio, demuxer.AudioStreams);
+            Assert.Contains(audio, demuxer.AudioTracks);
         }
     }
 
@@ -81,6 +81,71 @@ public class AudioTracksTests
         Assert.Equal(other, demuxer.Audio!.StreamIndex);
     }
 
+    /// <summary>
+    /// Several tracks in one pass (<see cref="IDemuxer.SelectAudio"/>): each track's packets are those it gives read
+    /// alone, interleaved in file order with the video's; <see cref="IDemuxer.Audio"/> is the first named. An empty
+    /// choice or a track named twice is refused and changes nothing.
+    /// </summary>
+    [Theory]
+    [InlineData("mp4-audio-tracks.mp4")]
+    [InlineData("mkv-audio-tracks.mkv")]
+    public void ReadsSeveralTracksInOnePass(string sampleName)
+    {
+        if (TestSamples.Directory is null || !File.Exists(TestSamples.PathOf(sampleName)))
+        {
+            return;
+        }
+
+        using var demuxer = Demuxer.Open(TestSamples.PathOf(sampleName));
+        var info = (Func<IEnumerable<PacketInfo>>)(demuxer is Mp4Demuxer mp4 ? mp4.ReadPacketInfo : ((MatroskaDemuxer)demuxer).ReadPacketInfo);
+        var alone = demuxer.AudioTracks.ToDictionary(t => t.StreamIndex, t =>
+        {
+            demuxer.SelectAudio(t.StreamIndex);
+            return info().Where(p => p.StreamIndex == t.StreamIndex).ToList();
+        });
+        var video = info().Where(p => p.StreamIndex == 0).ToList();
+
+        demuxer.SelectAudio(2, 1);
+        Assert.Equal(2, demuxer.Audio!.StreamIndex);
+        var both = info().ToList();
+        Assert.Equal(alone[1], both.Where(p => p.StreamIndex == 1));
+        Assert.Equal(alone[2], both.Where(p => p.StreamIndex == 2));
+        Assert.Equal(video, both.Where(p => p.StreamIndex == 0));
+        Assert.Equal(video.Count + alone[1].Count + alone[2].Count, both.Count);
+
+        Assert.Throws<ArgumentException>(() => demuxer.SelectAudio());
+        Assert.Throws<ArgumentException>(() => demuxer.SelectAudio(1, 1));
+        Assert.Equal(2, demuxer.Audio!.StreamIndex);
+        Assert.Equal(both, info());
+    }
+
+    /// <summary>
+    /// The players play, unasked, the track the demuxer gives (FFmpeg's choice); <c>PlaybackOptions.AudioTrack</c>
+    /// still counts tracks from 0 in the file's order.
+    /// </summary>
+    [Fact]
+    public void PlaysTheDemuxersTrackUnasked()
+    {
+        const string Name = "mp4-audio-tracks.mp4";
+        if (TestSamples.Directory is null || !File.Exists(TestSamples.PathOf(Name)))
+        {
+            return;
+        }
+
+        using (var player = new global::ManagedCodecs.Playback.MediaPlayer(TestSamples.PathOf(Name)))
+        {
+            Assert.Equal((2, 6), (player.Audio!.StreamIndex, player.Audio.Channels));
+        }
+
+        using (var player = new global::ManagedCodecs.Playback.AudioPlayer(TestSamples.PathOf(Name)))
+        {
+            Assert.Equal(2, player.Audio.StreamIndex);
+        }
+
+        using var first = new global::ManagedCodecs.Playback.MediaPlayer(TestSamples.PathOf(Name), new global::ManagedCodecs.Playback.PlaybackOptions { AudioTrack = 0 });
+        Assert.Equal(1, first.Audio!.StreamIndex);
+    }
+
     /// <summary>A track chosen after a <see cref="IDemuxer.Seek"/> starts at the time sought, as the track chosen before it did.</summary>
     [Theory]
     [InlineData("mp4-audio-tracks.mp4", 1)]
@@ -101,11 +166,11 @@ public class AudioTracksTests
         demuxer.SelectAudio(other);
         var after = demuxer.ReadPackets().First(p => p.StreamIndex == other);
         double Seconds(Packet p, Rational timeBase) => p.Pts * timeBase.ToDouble();
-        var timeBase = demuxer.AudioStreams.First(a => a.StreamIndex == other).TimeBase;
+        var timeBase = demuxer.AudioTracks.First(a => a.StreamIndex == other).TimeBase;
 
         // Both tracks start at a keyframe (every audio packet is one) at or just before the video's start.
         Assert.True(after.Sequence > 0, "The chosen track started from the beginning, not where the seek put the other.");
-        Assert.True(Math.Abs(Seconds(after, timeBase) - Seconds(before, demuxer.AudioStreams.First(a => a.StreamIndex == before.StreamIndex).TimeBase)) < 0.05);
+        Assert.True(Math.Abs(Seconds(after, timeBase) - Seconds(before, demuxer.AudioTracks.First(a => a.StreamIndex == before.StreamIndex).TimeBase)) < 0.05);
     }
 
     /// <summary>
@@ -135,7 +200,7 @@ public class AudioTracksTests
         patched[flag + 2] = 0;
         using (var demuxer = new MatroskaDemuxer(new MemoryStream(patched)))
         {
-            Assert.Equal(("eng", true), (demuxer.AudioStreams[1].Language, demuxer.AudioStreams[1].IsDefault));
+            Assert.Equal(("eng", true), (demuxer.AudioTracks[1].Language, demuxer.AudioTracks[1].IsDefault));
 
             // Two tracks marked default: the one with more channels plays.
             Assert.Equal(2, demuxer.Audio!.StreamIndex);
@@ -143,7 +208,7 @@ public class AudioTracksTests
 
         "und"u8.CopyTo(file.AsSpan(language + 4));
         using var und = new MatroskaDemuxer(new MemoryStream(file));
-        Assert.Null(und.AudioStreams[1].Language);
+        Assert.Null(und.AudioTracks[1].Language);
     }
 
     /// <summary>
@@ -192,8 +257,8 @@ public class AudioTracksTests
     public void ChoosesTheTrackFfmpegsCommandLinePlays(bool firstDefault, int firstChannels, bool secondDefault, int secondChannels, int chosen)
     {
         AudioStreamInfo Track(bool isDefault, int channels, int index) => new("aac", 48000, channels, 1, new Rational(1, 48000), ReadOnlyMemory<byte>.Empty, index) { IsDefault = isDefault };
-        Assert.Equal(chosen, AudioTracks.DefaultOf([Track(firstDefault, firstChannels, 1), Track(secondDefault, secondChannels, 2)]));
-        Assert.Equal(-1, AudioTracks.DefaultOf([]));
+        Assert.Equal(chosen, DefaultAudioTrack.Of([Track(firstDefault, firstChannels, 1), Track(secondDefault, secondChannels, 2)]));
+        Assert.Equal(-1, DefaultAudioTrack.Of([]));
     }
 
     /// <summary>A demuxer of one sound track at most (here ADTS) lists it alone and accepts it alone, by IDemuxer's defaults.</summary>
@@ -208,7 +273,7 @@ public class AudioTracksTests
 
         using IDemuxer demuxer = Demuxer.Open(TestSamples.PathOf(adts));
         var audio = demuxer.Audio!;
-        Assert.Equal([audio], demuxer.AudioStreams);
+        Assert.Equal([audio], demuxer.AudioTracks);
         demuxer.SelectAudio(audio.StreamIndex);
         Assert.Throws<ArgumentOutOfRangeException>(() => demuxer.SelectAudio(audio.StreamIndex + 1));
     }

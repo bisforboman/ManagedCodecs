@@ -329,6 +329,10 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.Containers/Mxf/MxfDemuxer.cs",
          find="(size - header.Length + ((8 - channels) * 4)) / (8 * 4)", replace="(size - header.Length) / (8 * 4)",
          tests="DisplayName~mxf-d10-pcm24-cut"),
+    # Only an MXF file's mono tracks play as left and right: elsewhere two mono tracks may be two languages (#535).
+    dict(file="src/ManagedCodecs.Playback/AudioPipeline.cs",
+         find="var right = demuxer is MxfDemuxer && track.Channels == 1", replace="var right = track.Channels == 1",
+         tests="FullyQualifiedName~AudioPlayerTests"),
     # A clip of sound the file ends in keeps its last bytes, not whole samples only (mxf-opatom-pcm-cut).
     dict(file="src/ManagedCodecs.Containers/Mxf/MxfDemuxer.cs",
          find="long whole = at == _cut ? element.Size :", replace="long whole =",

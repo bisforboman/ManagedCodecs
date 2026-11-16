@@ -1027,6 +1027,12 @@ for f in samples/mxf-*.mxf; do
     ff -i "$f" -map 0:a:0 -f f32le "${f%.mxf}.pcm.f32"
   fi
 done
+# name.pairNM.f32: two mono sound tracks as FFmpeg joins them into stereo (the first left, the second right), for the
+# players' folding of MXF's mono track a channel (PlaybackOptions.AudioTrack): mxf-h264-mono4's first pair and second.
+ff -i samples/mxf-h264-mono4.mxf -filter_complex '[0:a:0][0:a:1]join=inputs=2:channel_layout=stereo' -f f32le \
+  samples/mxf-h264-mono4.pair01.f32
+ff -i samples/mxf-h264-mono4.mxf -filter_complex '[0:a:2][0:a:3]join=inputs=2:channel_layout=stereo' -f f32le \
+  samples/mxf-h264-mono4.pair23.f32
 # mxf-h264-pcm-cut-video's last picture is cut short: FFmpeg's decoder conceals it, H264Decoder refuses it (outside
 # ConcealErrors, whose own tests cover concealment), so its frames have no reference; its packets do.
 rm -f samples/mxf-h264-pcm-cut-video.h264.framemd5 samples/mxf-h264-pcm-cut-video.color

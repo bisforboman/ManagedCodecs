@@ -211,6 +211,99 @@ public class LiveRtspUdpTests
         Assert.Equal((1L, 1L, 4L), (player.Statistics.LostPackets, player.Statistics.DamagedFrames, player.Statistics.DecodedFrames));
     }
 
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(4)]
+    [InlineData(5)]
+    [InlineData(6)]
+    [InlineData(7)]
+    [InlineData(8)]
+    [InlineData(9)]
+    [InlineData(10)]
+    [InlineData(11)]
+    [InlineData(12)]
+    public void CountsExactlyThePacketsARandomNetworkDrops(int seed)
+    {
+        // A network by the seed: of the three middle frames' packets a quarter are dropped and a fifth sent twice, and
+        // every frame after the first arrives shuffled. The frames that lost nothing are shown as they were sent, the
+        // others are dropped, and the packets counted lost are the ones dropped, no more (a duplicate, a late packet)
+        // and no fewer. tools/rtsp-nightly.py does the same to mediamtx's stream (tools/rtsp-lossy-relay.py).
+        var frames = LiveRtspJpegTests.Frames(RtpJpegDepacketizerTests.GStreamer("jpeg-420-restart"));
+        var random = new Random(seed);
+        var sent = new List<List<byte[]>>();
+        var whole = new List<bool>();
+        int dropped = 0;
+        for (int f = 0; f < frames.Count; f++)
+        {
+            bool middle = f > 0 && f < frames.Count - 1;
+            var packets = new List<byte[]>();
+            foreach (var packet in frames[f])
+            {
+                double choice = middle ? random.NextDouble() : 1;
+                if (choice < 0.25)
+                {
+                    dropped++;
+                    continue;
+                }
+
+                packets.Add(packet);
+                if (choice < 0.45)
+                {
+                    packets.Add(packet);
+                }
+            }
+
+            whole.Add(packets.Distinct().Count() == frames[f].Count);
+            if (f > 0)
+            {
+                random.Shuffle(System.Runtime.InteropServices.CollectionsMarshal.AsSpan(packets));
+            }
+
+            sent.Add(packets);
+        }
+
+        using var gate = new SemaphoreSlim(0);
+        using var server = new RtspTestServer(JpegSdp, async play =>
+        {
+            for (int f = 0; f < sent.Count; f++)
+            {
+                foreach (var packet in sent[f])
+                {
+                    await play.SendAsync(packet);
+                }
+
+                if (whole[f])
+                {
+                    await gate.WaitAsync(play.Token);
+                }
+            }
+
+            await Task.Delay(Timeout.Infinite, play.Token);
+        })
+        {
+            UdpOnly = true,
+        };
+
+        using var player = new LivePlayer(new RtspSource(server.Uri));
+        player.Start();
+        for (int f = 0; f < frames.Count; f++)
+        {
+            if (whole[f])
+            {
+                var shown = WaitFor(player, player.TakeLatest);
+                Assert.Equal(LiveRtspJpegTests.Expected("jpeg-420-restart", f), shown.Pixels);
+                player.Return(shown);
+                gate.Release();
+            }
+        }
+
+        var statistics = player.Statistics;
+        Assert.Equal((dropped, whole.Count(w => !w), whole.Count(w => w)), (statistics.LostPackets, statistics.DamagedFrames, statistics.DecodedFrames));
+        Assert.Equal((LiveState.Playing, 1), (player.State, server.Connections));
+    }
+
     [Fact]
     public void SaysUdpWasInUseWhenNothingCame()
     {

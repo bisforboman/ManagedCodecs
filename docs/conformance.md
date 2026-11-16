@@ -222,7 +222,26 @@ it on purpose.
 - **mediamtx 1.21.3, nightly** (tools/rtsp-nightly.py), with `rtspTransports: [udp]`, FFmpeg pushing over UDP too. It
   answers our first SETUP with 461, as measured for the note. The first run (2026-11-14) showed 100 frames, all the
   clip's, with none lost or damaged and no reconnects.
-- **Not tried yet:** a real network that loses or reorders packets, a NAT between camera and viewer, and an IP camera.
+- **A network that loses, repeats and reorders packets** (issue #527):
+  - `LiveRtspUdpTests`, by twelve seeds: of GStreamer's 4:2:0 JPEG recording's three middle frames a quarter of the
+    packets are dropped and a fifth sent twice, and every frame after the first arrives shuffled. The frames that lost
+    nothing are shown as sent, the others are dropped, and `LostPackets` is exactly the packets dropped.
+  - Nightly (tools/rtsp-nightly.py), tools/rtsp-lossy-relay.py between mediamtx (UDP only) and `mcdec --live`: it
+    passes the RTSP connection on, rewrites each SETUP so that RTP comes through its own ports, and, by a seeded choice,
+    drops, repeats or holds back (10 ms) packets for 6 s. Three runs of 400 frames:
+    - a twentieth of the packets sent twice and a tenth held back: every frame the clip's, nothing lost, and the last
+      receiver report's cumulative loss −68 for 68 packets sent twice, as RFC 3550's A.3 counts a duplicate;
+    - 2% dropped, H.264: 23 dropped, `LostPackets` 23 and the report 23; 21 frames damaged, none of the last 265 not the
+      clip's, no reconnect (`mcdec --live --lossy`: the last 75 frames must be the clip's);
+    - 2% dropped, H.264 and AAC: 14 dropped, `LostPackets` 14, the two tracks' reports 12 and 2 as the relay dropped
+      them; the last 75 chunks the clip's but for one loop's first.
+    - The relay checks the counts: `LostPackets` against the packets it dropped, and each stream's last receiver
+      report against those dropped less those sent twice.
+  - By hand (2026-11-15), the same relay for the whole run, with sound: at 10% dropped and 30% dropped (with repeats
+    and reordering), `LostPackets` was still exactly the packets dropped (144, and 1622 of 3956), with no reconnect. At
+    30% most pictures waited for the next IDR picture (743 of 1499 skipped), and 300 frames took 64 s. The receiver
+    reports then trail what was dropped by up to their 5 s.
+- **Not tried yet:** a real lossy network (Wi-Fi, a WAN), a NAT between camera and viewer, and an IP camera.
 
 ### RTSPS
 

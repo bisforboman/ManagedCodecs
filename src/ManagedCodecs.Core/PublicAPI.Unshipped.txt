@@ -1,1 +1,9 @@
 #nullable enable
+ManagedCodecs.AudioStreamInfo.IsDefault.get -> bool
+ManagedCodecs.AudioStreamInfo.IsDefault.init -> void
+ManagedCodecs.AudioStreamInfo.Language.get -> string?
+ManagedCodecs.AudioStreamInfo.Language.init -> void
+ManagedCodecs.AudioStreamInfo.Title.get -> string?
+ManagedCodecs.AudioStreamInfo.Title.init -> void
+ManagedCodecs.IDemuxer.AudioStreams.get -> System.Collections.Generic.IReadOnlyList<ManagedCodecs.AudioStreamInfo!>!
+ManagedCodecs.IDemuxer.SelectAudio(int streamIndex) -> void

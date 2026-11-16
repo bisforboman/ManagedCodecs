@@ -248,6 +248,25 @@ public sealed record AudioStreamInfo(
     /// 'strh' length in frames. 0 where the container says nothing.
     /// </summary>
     public long Duration { get; init; }
+
+    /// <summary>
+    /// The track's language as the container gives it and ffprobe reports it (its <c>language</c> tag): ISO 639-2 in
+    /// MP4 (the 'mdhd' language, "und" included) and Matroska (its Language, "eng" where the element is missing as the
+    /// specification's default, null for "und"); null where the container has none.
+    /// </summary>
+    public string? Language { get; init; }
+
+    /// <summary>The track's name as the container gives it and ffprobe reports it (its <c>title</c> tag: Matroska's Name), or null.</summary>
+    public string? Title { get; init; }
+
+    /// <summary>
+    /// Whether the container marks the track as one to play by default, as ffprobe's <c>disposition:default</c>:
+    /// Matroska's FlagDefault (set where the element is missing, the specification's default), MP4's 'tkhd'
+    /// track_enabled. A container without such a flag leaves it false. <see cref="IDemuxer.Audio"/> is, unless the
+    /// caller chooses another (<see cref="IDemuxer.SelectAudio"/>), the track FFmpeg's command line plays: the first
+    /// marked default (or, where none is, of them all) with the most channels, the first of equals.
+    /// </summary>
+    public bool IsDefault { get; init; }
 }
 
 /// <summary>Reads packets out of a container format (AVI, MP4, ...).</summary>
@@ -256,8 +275,33 @@ public interface IDemuxer : IDisposable
     /// <summary>The first video stream, or null if there is none.</summary>
     VideoStreamInfo? Video { get; }
 
-    /// <summary>The first audio stream, or null if there is none (or the container does not expose audio).</summary>
+    /// <summary>
+    /// The audio stream <see cref="ReadPackets"/> gives: the one <see cref="SelectAudio"/> chose, else the one FFmpeg's
+    /// command line plays (<see cref="AudioStreamInfo.IsDefault"/>); null if there is none (or the container does not
+    /// expose audio).
+    /// </summary>
     AudioStreamInfo? Audio { get; }
+
+    /// <summary>
+    /// Every audio stream of the file the demuxer can read, in file order, <see cref="Audio"/> among them. This default,
+    /// for a demuxer that gives one audio stream at most, lists <see cref="Audio"/> alone.
+    /// </summary>
+    IReadOnlyList<AudioStreamInfo> AudioStreams => Audio is { } audio ? [audio] : [];
+
+    /// <summary>
+    /// Makes the audio stream <paramref name="streamIndex"/> (one of <see cref="AudioStreams"/>) the one
+    /// <see cref="Audio"/> names and <see cref="ReadPackets"/> gives, from the next read on: from the start of the file,
+    /// or after a <see cref="Seek"/> from the keyframe at or before the time sought. A read in progress is not changed.
+    /// This default, for a demuxer that gives one audio stream at most, accepts that one only.
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">No audio stream of the demuxer has <paramref name="streamIndex"/>.</exception>
+    void SelectAudio(int streamIndex)
+    {
+        if (Audio?.StreamIndex != streamIndex)
+        {
+            throw new ArgumentOutOfRangeException(nameof(streamIndex), streamIndex, "No audio stream of the file has this index.");
+        }
+    }
 
     /// <summary>
     /// Packets of the video and audio streams, interleaved in file order; each stream's packets

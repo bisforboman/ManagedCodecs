@@ -79,7 +79,10 @@ public class VideoProbeTests
         var (width, height) = VideoProbe.DisplaySize(info.Width, info.Height, info.SampleAspectRatio, info.Rotation);
         Assert.Equal((width, height), (info.DisplayWidth, info.DisplayHeight));
 
-        var audio = streams.FirstOrDefault(s => s.GetProperty("codec_type").GetString() == "audio");
+        // The audio stream FFmpeg's command line plays (name.audioplayed; several in mp4-audio-tracks), else the first.
+        string played = File.Exists(TestSamples.ReferenceOf(name, ".audioplayed")) ? File.ReadAllText(TestSamples.ReferenceOf(name, ".audioplayed")).Trim() : "";
+        var audio = streams.FirstOrDefault(s => s.GetProperty("codec_type").GetString() == "audio"
+            && (played.Length == 0 || s.GetProperty("index").GetInt32().ToString(CultureInfo.InvariantCulture) == played));
         if (audio.ValueKind == JsonValueKind.Undefined)
         {
             Assert.Null(info.Audio);
@@ -111,7 +114,7 @@ public class VideoProbeTests
             (long Duration, Rational TimeBase)? actual = type switch
             {
                 "video" when demuxer.Video is { } v => (v.Duration, v.TimeBase),
-                "audio" when demuxer.Audio is { } a => (a.Duration, a.TimeBase),
+                "audio" when demuxer.AudioStreams.FirstOrDefault(a => a.StreamIndex == stream.GetProperty("index").GetInt32()) is { } a => (a.Duration, a.TimeBase),
                 _ => null,
             };
 

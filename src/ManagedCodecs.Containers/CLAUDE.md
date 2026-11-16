@@ -62,7 +62,8 @@ The repository's CLAUDE.md (process, core idea, cross-cutting gotchas) applies t
   FFmpeg's demuxer gives its 8-channel AES3 sound elements as PCM, so their packets' MD5s are the PCM's.
 - MXF files cut short: compare with FFmpeg's demuxer under `ffprobe -fflags +nofillin+noparse`. By default
   libavformat's H.264 parser cuts a clip-wrapped H.264 file's one partial packet (its index went with the footer) into
-  pictures, which the demuxer doesn't. Cut by the source's packet positions (make-samples.sh's `mxf_cut`), not by a share
+  pictures, which the demuxer doesn't. Without the index, the keyframes there are libavformat's parsers' (MPEG-2's I
+  pictures by their picture headers, which `MxfDemuxer` reads too; mxf-mpeg2-b-cut). Cut by the source's packet positions (make-samples.sh's `mxf_cut`), not by a share
   of the file: generated samples differ between machines, and the cut has to fall in the same kind of element.
 - MXF: FFmpeg's `-f mxf` muxer writes OP1a, frame-wrapped (`mxf_opatom` and `mxf_d10` are muxers of their own), audio
   at 48 kHz only ("only 48khz is implemented"), and always a random index pack; written to a pipe, the header and body partition packs leave FooterPartition 0. Its demuxer logs

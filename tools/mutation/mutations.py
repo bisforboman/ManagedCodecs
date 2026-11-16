@@ -218,6 +218,15 @@ MUTATIONS = [
          find="|| (mpeg2 && (f.Flags & MxfIndex.Predicted) == 0)", replace="",
          tests="FullyQualifiedName~MxfConformanceTests"),
     # ... MPEG-2's only: an H.264 entry's flags don't make a keyframe of it (AppliesTheIndexTablesTemporalOffsetsAndFlags).
+    # Without an index (a file cut before its footer's), an MPEG-2 picture is a keyframe where its picture header says
+    # I, as libavformat's parser reads it (mxf-mpeg2-b-cut) ...
+    dict(file="src/ManagedCodecs.Containers/Mxf/MxfDemuxer.cs",
+         find=": unit == 0 || _intraPictures.Contains(unit));", replace=": unit == 0);",
+         tests="FullyQualifiedName~MxfConformanceTests"),
+    # ... I alone (picture coding type 1), not P (2) or B (3).
+    dict(file="src/ManagedCodecs.Containers/Mxf/MxfDemuxer.cs",
+         find="((head[at + 5] >> 3) & 7) == 1", replace="((head[at + 5] >> 3) & 7) != 0",
+         tests="FullyQualifiedName~MxfConformanceTests"),
     dict(file="src/ManagedCodecs.Containers/Mxf/MxfDemuxer.cs",
          find="(mpeg2 && (f.Flags & MxfIndex.Predicted) == 0)", replace="((f.Flags & MxfIndex.Predicted) == 0)",
          tests="FullyQualifiedName~MxfConformanceTests"),

@@ -839,7 +839,12 @@ what the file says, the file is followed and the test says so:
   AES3 element: a sample counts where its kept channels' words are there, the words after them may be missing; checked
   by hand at cuts 8, 16 and 24 bytes into a sample as well) and mxf-opatom-pcm-cut (its one sound clip, which FFmpeg's
   demuxer still cuts into 1920-sample pieces without the index, the track's edit unit being a sample; the last piece
-  keeps a partial sample's bytes). A clip-wrapped H.264 file cut short is one packet of the clip's bytes, as FFmpeg's
+  keeps a partial sample's bytes), and mxf-mpeg2-b-cut (MPEG-2 with B pictures, 100 bytes into its 20th picture).
+  Without the index, which went with the footer, the keyframes are the I pictures, which libavformat's MPEG-2 parser
+  finds by their picture headers' coding type (ISO/IEC 13818-2 6.2.3) and `MxfDemuxer` reads the same way, at open,
+  for each MPEG-2 picture found while no index is known; the times are the edit units, which libavformat's are too
+  there (it can't place the B pictures: an I or P picture's pts is unknown). The NASA MPEG-2 file's first 32 MiB
+  (MXF from other writers, above) showed it first. A clip-wrapped H.264 file cut short is one packet of the clip's bytes, as FFmpeg's
   demuxer gives it (`-fflags +noparse`: libavformat's H.264 parser then cuts it into pictures, which `ffprobe` shows by
   default); a file cut inside its header metadata is refused (`ReadsAClipCutShortAsOnePacket`). A clip-wrapped file cut
   short whose index survives (none of FFmpeg's muxers write one before the essence) is refused: no file shows what

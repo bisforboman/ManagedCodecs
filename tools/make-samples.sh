@@ -989,6 +989,9 @@ mxf_cut samples/mxf-h264-pcm.mxf samples/mxf-h264-pcm-cut.mxf 1 30 1000
 mxf_cut samples/mxf-h264-pcm.mxf samples/mxf-h264-pcm-cut-video.mxf 0 40 100
 mxf_cut samples/mxf-d10-pcm24.mxf samples/mxf-d10-pcm24-cut.mxf 1 3 1000
 mxf_cut samples/mxf-opatom-pcm.mxf samples/mxf-opatom-pcm-cut.mxf 0 1 40000
+# mxf-mpeg2-b-cut: mxf-mpeg2-b ends 100 bytes into its 20th picture, so its index (in the footer) is gone: the keyframes
+# are the I pictures, which libavformat's parser finds in the picture headers and MxfDemuxer reads the same way.
+mxf_cut samples/mxf-mpeg2-b.mxf samples/mxf-mpeg2-b-cut.mxf 0 20 100
 # name.headers.json: the streams as FFmpeg's demuxer reads them from the header metadata, nothing decoded
 # (ffprobe -nofind_stream_info: with probing, the size and aspect ratio are the decoder's), and the file's operational
 # pattern, material package and start timecode.

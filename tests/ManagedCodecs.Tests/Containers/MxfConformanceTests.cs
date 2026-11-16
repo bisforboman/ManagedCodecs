@@ -29,6 +29,11 @@ public class MxfConformanceTests
 
         var expected = Parse(TestSamples.ReferenceOf(sampleName, ".packets.csv")).Where(p => streams.Contains(p.StreamIndex)).ToList();
         var own = Parse(TestSamples.ReferenceOf(sampleName, ".packets.nofillin.csv")).Where(p => streams.Contains(p.StreamIndex)).ToList();
+
+        // Where libavformat fills in MPEG-2 times with B pictures it can't place (an I or P picture's pts unknown: a file
+        // cut before its index, mxf-mpeg2-b-cut), its decode times are the edit units; without B pictures its parser
+        // delays them a frame.
+        bool unplaced = expected.Any(e => e.StreamIndex == mxf.Video?.StreamIndex && e.Pts is null && e.Dts is not null);
         var packets = mxf.ReadPackets().ToList();
 
         Assert.Equal(expected.Select(p => p.StreamIndex), packets.Select(p => p.StreamIndex)); // file order
@@ -52,9 +57,10 @@ public class MxfConformanceTests
             Assert.True(e.Duration == p.Duration, $"{at}: duration {p.Duration}, FFmpeg's {e.Duration}");
 
             // FFmpeg's demuxer's own decode times; where it gives none (audio; DNxHR's and D-10's constant-size index,
-            // which has no entries) the times libavformat fills in, which count edit units too, MPEG-2's a frame early
-            // (its parser's reorder delay, as mxf-mpeg2's own times show: D-10's start at -1).
-            long? filled = own[i].Dts is null && e.Dts is { } d && p.StreamIndex == mxf.Video?.StreamIndex && mxf.Video.Codec == "mpeg2video" ? d + 1 : e.Dts;
+            // which has no entries; a file cut before its index) the times libavformat fills in, which count edit units
+            // too, MPEG-2's a frame early (its parser's reorder delay, as mxf-mpeg2's own times show: D-10's start at -1)
+            // unless it found B pictures it couldn't place (above).
+            long? filled = own[i].Dts is null && e.Dts is { } d && p.StreamIndex == mxf.Video?.StreamIndex && mxf.Video.Codec == "mpeg2video" && !unplaced ? d + 1 : e.Dts;
             Assert.True((own[i].Dts ?? filled ?? p.Dts) == p.Dts, $"{at}: dts {p.Dts}, FFmpeg's demuxer's {own[i].Dts}, filled in {e.Dts}");
 
             long sequence = sequences.GetValueOrDefault(p.StreamIndex);

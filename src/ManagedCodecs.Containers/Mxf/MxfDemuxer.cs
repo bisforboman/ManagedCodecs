@@ -19,7 +19,8 @@ namespace ManagedCodecs.Containers;
 /// <para>
 /// A picture packet is an edit unit: its decode time counts them (<see cref="VideoStreamInfo.TimeBase"/> is one over the
 /// edit rate), its presentation time adds the index table's temporal offset where the index says the element is
-/// reordered, and it is a keyframe where the index entry has its random access flag (without an index, the first), for
+/// reordered, and it is a keyframe where the index entry has its random access flag (without an index, the first, and an MPEG-2 picture whose picture header says I, as
+/// libavformat's parser reads it: a file cut before its footer's index), for
 /// MPEG-2 also where the entry has neither prediction flag (an I picture: one that opens a GOP whose first B pictures
 /// lean on the GOP before has no random access flag, and libavformat's MPEG-2 parser marks every I picture a
 /// keyframe, which a seek to it wants too: the I picture and those after it decode), or
@@ -60,6 +61,10 @@ public sealed class MxfDemuxer : IDemuxer
 
     // Each packet's bytes in the file: its size, but an 8-channel AES3 element's whole value.
     private readonly List<int> _lengths = [];
+
+    // The MPEG-2 pictures (by sequence) whose picture header says I, read where no index was known when the walk found
+    // them: a file cut before its footer's index (IntraPicture).
+    private readonly HashSet<long> _intraPictures = [];
 
     // The sound track's 8-channel AES3 elements (D-10's): its channels and bytes a sample, or 0 where it has none.
     private int _aes3Channels;
@@ -222,6 +227,7 @@ public sealed class MxfDemuxer : IDemuxer
                 if (_packets[_cut].StreamIndex == _videoIndex)
                 {
                     _videoCount--;
+                    _intraPictures.Remove(_videoCount);
                 }
                 else
                 {
@@ -408,6 +414,11 @@ public sealed class MxfDemuxer : IDemuxer
 
                 if (video is not null && number == video.TrackNumber)
                 {
+                    if (video.Codec == "mpeg2video" && !indexes.ContainsKey(video.BodySid) && IntraPicture(valueStart, size))
+                    {
+                        _intraPictures.Add(_videoCount);
+                    }
+
                     _packets.Add(new PacketInfo(videoIndex, _videoCount++, (int)size, false, 0, 0, 0));
                     _positions.Add(valueStart);
                     _lengths.Add((int)size);
@@ -458,6 +469,21 @@ public sealed class MxfDemuxer : IDemuxer
     /// gives: its audio sample count (header bytes 1 and 2, little-endian, ST 331 Figure 2) times the descriptor's
     /// channels and sample size. The element holds all 8 channels' words whether valid or not.
     /// </summary>
+    /// <summary>
+    /// Whether the MPEG-2 picture element at <paramref name="valueStart"/> holds an I picture: its first picture header
+    /// (ISO/IEC 13818-2 6.2.3: start code 00 00 01 00, a 10-bit temporal reference, then the 3-bit picture coding type, 1
+    /// for I) in its first 4 KiB, after the sequence and GOP headers and their extensions. libavformat's MPEG-2 parser
+    /// marks such a packet a keyframe, and an index entry, where there is one, says the same by its flags.
+    /// </summary>
+    private bool IntraPicture(long valueStart, long size)
+    {
+        var head = new byte[(int)Math.Min(size, 4096)];
+        _stream.Position = valueStart;
+        _stream.ReadExactly(head);
+        int at = head.AsSpan().IndexOf((ReadOnlySpan<byte>)[0, 0, 1, 0]);
+        return at >= 0 && at + 5 < head.Length && ((head[at + 5] >> 3) & 7) == 1;
+    }
+
     private int Aes3PcmSize(long valueStart, long size, bool cut)
     {
         Span<byte> header = stackalloc byte[4];
@@ -682,7 +708,7 @@ public sealed class MxfDemuxer : IDemuxer
                 long pts = shown.TryGetValue(unit, out long display) ? display : unit;
                 bool keyframe = intra || (entry is { } f
                     ? (f.Flags & MxfIndex.RandomAccess) != 0 || (mpeg2 && (f.Flags & MxfIndex.Predicted) == 0)
-                    : unit == 0);
+                    : unit == 0 || _intraPictures.Contains(unit));
                 _packets[i] = packet with { Dts = unit - delay, Pts = pts, Duration = 1, IsKeyframe = keyframe };
             }
         }

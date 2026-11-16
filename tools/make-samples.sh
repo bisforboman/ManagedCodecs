@@ -1061,7 +1061,7 @@ for f in samples/*.mp4 samples/*.avi samples/*.mkv; do
   if [ -n "$t" ]; then echo "$t" > "${f%.*}.display"; fi
 done
 # name.probe.json: the file's duration and its streams' facts as ffprobe reports them, for VideoProbe (Thumbnails).
-for f in samples/*.mp4 samples/*.avi samples/*.mkv samples/*.h264 samples/*.264; do
+for f in samples/*.mp4 samples/*.avi samples/*.mkv samples/*.mxf samples/*.h264 samples/*.264; do
   ffprobe -v error -of json -show_entries format=duration,start_time:stream=index,codec_type,codec_name,width,height,sample_aspect_ratio,r_frame_rate,avg_frame_rate,sample_rate,channels,duration:stream_side_data=rotation \
     "$f" > "${f%.*}.probe.json"
 done

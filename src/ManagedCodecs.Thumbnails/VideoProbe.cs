@@ -99,6 +99,7 @@ public static class VideoProbe
             Mp4Demuxer mp4 => mp4.ReadPacketInfo(),
             AviDemuxer avi => avi.ReadPacketInfo(),
             MatroskaDemuxer mkv => mkv.ReadPacketInfo(),
+            MxfDemuxer mxf => mxf.ReadPacketInfo(),
             _ => [],
         };
 

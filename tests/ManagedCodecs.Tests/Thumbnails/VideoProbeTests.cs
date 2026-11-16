@@ -41,7 +41,7 @@ public class VideoProbeTests
 
         foreach (var file in Directory.EnumerateFiles(directory).Order())
         {
-            if (Path.GetExtension(file) is ".avi" or ".mp4" or ".mkv" && File.Exists(Path.ChangeExtension(file, ".probe.json"))
+            if (Path.GetExtension(file) is ".avi" or ".mp4" or ".mkv" or ".mxf" && File.Exists(Path.ChangeExtension(file, ".probe.json"))
                 && TestSamples.CodecOf(Path.GetRelativePath(directory, file)) is CodecIds.H264 or CodecIds.Mjpeg)
             {
                 files.Add(Path.GetRelativePath(directory, file));

@@ -341,6 +341,7 @@ ManagedCodecs.PixelFormat.Yuv444P14 = 19 -> ManagedCodecs.PixelFormat
 ManagedCodecs.PixelFormat.Yuv444P9 = 11 -> ManagedCodecs.PixelFormat
 ManagedCodecs.PixelFormatExtensions
 ManagedCodecs.Playback.AudioChunk
+ManagedCodecs.Playback.AudioChunk.CaptureTime.get -> System.DateTime?
 ManagedCodecs.Playback.AudioChunk.SampleRate.get -> int
 ManagedCodecs.Playback.AudioChunk.Samples.get -> float[]!
 ManagedCodecs.Playback.AudioPlayer
@@ -457,6 +458,7 @@ ManagedCodecs.Playback.PlaybackStatistics.Equals(ManagedCodecs.Playback.Playback
 ManagedCodecs.Playback.PlaybackStatistics.PlaybackStatistics() -> void
 ManagedCodecs.Playback.PlaybackStatistics.PlaybackStatistics(long DecodedFrames, double DecodeMilliseconds, long ConvertedFrames, double ConvertMilliseconds, long DroppedFrames) -> void
 ManagedCodecs.Playback.RgbaFrame
+ManagedCodecs.Playback.RgbaFrame.CaptureTime.get -> System.DateTime?
 ManagedCodecs.Playback.RgbaFrame.Height.get -> int
 ManagedCodecs.Playback.RgbaFrame.Pixels.get -> byte[]!
 ManagedCodecs.Playback.RgbaFrame.SampleAspectRatio.get -> ManagedCodecs.Rational

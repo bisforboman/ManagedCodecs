@@ -52,6 +52,11 @@ New public API, hence a minor version; code built against 0.17 keeps working.
   says (MPEG-2 with B pictures, as broadcast MXF has it): they were the stored order's, each packet's pts its dts. The
   decode times now start before 0 by the reordering's depth, as FFmpeg's. Found by the nightly check's first MXF files
   from other writers (`tools/realworld.py`, packet by packet against FFmpeg).
+- Playback: a live H.264 camera whose parameter sets come only in its SDP (`sprop-parameter-sets`, as FFmpeg's
+  packetizer sends them) showed no picture at all on that connection, though `State` said `Playing`, when a packet
+  of the first IDR picture was lost: the parameter sets came before that picture alone, and it was skipped. They now
+  come before every IDR picture until the stream sends its own.
+- Playback: `LiveStatistics.DamagedFrames` counted a whole H.264 picture after one that lost a packet as damaged too.
 - Containers: `MxfDemuxer.Video` carries the picture descriptor's colour (`ColorPrimaries`, `ColorTransfer`,
   `ColorMatrix`, and `ColorRange` by its black and white reference levels), as FFmpeg's demuxer reads it; it was left
   unspecified. Decoded H.264 frames take it where the stream's VUI says nothing, as with MP4's 'colr', so HDR and

@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- mclive-maui: a live camera in .NET MAUI (issue #526, docs/decisions/2026-11-17-live-maui.md): a sample, not a
+       package, whose LiveView and its handler per platform an application copies. Android and Windows first (the
+       owner's decision); iOS and Mac Catalyst later. Not in ManagedCodecs.slnx: it needs MAUI's workloads
+       (`dotnet workload install maui-android`, and the Android SDK), which the other jobs don't install, and the
+       Windows target builds on Windows only. .github/workflows/maui.yml builds and runs it. -->
+  <PropertyGroup>
+    <TargetFrameworks>net10.0-android</TargetFrameworks>
+    <TargetFrameworks Condition="$([MSBuild]::IsOSPlatform('windows'))">$(TargetFrameworks);net10.0-windows10.0.19041.0</TargetFrameworks>
+    <!-- Directory.Build.props sets one TargetFramework for every project; this one has several. -->
+    <TargetFramework></TargetFramework>
+    <OutputType>Exe</OutputType>
+    <UseMaui>true</UseMaui>
+    <SingleProject>true</SingleProject>
+    <AssemblyName>mclive-maui</AssemblyName>
+    <RootNamespace>ManagedCodecs.MauiSample</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <ApplicationTitle>mclive-maui</ApplicationTitle>
+    <ApplicationId>io.github.managedcodecs.mclive</ApplicationId>
+    <ApplicationDisplayVersion>1.0</ApplicationDisplayVersion>
+    <ApplicationVersion>1</ApplicationVersion>
+    <SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">24.0</SupportedOSPlatformVersion>
+    <SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">10.0.17763.0</SupportedOSPlatformVersion>
+    <TargetPlatformMinVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">10.0.17763.0</TargetPlatformMinVersion>
+    <!-- Windows: an .exe that runs as it is (as mclive-wpf), not an MSIX to install, so CI can start it with arguments. -->
+    <WindowsPackageType>None</WindowsPackageType>
+    <WindowsAppSDKSelfContained Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">true</WindowsAppSDKSelfContained>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Maui.Controls" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\ManagedCodecs.Playback\ManagedCodecs.Playback.csproj" />
+  </ItemGroup>
+
+</Project>

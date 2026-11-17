@@ -1,0 +1,142 @@
+name: MAUI
+
+# Builds mclive-maui (tools/ManagedCodecs.Maui.Sample: a live camera in .NET MAUI, issue #526,
+# docs/decisions/2026-11-17-live-maui.md) for Android and Windows, which no other job builds (it needs MAUI's workloads
+# and is not in ManagedCodecs.slnx), and runs it on both: an Android emulator on Linux and the Windows runner's desktop.
+# tools/mjpeg-http-server.py serves committed JPEGs as a camera would, and the sample checks itself (--frames, or the
+# intent's `frames` extra): every frame shown, it compares what the platform drew of the view with the decoded frame,
+# cell by cell, so a swap of red and blue, rows of the wrong length or no picture fail, not only a crash. Weekly, on
+# demand, and on pull requests that change the sample, Playback, the server, the MAUI version or this workflow; not
+# a required check.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '23 4 * * 4'
+  pull_request:
+    paths:
+      - '.github/workflows/maui.yml'
+      - 'tools/ManagedCodecs.Maui.Sample/**'
+      - 'src/ManagedCodecs.Playback/**'
+      - 'tools/mjpeg-http-server.py'
+      - 'Directory.Packages.props'
+
+concurrency:
+  group: maui-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # The workload set whose MAUI matches Microsoft.Maui.Controls in Directory.Packages.props (10.0.110); they move together.
+  MAUI_WORKLOAD_SET: 10.0.115
+  DOTNET_CLI_TELEMETRY_OPTOUT: 1
+
+jobs:
+  android:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Install the MAUI workload for Android
+        run: dotnet workload install maui-android --version "$MAUI_WORKLOAD_SET"
+
+      # The runner image has the Android SDK (ANDROID_HOME) and a JDK.
+      - name: Build
+        run: dotnet build tools/ManagedCodecs.Maui.Sample -f net10.0-android -c Release
+
+      # Hosted Linux runners have KVM, which the emulator needs to run at a usable speed.
+      - name: Start an Android emulator
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          sdk="$ANDROID_HOME/cmdline-tools/latest/bin"
+          yes | "$sdk/sdkmanager" --licenses > /dev/null
+          "$sdk/sdkmanager" emulator platform-tools 'system-images;android-34;google_apis;x86_64' > /dev/null
+          echo no | "$sdk/avdmanager" create avd -n ci -k 'system-images;android-34;google_apis;x86_64' --force
+          nohup "$ANDROID_HOME/emulator/emulator" -avd ci -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect > emulator.log 2>&1 &
+          adb="$ANDROID_HOME/platform-tools/adb"
+          "$adb" wait-for-device
+          for i in $(seq 1 120); do
+            [ "$("$adb" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 ] && break
+            sleep 5
+          done
+          "$adb" shell getprop sys.boot_completed
+
+      # 100 frames of samples/gstreamer/jpeg-422 (320x240, 5 JPEGs in a loop) at 25 fps, from the host (10.0.2.2 in the
+      # emulator). Android gives no exit code back through adb: the sample's two "mclive-maui:" lines in the log (tag
+      # DOTNET) say how it went, the second "every frame drawn as decoded" when it passed.
+      - name: Run mclive-maui against MJPEG over HTTP
+        run: |
+          adb="$ANDROID_HOME/platform-tools/adb"
+          python3 tools/mjpeg-http-server.py samples/gstreamer/jpeg-422 --port 8090 &
+          server=$!
+          "$adb" install -r tools/ManagedCodecs.Maui.Sample/bin/Release/net10.0-android/io.github.managedcodecs.mclive-Signed.apk
+          "$adb" logcat -c
+          "$adb" shell am start -W -n io.github.managedcodecs.mclive/.MainActivity -e url http://10.0.2.2:8090/video.mjpg --ei frames 100
+          for i in $(seq 1 90); do
+            "$adb" logcat -d -s DOTNET:I | grep 'mclive-maui:' > out.txt || true
+            [ "$(wc -l < out.txt)" -ge 2 ] && break
+            sleep 2
+          done
+          kill $server
+          "$adb" logcat -d > logcat.txt
+          cat out.txt
+          sed 's/.*mclive-maui: /    /' out.txt >> "$GITHUB_STEP_SUMMARY"
+          if [ "$(wc -l < out.txt)" -lt 2 ]; then
+            echo '::error::mclive-maui printed no result within 3 minutes'
+            grep -E 'DOTNET|AndroidRuntime|mclive' logcat.txt | tail -60
+            exit 3
+          fi
+          grep -q 'every frame drawn as decoded' out.txt
+
+      - name: Upload the log
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: android-logs
+          path: |
+            logcat.txt
+            emulator.log
+          if-no-files-found: ignore
+
+  windows:
+    runs-on: windows-2025
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Install the MAUI workload for Windows
+        run: dotnet workload install maui-windows --version $env:MAUI_WORKLOAD_SET
+
+      - name: Build
+        run: dotnet build tools/ManagedCodecs.Maui.Sample -f net10.0-windows10.0.19041.0 -c Release
+
+      # As windows.yml runs mclive-wpf: the sample exits 0, 1 if the player gave up, 2 if a frame was drawn wrong. It is
+      # a windowed program, which a shell doesn't wait for: Start-Process does, with a limit in case its window stays.
+      - name: Run mclive-maui against MJPEG over HTTP
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem tools/ManagedCodecs.Maui.Sample/bin/Release -Recurse -Filter mclive-maui.exe | Select-Object -First 1
+          $server = Start-Process python -ArgumentList 'tools/mjpeg-http-server.py', 'samples/gstreamer/jpeg-422', '--port', '8090' -PassThru -NoNewWindow
+          $run = Start-Process $exe.FullName -ArgumentList 'http://127.0.0.1:8090/video.mjpg', '--frames', '100' `
+            -PassThru -RedirectStandardOutput out.txt -RedirectStandardError err.txt
+          $null = $run.Handle   # without it PowerShell forgets the exit code
+          $exited = $run.WaitForExit(180000)
+          if (-not $exited) { $run.Kill() }
+          Stop-Process -Id $server.Id -Force
+          Get-Content out.txt, err.txt
+          Get-Content out.txt | ForEach-Object { '    ' + $_ } | Add-Content $env:GITHUB_STEP_SUMMARY
+          if (-not $exited) { Write-Error 'mclive-maui did not exit within 3 minutes'; exit 3 }
+          if ((Get-Content out.txt | Measure-Object -Line).Lines -lt 2) { Write-Error 'mclive-maui printed no result'; exit 4 }
+          exit $run.ExitCode

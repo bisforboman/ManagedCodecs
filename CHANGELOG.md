@@ -13,8 +13,8 @@ run time.
 
 ## Unreleased
 
-Features beside fixes (new public API: `AviDemuxer.AudioTracks` and `SelectAudio`, `PlaybackOptions.PairMonoTracks`), hence the next version is a minor
-one; code built against 0.18 keeps working.
+Features beside fixes (new public API: `AviDemuxer.AudioTracks` and `SelectAudio`, `PlaybackOptions.PairMonoTracks`),
+hence the next version is a minor one; code built against 0.18 keeps working.
 
 ### Added
 

@@ -724,8 +724,9 @@ its edit's end until the first was read that way. QuickTime files (`aac-quicktim
 
 ## AVI audio
 
-`AviDemuxer.Audio` is the file's first audio stream (docs/decisions/2026-11-08-avi-audio.md); `AviConformanceTests`
-compares its packets with ffprobe's (name.packets.csv: size and MD5 of every packet, pts, dts and duration where
+`AviDemuxer.AudioTracks` lists every audio stream, `Audio` being the first unless `SelectAudio` chooses others
+(docs/decisions/2026-11-08-avi-audio.md, 2026-11-15-sound-tracks.md); `AviConformanceTests` compares each one's
+packets, read alone, with ffprobe's (name.packets.csv: size and MD5 of every packet, pts, dts and duration where
 FFmpeg gives them) and its codec private data with FFmpeg's extradata, on every AVI sample:
 
 | Sample | What |
@@ -737,6 +738,7 @@ FFmpeg gives them) and its codec private data with FFmpeg's extradata, on every 
 | avi-mjpeg-ima | 4-bit IMA ADPCM at 22.05 kHz, stereo, in 512-byte blocks: a packet a block, timed in blocks (dwScale wSamplesPerBlock); `CodecIds.AdpcmImaWav` |
 | avi-mjpeg-ms-adpcm | Microsoft ADPCM at 22.05 kHz, stereo, in 512-byte blocks, timed as IMA's; `CodecIds.AdpcmMs` |
 | avi-mjpeg-mp3-cbr | MP3 in the CBR layout of VirtualDub and older muxers, written by `tools/avi-mp3-cbr.py` |
+| avi-mjpeg-three-audio | Three audio streams, MP3 stereo, 16-bit PCM mono and AAC, each a tone of its own: each read alone, and all three in one pass in ffprobe's file order; a seek by one before choosing the others; `PlaybackOptions.AudioTrack` plays each (`AudioPlayerTests`) |
 
 The CBR layout (dwScale 1, dwRate the bytes a second, dwSampleSize 1) cuts its chunks anywhere in a frame:
 `tools/avi-mp3-cbr.py` rewrites an FFmpeg AVI's MP3 into chunks of 417, 1000, 61, 731, 2048 and 5 bytes in turn,
@@ -960,8 +962,8 @@ what the file says, the file is followed and the test says so:
   and all named backwards, a track's packets being the same whichever others are read with it. By hand: `Audio`
   following the choice, a read under way keeping its tracks, the refusals, a seek moving the tracks not selected too;
   `MxfFollowTests` grows mxf-h264-mono4 under two of its four tracks. Not covered by a file: two tracks naming the
-  same essence elements (the first is read). The other demuxers still read their first audio stream alone (the
-  interface's defaults, checked on a one-stream demuxer).
+  same essence elements (the first is read). AVI lists its streams too (AVI, above); MP4 and Matroska still read
+  their first audio stream alone (the interface's defaults, checked on a one-stream demuxer).
 - The players on those tracks (`PlaybackOptions.AudioTrack`): `AudioPlayer` and `MediaPlayer` play mxf-h264-mono4's
   mono tracks in pairs, the track named as the left channel and the next as the right, sample for sample FFmpeg's
   `join` filter's stereo of the two (name.pair01.f32, name.pair23.f32); `AudioPlayerTests` also takes each track as

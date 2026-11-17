@@ -111,7 +111,7 @@ public class VideoProbeTests
             (long Duration, Rational TimeBase)? actual = type switch
             {
                 "video" when demuxer.Video is { } v => (v.Duration, v.TimeBase),
-                "audio" when demuxer.Audio is { } a => (a.Duration, a.TimeBase),
+                "audio" when demuxer.AudioTracks.FirstOrDefault(t => t.StreamIndex == stream.GetProperty("index").GetInt32()) is { } a => (a.Duration, a.TimeBase),
                 _ => null,
             };
 

@@ -56,6 +56,9 @@ built against 0.18 keeps working.
   has no flag), the one with the most channels, the first of equals. Before, the first stream in the file, which on
   such files was another one than FFmpeg plays. `SelectAudio` and `PlaybackOptions.AudioTrack` choose another; MXF still
   plays its first.
+- Playback: `LivePlayer` reads RTCP BYE. When the camera says goodbye for the stream (as live555 does at the end of a
+  file, leaving the connection open), the player connects again after its first backoff, `Error` saying so, rather than
+  waiting for `StallTimeout`. A goodbye for the sound beside a video ends nothing. docs/decisions/2026-11-15-live-rtcp.md.
 
 ### Fixed
 

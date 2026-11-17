@@ -362,6 +362,86 @@ public class LiveRtcpTests
 
     private static uint Timestamp(byte[] packet) => BinaryPrimitives.ReadUInt32BigEndian(packet.AsSpan(4));
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ConnectsAgainAtOnceWhenTheServerSaysGoodbye(bool udp)
+    {
+        // The server says goodbye for the video's stream and leaves the connection open, as live555 does at the end of a
+        // file (RTCP BYE): the player connects again after its first backoff, without waiting for the stall timeout,
+        // which the test's clock never reaches.
+        var units = LiveRtspTests.AccessUnits(Slices);
+        using var gate = new SemaphoreSlim(0);
+        using var server = new RtspTestServer(RtspTestServer.SdpOf(Slices), async play =>
+        {
+            foreach (var packet in units[0])
+            {
+                await play.SendAsync(packet);
+            }
+
+            if (play.Connection == 0)
+            {
+                await gate.WaitAsync(play.Token);
+                await play.SendAsync(RtcpReport.Bye(Ssrc(units[0][0])), 1);
+            }
+
+            await Task.Delay(Timeout.Infinite, play.Token);
+        })
+        {
+            UdpOnly = udp,
+        };
+
+        var clock = new FakeLiveClock();
+        using var player = new LivePlayer(new RtspSource(server.Uri) { StallTimeout = TimeSpan.FromSeconds(3) }, clock);
+        player.Start();
+        Assert.NotNull(WaitFor(player, player.TakeLatest));
+        gate.Release();
+
+        WaitFor(player, () => player.State == LiveState.Reconnecting && clock.WaitingFor.SequenceEqual([TimeSpan.FromSeconds(0.5)]) ? player : null);
+        var error = Assert.IsType<EndOfStreamException>(player.Error);
+        Assert.Contains("BYE", error.Message, StringComparison.Ordinal);
+        clock.Advance(TimeSpan.FromSeconds(0.5));
+        Assert.NotNull(WaitFor(player, player.TakeLatest));
+        Assert.Equal((2, 1L, LiveState.Playing), (server.Connections, player.Statistics.Reconnects, player.State));
+    }
+
+    [Fact]
+    public void PlaysOnWhenTheSoundBesideAVideoSaysGoodbye()
+    {
+        // A goodbye for the audio track's stream ends that stream, not the session: the video's next picture comes on the
+        // same connection.
+        var units = LiveRtspTests.AccessUnits(Slices);
+        var audio = RtpH264DepacketizerTests.Recording(Alaw)[0];
+        using var gate = new SemaphoreSlim(0);
+        using var server = new RtspTestServer(LiveRtspAudioTests.TwoTracks(Alaw), async play =>
+        {
+            foreach (var packet in units[0])
+            {
+                await play.SendAsync(packet);
+            }
+
+            await play.SendAsync(audio, 2);
+            await gate.WaitAsync(play.Token);
+            await play.SendAsync(RtcpReport.Bye(Ssrc(audio)), 3);
+            foreach (var packet in units[1])
+            {
+                await play.SendAsync(packet);
+            }
+
+            await Task.Delay(Timeout.Infinite, play.Token);
+        });
+
+        var clock = new FakeLiveClock();
+        using var player = new LivePlayer(new RtspSource(server.Uri) { Audio = true, StallTimeout = TimeSpan.FromSeconds(3) }, clock);
+        player.Start();
+        Assert.NotNull(WaitFor(player, player.TakeLatest));
+        Assert.NotNull(WaitFor(player, player.TakeAudio));
+        gate.Release();
+        Assert.NotNull(WaitFor(player, player.TakeLatest));
+        Assert.Equal((1, 0L, LiveState.Playing), (server.Connections, player.Statistics.Reconnects, player.State));
+        Assert.Null(player.Error);
+    }
+
     // The receiver reports that reached the server's RTCP port (the punch packet, 8 bytes, is not one).
     private static List<RtcpReport> Reports(RtspTestServer server) =>
         [.. server.Punches.Where(p => p.Port == "rtcp" && p.Data.Length > 8).Select(p => RtcpReport.Parse(p.Data))];

@@ -1265,7 +1265,11 @@ port=$((port + 2))
 # (-single), as cameras send; and its RFC 3551 one on the G.711 .wav files: A-law mono as the static payload type 8
 # with no a=rtpmap, μ-law stereo as "PCMU/8000/2". FFmpeg's encoder never writes an access unit larger than a packet,
 # so fragments are hand-made in the tests.
+# -latm: the AAC LC sample as LATM (RFC 6416's MP4A-LATM, -rtpflags latm: an access unit an audioMuxElement, one a
+# packet, the StreamMuxConfig as the SDP's config=), for RtpLatmTests. Not the HE-AAC one: FFmpeg writes that config
+# from the stream's rate and channels alone (AAC LC at 44.1 kHz for a 22.05 kHz core with SBR).
 for spec in aac-stereo-48k.mp4:aac-stereo-48k: "aac-stereo-48k.mp4:aac-stereo-48k-single:-max_delay 0" heaac-stereo-44k.mp4:heaac-stereo-44k: \
+  "aac-stereo-48k.mp4:aac-stereo-48k-latm:-rtpflags latm" \
   wav-alaw-codes.wav:wav-alaw-codes: wav-mulaw-codes.wav:wav-mulaw-codes:; do
   IFS=: read -r input name options <<< "$spec"
   python3 tools/rtp-record.py "$port" "samples/$name.rtp" &

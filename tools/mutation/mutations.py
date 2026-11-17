@@ -933,6 +933,16 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.Playback/RtpAudioDepacketizer.cs",
          find="if (_fragmentSize >= 0 && (header.Timestamp != _fragmentTimestamp || size != _fragmentSize))", replace="if (false)",
          tests="FullyQualifiedName~RtpAudioDepacketizerTests.DropsAFragmentedAccessUnitWhenAnotherStartsBeforeItsEnd"),
+    # AAC as LATM (RFC 6416, issue #527), rules only hand-made packets reach (FFmpeg's packetizer sends an element a
+    # packet): after a gap, an element is given only if its lengths add up to exactly its bytes, as nothing marks an
+    # element's first packet ...
+    dict(file="src/ManagedCodecs.Playback/RtpAudioDepacketizer.cs",
+         find="if (!whole || (suspect && at != element.Length))", replace="if (!whole)",
+         tests="FullyQualifiedName~RtpLatmTests.DropsAnElementMissingAPacket"),
+    # ... and an element larger than its access units can be is dropped rather than grown without bound.
+    dict(file="src/ManagedCodecs.Playback/RtpAudioDepacketizer.cs",
+         find="if (_fragment.Length + payload.Length > _latmSubFrames * (MaxAccessUnit + 256))", replace="if (false)",
+         tests="FullyQualifiedName~RtpLatmTests.DropsAnElementLargerThanItsAccessUnitsCanBe"),
     # MJPEG over HTTP: the first delimiter line names the boundary, whatever the header said (cameras get it wrong).
     dict(file="src/ManagedCodecs.Playback/MultipartReader.cs",
          find="            if (_first)\n", replace="            if (_boundary is null)\n",

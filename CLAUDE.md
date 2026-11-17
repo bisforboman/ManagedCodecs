@@ -89,7 +89,9 @@ G.726, checked against tools/g726-reference.py, which passes ITU-T's test sequen
   packages with advisories, direct or transitive, `tools/vulnerable-packages.py`; one issue per streak; every build
   already fails on them, NU1901-NU1904 being errors: docs/decisions/2026-11-06-vulnerable-packages.md), `codeql.yml`
   (code scanning, not required), `windows.yml` (weekly, and on PRs that change it: `mclive-wpf --frames` on a Windows
-  runner, the only job not on Linux; not required).
+  runner; not required), `maui.yml` (weekly, and on PRs that change it or Playback: mclive-maui built for Android and
+  Windows and checking itself on an Android emulator and a Windows runner; not required). Those two are the only jobs
+  with a Windows runner.
 
 ## Gotchas beside the code
 

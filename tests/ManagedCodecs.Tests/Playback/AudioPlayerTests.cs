@@ -120,6 +120,29 @@ public class AudioPlayerTests
         Assert.Equal(expected, played);
     }
 
+    /// <summary>
+    /// <see cref="PlaybackOptions.PairMonoTracks"/> false: mxf-h264-mono4's track plays alone, its mono samples on both
+    /// speakers (each a channel of FFmpeg's join of it and the next, name.pair01.f32 and name.pair23.f32), whichever
+    /// track is named.
+    /// </summary>
+    [Theory]
+    [InlineData(null, 1, "pair01", 0)]
+    [InlineData(1, 2, "pair01", 1)]
+    [InlineData(2, 3, "pair23", 0)]
+    public void PlaysAnMxfFilesMonoTrackAloneWhenNotPaired(int? track, int streamIndex, string reference, int channel)
+    {
+        const string Name = "mxf-h264-mono4.mxf";
+        var mono = Channel(Name, reference, channel);
+        var expected = Interleave(mono, mono);
+        using var player = new AudioPlayer(TestSamples.PathOf(Name), new PlaybackOptions { AudioTrack = track, PairMonoTracks = false });
+        Assert.Equal(streamIndex, player.Audio.StreamIndex);
+        player.Start();
+        var played = Drain(player, expected.Count + 1);
+        Assert.Null(player.Error);
+        Assert.Equal(expected, played);
+        Assert.True(new PlaybackOptions().PairMonoTracks);
+    }
+
     /// <summary>Loop plays a pair of mono tracks again as it played them, nothing of one pass waiting into the next.</summary>
     [Fact]
     public void Loop_PlaysAPairOfMonoTracksAgain()

@@ -1,4 +1,6 @@
 #nullable enable
+ManagedCodecs.Playback.PlaybackOptions.PairMonoTracks.get -> bool
+ManagedCodecs.Playback.PlaybackOptions.PairMonoTracks.init -> void
 ManagedCodecs.AudioStreamInfo.IsDefault.get -> bool
 ManagedCodecs.AudioStreamInfo.IsDefault.init -> void
 ManagedCodecs.AudioStreamInfo.Language.get -> string?

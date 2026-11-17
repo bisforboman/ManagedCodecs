@@ -14,11 +14,13 @@ run time.
 ## Unreleased
 
 Features beside fixes (new public API: `AudioTracks` and `SelectAudio` in `AviDemuxer`, `Mp4Demuxer` and
-`MatroskaDemuxer`; `AudioStreamInfo.Language`, `Title` and `IsDefault`), hence the next version is a minor one; code
-built against 0.18 keeps working.
+`MatroskaDemuxer`; `AudioStreamInfo.Language`, `Title` and `IsDefault`; `PlaybackOptions.PairMonoTracks`), hence the
+next version is a minor one; code built against 0.18 keeps working.
 
 ### Added
 
+- Playback: `PlaybackOptions.PairMonoTracks` (true by default): false plays an MXF file's mono track alone, on both
+  speakers, rather than with the next mono track as the right channel. Issue #535.
 - Containers: `AviDemuxer`, `Mp4Demuxer` (QuickTime too) and `MatroskaDemuxer` list every audio stream
   (`AudioTracks`) and read those `SelectAudio` chooses, one or several in one pass, each as FFmpeg's demuxer gives it;
   until a choice is made the one FFmpeg's command line plays is read alone (see Changed). `PlaybackOptions.AudioTrack`

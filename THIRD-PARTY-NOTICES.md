@@ -105,7 +105,8 @@ table checked against them is in this code's own layout: h264bsd (Apache-2.0; th
 AAC decoder from Android (Apache-2.0; the AAC, SBR and parametric stereo Huffman codebooks, enumerated from its
 decoding trees), the FDK AAC encoder (parametric stereo's IPD and OPD codebooks, Annex 8.B, read from its code
 tables and equal to the codes FFmpeg's code lengths give in canonical order) and FFmpeg (LGPL-2.1-or-later; the
-reference output, and the MJPEG IDCT's arithmetic, which `SimpleIdct` implements independently, README, License).
+reference output, and the MJPEG IDCT's arithmetic, which `SimpleIdct` implements independently, README, License; for
+SMPTE RDD 36, its decoded output alone, measured to find the inverse transform's arithmetic, not its source).
 
 ## The Apache License, Version 2.0
 

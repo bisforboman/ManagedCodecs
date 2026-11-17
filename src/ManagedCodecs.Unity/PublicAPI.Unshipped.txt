@@ -23,3 +23,12 @@ ManagedCodecs.G726Decoder.Decode(ManagedCodecs.Packet packet) -> ManagedCodecs.A
 ManagedCodecs.G726Decoder.Decode(System.ReadOnlySpan<byte> packet) -> ManagedCodecs.AudioFrame!
 ManagedCodecs.G726Decoder.G726Decoder(ManagedCodecs.AudioStreamInfo! stream) -> void
 ManagedCodecs.G726Decoder.SampleRate.get -> int
+const ManagedCodecs.CodecIds.Rdd36 = "RDD36" -> string!
+ManagedCodecs.Rdd36.Rdd36Decoder
+ManagedCodecs.Rdd36.Rdd36Decoder.Decode(ManagedCodecs.Packet packet) -> System.Collections.Generic.IReadOnlyList<ManagedCodecs.VideoFrame!>!
+ManagedCodecs.Rdd36.Rdd36Decoder.Decode(System.ReadOnlySpan<byte> packet) -> ManagedCodecs.VideoFrame!
+ManagedCodecs.Rdd36.Rdd36Decoder.DecodeAsync(ManagedCodecs.Packet packet, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<System.Collections.Generic.IReadOnlyList<ManagedCodecs.VideoFrame!>!>
+ManagedCodecs.Rdd36.Rdd36Decoder.Flush() -> System.Collections.Generic.IReadOnlyList<ManagedCodecs.VideoFrame!>!
+ManagedCodecs.Rdd36.Rdd36Decoder.FlushAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<System.Collections.Generic.IReadOnlyList<ManagedCodecs.VideoFrame!>!>
+ManagedCodecs.Rdd36.Rdd36Decoder.Rdd36Decoder() -> void
+ManagedCodecs.Rdd36.Rdd36Decoder.Rdd36Decoder(ManagedCodecs.VideoStreamInfo! stream) -> void

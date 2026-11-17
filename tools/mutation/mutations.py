@@ -747,6 +747,57 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.H264/H264Decoder.cs",
          find="_signal = sps.Signal.After(_signal);", replace="",
          tests="DisplayName~h264-color-bt2020-pq"),
+    # ---- SMPTE RDD 36 (src/ManagedCodecs.Rdd36/CLAUDE.md). RDD 36 qualifies an inverse transform's accuracy rather than
+    # fixing its arithmetic; the decoder's follows FFmpeg's, found by measuring it (docs/decisions/2026-11-15-rdd36-decoder.md).
+    # W3 is 19265, not the 19266 the definition rounds to (a measured block tells them apart).
+    dict(file="src/ManagedCodecs.Rdd36/Rdd36Idct.cs",
+         find="private const int W3 = 19265;", replace="private const int W3 = 19266;",
+         tests="FullyQualifiedName~Rdd36"),
+    # The rows' rounding constant (2^14), which the first sample of many blocks depends on.
+    dict(file="src/ManagedCodecs.Rdd36/Rdd36Idct.cs",
+         find="int a0 = (W4 * x0) + (1 << (RowShift - 1));", replace="int a0 = W4 * x0;",
+         tests="FullyQualifiedName~Rdd36"),
+    # The clamp: 4 to 1019, the levels between BT.601's timing references (7.5.1 allows either clamp).
+    dict(file="src/ManagedCodecs.Rdd36/Rdd36Idct.cs",
+         find="private const int MinSample = 4;", replace="private const int MinSample = 0;",
+         tests="FullyQualifiedName~Rdd36"),
+    dict(file="src/ManagedCodecs.Rdd36/Rdd36Idct.cs",
+         find="private const int MaxSample = 1019;", replace="private const int MaxSample = 1023;",
+         tests="FullyQualifiedName~Rdd36"),
+    # The shortcuts give what the full transform gives: a row with only its first coefficient, a block with only its
+    # first row, and a row of zeros (whose stack memory is not zero by itself).
+    dict(file="src/ManagedCodecs.Rdd36/Rdd36Idct.cs",
+         find="rows.Slice(at, 8).Fill((x0 + 1) >> 1);", replace="rows.Slice(at, 8).Fill(x0 >> 1);",
+         tests="FullyQualifiedName~Rdd36"),
+    dict(file="src/ManagedCodecs.Rdd36/Rdd36Idct.cs",
+         find="ushort sample = Clamp(((rows[u] + 8) >> 4) + Bias);", replace="ushort sample = Clamp((rows[u] >> 4) + Bias);",
+         tests="FullyQualifiedName~Rdd36"),
+    dict(file="src/ManagedCodecs.Rdd36/Rdd36Idct.cs",
+         find="rows.Slice(at, 8).Clear();", replace="",
+         tests="FullyQualifiedName~Rdd36"),
+    # Coefficients wrap to 16 bits, where no picture's reach (FFmpeg's C and SIMD transforms disagree beyond).
+    dict(file="src/ManagedCodecs.Rdd36/Rdd36Decoder.cs",
+         find="unchecked((short)(level * scale))", replace="(short)Math.Clamp(level * scale, short.MinValue, short.MaxValue)",
+         tests="FullyQualifiedName~Rdd36DecoderTests"),
+    # The reserved quantization_index values as FFmpeg takes them: 0 as 1, above 224 as 224 (rdd36-rw-reserved-index).
+    dict(file="src/ManagedCodecs.Rdd36/Rdd36Decoder.cs",
+         find="int index = Math.Clamp(quantizationIndex, 1, 224);", replace="int index = quantizationIndex;",
+         tests="FullyQualifiedName~Rdd36"),
+    # Rules of the document only some streams reach: a DC difference negated after a negative one (Table 9's text),
+    # the end of a component's data with up to 31 zero bits left (rdd36-rw-zero-bytes), colour codes 0 and 2 both
+    # unknown (the container's then; rdd36-aw-colour), and the limited range of 7.5.1.
+    dict(file="src/ManagedCodecs.Rdd36/Rdd36Decoder.cs",
+         find="            if (previousDifference < 0)", replace="            if (false)",
+         tests="FullyQualifiedName~Rdd36"),
+    dict(file="src/ManagedCodecs.Rdd36/Rdd36BitReader.cs",
+         find="_lengthInBits - _position <= 31", replace="_lengthInBits - _position <= 7",
+         tests="FullyQualifiedName~Rdd36"),
+    dict(file="src/ManagedCodecs.Rdd36/Rdd36Decoder.cs",
+         find="private static bool Specified(int code) => code is not (0 or 2);", replace="private static bool Specified(int code) => code != 2;",
+         tests="FullyQualifiedName~Rdd36"),
+    dict(file="src/ManagedCodecs.Rdd36/Rdd36Decoder.cs",
+         find="frame.ColorRange = ColorRange.Limited;", replace="frame.ColorRange = _stream?.ColorRange ?? ColorRange.Unspecified;",
+         tests="FullyQualifiedName~Rdd36"),
     # ---- MJPEG
     # FFmpeg takes an image of less than 3/4 of the stream's height (integer division) as a field.
     dict(file="src/ManagedCodecs.Mjpeg/MjpegDecoder.cs",

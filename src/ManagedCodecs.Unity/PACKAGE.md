@@ -6,6 +6,7 @@ runtimes (Mono, IL2CPP). It is the same C# as the other packages, compiled into 
 - **H.264**: Constrained Baseline to High 4:4:4 Predictive. CAVLC and CABAC, I/P/B, interlaced, 4:0:0 to 4:4:4,
   8 to 14 bits, lossless.
 - **MJPEG**: baseline and extended Huffman JPEG, interlaced AVI1.
+- **SMPTE RDD 36**: 4:2:2, progressive, 10 bits, from MOV.
 - **AAC LC and HE-AAC** (SBR, parametric stereo), mono to 7.1.
 - **Containers**: AVI, MP4 (fragmented too) and raw AAC (ADTS).
 - **Thumbnails**: `VideoProbe` (a video file's duration, size as shown, codecs, rotation) and `VideoThumbnail` (one

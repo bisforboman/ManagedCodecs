@@ -63,7 +63,7 @@ Fuzzer.OutOfProcess.Run(stream =>
 return 0;
 
 // Seeds: small whole files for "file"; for the codec targets, the first packets of a few samples in the target's
-// framing (avcC and packets, a JPEG, AudioSpecificConfig and frames, MP3 frames).
+// framing (avcC and packets, a JPEG, an RDD 36 frame, AudioSpecificConfig and frames, MP3 frames).
 static void WriteSeeds(string samples, string output)
 {
     foreach (var name in Targets.Names)
@@ -74,7 +74,7 @@ static void WriteSeeds(string samples, string output)
     // samples/heaac holds the committed HE-AAC streams (the FDK encoder's), parametric stereo among them.
     string heaac = Path.Combine(samples, "heaac");
     var files = Directory.GetFiles(samples).Concat(Directory.Exists(heaac) ? Directory.GetFiles(heaac) : []);
-    foreach (var path in files.Where(f => f.EndsWith(".avi") || f.EndsWith(".mp4") || f.EndsWith(".mxf") || f.EndsWith(".aac")).Order())
+    foreach (var path in files.Where(f => f.EndsWith(".avi") || f.EndsWith(".mp4") || f.EndsWith(".mov") || f.EndsWith(".mxf") || f.EndsWith(".aac")).Order())
     {
         string stem = Path.GetFileNameWithoutExtension(path);
 
@@ -99,6 +99,10 @@ static void WriteSeeds(string samples, string output)
                 if (video.Codec == CodecIds.Mjpeg && videoPackets.Count > 0)
                 {
                     File.WriteAllBytes(Path.Combine(output, "mjpeg", stem + ".jpg"), videoPackets[0].Data.ToArray());
+                }
+                else if (video.Codec == CodecIds.Rdd36 && videoPackets.Count > 0 && videoPackets[0].Data.Length <= 64 * 1024)
+                {
+                    File.WriteAllBytes(Path.Combine(output, "rdd36", stem + ".icpf"), videoPackets[0].Data.ToArray());
                 }
                 else if (video.Codec == CodecIds.H264 && videoPackets.Count > 0)
                 {

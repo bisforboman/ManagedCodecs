@@ -13,3 +13,4 @@ ManagedCodecs.G726Decoder.Decode(ManagedCodecs.Packet packet) -> ManagedCodecs.A
 ManagedCodecs.G726Decoder.Decode(System.ReadOnlySpan<byte> packet) -> ManagedCodecs.AudioFrame!
 ManagedCodecs.G726Decoder.G726Decoder(ManagedCodecs.AudioStreamInfo! stream) -> void
 ManagedCodecs.G726Decoder.SampleRate.get -> int
+const ManagedCodecs.CodecIds.Rdd36 = "RDD36" -> string!

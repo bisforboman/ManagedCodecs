@@ -6,6 +6,7 @@ using ManagedCodecs.Containers;
 using ManagedCodecs.H264;
 using ManagedCodecs.Mjpeg;
 using ManagedCodecs.Mp3;
+using ManagedCodecs.Rdd36;
 
 // mcdec: decodes every stream of a file that ManagedCodecs has a decoder for and reports the time it took, in the
 // shape of `ffmpeg -benchmark`, so both can be run on the same file:
@@ -171,6 +172,7 @@ for (int loop = 0; loop < loops; loop++)
     IVideoDecoder? videoDecoder = video?.Codec switch
     {
         CodecIds.Mjpeg => new MjpegDecoder(video) { ZeroCopy = zeroCopy },
+        CodecIds.Rdd36 => new Rdd36Decoder(video),
         CodecIds.H264 => new H264Decoder(video) { BorrowFrames = borrowFrames, Threads = threads, ConcealErrors = conceal },
         _ => null,
     };

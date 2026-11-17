@@ -1,6 +1,6 @@
 # Changelog
 
-Versions are git tags (`vX.Y.Z`); each one publishes every package (ManagedCodecs.Core, .Containers, .Mjpeg, .H264,
+Versions are git tags (`vX.Y.Z`); each one publishes every package (ManagedCodecs.Core, .Containers, .Mjpeg, .Rdd36, .H264,
 .Aac, .Mp3, .Thumbnails, .Playback, .MonoGame, .Avalonia, .Wpf, .Unity and the ManagedCodecs meta-package) to nuget.org at that version, and a GitHub release with this file's section
 as its notes. `release.yml` releases on the push to main that brings a version heading not yet tagged, so a release
 is a pull request that turns "Unreleased" into "## X.Y.Z – date" and runs `tools/ship-public-api.py`. From 0.1.0 on, the
@@ -101,6 +101,9 @@ New public API, hence a minor version; code built against 0.17 keeps working.
 
 ### Added
 
+- ManagedCodecs.Rdd36, a new package: `Rdd36Decoder` decodes SMPTE RDD 36 video, 4:2:2, progressive, to 10-bit frames,
+  bit-exact with FFmpeg; `Mp4Demuxer` names QuickTime's sample entries for it `CodecIds.Rdd36`. Interlaced frames,
+  4:4:4, alpha and 12 bits are refused for now (issue #461; docs/decisions/2026-11-15-rdd36-decoder.md).
 - Containers: sound tracks after the first. `IDemuxer.AudioTracks` lists a file's audio streams and
   `IDemuxer.SelectAudio` chooses which of them `ReadPackets` gives, one or several in one pass; `Audio` is the first
   one chosen, and until a choice is made the file's first audio stream is read alone, as before. `MxfDemuxer` lists

@@ -17,7 +17,7 @@ dotnet build tools/ManagedCodecs.Cli -c Release -v q -nologo
 dotnet publish tools/ManagedCodecs.Wasm -c Release -v q -nologo -warnaserror -p:RunAOTCompilation=$aot
 bundle=tools/ManagedCodecs.Wasm/bin/Release/net10.0/browser-wasm/AppBundle
 
-files=$(ls samples/*.avi samples/*.mp4 samples/*.mkv samples/*.webm samples/*.aac samples/*.mp3 samples/*.wav samples/*.h264 samples/*.264 samples/heaac/*.mp4 samples/heaac/*.aac samples/jm/*.mp4 samples/openh264/*.mp4)
+files=$(ls samples/*.avi samples/*.mp4 samples/*.mov samples/*.mkv samples/*.webm samples/*.aac samples/*.mp3 samples/*.wav samples/*.h264 samples/*.264 samples/heaac/*.mp4 samples/heaac/*.aac samples/jm/*.mp4 samples/openh264/*.mp4)
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
@@ -41,7 +41,7 @@ fi
 
 # The Thumbnails package the same way: each MP4 and AVI file's probe and thumbnail (ThumbnailOutput), the pixels
 # hashed, against the native ones.
-videos=$(echo "$files" | tr ' ' '\n' | grep -E '\.(mp4|avi)$')
+videos=$(echo "$files" | tr ' ' '\n' | grep -E '\.(mp4|mov|avi)$')
 # shellcheck disable=SC2086
 dotnet tools/ManagedCodecs.Cli/bin/Release/net10.0/mcdec.dll --thumbnail-hash $videos > "$work/native-thumbnails.txt"
 # shellcheck disable=SC2086

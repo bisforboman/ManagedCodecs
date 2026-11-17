@@ -75,7 +75,9 @@ writes a feature, unit tests and hand-built or rewritten streams cover it. [docs
 says feature by feature which encoder made the samples (libx264, OpenH264, JM) and what is not checked. Every night
 the [real-world check](https://github.com/bisforboman/ManagedCodecs/actions/workflows/realworld.yml)
 (`tools/realworld.py`) decodes six of Blender's open movies, real H.264 and AAC from real encoders, and four cameras' MJPEG against FFmpeg:
-every frame identical, the audio within 2^-17. On every pull request (docs-only ones skip its steps) the
+every frame identical, the audio within 2^-17. It also reads four MXF files from writers other than FFmpeg (two of
+archive.org's `mxfburger`, MPEG-2 and PCM, and the first megabytes of two NASA broadcast files, MPEG-2 and 4K H.264)
+and compares them with FFmpeg's demuxer packet by packet: size, MD5, times, keyframes and durations. On every pull request (docs-only ones skip its steps) the
 [mutation check](https://github.com/bisforboman/ManagedCodecs/actions/workflows/mutation.yml)
 (`tools/mutation/mutate.py`) breaks, one at a time, the guards a passing test could miss (the frame threading waits,
 and code that reproduces FFmpeg's reading where it differs from the spec), and needs a test to fail for each.

@@ -100,6 +100,8 @@ ManagedCodecs.Playback.PlaybackOptions.Loop.get -> bool
 ManagedCodecs.Playback.PlaybackOptions.Loop.init -> void
 ManagedCodecs.Playback.PlaybackOptions.Matrix.get -> ManagedCodecs.ColorMatrix?
 ManagedCodecs.Playback.PlaybackOptions.Matrix.init -> void
+ManagedCodecs.Playback.PlaybackOptions.PairMonoTracks.get -> bool
+ManagedCodecs.Playback.PlaybackOptions.PairMonoTracks.init -> void
 ManagedCodecs.Playback.PlaybackOptions.PlaybackOptions() -> void
 ManagedCodecs.Playback.PlaybackOptions.Range.get -> ManagedCodecs.ColorRange?
 ManagedCodecs.Playback.PlaybackOptions.Range.init -> void

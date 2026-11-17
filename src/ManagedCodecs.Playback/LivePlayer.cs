@@ -324,7 +324,9 @@ public sealed class LivePlayer : IDisposable
 
                 // A refused or dropped connection, an error status, a stall or a body that isn't multipart: all may be
                 // gone on the next try, as cameras reboot and networks drop.
-                _error = connection.Stalled
+                _error = connection.Goodbye
+                    ? new EndOfStreamException("The server ended the stream (RTCP BYE).")
+                    : connection.Stalled
                     ? new TimeoutException(
                         connection.Udp
                             ? $"Nothing received for {StallTimeout.TotalSeconds} s over UDP (a firewall or NAT may be dropping it)."
@@ -608,7 +610,7 @@ public sealed class LivePlayer : IDisposable
                 }
 
                 reports = SendReportsAsync(senders, ending);
-                await PumpTcpAsync(rtsp, transport.Channel, handle, rtcp, audio, ending).ConfigureAwait(false);
+                await PumpTcpAsync(rtsp, transport.Channel, handle, rtcp, audio, Goodbye(connection, cancel), ending).ConfigureAwait(false);
             }
             else
             {
@@ -626,7 +628,7 @@ public sealed class LivePlayer : IDisposable
                     senders.Add((rtcp, Sender(udp, serverRtcp)));
                 }
 
-                Observe(ReadReportsAsync(udp, server, rtcp));
+                Observe(ReadReportsAsync(udp, server, rtcp, Goodbye(connection, cancel)));
                 if (audio?.Udp is { } audioUdp)
                 {
                     var audioServer = Server(audio.Transport, rtsp, multicast);
@@ -641,7 +643,7 @@ public sealed class LivePlayer : IDisposable
                         senders.Add((audio.Rtcp, Sender(audioUdp, audioRtcp)));
                     }
 
-                    Observe(ReadReportsAsync(audioUdp, audioServer, audio.Rtcp));
+                    Observe(ReadReportsAsync(audioUdp, audioServer, audio.Rtcp, null));
 
                     // Until the ending ends (the ending): the video's pump decides when that is.
                     audioPump = PumpUdpAsync(Task.Delay(Timeout.Infinite, ending), audioUdp, audioServer, audio.Transport.Ssrc, audio.Handle, audio.Rtcp, watched: false, ending);
@@ -898,7 +900,7 @@ public sealed class LivePlayer : IDisposable
     // RTP interleaved on the RTSP connection: the packets of the first track's channel (the video's, or the sound's when
     // it is the only one), and of the audio's beside a video, until the connection ends, and on the channel after each
     // its RTCP (the camera's sender reports). Only the first track's packets count against a stall.
-    private async Task PumpTcpAsync(RtspConnection rtsp, int channel, Action<byte[]> handle, RtcpSession rtcp, AudioSession? audio, CancellationToken token)
+    private async Task PumpTcpAsync(RtspConnection rtsp, int channel, Action<byte[]> handle, RtcpSession rtcp, AudioSession? audio, Action goodbye, CancellationToken token)
     {
         int audioChannel = audio?.Channel ?? -1;
         while (await rtsp.ReadAsync(token).ConfigureAwait(false) is { } message)
@@ -916,7 +918,10 @@ public sealed class LivePlayer : IDisposable
             }
             else if (message.Channel == channel + 1)
             {
-                rtcp.Report(message.Data, _clock.Elapsed);
+                if (rtcp.Report(message.Data, _clock.Elapsed))
+                {
+                    goodbye();
+                }
             }
             else if (message.Channel == audioChannel)
             {
@@ -957,18 +962,28 @@ public sealed class LivePlayer : IDisposable
         return Task.CompletedTask;
     };
 
-    // RTCP over UDP: the server's sender reports, until the ports close with the session (the receive then throws).
-    private async Task ReadReportsAsync(RtpUdpPorts udp, IPAddress? server, RtcpSession rtcp)
+    // RTCP over UDP: the server's sender reports, until the ports close with the session (the receive then throws), and
+    // for the first track its BYE (goodbye; null for the audio beside a video, whose end isn't the session's).
+    private async Task ReadReportsAsync(RtpUdpPorts udp, IPAddress? server, RtcpSession rtcp, Action? goodbye)
     {
         while (true)
         {
             var (packet, from) = await udp.ReceiveReportAsync().ConfigureAwait(false);
-            if (server is null || Plain(from.Address).Equals(server))
+            if ((server is null || Plain(from.Address).Equals(server)) && rtcp.Report(packet, _clock.Elapsed))
             {
-                rtcp.Report(packet, _clock.Elapsed);
+                goodbye?.Invoke();
             }
         }
     }
+
+    // The server said goodbye for the first track's stream (RTCP BYE, as live555 sends at the end of a file, leaving the
+    // connection open): the session ends at once, rather than at the stall timeout, and the player connects again
+    // (docs/decisions/2026-11-15-live-rtcp.md, point 4).
+    private static Action Goodbye(Connection connection, CancellationTokenSource cancel) => () =>
+    {
+        connection.Goodbye = true;
+        cancel.Cancel();
+    };
 
     // RTP over UDP: the server's packets (its address, and its SSRC when SETUP's answer gave one) through the reorder
     // window, until control ends: the video's is the read of the RTSP connection, which still carries the keep-alives.
@@ -1444,6 +1459,7 @@ public sealed class LivePlayer : IDisposable
         public volatile bool Stalled;
         public volatile bool Frames;
         public volatile bool Udp;
+        public volatile bool Goodbye;
     }
 
     // A reason not to connect again (an answer a retry won't change); its inner exception is the player's Error.

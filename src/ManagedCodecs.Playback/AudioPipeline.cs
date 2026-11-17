@@ -89,7 +89,7 @@ internal sealed class PlayedAudio
         }
 
         var track = tracks[index];
-        var right = demuxer is MxfDemuxer && track.Channels == 1 && index + 1 < tracks.Count
+        var right = options.PairMonoTracks && demuxer is MxfDemuxer && track.Channels == 1 && index + 1 < tracks.Count
             && tracks[index + 1] is { Channels: 1 } next && next.Codec == track.Codec && next.SampleRate == track.SampleRate
             ? next
             : null;

@@ -414,7 +414,11 @@ MUTATIONS = [
          tests="DisplayName~mxf-d10-pcm24-cut"),
     # Only an MXF file's mono tracks play as left and right: elsewhere two mono tracks may be two languages (#535).
     dict(file="src/ManagedCodecs.Playback/AudioPipeline.cs",
-         find="var right = demuxer is MxfDemuxer && track.Channels == 1", replace="var right = track.Channels == 1",
+         find="var right = options.PairMonoTracks && demuxer is MxfDemuxer && track.Channels == 1", replace="var right = options.PairMonoTracks && track.Channels == 1",
+         tests="FullyQualifiedName~AudioPlayerTests"),
+    # PairMonoTracks false plays an MXF file's mono track alone (as players before 0.18.0 did).
+    dict(file="src/ManagedCodecs.Playback/AudioPipeline.cs",
+         find="var right = options.PairMonoTracks && demuxer", replace="var right = demuxer",
          tests="FullyQualifiedName~AudioPlayerTests"),
     # A clip of sound the file ends in keeps its last bytes, not whole samples only (mxf-opatom-pcm-cut).
     dict(file="src/ManagedCodecs.Containers/Mxf/MxfDemuxer.cs",
@@ -960,6 +964,18 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
          find="senders.Add((rtcp, Sender(udp, serverRtcp)));", replace="",
          tests="FullyQualifiedName~LiveRtcpTests.ReportsOverUdpFromTheRtcpPortWithWhatWasLost"),
+    # ---- RTCP BYE (docs/decisions/2026-11-15-live-rtcp.md, Since): only the stream's BYE ends it ...
+    dict(file="src/ManagedCodecs.Playback/Rtsp/RtcpSession.cs",
+         find="goodbye |= BinaryPrimitives.ReadUInt32BigEndian(packet.Slice(4 + (4 * i))) == _source;", replace="goodbye = true;",
+         tests="FullyQualifiedName~RtcpSessionTests.SaysWhenTheSenderSaysGoodbyeForTheStream"),
+    # ... and ends the session at once, over the connection ...
+    dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
+         find="                if (rtcp.Report(message.Data, _clock.Elapsed))\n                {\n                    goodbye();\n                }", replace="                rtcp.Report(message.Data, _clock.Elapsed);",
+         tests="FullyQualifiedName~LiveRtcpTests.ConnectsAgainAtOnceWhenTheServerSaysGoodbye"),
+    # ... and over UDP.
+    dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
+         find="Observe(ReadReportsAsync(udp, server, rtcp, Goodbye(connection, cancel)));", replace="Observe(ReadReportsAsync(udp, server, rtcp, null));",
+         tests="FullyQualifiedName~LiveRtcpTests.ConnectsAgainAtOnceWhenTheServerSaysGoodbye"),
     # ---- A lossy network (LossyNetworkTests, issue #527): a gap inside a unit ended by its own marker damages only it ...
     dict(file="src/ManagedCodecs.Playback/RtpH264Depacketizer.cs",
          find="            _gapBeforeNext = false;\n            completed.Add(Complete(damaged: false));", replace="            completed.Add(Complete(damaged: false));",

@@ -14,11 +14,14 @@ run time.
 ## 0.19.0 – 2026-11-17
 
 Live cameras that more cameras and networks need: AAC as LATM and G.726 sound, sound with no picture, RTP to a
-multicast group, RTSP over an HTTP tunnel, and JPEG over 2040 pixels; every audio track in AVI, MP4 and Matroska files
-(`AudioTracks`, `SelectAudio`). New public API, hence a minor version; code built against 0.18 keeps working.
+multicast group, RTSP over an HTTP tunnel, JPEG over 2040 pixels, and a reconnect on RTCP BYE; every audio track in
+AVI, MP4 and Matroska files (`AudioTracks`, `SelectAudio`, `PlaybackOptions.PairMonoTracks`). New public API, hence a
+minor version; code built against 0.18 keeps working.
 
 ### Added
 
+- Playback: `PlaybackOptions.PairMonoTracks` (true by default): false plays an MXF file's mono track alone, on both
+  speakers, rather than with the next mono track as the right channel. Issue #535.
 - Containers: `AviDemuxer`, `Mp4Demuxer` (QuickTime too) and `MatroskaDemuxer` list every audio stream
   (`AudioTracks`) and read those `SelectAudio` chooses, one or several in one pass, each as FFmpeg's demuxer gives it;
   until a choice is made the one FFmpeg's command line plays is read alone (see Changed). `PlaybackOptions.AudioTrack`
@@ -56,6 +59,9 @@ multicast group, RTSP over an HTTP tunnel, and JPEG over 2040 pixels; every audi
   has no flag), the one with the most channels, the first of equals. Before, the first stream in the file, which on
   such files was another one than FFmpeg plays. `SelectAudio` and `PlaybackOptions.AudioTrack` choose another; MXF still
   plays its first.
+- Playback: `LivePlayer` reads RTCP BYE. When the camera says goodbye for the stream (as live555 does at the end of a
+  file, leaving the connection open), the player connects again after its first backoff, `Error` saying so, rather than
+  waiting for `StallTimeout`. A goodbye for the sound beside a video ends nothing. docs/decisions/2026-11-15-live-rtcp.md.
 
 ### Fixed
 

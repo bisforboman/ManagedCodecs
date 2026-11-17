@@ -483,6 +483,7 @@ public sealed class AviDemuxer : IDemuxer
         {
             // FFmpeg gives a stream duration (dwLength ticks) for a packet a chunk only.
             Duration = samples ? 0 : stream.Length,
+            ChannelMask = format.ChannelMask,
         };
         return new AudioTrack(info, samples ? AudioLayout.ChunkSamples : AudioLayout.Chunks, stream.SampleSize);
     }

@@ -42,6 +42,9 @@ public sealed class AacDecoder : IAudioDecoder
     private readonly ChannelStream[] _streams;
     private readonly int[] _outputOrder;
 
+    // The output channels' speakers (AudioFrame.ChannelMask), 0 where the layout places none.
+    private readonly ulong _channelMask;
+
     // Seed of the noise generator for PNS.
     private uint _noiseState = 0x1F2E3D4C;
 
@@ -82,6 +85,7 @@ public sealed class AacDecoder : IAudioDecoder
         _filterbanks = [.. Enumerable.Range(0, channels).Select(_ => new Filterbank())];
         _streams = [.. Enumerable.Range(0, channels).Select(_ => new ChannelStream())];
         _outputOrder = _config.Pce?.OutputOrder() ?? OutputOrder(_config.ChannelConfiguration, channels);
+        _channelMask = _config.Pce?.ChannelMask() ?? ChannelMask(_config.ChannelConfiguration);
         _channelElement = new int[channels];
         _channelInElement = new int[channels];
     }
@@ -207,7 +211,7 @@ public sealed class AacDecoder : IAudioDecoder
         }
 
         int count = blocks[0].SampleCount;
-        var frame = new AudioFrame(blocks[0].SampleRate, blocks[0].Channels, count * blocks.Length);
+        var frame = new AudioFrame(blocks[0].SampleRate, blocks[0].Channels, count * blocks.Length) { ChannelMask = blocks[0].ChannelMask, };
         for (int i = 0; i < blocks.Length; i++)
         {
             if (blocks[i].SampleCount != count || blocks[i].Channels != frame.Channels)
@@ -337,7 +341,7 @@ public sealed class AacDecoder : IAudioDecoder
             return DecodeWithSbr();
         }
 
-        var frame = new AudioFrame(_config.SampleRate, _config.Channels, 1024);
+        var frame = new AudioFrame(_config.SampleRate, _config.Channels, 1024) { ChannelMask = _channelMask, };
         for (int output = 0; output < _config.Channels; output++)
         {
             int source = _outputOrder[output];
@@ -401,7 +405,7 @@ public sealed class AacDecoder : IAudioDecoder
     private AudioFrame DecodeWithSbr()
     {
         _sbrChannels ??= [.. Enumerable.Range(0, _config.Channels).Select(_ => new SbrChannel(_config.DownsampledSbr))];
-        var frame = new AudioFrame(SampleRate, Channels, _config.DownsampledSbr ? 1024 : 2048);
+        var frame = new AudioFrame(SampleRate, Channels, _config.DownsampledSbr ? 1024 : 2048) { ChannelMask = HasParametricStereo ? 0 : _channelMask, };
         if (HasParametricStereo)
         {
             var stream = _streams[0];
@@ -497,6 +501,19 @@ public sealed class AacDecoder : IAudioDecoder
         // front, side and back and outputs 7.1, and so do we, so FFmpeg's 7.1 files round-trip.
         7 => [1, 2, 0, 7, 5, 6, 3, 4],    // C, L R, Ls Rs, Lb Rb, LFE -> FL FR FC LFE BL BR SL SR
         _ => [.. Enumerable.Range(0, channels)],
+    };
+
+    /// <summary>The speakers of a channel configuration's output channels (WAVE's mask, in the order above).</summary>
+    private static ulong ChannelMask(int configuration) => configuration switch
+    {
+        1 => 0x4,   // FC
+        2 => 0x3,   // FL FR
+        3 => 0x7,   // FL FR FC
+        4 => 0x107, // FL FR FC BC
+        5 => 0x37,  // FL FR FC BL BR
+        6 => 0x3F,  // FL FR FC LFE BL BR
+        7 => 0x63F, // FL FR FC LFE BL BR SL SR
+        _ => 0,
     };
 
     // ---- Syntax ----

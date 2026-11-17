@@ -25,9 +25,17 @@ internal static class AudioPipeline
         _ => new AacDecoder(audio),
     };
 
-    /// <summary>A frame's samples as interleaved stereo: its first two channels, or mono on both.</summary>
+    /// <summary>
+    /// A frame's samples as interleaved stereo: mono on both, stereo as it is, and more channels downmixed as FFmpeg's
+    /// <c>-ac 2</c> (<see cref="Downmix"/>; more than eight with no layout named, their first two).
+    /// </summary>
     public static AudioChunk ToStereo(AudioFrame frame, DateTime? captureTime = null)
     {
+        if (Downmix.Weights(frame.ChannelMask, frame.Channels) is { } weights)
+        {
+            return new AudioChunk(frame.SampleRate, Downmix.Apply(frame, weights)) { CaptureTime = captureTime };
+        }
+
         int count = frame.SampleCount;
         var left = frame.Samples[0];
         var right = frame.Channels > 1 ? frame.Samples[1] : left;

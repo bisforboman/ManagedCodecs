@@ -6,8 +6,8 @@ using ManagedCodecs.Playback;
 namespace ManagedCodecs.Tests.Playback;
 
 /// <summary>
-/// <see cref="AudioPlayer"/>: every audio-only sample (.wav, raw MP3 and AAC) plays its decoder's own output, as
-/// interleaved stereo in file order; Loop plays it again; what ends the decoding is kept in Error.
+/// <see cref="AudioPlayer"/>: every audio-only sample (.wav, raw MP3 and AAC) of one or two channels plays its decoder's
+/// own output, as interleaved stereo in file order (more channels: <see cref="DownmixTests"/>); Loop plays it again; what ends the decoding is kept in Error.
 /// </summary>
 public class AudioPlayerTests
 {
@@ -21,7 +21,8 @@ public class AudioPlayerTests
 
         foreach (var file in Directory.EnumerateFiles(TestSamples.Directory).Order())
         {
-            if (Path.GetExtension(file) is ".wav" or ".mp3" or ".aac")
+            // More than two channels are downmixed: DownmixTests compares them with FFmpeg's (name.stereo.f32).
+            if (Path.GetExtension(file) is ".wav" or ".mp3" or ".aac" && !File.Exists(TestSamples.ReferenceOf(file, ".stereo.f32")))
             {
                 names.Add(Path.GetFileName(file));
             }

@@ -75,7 +75,10 @@ public sealed class WavDemuxer : IDemuxer
                 CutData(format, dataStart, dataEnd);
             }
 
-            Audio = new AudioStreamInfo(format.Codec, format.SampleRate, format.Channels, _packets.Count, new Rational(1, format.SampleRate), format.CodecPrivate, 0);
+            Audio = new AudioStreamInfo(format.Codec, format.SampleRate, format.Channels, _packets.Count, new Rational(1, format.SampleRate), format.CodecPrivate, 0)
+            {
+                ChannelMask = format.ChannelMask,
+            };
         }
         catch (Exception e)
         {

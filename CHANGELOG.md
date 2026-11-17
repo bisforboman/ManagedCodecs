@@ -53,6 +53,12 @@ next version is a minor one; code built against 0.18 keeps working.
 
 ### Changed
 
+- Playback: sound with more than two channels (5.1 and 7.1 AAC, multichannel PCM) plays downmixed to stereo as
+  FFmpeg's `-ac 2` does in float: the centre and the surrounds at -3 dB, a back centre at -6 dB, the LFE left out, not
+  scaled down (a loud passage can exceed 1, as FFmpeg's output does). Before, only the first two channels played, and
+  a film's dialogue in the centre channel was lost. The layout is AAC's channel configuration or program config
+  element, WAVEFORMATEXTENSIBLE's channel mask in WAV and AVI, else FFmpeg's default for the count; more than eight
+  channels with none named still give their first two. docs/decisions/2026-11-17-more-than-two-channels.md, issue #535.
 - Containers and Playback: a file with several audio streams gives, and plays, the one FFmpeg's command line plays: of
   the tracks marked default (MP4's 'tkhd' enabled flag, Matroska's FlagDefault), or of them all where none is (AVI, which
   has no flag), the one with the most channels, the first of equals. Before, the first stream in the file, which on

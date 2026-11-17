@@ -928,7 +928,8 @@ MUTATIONS = [
          tests="FullyQualifiedName~LiveRtcpTests.PlacesAnAacPacketsLaterFramesByTheLengthOfThoseBeforeThem"),
     # ---- Audio over RTSP (docs/decisions/2026-11-15-live-rtsp-audio.md): no second SETUP unless RtspSource.Audio asks ...
     dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
-         find="if (source.Audio && sdp.Audio is { } audioTrack)", replace="if (sdp.Audio is { } audioTrack)",
+         find="if (track is not null && source.Audio && sdp.Audio is { } audioTrack)",
+         replace="if (track is not null && sdp.Audio is { } audioTrack)",
          tests="FullyQualifiedName~LiveRtspAudioTests.SetsUpNoAudioUnlessAskedTo"),
     # ... the audio's packets don't count against a stall, on the RTSP connection ...
     dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",

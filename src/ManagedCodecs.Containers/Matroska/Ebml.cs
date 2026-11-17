@@ -18,6 +18,9 @@ internal static class Ebml
     public const uint TrackNumber = 0xD7;
     public const uint TrackType = 0x83;
     public const uint CodecId = 0x86;
+    public const uint FlagDefault = 0x88;
+    public const uint Name = 0x536E;
+    public const uint Language = 0x22B59C;
     public const uint CodecPrivate = 0x63A2;
     public const uint DefaultDuration = 0x23E383;
     public const uint CodecDelay = 0x56AA;

@@ -106,3 +106,9 @@ The repository's CLAUDE.md (process, core idea, cross-cutting gotchas) applies t
   mono input (`-map` each), and its demuxer numbers the streams as the material package's tracks; `.packets.csv` holds
   every stream, so filter it by the selected ones. Don't edit make-samples.sh while it runs: bash reads the script as
   it goes, and the run fails at a shifted line.
+- Several sound tracks in MP4 and Matroska: FFmpeg's command line plays the track marked default (MP4's 'tkhd'
+  track_enabled, Matroska's FlagDefault), then the most channels; read which with `ffmpeg -i f -f null -` ("Stream #0:N
+  -> #0:1"), as make-samples.sh's `.audioplayed`. ffprobe reports MP4's "und" language but not Matroska's, a missing
+  Matroska Language as "eng" and FlagDefault as set, and QuickTime's Macintosh language codes by a table of FFmpeg's
+  (`Mp4Demuxer.MacintoshLanguages`, read code by code from ffprobe). FFmpeg's Matroska muxer writes FlagDefault 0 on a
+  lone audio track; its MP4 muxer enables the first track of a kind where none is marked, and writes no title.

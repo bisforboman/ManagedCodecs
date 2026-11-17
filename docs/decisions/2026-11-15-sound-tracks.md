@@ -86,7 +86,9 @@ public interface IDemuxer
 - The two tracks' samples are paired as they are decoded, whatever their packets' sizes and order; what one has past
   the other's end plays beside silence. `Audio` is the left track; the right one is not exposed.
 - **Not built, to decide if it is missed:** a way to turn the folding off (channel 1 alone on both speakers, as
-  0.17 played such files), and more than two channels out of a player (`AudioChunk` is stereo).
+  0.17 played such files), and more than two channels out of a player (`AudioChunk` is stereo). The owner
+  (2026-11-17): no switch for now. Nobody has missed one, and an option once shipped can't be taken back without a
+  break; it waits for a request.
 - **Checks:** mxf-h264-mono4 through `AudioPlayer` and `MediaPlayer` against FFmpeg's `join` of the two tracks
   (name.pair01.f32, name.pair23.f32), sample for sample, for each track as the left one, and looped; the pairing on
   hand-made packets; mxf-prores-pcm16's second stereo track; the refusals.

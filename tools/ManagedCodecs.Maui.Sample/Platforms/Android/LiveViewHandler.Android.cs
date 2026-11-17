@@ -71,7 +71,14 @@ public sealed partial class LiveViewHandler : ViewHandler<LiveView, ImageView>
             made = true;
         }
 
-        Marshal.Copy(frame.Pixels, 0, _buffer!.GetDirectBufferAddress(), frame.Width * frame.Height * 4);
+        // TEMPORARY, to see the check fail: red and blue swapped.
+        var swapped = (byte[])frame.Pixels.Clone();
+        for (int i = 0; i < swapped.Length; i += 4)
+        {
+            (swapped[i], swapped[i + 2]) = (swapped[i + 2], swapped[i]);
+        }
+
+        Marshal.Copy(swapped, 0, _buffer!.GetDirectBufferAddress(), frame.Width * frame.Height * 4);
         _buffer.Rewind();
         _bitmap.CopyPixelsFromBuffer(_buffer);
         if (made)

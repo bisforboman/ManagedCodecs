@@ -9,6 +9,9 @@
     <TargetFrameworks>net10.0-android</TargetFrameworks>
     <TargetFrameworks Condition="$([MSBuild]::IsOSPlatform('windows'))">$(TargetFrameworks);net10.0-windows10.0.19041.0</TargetFrameworks>
     <TargetFrameworks Condition="$([MSBuild]::IsOSPlatform('osx'))">$(TargetFrameworks);net10.0-ios;net10.0-maccatalyst</TargetFrameworks>
+    <!-- A build for some of them only (maui.yml's macOS job, whose runner has no Android workload): restore evaluates
+         every listed one. A property of its own, as a global TargetFrameworks would reach the libraries referenced. -->
+    <TargetFrameworks Condition="'$(SampleTargetFrameworks)' != ''">$(SampleTargetFrameworks)</TargetFrameworks>
     <!-- Directory.Build.props sets one TargetFramework for every project; this one has several. -->
     <TargetFramework></TargetFramework>
     <OutputType>Exe</OutputType>

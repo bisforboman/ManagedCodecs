@@ -91,9 +91,28 @@ public interface IDemuxer
   (name.pair01.f32, name.pair23.f32), sample for sample, for each track as the left one, and looped; the pairing on
   hand-made packets; mxf-prores-pcm16's second stereo track; the refusals.
 
-## Left for the later pull requests
+## Later (the owner, 2026-11-16)
 
-- `Mp4Demuxer`, `MatroskaDemuxer`, `AviDemuxer`: their own `AudioTracks` and `SelectAudio`, each with a sample of
-  several tracks (`-map 0 -map 1 -map 2`) against FFmpeg's packets.
-- Track names and languages (MP4's 'mdhd' language, Matroska's Language and Name): not in `AudioStreamInfo` today, and
-  what a player would choose a commentary by. An API decision of its own once the lists are there.
+Closing #548, another session's plan for the same issue, the owner kept two of its answers on top of this API:
+
+- **Which track `Audio` is when nobody chooses:** the one FFmpeg's command line plays: of the tracks flagged default
+  (MP4's 'tkhd' track_enabled, Matroska's FlagDefault), or of them all where none is, the one with the most channels,
+  the first of equals. MXF has no flag and keeps its first track.
+- **`AudioStreamInfo.Language`, `Title` and `IsDefault`,** as ffprobe reports them.
+
+The #469 session builds both, with `Mp4Demuxer`'s and `MatroskaDemuxer`'s lists (its branch
+`audio-tracks-mkv-mp4-535`, moved onto this API).
+
+## AVI (the third pull request)
+
+- `AviDemuxer.AudioTracks`: every audio stream whose 'strf' is a WAVEFORMATEX, in the file's order (before, the first
+  such stream). Each keeps its own layout (a packet a chunk, pieces timed by bytes, or CBR MP3 re-split), its own
+  count and, after a seek, its own held packet; `Seek` takes any of their indexes.
+- AVI has no default flag, so `Audio` stays the first stream, as in MXF. Whether FFmpeg's "most channels" rule should
+  pick among an AVI's streams follows the #469 session's rule once it is on main.
+- **Sample:** `avi-mjpeg-three-audio` (MP3 stereo, 16-bit PCM mono, AAC), and make-samples.sh's `.packets.framemd5`
+  now maps every video and audio stream (`-map 0:v? -map 0:a?`), for each stream's extradata; no other sample has
+  several of a kind, so no other reference changes.
+- **Checks:** `AviConformanceTests` compares each stream read alone with ffprobe's packets and extradata (every AVI
+  sample), all three in one pass in ffprobe's file order, the refusals, and a seek by one stream before choosing
+  others; `AudioPlayerTests` plays each stream by `PlaybackOptions.AudioTrack`.

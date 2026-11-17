@@ -13,10 +13,14 @@ run time.
 
 ## Unreleased
 
-Features beside fixes, hence the next version is a minor one.
+Features beside fixes (new public API: `AviDemuxer.AudioTracks` and `SelectAudio`), hence the next version is a minor
+one; code built against 0.18 keeps working.
 
 ### Added
 
+- Containers: `AviDemuxer` lists every audio stream (`AudioTracks`) and reads those `SelectAudio` chooses, one or
+  several in one pass, each as FFmpeg's demuxer gives it; until a choice is made the first is read alone, as before.
+  `PlaybackOptions.AudioTrack` plays any of them. Issue #535, docs/decisions/2026-11-15-sound-tracks.md.
 - Playback: JPEG over RTSP larger than 2040 pixels, whose size RFC 2435's header can't give: `LivePlayer` takes it
   from the camera's SDP (GStreamer's `a=x-dimensions`, RFC 6064's `a=framesize`) or from ONVIF's RTP header extension,
   where it used to fail. docs/decisions/2026-11-12-live-rtsp-jpeg.md (Since), issue #527.
@@ -29,6 +33,9 @@ Features beside fixes, hence the next version is a minor one.
 
 ### Fixed
 
+- Thumbnails: `VideoProbe`'s duration (and where `VideoThumbnail` takes its frame) counts every audio stream, as
+  ffprobe's does: a file whose later sound track ran longer than its first (MXF's tracks since 0.18.0, AVI's now) was
+  given the first one's end.
 - Thumbnails: `VideoProbe` gives an MXF file's duration as ffprobe's; it gave 0 for every MXF file, so
   `VideoThumbnail` took its frame at the start rather than 10% in.
 - Containers: `MxfDemuxer`'s streams last their header's track durations, as FFmpeg's demuxer reads them: the

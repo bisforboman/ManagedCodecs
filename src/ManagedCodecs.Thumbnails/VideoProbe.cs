@@ -75,7 +75,7 @@ public static class VideoProbe
     /// <summary>
     /// As ffprobe's <c>format=duration</c> (FFmpeg's update_stream_timings): from the earliest stream start to the
     /// latest stream end, a stream starting at its first packet shown (packets an edit only decodes left out; past the
-    /// samples it skips, MP3's encoder delay inside its first packet) and
+    /// samples it skips, MP3's encoder delay inside its first packet; every audio stream, not only the first) and
     /// lasting its container duration (<see cref="VideoStreamInfo.Duration"/>), or to the end of its last packet where
     /// the container gives none (except in AVI, where such a stream, audio with a dwSampleSize, ends nothing: FFmpeg gives it
     /// no duration and reads no packets for one). Matroska's: the Segment's Duration, or, in a file without one (a live recording, for
@@ -91,31 +91,51 @@ public static class VideoProbe
             streams[video.StreamIndex] = (video.TimeBase, video.Duration, long.MaxValue, long.MinValue);
         }
 
-        if (demuxer.Audio is { } audio)
+        // Every audio stream, as ffprobe's file duration counts every stream, read in one pass; then Audio alone is read
+        // again, as a demuxer just opened reads it (both callers open their own).
+        var tracks = demuxer.AudioTracks;
+        var sampleRates = new Dictionary<int, int>();
+        foreach (var audio in tracks)
         {
             streams[audio.StreamIndex] = (audio.TimeBase, audio.Duration, long.MaxValue, long.MinValue);
+            sampleRates[audio.StreamIndex] = audio.SampleRate;
         }
 
-        var packets = demuxer switch
+        int[]? chosen = tracks.Count > 1 && demuxer.Audio is { } unasked ? [unasked.StreamIndex] : null;
+        if (chosen is not null)
         {
-            Mp4Demuxer mp4 => mp4.ReadPacketInfo(),
-            AviDemuxer avi => avi.ReadPacketInfo(),
-            MatroskaDemuxer mkv => mkv.ReadPacketInfo(),
-            MxfDemuxer mxf => mxf.ReadPacketInfo(),
-            _ => [],
-        };
+            demuxer.SelectAudio([.. tracks.Select(t => t.StreamIndex)]);
+        }
 
-        // SkipSamples counts decoded samples; the packets' times are in the stream's time base.
-        int sampleRate = demuxer.Audio?.SampleRate ?? 0;
-        int audioIndex = demuxer.Audio?.StreamIndex ?? -1;
-        foreach (var packet in packets)
+        try
         {
-            if (!packet.Discard && streams.TryGetValue(packet.StreamIndex, out var s))
+            var packets = demuxer switch
             {
-                long skip = packet.SkipSamples > 0 && packet.StreamIndex == audioIndex && sampleRate > 0 && s.TimeBase.Numerator > 0
-                    ? packet.SkipSamples * (long)s.TimeBase.Denominator / ((long)sampleRate * s.TimeBase.Numerator)
-                    : 0;
-                streams[packet.StreamIndex] = s with { Start = Math.Min(s.Start, packet.Pts + skip), End = Math.Max(s.End, packet.Pts + packet.Duration) };
+                Mp4Demuxer mp4 => mp4.ReadPacketInfo(),
+                AviDemuxer avi => avi.ReadPacketInfo(),
+                MatroskaDemuxer mkv => mkv.ReadPacketInfo(),
+                MxfDemuxer mxf => mxf.ReadPacketInfo(),
+                _ => [],
+            };
+
+            // SkipSamples counts decoded samples; the packets' times are in the stream's time base.
+            foreach (var packet in packets)
+            {
+                if (!packet.Discard && streams.TryGetValue(packet.StreamIndex, out var s))
+                {
+                    int sampleRate = sampleRates.GetValueOrDefault(packet.StreamIndex);
+                    long skip = packet.SkipSamples > 0 && sampleRate > 0 && s.TimeBase.Numerator > 0
+                        ? packet.SkipSamples * (long)s.TimeBase.Denominator / ((long)sampleRate * s.TimeBase.Numerator)
+                        : 0;
+                    streams[packet.StreamIndex] = s with { Start = Math.Min(s.Start, packet.Pts + skip), End = Math.Max(s.End, packet.Pts + packet.Duration) };
+                }
+            }
+        }
+        finally
+        {
+            if (chosen is not null)
+            {
+                demuxer.SelectAudio(chosen);
             }
         }
 

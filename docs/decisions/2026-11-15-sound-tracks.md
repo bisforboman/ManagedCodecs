@@ -108,8 +108,8 @@ The #469 session builds both, with `Mp4Demuxer`'s and `MatroskaDemuxer`'s lists 
 - `AviDemuxer.AudioTracks`: every audio stream whose 'strf' is a WAVEFORMATEX, in the file's order (before, the first
   such stream). Each keeps its own layout (a packet a chunk, pieces timed by bytes, or CBR MP3 re-split), its own
   count and, after a seek, its own held packet; `Seek` takes any of their indexes.
-- AVI has no default flag, so `Audio` stays the first stream, as in MXF. Whether FFmpeg's "most channels" rule should
-  pick among an AVI's streams follows the #469 session's rule once it is on main.
+- AVI has no default flag, so `Audio` stayed the first stream, as in MXF; the next pull request (below) made it the
+  one with the most channels, as FFmpeg's command line plays it.
 - **Sample:** `avi-mjpeg-three-audio` (MP3 stereo, 16-bit PCM mono, AAC), and make-samples.sh's `.packets.framemd5`
   now maps every video and audio stream (`-map 0:v? -map 0:a?`), for each stream's extradata; no other sample has
   several of a kind, so no other reference changes.

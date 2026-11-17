@@ -58,6 +58,11 @@ ff -f lavfi -i testsrc2=size=160x120:rate=25 -f lavfi -i "sine=frequency=440:sam
   -f lavfi -i "sine=frequency=550:sample_rate=22050" -f lavfi -i "sine=frequency=660:sample_rate=48000" -t 1 \
   -map 0 -map 1 -map 2 -map 3 -c:v mjpeg -q:v 5 -c:a:0 libmp3lame -b:a:0 64k -c:a:1 pcm_s16le -c:a:2 aac -b:a:2 64k \
   samples/avi-mjpeg-three-audio.avi
+# avi-audio-channels: a mono PCM stream before a stereo one. AVI marks no stream default, so FFmpeg's command line plays
+# the one with more channels, the second (name.audioplayed), which AviDemuxer.Audio gives too.
+ff -f lavfi -i testsrc2=size=160x120:rate=25 -f lavfi -i "sine=frequency=440:sample_rate=22050" \
+  -f lavfi -i "sine=frequency=660:sample_rate=22050" -t 1 -map 0 -map 1 -map 2 -c:v mjpeg -q:v 5 -c:a pcm_s16le \
+  -ac:a:0 1 -ac:a:1 2 samples/avi-audio-channels.avi
 # 8-bit PCM, as cameras write it (PcmDecoder): unsigned, at 11.025 kHz, here in stereo for the channels' interleaving.
 # The audio runs 0.2 s past the video, as cameras' often does a little: ffprobe's duration is still the video's (VideoProbe).
 ff -f lavfi -i testsrc2=size=160x120:rate=25:d=1 -f lavfi -i "aevalsrc=0.4*sin(2*PI*440*t)|0.3*sin(2*PI*660*t):s=11025:d=1.2" \

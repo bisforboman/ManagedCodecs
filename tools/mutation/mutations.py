@@ -186,6 +186,10 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.Containers/DefaultAudioTrack.cs",
          find="a.IsDefault != b.IsDefault ? a.IsDefault : a.Channels > b.Channels", replace="a.IsDefault && !b.IsDefault",
          tests="FullyQualifiedName~AudioTracksTests"),
+    # AVI marks no stream default: the most channels plays (avi-audio-channels), not the first.
+    dict(file="src/ManagedCodecs.Containers/Avi/AviDemuxer.cs",
+         find="int played = DefaultAudioTrack.Of(AudioTracks);", replace="int played = AudioTracks.Count > 0 ? 0 : -1;",
+         tests="FullyQualifiedName~AudioTracksTests"),
     # Matroska's missing Language and FlagDefault are the specification's defaults, and "und" is no language to ffprobe.
     dict(file="src/ManagedCodecs.Containers/Matroska/MatroskaDemuxer.cs",
          find='public string Language { get; set; } = "eng";', replace='public string Language { get; set; } = "und";',

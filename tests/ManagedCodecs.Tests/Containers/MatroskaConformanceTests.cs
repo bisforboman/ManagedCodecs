@@ -32,8 +32,7 @@ public class MatroskaConformanceTests
             streams.Add((video.StreamIndex, video.FrameCount, video.CodecPrivate));
         }
 
-        // Every sound track (several in mp4-audio-tracks and mkv-audio-tracks), each read after choosing it; framemd5
-        // maps only the one FFmpeg's command line plays, which the demuxer chooses by default.
+        // Every sound track (several in mp4-audio-tracks and mkv-audio-tracks), each read after choosing it.
         int? played = demuxer.Audio?.StreamIndex;
         foreach (var audio in demuxer.AudioTracks)
         {
@@ -57,13 +56,10 @@ public class MatroskaConformanceTests
         for (int mapped = 0; mapped < streams.Count; mapped++)
         {
             var (index, count, codecPrivate) = streams[mapped];
-            int? framemd5Index = index == demuxer.Video?.StreamIndex ? 0 : index == played ? (demuxer.Video is null ? 0 : 1) : null;
-            var extradata = framemd5Index is { } m ? FrameMd5.ParseExtradata(lines, m) : null;
-            if (framemd5Index is null)
-            {
-                // Not in framemd5 (FFmpeg's command line maps one sound track).
-            }
-            else if (extradata is null)
+
+            // framemd5 maps every video and audio stream (-map 0:v? -map 0:a?): the video first, then the audio in file order.
+            var extradata = FrameMd5.ParseExtradata(lines, mapped);
+            if (extradata is null)
             {
                 Assert.True(codecPrivate.IsEmpty, $"Stream {index}: FFmpeg reports no extradata but we found some.");
             }

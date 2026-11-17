@@ -393,10 +393,6 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
          find="            SetState(LiveState.Playing);\n            packets(packet);", replace="            packets(packet);",
          tests="FullyQualifiedName~LiveRtspAudioOnlyTests.PlaysTheSoundAsTheDecoderDecodesIt"),
-    # ... and interleaved AAC, which beside a video only turns the sound off, ends the player.
-    dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
-         find="throw new FatalException(e); // nothing else to play", replace="_error = e;",
-         tests="FullyQualifiedName~LiveRtspAudioOnlyTests.FailsOnInterleavedAccessUnits"),
     dict(file="src/ManagedCodecs.Playback/Rtsp/RtspConnection.cs",
          find="return sha.ComputeHash(certificate.GetRawCertData()).AsSpan().SequenceEqual(pinned);", replace="return true;",
          tests="FullyQualifiedName~LiveRtspsTests"),
@@ -964,6 +960,31 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
          find="senders.Add((rtcp, Sender(udp, serverRtcp)));", replace="",
          tests="FullyQualifiedName~LiveRtcpTests.ReportsOverUdpFromTheRtcpPortWithWhatWasLost"),
+    # ---- RFC 3640's interleaved AAC (docs/decisions/2026-11-17-live-rtp-interleaving.md), which no sender at hand writes:
+    # a missing unit is given up on once a later one is past the bound ...
+    dict(file="src/ManagedCodecs.Playback/RtpAudioDepacketizer.cs",
+         find="if (earliest != _next && _newest - _next <= _bound)", replace="if (earliest != _next)",
+         tests="FullyQualifiedName~RtpAudioDepacketizerTests.GivesUpOnALostPacketsAccessUnitsOnceTheBoundIsPassed"),
+    # ... the bound is capped at a quarter of a second ...
+    dict(file="src/ManagedCodecs.Playback/RtpAudioDepacketizer.cs",
+         find="_bound = track.MaxDisplacement > 0 ? Math.Min(track.MaxDisplacement, cap) : cap;", replace="_bound = track.MaxDisplacement > 0 ? track.MaxDisplacement : cap;",
+         tests="FullyQualifiedName~RtpAudioDepacketizerTests.GivesUpOnALostPacketsAccessUnitsOnceTheBoundIsPassed"),
+    # ... at the start the first unit due is the earliest held once the bound has passed ...
+    dict(file="src/ManagedCodecs.Playback/RtpAudioDepacketizer.cs",
+         find="            if (_newest - _held.Keys.First() <= _bound)\n            {\n                return;\n            }\n", replace="",
+         tests="FullyQualifiedName~RtpAudioDepacketizerTests.PlacesAFragmentedAccessUnitAmongInterleavedOnes"),
+    # ... the deltas turn it on where the SDP gave no maxDisplacement ...
+    dict(file="src/ManagedCodecs.Playback/RtpAudioDepacketizer.cs",
+         find="_interleaved |= i > 0 && index > 0;", replace="",
+         tests="FullyQualifiedName~RtpAudioDepacketizerTests.DeinterleavesWhatAnSdpWithoutTheParametersAnnounces"),
+    # ... a unit that comes after it was given up on is dropped and counted ...
+    dict(file="src/ManagedCodecs.Playback/RtpAudioDepacketizer.cs",
+         find="                Damage(); // too late: given up on, or given already\n", replace="",
+         tests="FullyQualifiedName~RtpAudioDepacketizerTests.DropsAnAccessUnitThatComesAfterItWasGivenUpOn"),
+    # ... and a first AU-Index other than 0 damages its packet.
+    dict(file="src/ManagedCodecs.Playback/RtpAudioDepacketizer.cs",
+         find="            if (i == 0 && index != 0)\n            {\n                Damage(); // an AU-Index other than 0: not an AAC mode's (variable durations aren't AAC's)\n                return;\n            }\n", replace="",
+         tests="FullyQualifiedName~RtpAudioDepacketizerTests.CountsAPacketWithAnAuIndexOtherThanZeroAsDamaged"),
     # ---- RTCP BYE (docs/decisions/2026-11-15-live-rtcp.md, Since): only the stream's BYE ends it ...
     dict(file="src/ManagedCodecs.Playback/Rtsp/RtcpSession.cs",
          find="goodbye |= BinaryPrimitives.ReadUInt32BigEndian(packet.Slice(4 + (4 * i))) == _source;", replace="goodbye = true;",

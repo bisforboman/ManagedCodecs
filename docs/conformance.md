@@ -354,8 +354,16 @@ checks are of the packets and the player.
   - The G.711 payloads are the .wav files' bytes, and decode to the same samples.
   - **Hand-made packets**, for what FFmpeg never sends (its encoder writes no access unit larger than a packet): a
     unit fragmented over three packets; one missing a fragment, missing its end, or ended early by the marker (dropped
-    and counted once); `AAC-lbr`'s 6-bit sizes; headers that don't fit the packet; a non-zero index (interleaving,
-    refused); another payload type, a repeated packet, a lost one.
+    and counted once); `AAC-lbr`'s 6-bit sizes; headers that don't fit the packet; a first AU-Index other than 0
+    (damaged); another payload type, a repeated packet, a lost one.
+  - **Interleaving** (RFC 3640, 3.2.3.2; docs/decisions/2026-11-17-live-rtp-interleaving.md), which no sender at hand
+    writes: a packetizer of the tests' own interleaves `aac-stereo-48k-single.rtp`'s access units as the RFC's 2.5
+    shows (groups of 9, 3 a packet), and they come back in order, each at its own time, released as soon as those
+    before them have come. Then a lost packet with the SDP's bound (5 units) and capped (10 s asked, 250 ms held),
+    each release counted packet by packet; a sender interleaving past the cap (its late units dropped and counted);
+    the timestamp's wrap; an SDP without `constantDuration` and `maxDisplacement`; a fragmented unit among interleaved
+    ones; and through `LivePlayer`, interleaved sound alone as the decoder's chunks in order. The tests' packetizer
+    and the depacketizer share one reading of the RFC.
   - The SDP's audio track: the static types 0 and 8, `PCMA` with a rate, `MPEG4-GENERIC` with its parameters in any
     case and order, the first format that plays across tracks, and what doesn't play by name (`MP4A-LATM`, a payload
     type with no `a=rtpmap`, `MPEG4-GENERIC` in another mode, or without a `config`).

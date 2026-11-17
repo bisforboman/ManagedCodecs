@@ -50,6 +50,11 @@ next version is a minor one; code built against 0.18 keeps working.
   `SkippedAudioCodec` named it before. It decodes exactly the Recommendation's samples, not FFmpeg's (whose adpcm_g726
   differs), checked against `tools/g726-reference.py`, which passes the Recommendation's test sequences.
   docs/decisions/2026-11-15-g726.md, issue #527.
+- Playback: a camera's AAC sent interleaved (RFC 3640's AU-Index-delta, with `constantDuration` and `maxDisplacement`
+  in the SDP) plays, the access units put back in order. The SDP's displacement is held, but never more than a quarter
+  of a second, and what comes later than that is counted damaged. It used to turn the sound off. A packet whose first
+  AU-Index isn't 0, which no AAC sender sends, is now counted damaged, not the end of the sound.
+  docs/decisions/2026-11-17-live-rtp-interleaving.md, issue #527.
 
 ### Changed
 

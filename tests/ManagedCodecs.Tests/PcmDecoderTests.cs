@@ -16,6 +16,9 @@ public class PcmDecoderTests
     {
         var reference = File.ReadAllBytes(TestSamples.ReferenceOf(sampleName, ".pcm.f32"));
         using var demuxer = Demuxer.Open(TestSamples.PathOf(sampleName));
+
+        // The reference is the file's first audio stream (-map 0:a:0), which needn't be the one played by default.
+        demuxer.SelectAudio(demuxer.AudioTracks[0].StreamIndex);
         var audio = demuxer.Audio!;
         Assert.True(PcmDecoder.CanDecode(audio.Codec), audio.Codec);
         var decoder = new PcmDecoder(audio);

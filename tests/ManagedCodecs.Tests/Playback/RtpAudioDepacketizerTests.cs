@@ -8,7 +8,8 @@ namespace ManagedCodecs.Tests.Playback;
 /// The audio depacketizer (RFC 3640's AAC-hbr and AAC-lbr, RFC 3551's G.711) against FFmpeg's packetizer: the access
 /// units it gives back are the file's packets byte for byte, and the SDP's config is the file's AudioSpecificConfig
 /// (docs/decisions/2026-11-15-live-rtsp-audio.md). FFmpeg's encoder never writes an access unit larger than a packet,
-/// so fragments' rules, AAC-lbr's field sizes and damage are hand-made packets; GStreamer's packetizers, recorded with
+/// so fragments' rules, AAC-lbr's field sizes, interleaving (by a packetizer of the tests' own, from RFC 3640) and
+/// damage are hand-made packets; GStreamer's packetizers, recorded with
 /// what went into them (samples/gstreamer/, tools/gst-audio-record.py), send one access unit a packet and access units
 /// over several. The SDP's audio track is read here too.
 /// </summary>
@@ -227,10 +228,198 @@ public class RtpAudioDepacketizerTests
     }
 
     [Fact]
-    public void RefusesInterleavedAccessUnits()
+    public void DeinterleavesAccessUnitsInTheirDecodingOrder()
     {
+        // FFmpeg's access units, interleaved as RFC 3640's 2.5 shows: groups of 9, 3 in a packet, a third of a group apart.
+        // They come out in their order, each at its own time, as soon as those before it have come. At the start one
+        // before the first to come could still come within the bound (5 units); the first packet already spans 6 (0,
+        // 3, 6), so 0 comes at once. Then 1 after the second packet (1, 4, 7), the rest of the group after the third
+        // (2, 5, 8), 9 after the fourth.
+        var (track, units) = Interleavable();
+        var packets = Interleaved(units, 1000, 7);
+        var depacketizer = new RtpAudioDepacketizer(track);
+        var output = new List<byte[]>();
+        var times = new List<(uint Timestamp, int Index)>();
+        var counts = new List<int>();
+        foreach (var packet in packets)
+        {
+            depacketizer.Add(packet, output, times);
+            counts.Add(output.Count);
+        }
+
+        int whole = units.Count / 9 * 9;
+        Assert.Equal(units.Take(whole), output);
+        Assert.Equal(Enumerable.Range(0, whole).Select(n => (1000u + ((uint)n * 1024), 0)), times);
+        Assert.Equal([1, 2, 9, 10, 11, 18], counts.Take(6));
+        Assert.Equal((0L, 0L), (depacketizer.LostPackets, depacketizer.Damaged));
+    }
+
+    [Theory]
+    [InlineData(5 * 1024, new[] { 1, 3, 7 })] // the SDP's maxDisplacement: 5 access units, as 2.5's pattern needs
+    [InlineData(480000, new[] { 0, 0, 3 })] // 10 s asked: held to a quarter of a second, 12000 ticks (11.7 units)
+    public void GivesUpOnALostPacketsAccessUnitsOnceTheBoundIsPassed(int maxDisplacement, int[] firstCounts)
+    {
+        // The packet with 1, 4 and 7 is lost: they never come, and the rest comes in order, each once the newest held
+        // is further past the one missing than the bound (3.2.3.3). With 5 units: 0 at once, 2 and 3 when 8 comes (7
+        // past 1), 5, 6, 8 and 9 when 15 does. With 12000 ticks nothing until 15 is 15 past 0, then 0, 2 and 3.
+        var (track, units) = Interleavable(maxDisplacement);
+        var packets = Interleaved(units, 0, 100);
+        packets.RemoveAt(1);
+        var depacketizer = new RtpAudioDepacketizer(track);
+        var output = new List<byte[]>();
+        var counts = new List<int>();
+        foreach (var packet in packets)
+        {
+            depacketizer.Add(packet, output);
+            counts.Add(output.Count);
+        }
+
+        Assert.Equal(firstCounts, counts.Take(3));
+        var expected = units.Take(units.Count / 9 * 9).Where((_, n) => n is not (1 or 4 or 7)).ToList();
+        Assert.Equal(expected.Take(output.Count), output);
+        Assert.True(output.Count >= expected.Count - 12, $"{output.Count} of {expected.Count} given.");
+        Assert.Equal((1L, 0L), (depacketizer.LostPackets, depacketizer.Damaged));
+    }
+
+    [Fact]
+    public void DropsAnAccessUnitThatComesAfterItWasGivenUpOn()
+    {
+        // A sender that interleaves further than a quarter of a second: groups of 24, units 8 apart in a packet, so that
+        // 16 comes 15 units (15360 ticks) before 1. Held no longer than 12000 ticks, some are given up on before they
+        // come: they are dropped and counted, and those given are the stream's, in order. (A late packet never gets
+        // this far: its sequence number is old, and the depacketizer drops it as it did before.)
+        var (track, units) = Interleavable(480000);
+        var depacketizer = new RtpAudioDepacketizer(track);
+        var output = new List<byte[]>();
+        foreach (var packet in Interleaved(units, 0, 0, group: 24, perPacket: 3))
+        {
+            depacketizer.Add(packet, output);
+        }
+
+        int at = 0;
+        foreach (var unit in output)
+        {
+            while (!units[at].AsSpan().SequenceEqual(unit))
+            {
+                at++;
+            }
+
+            at++;
+        }
+
+        Assert.True(depacketizer.Damaged > 0);
+        Assert.Equal(units.Count / 24 * 24, output.Count + depacketizer.Damaged + (units.Count / 24 * 24) - at);
+    }
+
+    [Fact]
+    public void FollowsTheTimestampAcrossItsWrap()
+    {
+        var (track, units) = Interleavable();
+        uint start = uint.MaxValue - (4 * 1024) + 1;
+        var output = new List<byte[]>();
+        var times = new List<(uint Timestamp, int Index)>();
+        var depacketizer = new RtpAudioDepacketizer(track);
+        foreach (var packet in Interleaved(units, start, 65530))
+        {
+            depacketizer.Add(packet, output, times);
+        }
+
+        int whole = units.Count / 9 * 9;
+        Assert.Equal(units.Take(whole), output);
+        Assert.Equal(Enumerable.Range(0, whole).Select(n => (unchecked(start + ((uint)n * 1024)), 0)), times);
+    }
+
+    [Fact]
+    public void DeinterleavesWhatAnSdpWithoutTheParametersAnnounces()
+    {
+        // A sender that leaves out maxDisplacement and constantDuration, as it must not when interleaving: the deltas
+        // show it, AAC's 1024 samples stand for the duration and a quarter of a second for the bound.
+        var (_, units) = Interleavable();
+        var track = RtpAudioDepacketizerTests.Track("aac-stereo-48k-single");
+        var output = new List<byte[]>();
+        var depacketizer = new RtpAudioDepacketizer(track);
+        foreach (var packet in Interleaved(units, 0, 0))
+        {
+            depacketizer.Add(packet, output);
+        }
+
+        Assert.Equal(units.Take(output.Count), output);
+        Assert.True(output.Count >= (units.Count / 9 * 9) - 12, $"{output.Count} given.");
+    }
+
+    [Fact]
+    public void PlacesAFragmentedAccessUnitAmongInterleavedOnes()
+    {
+        // A unit too large for a packet goes alone, fragmented, at its packet's timestamp (3.2.3.1); the one after it
+        // in time came first and waits for it. A unit past the bound lets them go.
+        var track = Hbr with { ConstantDuration = 1024, MaxDisplacement = 4096 };
+        var depacketizer = new RtpAudioDepacketizer(track);
+        var output = new List<byte[]>();
+        depacketizer.Add(Aac(1, 1024, true, [(2, 0)], [8, 9]), output);
+        depacketizer.Add(Aac(2, 0, false, [(4, 0)], [1, 2]), output);
+        depacketizer.Add(Aac(3, 0, true, [(4, 0)], [3, 4]), output);
+        Assert.Empty(output);
+        depacketizer.Add(Aac(4, 5 * 1024, true, [(1, 0)], [5]), output);
+        Assert.Equal([[1, 2, 3, 4], [8, 9]], output);
+    }
+
+    [Fact]
+    public void CountsAPacketWithAnAuIndexOtherThanZeroAsDamaged()
+    {
+        // The AAC modes code the first AU-Index 0 (RFC 3640, 3.3.5 and 3.3.6): another is no AAC sender's.
         var depacketizer = new RtpAudioDepacketizer(Hbr);
-        Assert.Throws<NotSupportedException>(() => depacketizer.Add(Aac(1, 0, true, [(1, 0), (1, 1)], [1, 2]), []));
+        var output = new List<byte[]>();
+        depacketizer.Add(Aac(1, 0, true, [(1, 1), (1, 0)], [1, 2]), output);
+        depacketizer.Add(Aac(2, 2048, true, [(1, 0)], [3]), output);
+        Assert.Equal([[3]], output);
+        Assert.Equal(1, depacketizer.Damaged);
+    }
+
+    [Fact]
+    public void ReadsTheSdpsInterleavingParameters()
+    {
+        const string Media = "m=audio 0 RTP/AVP 96\r\na=rtpmap:96 mpeg4-generic/48000/6\r\n"
+            + "a=fmtp:96 streamtype=5; profile-level-id=16; mode=AAC-hbr; config=11B0; sizeLength=13; indexLength=3; indexDeltaLength=3; constantDuration=1024; MaxDisplacement=5120\r\n";
+        var track = Sdp.Parse("v=0\r\ns=-\r\nt=0 0\r\n" + Media).Audio!;
+        Assert.Equal((1024, 5120, 6), (track.ConstantDuration, track.MaxDisplacement, track.Channels));
+
+        var plain = Sdp.Parse("v=0\r\ns=-\r\nt=0 0\r\n" + Media.Replace("; constantDuration=1024; MaxDisplacement=5120", "", StringComparison.Ordinal)).Audio!;
+        Assert.Equal((0, 0), (plain.ConstantDuration, plain.MaxDisplacement));
+    }
+
+    // FFmpeg's access units of one a packet, and the track with the parameters a sender that interleaves gives.
+    internal static (SdpAudioTrack Track, List<byte[]> Units) Interleavable(int maxDisplacement = 5 * 1024)
+    {
+        const string Name = "aac-stereo-48k-single";
+        var track = Track(Name);
+        var units = new List<byte[]>();
+        var depacketizer = new RtpAudioDepacketizer(track);
+        foreach (var packet in RtpH264DepacketizerTests.Recording(Name))
+        {
+            depacketizer.Add(packet, units);
+        }
+
+        return (track with { ConstantDuration = 1024, MaxDisplacement = maxDisplacement }, units);
+    }
+
+    // A packetizer of the tests' own, from RFC 3640's 2.5 and 3.2.1.1: in each group of 9 access units (by default),
+    // packet j holds j, j + 3 and j + 6, its timestamp the first's (start, 1024 a unit), the others' AU-Index-deltas 2.
+    // The groups whole only.
+    internal static List<byte[]> Interleaved(List<byte[]> units, uint start, ushort sequence, int group = 9, int perPacket = 3)
+    {
+        var packets = new List<byte[]>();
+        int stride = group / perPacket;
+        for (int first = 0; first + group <= units.Count; first += group)
+        {
+            for (int j = 0; j < stride; j++)
+            {
+                int[] members = [.. Enumerable.Range(0, perPacket).Select(k => first + j + (k * stride))];
+                var headers = members.Select((n, k) => (units[n].Length, k == 0 ? 0 : stride - 1)).ToArray();
+                packets.Add(Aac(sequence++, unchecked(start + ((uint)(first + j) * 1024)), true, headers, [.. members.SelectMany(n => units[n])]));
+            }
+        }
+
+        return packets;
     }
 
     [Fact]

@@ -21,8 +21,9 @@ doesn't keep a stalled picture's connection, `ConnectsAgainWhenTheVideoStallsTho
   over UDP, capture times from its sender reports) is the video's path with the sound in the video's place.
 - **The sound drives the player.** Its packets make it `Playing`, and they are what `StallTimeout` watches. A
   connection that played sound resets the wait between attempts, as one that showed a frame does.
-- **What would only turn the sound off ends the player.** Beside a video, interleaved AAC access units or a decoder
-  that refuses the SDP's config leave the picture playing without sound. With sound only, there is nothing left to
+- **What would only turn the sound off ends the player.** Beside a video, interleaved AAC access units (played since
+  2026-11-17: docs/decisions/2026-11-17-live-rtp-interleaving.md) or a decoder that refuses the SDP's config leave
+  the picture playing without sound. With sound only, there is nothing left to
   play, and a retry gets the same SDP: final (`Error`).
 - **An SDP with neither** fails as before, naming the audio format when there is one that doesn't play
   (`opus`).
@@ -50,7 +51,8 @@ Asked with the multiple-choice prompt (2026-11-16); the owner took each recommen
   - `TakeLatest()` null and no video frame counted;
   - without `Audio`, a final error naming it and no SETUP;
   - Opus, or a config the decoder refuses, final with no SETUP;
-  - interleaved access units final;
+  - interleaved access units final (since 2026-11-17 they play, and a first AU-Index other than 0 damages its
+    packet: docs/decisions/2026-11-17-live-rtp-interleaving.md);
   - the stall timeout counts from the sound's last packet, over the connection and over UDP.
 - Mutation entries (tools/mutation/mutations.py) for the three rules no recording reaches otherwise: the refusal
   without `Audio`, `Playing` on the sound's packets, and interleaved AAC being final.

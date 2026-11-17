@@ -381,7 +381,7 @@ def main():
         for label, method, clip, transports, audio, *more in runs:
             if args.only and args.only not in label:
                 continue
-            tls, relay = (*more, False, None)[:2]
+            tls, relay = (*more, *(False, None)[len(more):])
 
             # A run through the relay goes on for 16 s: 6 s of impairing, a receiver report after it (one every 5 s), and
             # 3 s of clean frames.

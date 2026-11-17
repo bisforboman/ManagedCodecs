@@ -294,6 +294,18 @@ internal sealed record SdpAudioTrack(string Codec, int PayloadType, string? Cont
     public int LatmSubFrames { get; init; }
 
     /// <summary>
+    /// AAC by RFC 3640: each access unit's duration in RTP clock ticks (<c>constantDuration</c>), which places
+    /// interleaved access units in time (3.2.3.2); 0 when the SDP gives none.
+    /// </summary>
+    public int ConstantDuration { get; init; }
+
+    /// <summary>
+    /// AAC by RFC 3640: how far, in RTP clock ticks, an interleaved access unit may come after a later one
+    /// (<c>maxDisplacement</c>, 3.2.3.3), which a sender that interleaves must give; 0 when the SDP gives none.
+    /// </summary>
+    public int MaxDisplacement { get; init; }
+
+    /// <summary>
     /// The track a format describes, or null when it isn't one that plays: an encoding other than MPEG4-GENERIC, MP4A-LATM,
     /// PCMU, PCMA and G.726's eight names, or MPEG4-GENERIC in a mode other than AAC-hbr and AAC-lbr, or without a size
     /// field or a config, or G.726 in more than one channel.
@@ -356,6 +368,8 @@ internal sealed record SdpAudioTrack(string Codec, int PayloadType, string? Cont
         int sizeLength = 0;
         int indexLength = 0;
         int indexDeltaLength = 0;
+        int constantDuration = 0;
+        int maxDisplacement = 0;
         byte[] config = [];
         foreach (var parameter in fmtp.Split(';'))
         {
@@ -387,11 +401,23 @@ internal sealed record SdpAudioTrack(string Codec, int PayloadType, string? Cont
             {
                 config = Hex(value);
             }
+            else if (name.Equals("constantduration", StringComparison.OrdinalIgnoreCase))
+            {
+                _ = Number(value, out constantDuration);
+            }
+            else if (name.Equals("maxdisplacement", StringComparison.OrdinalIgnoreCase))
+            {
+                _ = Number(value, out maxDisplacement);
+            }
         }
 
         bool aac = mode.Equals("AAC-hbr", StringComparison.OrdinalIgnoreCase) || mode.Equals("AAC-lbr", StringComparison.OrdinalIgnoreCase);
         return aac && sizeLength is > 0 and <= 16 && indexLength <= 16 && indexDeltaLength <= 16 && config.Length > 0
             ? new SdpAudioTrack(CodecIds.Aac, payloadType, control, rate, channels, sizeLength, indexLength, indexDeltaLength, config)
+            {
+                ConstantDuration = Math.Max(0, constantDuration),
+                MaxDisplacement = Math.Max(0, maxDisplacement),
+            }
             : null;
     }
 

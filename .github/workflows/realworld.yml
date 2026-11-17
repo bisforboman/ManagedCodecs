@@ -55,6 +55,8 @@ jobs:
         with:
           path: samples/realworld/${{ matrix.film }}
           key: realworld-${{ matrix.film }}-${{ hashFiles('tools/realworld.py') }}
+          # A change to the script keeps the film: fetch() checks its pin and downloads again on a mismatch.
+          restore-keys: realworld-${{ matrix.film }}-
 
       - name: Build
         run: dotnet build tools/ManagedCodecs.Cli -c Release

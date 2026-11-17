@@ -7,7 +7,10 @@ namespace ManagedCodecs.Playback;
 /// A), T.81 K.3's Huffman tables, SOF0 for types 0 (4:2:2) and 1 (4:2:0), DRI for types 64 and 65, and SOS. A frame
 /// ends at the packet with the marker bit, or, if that was lost, at the first packet with another timestamp. A frame
 /// whose fragments don't join up from offset 0 is incomplete and given as <see cref="RtpJpegFrame.Damaged"/>, without
-/// a JPEG: it is dropped (docs/decisions/2026-11-12-live-rtsp-jpeg.md, decision 1).
+/// a JPEG: it is dropped (docs/decisions/2026-11-12-live-rtsp-jpeg.md, decision 1). A frame over 2040 pixels, whose
+/// size the header can't say and gives as 0, takes it from the SDP (GStreamer's <c>a=x-dimensions</c>, RFC 6064's
+/// <c>a=framesize</c>), or from the SOF0 segment in the RTP header extension ONVIF's Streaming Specification defines
+/// for it (profile 0xFFD8, continued as 0xFFFF).
 /// </summary>
 internal sealed class RtpJpegDepacketizer
 {
@@ -15,6 +18,8 @@ internal sealed class RtpJpegDepacketizer
     private const int MaxFrame = 32 * 1024 * 1024;
 
     private readonly int _payloadType;
+    private readonly int _sdpWidth;
+    private readonly int _sdpHeight;
     private readonly MemoryStream _scan = new();
     private readonly Dictionary<int, byte[]> _tables = [];
     private bool _inFrame;
@@ -24,13 +29,19 @@ internal sealed class RtpJpegDepacketizer
     private int _width;
     private int _height;
     private int _restartInterval;
+    private int _extensionWidth;
+    private int _extensionHeight;
     private byte[]? _quantization;
     private int _expected = -1;
 
     /// <param name="payloadType">The SDP's payload type for the track (26, RFC 3551's static one, unless mapped); -1 for any.</param>
-    public RtpJpegDepacketizer(int payloadType = 26)
+    /// <param name="width">The SDP's frame width (<see cref="Rtsp.SdpVideoTrack.Width"/>), for frames whose header says 0; else 0.</param>
+    /// <param name="height">The SDP's frame height, likewise.</param>
+    public RtpJpegDepacketizer(int payloadType = 26, int width = 0, int height = 0)
     {
         _payloadType = payloadType;
+        _sdpWidth = width;
+        _sdpHeight = height;
     }
 
     /// <summary>Packets the sequence numbers say never arrived.</summary>
@@ -42,7 +53,8 @@ internal sealed class RtpJpegDepacketizer
     /// </summary>
     /// <exception cref="NotSupportedException">
     /// A frame that can't be rebuilt: a reserved or dynamic type (other than 0, 1, 64 and 65), a reserved Q (0, 100 to
-    /// 127), interlaced fields, a size RFC 2435 can't say (0), or quantization tables of 16-bit precision.
+    /// 127), interlaced fields, a size RFC 2435 can't say (0) that neither the SDP nor a header extension gives, or
+    /// quantization tables of 16-bit precision.
     /// </exception>
     public void Add(ReadOnlySpan<byte> packet, List<RtpJpegFrame> completed)
     {
@@ -83,9 +95,12 @@ internal sealed class RtpJpegDepacketizer
             _timestamp = header.Timestamp;
             _damaged = false;
             _quantization = null;
+            _extensionWidth = 0;
+            _extensionHeight = 0;
             _scan.SetLength(0);
         }
 
+        ReadExtension(packet);
         AddPayload(payload);
         if (header.Marker)
         {
@@ -110,6 +125,56 @@ internal sealed class RtpJpegDepacketizer
         }
 
         return tables;
+    }
+
+    // ONVIF's RTP header extension for JPEG (Streaming Specification, "JPEG over RTP"): profile 0xFFD8 where the
+    // frame's JPEG header starts, 0xFFFF where it goes on, then JPEG marker segments padded with 0xFF. Only the SOF0
+    // segment's size is taken; the tables are rebuilt as RFC 2435 has them. The caller has checked the packet.
+    private void ReadExtension(ReadOnlySpan<byte> packet)
+    {
+        if ((packet[0] & 0x10) == 0)
+        {
+            return;
+        }
+
+        int at = 12 + ((packet[0] & 0x0F) * 4);
+        int profile = (packet[at] << 8) | packet[at + 1];
+        if (profile is not (0xFFD8 or 0xFFFF))
+        {
+            return;
+        }
+
+        var segments = packet.Slice(at + 4, ((packet[at + 2] << 8) | packet[at + 3]) * 4);
+        for (int i = 0; i + 4 <= segments.Length;)
+        {
+            if (segments[i] != 0xFF)
+            {
+                return; // not marker segments
+            }
+
+            int marker = segments[i + 1];
+            if (marker == 0xFF)
+            {
+                i++; // padding
+                continue;
+            }
+
+            if (marker == 0xD8)
+            {
+                i += 2; // SOI has no length
+                continue;
+            }
+
+            int length = (segments[i + 2] << 8) | segments[i + 3];
+            if (marker == 0xC0 && length >= 7 && i + 9 <= segments.Length)
+            {
+                _extensionHeight = (segments[i + 5] << 8) | segments[i + 6];
+                _extensionWidth = (segments[i + 7] << 8) | segments[i + 8];
+                return;
+            }
+
+            i += 2 + Math.Max(length, 2);
+        }
     }
 
     private void AddPayload(ReadOnlySpan<byte> payload)
@@ -143,7 +208,13 @@ internal sealed class RtpJpegDepacketizer
 
         if (width == 0 || height == 0)
         {
-            throw new NotSupportedException("The camera sends JPEG over RTP of a size RFC 2435 can't say (over 2040 pixels).");
+            // Over 2040 pixels: the size from this frame's header extension (ONVIF), else from the SDP.
+            (width, height) = _extensionWidth > 0 ? (_extensionWidth, _extensionHeight) : (_sdpWidth, _sdpHeight);
+            if (width == 0 || height == 0)
+            {
+                throw new NotSupportedException(
+                    "The camera sends JPEG over RTP of a size RFC 2435 can't say (over 2040 pixels), and neither its SDP (a=x-dimensions, a=framesize) nor an ONVIF header extension gives it.");
+            }
         }
 
         int position = 8;

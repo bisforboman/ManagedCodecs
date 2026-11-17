@@ -37,6 +37,86 @@ public class RtpJpegDepacketizerTests
     }
 
     [Fact]
+    public void GivesBackGStreamersJpegsWiderThanTheHeaderCanSay()
+    {
+        // 2048x64: GStreamer's packetizer sends the size as 0 and its RTSP server puts it in the SDP
+        // (a=x-dimensions:2048,64; samples/gstreamer/jpeg-large.sdp is its answer to DESCRIBE).
+        var packets = GStreamer("jpeg-large");
+        var track = ManagedCodecs.Playback.Rtsp.Sdp.Parse(File.ReadAllText(TestSamples.PathOf(Path.Combine("gstreamer", "jpeg-large.sdp")))).Track!;
+        Assert.Equal((0, 0), (packets[0][12 + 6], packets[0][12 + 7]));
+        Assert.Equal((ManagedCodecs.Playback.Rtsp.SdpCodec.Jpeg, 26, 2048, 64), (track.Codec, track.PayloadType, track.Width, track.Height));
+
+        var depacketizer = new RtpJpegDepacketizer(track.PayloadType, track.Width, track.Height);
+        var frames = new List<RtpJpegFrame>();
+        foreach (var packet in packets)
+        {
+            depacketizer.Add(packet, frames);
+        }
+
+        Assert.Equal(0, depacketizer.LostPackets);
+        Assert.Equal(Sources("jpeg-large"), frames.Select(f => Hash(f.Jpeg!)));
+
+        // With no size from anywhere, no frame can be rebuilt.
+        Assert.Throws<NotSupportedException>(() => new RtpJpegDepacketizer().Add(packets[0], []));
+    }
+
+    [Theory]
+    [InlineData(0xFFD8, 0)] // the extension starts the frame's JPEG header
+    [InlineData(0xFFFF, 0)] // or goes on with it
+    [InlineData(0xFFD8, 5)] // padded with 0xFF before the segments too
+    public void TakesALargeFramesSizeFromOnvifsHeaderExtension(int profile, int padding)
+    {
+        // ONVIF's way for JPEG over 2040 pixels (hand-made: no sender in reach writes it): the size as 0 in RFC 2435's
+        // header, and the JPEG's SOF0 segment, among others, in an RTP header extension on the frame's first packet.
+        // The SDP gives no size here, and an SDP's wrong one loses to the extension's.
+        byte[] segments =
+        [
+            .. Enumerable.Repeat((byte)0xFF, padding),
+            0xFF, 0xDB, 0, 3, 0, // another segment before it, skipped by its length
+            0xFF, 0xC0, 0, 17, 8, 0, 64, 2048 >> 8, 2048 & 0xFF, 3, 1, 0x22, 0, 2, 0x11, 1, 3, 0x11, 1,
+        ];
+        var packets = GStreamer("jpeg-large").Select(p => Offset(p) == 0 ? WithExtension(p, profile, segments) : p).ToList();
+        foreach (var (width, height) in new[] { (0, 0), (640, 480) })
+        {
+            var depacketizer = new RtpJpegDepacketizer(26, width, height);
+            var frames = new List<RtpJpegFrame>();
+            foreach (var packet in packets)
+            {
+                depacketizer.Add(packet, frames);
+            }
+
+            Assert.Equal(Sources("jpeg-large"), frames.Select(f => Hash(f.Jpeg!)));
+        }
+    }
+
+    [Theory]
+    [InlineData(0xBEDE, new byte[] { 0xFF, 0xC0, 0, 17, 8, 0, 64, 8, 0, 3, 1, 0x22, 0, 2, 0x11, 1, 3, 0x11, 1 })] // another extension (RFC 8285's)
+    [InlineData(0xFFD8, new byte[] { 0xFF, 0xDB, 0, 3, 0 })] // ONVIF's, with no SOF0
+    [InlineData(0xFFD8, new byte[] { 0xFF, 0xC0, 0, 17, 8, 0 })] // a SOF0 cut short
+    [InlineData(0xFFD8, new byte[] { 1, 2, 3, 4 })] // not marker segments
+    public void RefusesALargeFrameWhoseExtensionGivesNoSize(int profile, byte[] segments)
+    {
+        var first = WithExtension(GStreamer("jpeg-large")[0], profile, segments);
+        Assert.Throws<NotSupportedException>(() => new RtpJpegDepacketizer().Add(first, []));
+    }
+
+    [Theory]
+    [InlineData("a=x-dimensions:2560,1440\r\n", 2560, 1440)] // GStreamer's
+    [InlineData("a=framesize:26 2592-1944\r\n", 2592, 1944)] // RFC 6064's
+    [InlineData("a=x-dimensions:2560,1440\r\na=framesize:26 2592-1944\r\n", 2592, 1944)]
+    [InlineData("a=framesize:96 2592-1944\r\n", 0, 0)] // another payload type's
+    [InlineData("a=x-dimensions:2560\r\n", 0, 0)]
+    [InlineData("a=x-dimensions:0,1440\r\n", 0, 0)]
+    [InlineData("a=x-dimensions:2560,70000\r\n", 0, 0)]
+    [InlineData("a=framesize:26 2592x1944\r\n", 0, 0)]
+    [InlineData("", 0, 0)]
+    public void ReadsAJpegTracksSizeFromTheSdp(string attributes, int width, int height)
+    {
+        var track = ManagedCodecs.Playback.Rtsp.Sdp.Parse("v=0\r\ns=-\r\nt=0 0\r\nm=video 0 RTP/AVP 26\r\n" + attributes + "a=control:trackID=1\r\n").Track!;
+        Assert.Equal((width, height), (track.Width, track.Height));
+    }
+
+    [Fact]
     public void ComputesTheTablesForQBelow128AsLibjpegDoes()
     {
         // Pillow's quality 50 is libjpeg's scaling, the one RFC 2435 Appendix A gives, and at 50 it leaves K.1's tables
@@ -156,6 +236,16 @@ public class RtpJpegDepacketizerTests
     {
         using var frame = new MjpegDecoder().Decode(jpeg);
         return FrameMd5.Hash(frame);
+    }
+
+    // The packet with an RTP header extension (RFC 3550, 5.3.1) of that profile, its data padded with 0xFF to whole words.
+    private static byte[] WithExtension(byte[] packet, int profile, byte[] data)
+    {
+        int words = (data.Length + 3) / 4;
+        byte[] extension = [(byte)(profile >> 8), (byte)profile, (byte)(words >> 8), (byte)words, .. data, .. Enumerable.Repeat((byte)0xFF, (words * 4) - data.Length)];
+        byte[] p = [.. packet.AsSpan(0, 12), .. extension, .. packet.AsSpan(12)];
+        p[0] |= 0x10;
+        return p;
     }
 
     private static int Offset(byte[] packet) => (packet[13] << 16) | (packet[14] << 8) | packet[15];

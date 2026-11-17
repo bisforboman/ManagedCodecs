@@ -13,7 +13,13 @@ run time.
 
 ## Unreleased
 
-Fixes only, hence the next version is a patch.
+A feature (JPEG over 2040 pixels over RTSP) beside fixes, hence the next version is a minor one.
+
+### Added
+
+- Playback: JPEG over RTSP larger than 2040 pixels, whose size RFC 2435's header can't give: `LivePlayer` takes it
+  from the camera's SDP (GStreamer's `a=x-dimensions`, RFC 6064's `a=framesize`) or from ONVIF's RTP header extension,
+  where it used to fail. docs/decisions/2026-11-12-live-rtsp-jpeg.md (Since), issue #527.
 
 ### Fixed
 

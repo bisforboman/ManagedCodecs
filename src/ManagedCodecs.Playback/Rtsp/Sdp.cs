@@ -75,6 +75,20 @@ internal sealed class Sdp
                     current.Fmtp[type] = value;
                 }
             }
+            else if (current is not null && line.StartsWith("a=x-dimensions:", StringComparison.Ordinal))
+            {
+                // GStreamer's, for JPEG larger than RFC 2435's header can say: "a=x-dimensions:2560,1440".
+                current.Size = Size(line.Substring("a=x-dimensions:".Length), ',');
+            }
+            else if (current is not null && line.StartsWith("a=framesize:", StringComparison.Ordinal))
+            {
+                // RFC 6064: "a=framesize:26 2560-1440", for a payload type.
+                var (type, value) = Attribute(line.Substring("a=framesize:".Length));
+                if (type >= 0)
+                {
+                    current.FrameSize[type] = Size(value, '-');
+                }
+            }
         }
 
         foreach (var m in media)
@@ -101,7 +115,8 @@ internal sealed class Sdp
                 // 26 is JPEG's static payload type (RFC 3551), which needs no a=rtpmap; mapped, it must say JPEG.
                 if (map is null ? type == 26 : map.StartsWith("JPEG/", StringComparison.OrdinalIgnoreCase))
                 {
-                    found = new SdpVideoTrack(SdpCodec.Jpeg, type, m.Control, 0, []);
+                    var (width, height) = m.FrameSize.TryGetValue(type, out var size) && size.Width > 0 ? size : m.Size;
+                    found = new SdpVideoTrack(SdpCodec.Jpeg, type, m.Control, 0, []) { Width = width, Height = height };
                     break;
                 }
             }
@@ -166,6 +181,18 @@ internal sealed class Sdp
             : (-1, "");
     }
 
+    // "2560,1440" or "2560-1440" as a size; (0, 0) when it isn't two positive numbers no JPEG is larger than.
+    private static (int Width, int Height) Size(string text, char separator)
+    {
+        var parts = text.Split(separator);
+        return parts.Length == 2
+            && int.TryParse(parts[0].Trim(), System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out int width)
+            && int.TryParse(parts[1].Trim(), System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out int height)
+            && width is > 0 and <= 65535 && height is > 0 and <= 65535
+            ? (width, height)
+            : (0, 0);
+    }
+
     private sealed class Media(string[] fields)
     {
         public string[] Fields { get; } = fields;
@@ -175,6 +202,10 @@ internal sealed class Sdp
         public Dictionary<int, string> RtpMap { get; } = [];
 
         public Dictionary<int, string> Fmtp { get; } = [];
+
+        public (int Width, int Height) Size { get; set; }
+
+        public Dictionary<int, (int Width, int Height)> FrameSize { get; } = [];
     }
 }
 
@@ -193,6 +224,15 @@ internal enum SdpCodec
 /// <param name="ParameterSets">H.264: the <c>sprop-parameter-sets</c> NAL units (empty when absent or not base64).</param>
 internal sealed record SdpVideoTrack(SdpCodec Codec, int PayloadType, string? Control, int PacketizationMode, byte[][] ParameterSets)
 {
+    /// <summary>
+    /// JPEG: the frame's size when the SDP gives it (<c>a=x-dimensions</c>, GStreamer's, or RFC 6064's
+    /// <c>a=framesize</c>), for frames over 2040 pixels, whose size RFC 2435's header can't say; else 0.
+    /// </summary>
+    public int Width { get; init; }
+
+    /// <summary>JPEG: the frame's height when the SDP gives it (<see cref="Width"/>); else 0.</summary>
+    public int Height { get; init; }
+
     public static SdpVideoTrack H264(int payloadType, string? control, string fmtp)
     {
         int mode = 0;

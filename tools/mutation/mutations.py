@@ -844,6 +844,16 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.Playback/RtpJpegDepacketizer.cs",
          find="if (_damaged || offset != _scan.Length || ", replace="if (_damaged || ",
          tests="FullyQualifiedName~RtpJpegDepacketizerTests.DropsAFrameMissingAPacketAndKeepsTheOthers"),
+    # Over 2040 pixels (issue #527), sizes only ONVIF's header extension and RFC 6064's a=framesize give (no sender in
+    # reach writes either): the extension's SOF0 wins over the SDP's size ...
+    dict(file="src/ManagedCodecs.Playback/RtpJpegDepacketizer.cs",
+         find="(width, height) = _extensionWidth > 0 ? (_extensionWidth, _extensionHeight) : (_sdpWidth, _sdpHeight);",
+         replace="(width, height) = (_sdpWidth, _sdpHeight);",
+         tests="FullyQualifiedName~RtpJpegDepacketizerTests.TakesALargeFramesSizeFromOnvifsHeaderExtension"),
+    # ... and a=framesize for the track's payload type wins over GStreamer's a=x-dimensions.
+    dict(file="src/ManagedCodecs.Playback/Rtsp/Sdp.cs",
+         find="m.FrameSize.TryGetValue(type, out var size) && size.Width > 0 ? size : m.Size", replace="m.Size",
+         tests="FullyQualifiedName~RtpJpegDepacketizerTests.ReadsAJpegTracksSizeFromTheSdp"),
     # ---- RTP over UDP (docs/decisions/2026-11-14-live-rtsp-udp.md), which the loopback interface never loses or
     # reorders: a 461 to RTP over the RTSP connection means SETUP again for UDP ...
     dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",

@@ -49,7 +49,7 @@ in between. That comparison is not measured here.
 | `tools/ManagedCodecs.Unity.Sample` | A Unity `MonoBehaviour` that plays a video into a `Texture2D` and an `AudioClip` with the `ManagedCodecs.Unity` package (its `MediaPlayer`); CI compiles it against stubs of UnityEngine, Unity has not run it |
 | `tools/make-samples.sh` | Generates the test samples and FFmpeg's references |
 | `tools/gst-rtsp-server.py` | A GStreamer RTSP server with a live H.264 or JPEG test pattern, and a tone as AAC, G.711 or LATM (no auth, Basic or Digest), for trying `LivePlayer` by hand |
-| `tools/gst-jpeg-record.py` | Makes the committed JPEG over RTP recordings in `samples/gstreamer/` (GStreamer's `rtpjpegpay`: types 0, 64 and 65) |
+| `tools/gst-jpeg-record.py` | Makes the committed JPEG over RTP recordings in `samples/gstreamer/` (GStreamer's `rtpjpegpay`: types 0, 64 and 65, and 2048 pixels wide with its server's SDP) |
 | `tools/gst-audio-record.py` | Makes the committed audio over RTP recordings there (GStreamer's `rtpmp4gpay`, one AAC access unit a packet and fragmented ones; `rtppcmapay`, `rtppcmupay`) |
 | `tools/rtsp-nightly.py` | `LivePlayer` against mediamtx serving an H.264 and an MJPEG clip, each frame checked against the clip's, and an H.264 clip with AAC sound, each chunk of audio checked too, and over a network that loses and reorders packets (`mcdec --live`); nightly in `realworld.yml` |
 | `tools/rtsp-lossy-relay.py` | Relays an RTSP session and drops, repeats and reorders its RTP over UDP by a seeded choice, reading the client's receiver reports; `rtsp-nightly.py` puts it between mediamtx and `LivePlayer` |
@@ -529,7 +529,8 @@ if (player.TakeLatest() is { } frame)
     (`LiveStatistics.LostPackets`).
   - If decoding falls more than `MaxLag` (1 s) behind the camera, pictures are skipped up to the next IDR picture
     (`SkippedFrames`).
-  - JPEG (RFC 2435: 4:2:0 and 4:2:2, restart markers, in-band or computed tables) is rebuilt into whole JPEGs and
+  - JPEG (RFC 2435: 4:2:0 and 4:2:2, restart markers, in-band or computed tables, over 2040 pixels with the size from
+    the SDP or ONVIF's header extension) is rebuilt into whole JPEGs and
     decoded as MJPEG over HTTP is, the newest waiting; an incomplete frame is dropped (`DamagedFrames`).
   - Final answers: 401 after the challenge's answer, 403, 404, 454, 461 to both RTP over the connection and over UDP
     (multicast only), an SDP with no H.264 or JPEG track or with H.264 in RTP's interleaved mode, and a JPEG type or
@@ -541,7 +542,7 @@ if (player.TakeLatest() is { } frame)
     pinned: `new RtspSource(uri) { CertificateHash = "AB:CD:..." }` accepts that certificate (its SHA-256, as a browser
     or `openssl x509 -fingerprint -sha256` shows it) and no other, as most cameras' are self-signed
     (docs/decisions/2026-11-15-live-rtsps.md).
-  - Not yet: multicast, SRTP, H.265, JPEG over 2040 pixels.
+  - Not yet: multicast, SRTP, H.265.
 - **Sound:** `new RtspSource(uri) { Audio = true }` plays the camera's sound too: the first audio track of its SDP
   that is AAC (RFC 3640's `MPEG4-GENERIC`, AAC LC and HE-AAC) or G.711 (A-law, µ-law), set up beside the video on the
   same transport. `player.TakeAudio()` returns it as float stereo chunks, in order, for the application's sound output

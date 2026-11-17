@@ -111,6 +111,43 @@ public class LiveRtspJpegTests
         Assert.Equal(1, server.Connections);
     }
 
+    [Fact]
+    public void ShowsFramesWiderThanRfc2435sHeaderCanSay()
+    {
+        // GStreamer's 2048x64 recording with the SDP its RTSP server describes it by, which has the size the packets
+        // can't say (a=x-dimensions; issue #527).
+        string described = File.ReadAllText(TestSamples.PathOf(Path.Combine("gstreamer", "jpeg-large.sdp")));
+        var frames = Frames(RtpJpegDepacketizerTests.GStreamer("jpeg-large"));
+        using var gate = new SemaphoreSlim(0);
+        using var server = new RtspTestServer(described.Replace("a=control:stream=0", "a=control:trackID=1", StringComparison.Ordinal), async play =>
+        {
+            foreach (var frame in frames)
+            {
+                foreach (var packet in frame)
+                {
+                    await play.SendAsync(packet);
+                }
+
+                await gate.WaitAsync(play.Token);
+            }
+
+            await Task.Delay(Timeout.Infinite, play.Token);
+        });
+
+        using var player = new LivePlayer(new RtspSource(server.Uri));
+        player.Start();
+        for (int i = 0; i < frames.Count; i++)
+        {
+            var shown = WaitFor(player, player.TakeLatest);
+            Assert.Equal((2048, 64), (shown.Width, shown.Height));
+            Assert.Equal(Expected("jpeg-large", i), shown.Pixels);
+            player.Return(shown);
+            gate.Release();
+        }
+
+        Assert.Equal((5L, 0L, 0L), (player.Statistics.DecodedFrames, player.Statistics.DamagedFrames, player.Statistics.LostPackets));
+    }
+
     private static string Sdp(string media) => "v=0\r\ns=-\r\nt=0 0\r\n" + media + "a=control:trackID=1\r\n";
 
     // The packets of each frame, up to its marker bit (copies: a test may rewrite them).

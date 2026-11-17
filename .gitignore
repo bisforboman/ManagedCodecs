@@ -10,6 +10,7 @@ BenchmarkDotNet.Artifacts/
 # Sample media is generated locally with FFmpeg (see samples/README.md); samples/openh264/ is committed on purpose
 samples/*.avi
 samples/*.mp4
+samples/*.mov
 samples/*.mkv
 samples/*.webm
 samples/*.mxf
@@ -29,6 +30,8 @@ samples/*.color
 samples/*.display
 samples/*.probe.json
 samples/*.headers.json
+samples/*.audiotracks.json
+samples/*.audioplayed
 samples/*.rgba
 samples/*.flags
 samples/*.csv

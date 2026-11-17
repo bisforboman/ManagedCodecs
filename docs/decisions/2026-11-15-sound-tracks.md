@@ -108,11 +108,52 @@ The #469 session builds both, with `Mp4Demuxer`'s and `MatroskaDemuxer`'s lists 
 - `AviDemuxer.AudioTracks`: every audio stream whose 'strf' is a WAVEFORMATEX, in the file's order (before, the first
   such stream). Each keeps its own layout (a packet a chunk, pieces timed by bytes, or CBR MP3 re-split), its own
   count and, after a seek, its own held packet; `Seek` takes any of their indexes.
-- AVI has no default flag, so `Audio` stays the first stream, as in MXF. Whether FFmpeg's "most channels" rule should
-  pick among an AVI's streams follows the #469 session's rule once it is on main.
+- AVI has no default flag, so `Audio` stayed the first stream, as in MXF; the next pull request (below) made it the
+  one with the most channels, as FFmpeg's command line plays it.
 - **Sample:** `avi-mjpeg-three-audio` (MP3 stereo, 16-bit PCM mono, AAC), and make-samples.sh's `.packets.framemd5`
   now maps every video and audio stream (`-map 0:v? -map 0:a?`), for each stream's extradata; no other sample has
   several of a kind, so no other reference changes.
 - **Checks:** `AviConformanceTests` compares each stream read alone with ffprobe's packets and extradata (every AVI
   sample), all three in one pass in ffprobe's file order, the refusals, and a seek by one stream before choosing
   others; `AudioPlayerTests` plays each stream by `PlaybackOptions.AudioTrack`.
+
+## MP4, Matroska, and AVI's default (the fourth pull request)
+
+`Mp4Demuxer`'s and `MatroskaDemuxer`'s lists, and the two answers above (Later), built:
+
+5. **Which track `Audio` is until the caller chooses: the one FFmpeg's command line plays.** Measured with FFmpeg 6.1
+   on Matroska and MP4 files with a stereo and a 5.1 AAC track in each order and every combination of default flags:
+   of the tracks marked default (or of them all, where none is), the one with the most channels, the first of
+   equals. ffplay plays the same. MXF marks none and its tracks are alike, so it still plays its first. AVI marks none
+   either, so its stream with the most channels plays (the first of equals), as FFmpeg's command line plays it. The
+   players follow: `PlaybackOptions.AudioTrack` became `int?` before 0.18.0 shipped it (#558), null playing the
+   demuxer's `Audio`.
+6. **`AudioStreamInfo.Language`, `Title` and `IsDefault`**, each as ffprobe reports it (its `language` and `title`
+   tags and `disposition:default`).
+
+What the files say, as FFmpeg reads it (measured by patching values into samples and reading ffprobe):
+
+- **Matroska:** FlagDefault, set where the element is missing (RFC 9559's default; FFmpeg's muxer writes 0 on every
+  track not marked default, a lone track included); Language, "eng" where missing (the default), and "und" reported
+  as no language; Name as the title. LanguageBCP47 isn't read (FFmpeg 6.1 doesn't).
+- **MP4:** the `tkhd` track_enabled flag is the default disposition (FFmpeg's muxer sets it on the tracks marked
+  default, and on the first of a kind where none is). The `mdhd` language: three packed letters ("und" reported as it
+  is, the top bit ignored), 0x7FFF none, and below 0x400 a Macintosh language code, which QuickTime files use (FFmpeg's
+  `.mov` muxer writes 0 for eng, 11 for jpn): FFmpeg turns those into ISO 639-2 by a table, read here code by code from
+  ffprobe (`Mp4Demuxer.MacintoshLanguages`: 0 to 138, 34, 58 and 95 to 127 unnamed). MP4 gives no title (FFmpeg's
+  muxer writes none).
+- An audio track whose content encoding Matroska can't read is left out of the list while another can be read (before,
+  such a first track refused the file).
+
+**Samples:** mp4-audio-tracks (stereo eng, then 5.1 swe marked default: the second plays), mov-audio-tracks (Macintosh
+language codes, neither marked: the muxer enables the first), mkv-audio-tracks (stereo marked default, eng, "Main",
+before 5.1 swe "Commentary": the first plays though it has fewer channels) and mkv-audio-nodefault (neither marked: the
+5.1 plays), and avi-audio-channels (AVI: a mono stream before a stereo one, so the second plays). References: name.audiotracks.json (ffprobe's tracks, channels, tags and disposition) and name.audioplayed
+(the stream FFmpeg's command line maps), for every MP4, QuickTime, Matroska and AVI sample.
+
+**Checks:** `AudioTracksTests` against those references on every sample, each track's packets alone and several in one
+pass, a track chosen after a seek, the refusals, Matroska's missing elements, every Macintosh code and the choice on
+every measured combination; `Mp4ConformanceTests` and `MatroskaConformanceTests` compare every track's packets with
+FFmpeg's. ffprobe's channels are its decoder's (HE-AAC's parametric stereo makes a mono track two), so channels are
+compared on the samples made for the choice only; on such a file FFmpeg's choice by channels could differ.
+

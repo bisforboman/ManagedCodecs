@@ -138,8 +138,11 @@ public sealed class AviDemuxer : IDemuxer
                 Duration = header.Length,
             };
             _tracks = [.. header.AudioStreams.Select(AudioOf).OfType<AudioTrack>()];
-            _selected = _tracks.Length == 0 ? [] : [_tracks[0]];
             AudioTracks = [.. _tracks.Select(t => t.Info)];
+
+            // AVI marks no stream default: FFmpeg's command line plays the one with the most channels, the first of equals.
+            int played = DefaultAudioTrack.Of(AudioTracks);
+            _selected = played < 0 ? [] : [_tracks[played]];
         }
         catch (Exception e)
         {
@@ -156,8 +159,9 @@ public sealed class AviDemuxer : IDemuxer
     public VideoStreamInfo Video { get; }
 
     /// <summary>
-    /// The audio stream <see cref="ReadPackets"/> gives: the file's first, or the first of those chosen with
-    /// <see cref="SelectAudio"/>. Null without one.
+    /// The audio stream <see cref="ReadPackets"/> gives: the first of those chosen with <see cref="SelectAudio"/>, and
+    /// until a choice is made the one FFmpeg's command line plays (AVI marking none default: the one with the most
+    /// channels, the first of equals). Null without one.
     /// </summary>
     public AudioStreamInfo? Audio => _selected.Length == 0 ? null : _selected[0].Info;
 

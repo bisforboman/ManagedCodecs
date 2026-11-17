@@ -23,7 +23,10 @@ public class AviConformanceTests
         int videoIndex = demuxer.Video.StreamIndex;
         var listed = demuxer.AudioTracks.Select(t => t.StreamIndex).ToList();
         Assert.Equal(expected.Where(e => e.StreamIndex != videoIndex).Select(e => e.StreamIndex).Distinct().Order(), listed);
-        Assert.Equal(listed.FirstOrDefault(-1), demuxer.Audio?.StreamIndex ?? -1);
+
+        // Unasked, the stream FFmpeg's command line plays (name.audioplayed): AVI marks none default, so the most channels.
+        string played = File.ReadAllText(TestSamples.ReferenceOf(sampleName, ".audioplayed")).Trim();
+        Assert.Equal(played.Length == 0 ? -1 : int.Parse(played, System.Globalization.CultureInfo.InvariantCulture), demuxer.Audio?.StreamIndex ?? -1);
         foreach (var audio in demuxer.AudioTracks)
         {
             demuxer.SelectAudio(audio.StreamIndex);

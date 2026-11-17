@@ -67,9 +67,17 @@ public sealed partial class LiveViewHandler : ViewHandler<LiveView, UIView>
 
         int row = frame.Width * 4;
         int stride = (int)_context.BytesPerRow;
+
+        // TEMPORARY, to see the check fail: red and blue swapped.
+        var swapped = (byte[])frame.Pixels.Clone();
+        for (int i = 0; i < swapped.Length; i += 4)
+        {
+            (swapped[i], swapped[i + 2]) = (swapped[i + 2], swapped[i]);
+        }
+
         for (int y = 0; y < frame.Height; y++)
         {
-            Marshal.Copy(frame.Pixels, y * row, _context.Data + (y * stride), row);
+            Marshal.Copy(swapped, y * row, _context.Data + (y * stride), row);
         }
 
         if (_context.ToImage() is { } image)

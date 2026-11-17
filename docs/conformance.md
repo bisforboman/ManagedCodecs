@@ -432,6 +432,10 @@ by a parser and sender reports of the tests' own.
   - Over UDP: the reports reach the server's RTCP port, and a sequence number the server skipped counts as one lost.
 - **Mutation entries:** the fraction's floor at 0, a sender report echoed only to its own stream, and the reports'
   sending over UDP.
+- **RTCP BYE**: `RtcpSessionTests` reads which BYE is the stream's (alone, in a compound packet, among other SSRCs, with
+  a reason; not another SSRC's, not before the first packet, not cut short). `LiveRtcpTests`: the video's BYE over the
+  connection and over UDP makes the player connect again after 0.5 s with the test's clock short of the stall timeout;
+  the sound's BYE beside a video ends nothing.
 - **Not tried yet:** a camera or server that drops a reader without them. mediamtx plays with and without.
 
 ### Capture times
@@ -506,9 +510,10 @@ the clip's, with no lost packet, damaged frame or reconnect.
 
   So live555MediaServer itself needs no receiver reports from a reader that sends keep-alives. A camera built on
   live555 that doesn't count `GET_PARAMETER` would need them; none was in reach.
-- **At a file's end** live555 sends an RTCP BYE and stops, leaving the connection open. `LivePlayer` doesn't read BYE
-  (docs/decisions/2026-11-15-live-rtcp.md, point 4): it stalls for 5 s, reconnects, and the file plays again from its
-  start (620 frames of a 500-frame clip: 1 reconnect, all the clip's).
+- **At a file's end** live555 sends an RTCP BYE and stops, leaving the connection open. `LivePlayer` didn't read BYE
+  then: it stalled for 5 s, reconnected, and the file played again from its start (620 frames of a 500-frame clip: 1
+  reconnect, all the clip's). It reads BYE since (docs/decisions/2026-11-15-live-rtcp.md, Since) and connects again
+  after 0.5 s; not yet run against live555.
 - **Each IDR picture cost a frame not shown** with B pictures (`dropped` 8 of 408, 45 of 2295: one a 2 s GOP). Probably
   the decoder gives its held frames at once at an IDR picture, and the player shows the newest; not looked into.
   Without B pictures, none.

@@ -16,6 +16,7 @@ internal sealed class RtcpSession
     private const int SenderReport = 200;
     private const int ReceiverReport = 201;
     private const int SourceDescription = 202;
+    private const int Goodbye = 203;
 
     private static readonly DateTime NtpEpoch = new(1900, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
@@ -118,16 +119,19 @@ internal sealed class RtcpSession
     /// <summary>
     /// Reads a compound RTCP packet from the sender that arrived at <paramref name="now"/>: its sender report's NTP
     /// time is what the next receiver report echoes (LSR), while the stream's packets are from the SSRC that sent it.
-    /// Anything else in it, and anything malformed, is ignored.
+    /// Returns true when it says goodbye for the stream (RFC 3550, 6.6: a BYE naming the SSRC its packets come from), as
+    /// a server does at the end of what it serves; a BYE before the stream's first packet, or for another SSRC, is not
+    /// the stream's. Anything else in it, and anything malformed, is ignored.
     /// </summary>
-    public void Report(ReadOnlySpan<byte> packet, TimeSpan now)
+    public bool Report(ReadOnlySpan<byte> packet, TimeSpan now)
     {
+        bool goodbye = false;
         while (packet.Length >= 4 && packet[0] >> 6 == 2)
         {
             int length = (BinaryPrimitives.ReadUInt16BigEndian(packet.Slice(2)) + 1) * 4;
             if (length > packet.Length)
             {
-                return;
+                return goodbye;
             }
 
             if (packet[1] == SenderReport && length >= 28)
@@ -144,8 +148,23 @@ internal sealed class RtcpSession
                 }
             }
 
+            if (packet[1] == Goodbye)
+            {
+                // Its source count's SSRCs, as many as fit in its length (a reason may follow them).
+                int count = Math.Min(packet[0] & 0x1F, (length - 4) / 4);
+                lock (_lock)
+                {
+                    for (int i = 0; i < count && _any; i++)
+                    {
+                        goodbye |= BinaryPrimitives.ReadUInt32BigEndian(packet.Slice(4 + (4 * i))) == _source;
+                    }
+                }
+            }
+
             packet = packet.Slice(length);
         }
+
+        return goodbye;
     }
 
     /// <summary>

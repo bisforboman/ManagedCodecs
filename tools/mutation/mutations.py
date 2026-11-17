@@ -384,6 +384,19 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
          find="if (setup.Status == 461 && source.Secure)", replace="if (false)",
          tests="FullyQualifiedName~LiveRtspsTests"),
+    # ---- A stream with sound only (docs/decisions/2026-11-16-live-audio-only.md), which no camera recording has: refused
+    # unless RtspSource.Audio asks for sound ...
+    dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
+         find="if (!source.Audio)", replace="if (false)",
+         tests="FullyQualifiedName~LiveRtspAudioOnlyTests.FailsWithoutAudioSayingSo"),
+    # ... the sound's packets make the player Playing ...
+    dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
+         find="            SetState(LiveState.Playing);\n            packets(packet);", replace="            packets(packet);",
+         tests="FullyQualifiedName~LiveRtspAudioOnlyTests.PlaysTheSoundAsTheDecoderDecodesIt"),
+    # ... and interleaved AAC, which beside a video only turns the sound off, ends the player.
+    dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
+         find="throw new FatalException(e); // nothing else to play", replace="_error = e;",
+         tests="FullyQualifiedName~LiveRtspAudioOnlyTests.FailsOnInterleavedAccessUnits"),
     dict(file="src/ManagedCodecs.Playback/Rtsp/RtspConnection.cs",
          find="return sha.ComputeHash(certificate.GetRawCertData()).AsSpan().SequenceEqual(pinned);", replace="return true;",
          tests="FullyQualifiedName~LiveRtspsTests"),
@@ -982,7 +995,8 @@ MUTATIONS = [
          tests="FullyQualifiedName~LiveRtcpTests.PlacesAnAacPacketsLaterFramesByTheLengthOfThoseBeforeThem"),
     # ---- Audio over RTSP (docs/decisions/2026-11-15-live-rtsp-audio.md): no second SETUP unless RtspSource.Audio asks ...
     dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
-         find="if (source.Audio && sdp.Audio is { } audioTrack)", replace="if (sdp.Audio is { } audioTrack)",
+         find="if (track is not null && source.Audio && sdp.Audio is { } audioTrack)",
+         replace="if (track is not null && sdp.Audio is { } audioTrack)",
          tests="FullyQualifiedName~LiveRtspAudioTests.SetsUpNoAudioUnlessAskedTo"),
     # ... the audio's packets don't count against a stall, on the RTSP connection ...
     dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",

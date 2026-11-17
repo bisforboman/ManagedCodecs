@@ -163,7 +163,7 @@ jobs:
     timeout-minutes: 45
     env:
       APPLE_WORKLOAD_SET: 10.0.112
-      APPLE_XCODE: '26.5'
+      APPLE_XCODE: '26.6'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
@@ -173,7 +173,7 @@ jobs:
 
       # .NET's iOS and Mac Catalyst SDKs each require one Xcode. Workload set 10.0.115 (the other jobs') brings SDK 27.2,
       # for Xcode 27.2, which the runner image doesn't have yet (26.6 at most, 2026-11-17): this job takes 10.0.112, the
-      # newest whose SDK (26.5) has its Xcode on the image. Its MAUI workload is 10.0.20; the app's MAUI packages stay
+      # newest whose SDK (26.5, which wants Xcode 26.6) has its Xcode on the image. Its MAUI workload is 10.0.20; the app's MAUI packages stay
       # 10.0.110 (Directory.Packages.props). Back to MAUI_WORKLOAD_SET once the image has the Xcode it needs.
       - name: Select Xcode
         run: |

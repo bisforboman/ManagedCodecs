@@ -1,7 +1,1 @@
 #nullable enable
-ManagedCodecs.Containers.AviDemuxer.AudioTracks.get -> System.Collections.Generic.IReadOnlyList<ManagedCodecs.AudioStreamInfo!>!
-ManagedCodecs.Containers.AviDemuxer.SelectAudio(params int[]! streamIndexes) -> void
-ManagedCodecs.Containers.MatroskaDemuxer.AudioTracks.get -> System.Collections.Generic.IReadOnlyList<ManagedCodecs.AudioStreamInfo!>!
-ManagedCodecs.Containers.MatroskaDemuxer.SelectAudio(params int[]! streamIndexes) -> void
-ManagedCodecs.Containers.Mp4Demuxer.AudioTracks.get -> System.Collections.Generic.IReadOnlyList<ManagedCodecs.AudioStreamInfo!>!
-ManagedCodecs.Containers.Mp4Demuxer.SelectAudio(params int[]! streamIndexes) -> void

@@ -32,12 +32,18 @@ ManagedCodecs.AudioStreamInfo.Duration.init -> void
 ManagedCodecs.AudioStreamInfo.Equals(ManagedCodecs.AudioStreamInfo? other) -> bool
 ManagedCodecs.AudioStreamInfo.FrameCount.get -> long
 ManagedCodecs.AudioStreamInfo.FrameCount.init -> void
+ManagedCodecs.AudioStreamInfo.IsDefault.get -> bool
+ManagedCodecs.AudioStreamInfo.IsDefault.init -> void
+ManagedCodecs.AudioStreamInfo.Language.get -> string?
+ManagedCodecs.AudioStreamInfo.Language.init -> void
 ManagedCodecs.AudioStreamInfo.SampleRate.get -> int
 ManagedCodecs.AudioStreamInfo.SampleRate.init -> void
 ManagedCodecs.AudioStreamInfo.StreamIndex.get -> int
 ManagedCodecs.AudioStreamInfo.StreamIndex.init -> void
 ManagedCodecs.AudioStreamInfo.TimeBase.get -> ManagedCodecs.Rational
 ManagedCodecs.AudioStreamInfo.TimeBase.init -> void
+ManagedCodecs.AudioStreamInfo.Title.get -> string?
+ManagedCodecs.AudioStreamInfo.Title.init -> void
 ManagedCodecs.ChromaLocation
 ManagedCodecs.ChromaLocation.Bottom = 6 -> ManagedCodecs.ChromaLocation
 ManagedCodecs.ChromaLocation.BottomLeft = 5 -> ManagedCodecs.ChromaLocation
@@ -113,12 +119,14 @@ ManagedCodecs.Containers.AdtsDemuxer.Seek(long pts, int streamIndex) -> void
 ManagedCodecs.Containers.AdtsDemuxer.Video.get -> ManagedCodecs.VideoStreamInfo?
 ManagedCodecs.Containers.AviDemuxer
 ManagedCodecs.Containers.AviDemuxer.Audio.get -> ManagedCodecs.AudioStreamInfo?
+ManagedCodecs.Containers.AviDemuxer.AudioTracks.get -> System.Collections.Generic.IReadOnlyList<ManagedCodecs.AudioStreamInfo!>!
 ManagedCodecs.Containers.AviDemuxer.AviDemuxer(System.IO.Stream! stream, bool leaveOpen = false) -> void
 ManagedCodecs.Containers.AviDemuxer.Dispose() -> void
 ManagedCodecs.Containers.AviDemuxer.ReadPacketInfo() -> System.Collections.Generic.IEnumerable<ManagedCodecs.PacketInfo>!
 ManagedCodecs.Containers.AviDemuxer.ReadPackets() -> System.Collections.Generic.IEnumerable<ManagedCodecs.Packet>!
 ManagedCodecs.Containers.AviDemuxer.ReadPacketsAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerable<ManagedCodecs.Packet>!
 ManagedCodecs.Containers.AviDemuxer.Seek(long pts, int streamIndex) -> void
+ManagedCodecs.Containers.AviDemuxer.SelectAudio(params int[]! streamIndexes) -> void
 ManagedCodecs.Containers.AviDemuxer.Video.get -> ManagedCodecs.VideoStreamInfo!
 ManagedCodecs.Containers.Demuxer
 ManagedCodecs.Containers.H264Demuxer
@@ -132,12 +140,14 @@ ManagedCodecs.Containers.H264Demuxer.Seek(long pts, int streamIndex) -> void
 ManagedCodecs.Containers.H264Demuxer.Video.get -> ManagedCodecs.VideoStreamInfo!
 ManagedCodecs.Containers.MatroskaDemuxer
 ManagedCodecs.Containers.MatroskaDemuxer.Audio.get -> ManagedCodecs.AudioStreamInfo?
+ManagedCodecs.Containers.MatroskaDemuxer.AudioTracks.get -> System.Collections.Generic.IReadOnlyList<ManagedCodecs.AudioStreamInfo!>!
 ManagedCodecs.Containers.MatroskaDemuxer.Dispose() -> void
 ManagedCodecs.Containers.MatroskaDemuxer.MatroskaDemuxer(System.IO.Stream! stream, bool leaveOpen = false) -> void
 ManagedCodecs.Containers.MatroskaDemuxer.ReadPacketInfo() -> System.Collections.Generic.IEnumerable<ManagedCodecs.PacketInfo>!
 ManagedCodecs.Containers.MatroskaDemuxer.ReadPackets() -> System.Collections.Generic.IEnumerable<ManagedCodecs.Packet>!
 ManagedCodecs.Containers.MatroskaDemuxer.ReadPacketsAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerable<ManagedCodecs.Packet>!
 ManagedCodecs.Containers.MatroskaDemuxer.Seek(long pts, int streamIndex) -> void
+ManagedCodecs.Containers.MatroskaDemuxer.SelectAudio(params int[]! streamIndexes) -> void
 ManagedCodecs.Containers.MatroskaDemuxer.Video.get -> ManagedCodecs.VideoStreamInfo?
 ManagedCodecs.Containers.Mp3Demuxer
 ManagedCodecs.Containers.Mp3Demuxer.Audio.get -> ManagedCodecs.AudioStreamInfo!
@@ -150,6 +160,7 @@ ManagedCodecs.Containers.Mp3Demuxer.Seek(long pts, int streamIndex) -> void
 ManagedCodecs.Containers.Mp3Demuxer.Video.get -> ManagedCodecs.VideoStreamInfo?
 ManagedCodecs.Containers.Mp4Demuxer
 ManagedCodecs.Containers.Mp4Demuxer.Audio.get -> ManagedCodecs.AudioStreamInfo?
+ManagedCodecs.Containers.Mp4Demuxer.AudioTracks.get -> System.Collections.Generic.IReadOnlyList<ManagedCodecs.AudioStreamInfo!>!
 ManagedCodecs.Containers.Mp4Demuxer.Dispose() -> void
 ManagedCodecs.Containers.Mp4Demuxer.Mp4Demuxer(System.IO.Stream! stream) -> void
 ManagedCodecs.Containers.Mp4Demuxer.Mp4Demuxer(System.IO.Stream! stream, ManagedCodecs.MediaTypes tracks, bool leaveOpen = false) -> void
@@ -158,6 +169,7 @@ ManagedCodecs.Containers.Mp4Demuxer.ReadPacketInfo() -> System.Collections.Gener
 ManagedCodecs.Containers.Mp4Demuxer.ReadPackets() -> System.Collections.Generic.IEnumerable<ManagedCodecs.Packet>!
 ManagedCodecs.Containers.Mp4Demuxer.ReadPacketsAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerable<ManagedCodecs.Packet>!
 ManagedCodecs.Containers.Mp4Demuxer.Seek(long pts, int streamIndex) -> void
+ManagedCodecs.Containers.Mp4Demuxer.SelectAudio(params int[]! streamIndexes) -> void
 ManagedCodecs.Containers.Mp4Demuxer.Video.get -> ManagedCodecs.VideoStreamInfo?
 ManagedCodecs.Containers.MxfDemuxer
 ManagedCodecs.Containers.MxfDemuxer.Audio.get -> ManagedCodecs.AudioStreamInfo?
@@ -188,6 +200,12 @@ ManagedCodecs.FieldOrder.Progressive = 1 -> ManagedCodecs.FieldOrder
 ManagedCodecs.FieldOrder.TB = 4 -> ManagedCodecs.FieldOrder
 ManagedCodecs.FieldOrder.TT = 2 -> ManagedCodecs.FieldOrder
 ManagedCodecs.FieldOrder.Unknown = 0 -> ManagedCodecs.FieldOrder
+ManagedCodecs.G726Decoder
+ManagedCodecs.G726Decoder.Channels.get -> int
+ManagedCodecs.G726Decoder.Decode(ManagedCodecs.Packet packet) -> ManagedCodecs.AudioFrame!
+ManagedCodecs.G726Decoder.Decode(System.ReadOnlySpan<byte> packet) -> ManagedCodecs.AudioFrame!
+ManagedCodecs.G726Decoder.G726Decoder(ManagedCodecs.AudioStreamInfo! stream) -> void
+ManagedCodecs.G726Decoder.SampleRate.get -> int
 ManagedCodecs.H264.H264Decoder
 ManagedCodecs.H264.H264Decoder.BorrowFrames.get -> bool
 ManagedCodecs.H264.H264Decoder.BorrowFrames.init -> void
@@ -476,6 +494,8 @@ ManagedCodecs.Playback.RtspSource.Audio.init -> void
 ManagedCodecs.Playback.RtspSource.CertificateHash.get -> string?
 ManagedCodecs.Playback.RtspSource.CertificateHash.init -> void
 ManagedCodecs.Playback.RtspSource.Credential.get -> System.Net.NetworkCredential?
+ManagedCodecs.Playback.RtspSource.HttpTunnel.get -> bool
+ManagedCodecs.Playback.RtspSource.HttpTunnel.init -> void
 ManagedCodecs.Playback.RtspSource.MaxLag.get -> System.TimeSpan
 ManagedCodecs.Playback.RtspSource.MaxLag.init -> void
 ManagedCodecs.Playback.RtspSource.RtspSource(System.Uri! uri) -> void
@@ -631,6 +651,8 @@ ManagedCodecs.VideoStreamInfo.VideoStreamInfo(string! Codec, int Width, int Heig
 ManagedCodecs.VideoStreamInfo.Width.get -> int
 ManagedCodecs.VideoStreamInfo.Width.init -> void
 const ManagedCodecs.CodecIds.Aac = "AAC" -> string!
+const ManagedCodecs.CodecIds.AdpcmG726 = "ADPCM_G726" -> string!
+const ManagedCodecs.CodecIds.AdpcmG726Le = "ADPCM_G726LE" -> string!
 const ManagedCodecs.CodecIds.AdpcmImaWav = "ADPCM_IMA_WAV" -> string!
 const ManagedCodecs.CodecIds.AdpcmMs = "ADPCM_MS" -> string!
 const ManagedCodecs.CodecIds.H264 = "H264" -> string!

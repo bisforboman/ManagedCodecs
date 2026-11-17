@@ -401,6 +401,11 @@ checks are of the packets and the player.
   - `LiveRtspAudioTests` plays the recording through `LivePlayer`, over the connection and over UDP.
   - **GStreamer 1.24's `rtpmp4apay`, by hand** (2026-11-15, its RTSP server with the H.264 pattern): with its default
     MTU and with `mtu=300` (each element over packets), 280 chunks each in 6 s, none dropped or damaged, no packet lost.
+- **G.726** (`RtpG726Tests`): FFmpeg's packetizer on the wav-g726-itu samples' codes at each rate, as `G726-N` (each
+  byte filled from its least significant bit) and as `AAL2-G726-N` (from its most significant): the SDP names the
+  codec and the bits a code, the payloads joined are the file's codes in that packing, whole codes in each packet,
+  and through `LivePlayer` every chunk is `G726Decoder`'s for the packets in order, over the connection and over UDP.
+  Not tried: GStreamer's `rtpg726pay`, and a camera's G.726.
 - **Not tried yet:** an IP camera (their G.711 and one access unit a packet are covered by GStreamer's and FFmpeg's
   packetizers only).
 
@@ -842,6 +847,24 @@ FFmpeg's same samples, a unit test), a predictor index past 6 refused, and the s
 entry). Hand-built blocks decode as FFmpeg decodes them in a WAV file: predictors 0, 1, 3 and 6, a negative step, a
 step driven to the cap, a block cut short (its header's two samples and two a byte), stereo's pairing of the channels
 in each byte.
+
+G.726 (`G726Decoder`, docs/decisions/2026-11-15-g726.md) is the one decoder here not checked against FFmpeg: FFmpeg's
+adpcm_g726 is a codec of its own, not the Recommendation's (on FFmpeg's own 40 kbit/s tone, 10386 of 10400 samples
+differ, 7.3 dB apart). Its reference is `tools/g726-reference.py`, whose `verify` passes all 56 of the Recommendation's
+test sequences (Appendix II, from the ITU-T Software Tool Library; by hand, 2026-11-16, not committed), and which writes
+name.g726.f32 for every G.726 sample. `G726DecoderTests` decodes each exactly to it, at each rate:
+
+| Sample | What it is |
+|---|---|
+| wav-g726-16 to wav-g726-40 | FFmpeg's encoder on a tone, as FFmpeg writes .wav files (tag 0x45, wBitsPerSample the bits a code) |
+| wav-g726-itu-16 to -40 | the Recommendation's encoder on a loud sweep with quiet stretches and steps: the tone and transition detector, the poles' limits, the output's |
+| wav-g726-codes-16 to -40 | random codes, as no encoder sends them: the 16-bit wraps of the predictor's sums |
+
+Sun Microsystems' public-domain g72x code (as SoX carries it; 24, 32 and 40 kbit/s), run by hand on the three tone
+files, gave `G726Decoder`'s samples, every one. FFmpeg's output is kept as name.g726.ffmpeg.f32 to show the difference;
+nothing checks it. Also: RTP's packing (from each byte's least significant bit) decodes alike, packets cut anywhere
+between codes give the same samples, a packet's bits after its last whole code are ignored, and the format tag in mono
+at 2 to 5 bits only. Over RTSP: Audio over RTSP, above.
 
 `Seek` starts at the packet whose samples hold the time (every packet is a keyframe), among the packets listed when
 opening: the tail of a read from the start, as `IDemuxer.Seek` asks and `SeekTests` checks on every .wav sample.

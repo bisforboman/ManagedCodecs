@@ -48,6 +48,7 @@ in between. That comparison is not measured here.
 | `tools/ManagedCodecs.MonoGame.Sample` | `mcplay`: a MonoGame `Game` around `VideoTexture` (`ManagedCodecs.MonoGame`) (its README has the 1080p measurements; issue #254) |
 | `tools/ManagedCodecs.Unity.Sample` | A Unity `MonoBehaviour` that plays a video into a `Texture2D` and an `AudioClip` with the `ManagedCodecs.Unity` package (its `MediaPlayer`); CI compiles it against stubs of UnityEngine, Unity has not run it |
 | `tools/make-samples.sh` | Generates the test samples and FFmpeg's references |
+| `tools/g726-reference.py` | ITU-T G.726 in plain integers: the reference `G726Decoder` is checked against (FFmpeg's isn't the Recommendation's), the encoder behind the `wav-g726-itu` samples, and `verify`, which runs the Recommendation's test sequences |
 | `tools/gst-rtsp-server.py` | A GStreamer RTSP server with a live H.264 or JPEG test pattern, and a tone as AAC, G.711 or LATM (no auth, Basic or Digest), for trying `LivePlayer` by hand |
 | `tools/gst-jpeg-record.py` | Makes the committed JPEG over RTP recordings in `samples/gstreamer/` (GStreamer's `rtpjpegpay`: types 0, 64 and 65, and 2048 pixels wide with its server's SDP) |
 | `tools/gst-audio-record.py` | Makes the committed audio over RTP recordings there (GStreamer's `rtpmp4gpay`, one AAC access unit a packet and fragmented ones; `rtppcmapay`, `rtppcmupay`) |
@@ -110,6 +111,10 @@ and code that reproduces FFmpeg's reading where it differs from the spec), and n
   'alaw', 'ulaw') and Matroska (A_PCM by
   BitDepth), ISO MP4 (`ipcm`, `fpcm`). `MediaPlayer` plays it beside video
   (docs/decisions/2026-11-10-pcm-containers.md).
+- **G.726** (`G726Decoder`, in ManagedCodecs.Core): ITU-T G.726 ADPCM at 16, 24, 32 and 40 kbit/s, exactly the
+  Recommendation's samples, which are not FFmpeg's (its adpcm_g726 decoder is a codec of its own); from `.wav` files
+  (format tag 0x45) and over RTSP (`G726-*`, `AAL2-G726-*`). The reference it is checked against,
+  `tools/g726-reference.py`, passes the Recommendation's test sequences (docs/decisions/2026-11-15-g726.md).
 - **Containers**: AVI (video, and every audio stream, `AudioTracks` and `SelectAudio`: MP3 in both its chunk layouts, AAC, integer and float PCM
   and 4-bit IMA and Microsoft ADPCM, which `PcmDecoder`, `ImaAdpcmDecoder` and `MsAdpcmDecoder` decode exactly as
   FFmpeg, others by their format tag such as `0x0031` for GSM 6.10; docs/decisions/2026-11-08-avi-audio.md), MP4 (video and audio tracks, fragmented files too, edit lists of several edits),
@@ -471,7 +476,7 @@ while (player.TakeAudio() is { } audio) { /* audio.Samples at audio.SampleRate t
   FFmpeg's scaler (tools/ManagedCodecs.MonoGame.Sample/README.md); the fast path is checked against the formula on random
   samples of every 8-bit layout.
 - **Speed:** on 4 vCPUs at 2.1 GHz, 1080p24 and 1080p30 keep up, decoding and conversion included (mcplay's README).
-- **Audio it doesn't decode** (Opus, Vorbis, GSM 6.10, ...; AAC, MP3, PCM, G.711 and IMA and Microsoft ADPCM play) plays as none: `Audio` is null and
+- **Audio it doesn't decode** (Opus, Vorbis, GSM 6.10, ...; AAC, MP3, PCM, G.711, G.726 and IMA and Microsoft ADPCM play) plays as none: `Audio` is null and
   `SkippedAudioCodec` names it (the container's Codec ID, such as `A_OPUS`, or AVI's format tag, `0x0031`), for a warning; the Godot, Unity and
   mcplay samples print one.
 - **Not a media player:** no seeking and no clock of its own (pause by stopping the clock you pass); `Loop` plays the
@@ -549,7 +554,7 @@ if (player.TakeLatest() is { } frame)
     what the camera sends, RTP included, and a POST the requests (docs/decisions/2026-11-16-live-rtsp-http.md).
   - Not yet: SRTP, H.265.
 - **Sound:** `new RtspSource(uri) { Audio = true }` plays the camera's sound too: the first audio track of its SDP
-  that is AAC (RFC 3640's `MPEG4-GENERIC`, AAC LC and HE-AAC, or RFC 6416's `MP4A-LATM`) or G.711 (A-law, µ-law),
+  that is AAC (RFC 3640's `MPEG4-GENERIC`, AAC LC and HE-AAC, or RFC 6416's `MP4A-LATM`), G.711 (A-law, µ-law) or G.726,
   set up beside the video on the
   same transport. `player.TakeAudio()` returns it as float stereo chunks, in order, for the application's sound output
   (as `MediaPlayer.TakeAudio()` does).
@@ -561,7 +566,7 @@ if (player.TakeLatest() is { } frame)
   - Half a second waits at most. Past that the oldest chunk is dropped (`LiveStatistics.DroppedAudioFrames`), so a
     sound that plays slower than the camera sends never falls further behind.
   - Sound never stops the picture: a camera that refuses the audio's SETUP plays without it (`Error` says why), audio
-    of another kind (G.726, Opus, LATM with its config in the stream) is named by `SkippedAudioCodec`, and lost packets are a gap in the sound.
+    of another kind (Opus, LATM with its config in the stream) is named by `SkippedAudioCodec`, and lost packets are a gap in the sound.
   - Off by default: without `Audio` the session is for the video alone.
   - **Sound only:** a stream with an audio track and no H.264 or JPEG one plays with `Audio` on, the sound as the
     session's one track: its packets make the player `Playing` and are what `StallTimeout` watches, and `TakeLatest()`

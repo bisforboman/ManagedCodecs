@@ -24,12 +24,12 @@ internal sealed class Sdp
     /// <summary>The first H.264 or JPEG video track, or null when there is none.</summary>
     public SdpVideoTrack? Track { get; }
 
-    /// <summary>The first AAC or G.711 audio track, or null when there is none.</summary>
+    /// <summary>The first AAC, G.711 or G.726 audio track, or null when there is none.</summary>
     public SdpAudioTrack? Audio { get; }
 
     /// <summary>
     /// When there is audio but none that plays (<see cref="Audio"/> is null): the first audio format's encoding name
-    /// (<c>MP4A-LATM</c>, <c>G726-32</c>), or its payload type when it has no <c>a=rtpmap</c>. Else null.
+    /// (<c>MP4A-LATM</c>, <c>opus</c>), or its payload type when it has no <c>a=rtpmap</c>. Else null.
     /// </summary>
     public string? SkippedAudio { get; }
 
@@ -269,7 +269,10 @@ internal sealed record SdpVideoTrack(SdpCodec Codec, int PayloadType, string? Co
 }
 
 /// <summary>An audio track of an SDP that plays.</summary>
-/// <param name="Codec"><see cref="CodecIds.Aac"/>, <see cref="CodecIds.PcmMulaw"/> or <see cref="CodecIds.PcmAlaw"/>.</param>
+/// <param name="Codec">
+/// <see cref="CodecIds.Aac"/>, <see cref="CodecIds.PcmMulaw"/>, <see cref="CodecIds.PcmAlaw"/>,
+/// <see cref="CodecIds.AdpcmG726Le"/> (<c>G726-*</c>) or <see cref="CodecIds.AdpcmG726"/> (<c>AAL2-G726-*</c>).
+/// </param>
 /// <param name="PayloadType">Its RTP payload type.</param>
 /// <param name="Control">Its <c>a=control</c>, or null.</param>
 /// <param name="SampleRate">The <c>a=rtpmap</c>'s clock rate (8000 for the static G.711 types).</param>
@@ -277,7 +280,10 @@ internal sealed record SdpVideoTrack(SdpCodec Codec, int PayloadType, string? Co
 /// <param name="SizeLength">AAC: the bits of each AU header's size (<c>sizelength</c>: 13 for AAC-hbr, 6 for AAC-lbr).</param>
 /// <param name="IndexLength">AAC: the bits of the first AU header's index (<c>indexlength</c>).</param>
 /// <param name="IndexDeltaLength">AAC: the bits of the other AU headers' index delta (<c>indexdeltalength</c>).</param>
-/// <param name="Config">AAC: the AudioSpecificConfig (<c>config</c>, hexadecimal); empty for G.711.</param>
+/// <param name="Config">
+/// AAC: the AudioSpecificConfig (<c>config</c>, hexadecimal); G.726: one byte, the bits a code (the name's rate over
+/// 8, as <see cref="G726Decoder"/> takes it); empty for G.711.
+/// </param>
 internal sealed record SdpAudioTrack(string Codec, int PayloadType, string? Control, int SampleRate, int Channels, int SizeLength, int IndexLength, int IndexDeltaLength, byte[] Config)
 {
     /// <summary>
@@ -288,8 +294,9 @@ internal sealed record SdpAudioTrack(string Codec, int PayloadType, string? Cont
     public int LatmSubFrames { get; init; }
 
     /// <summary>
-    /// The track a format describes, or null when it isn't one that plays: an encoding other than MPEG4-GENERIC, PCMU
-    /// and PCMA, or MPEG4-GENERIC in a mode other than AAC-hbr and AAC-lbr, or without a size field or a config.
+    /// The track a format describes, or null when it isn't one that plays: an encoding other than MPEG4-GENERIC, MP4A-LATM,
+    /// PCMU, PCMA and G.726's eight names, or MPEG4-GENERIC in a mode other than AAC-hbr and AAC-lbr, or without a size
+    /// field or a config, or G.726 in more than one channel.
     /// </summary>
     public static SdpAudioTrack? From(int payloadType, string? control, string? rtpMap, string fmtp)
     {
@@ -326,6 +333,18 @@ internal sealed record SdpAudioTrack(string Codec, int PayloadType, string? Cont
         if (encoding.Equals("MP4A-LATM", StringComparison.OrdinalIgnoreCase))
         {
             return Latm(payloadType, control, rate, channels, fmtp);
+        }
+
+        // G.726 (RFC 3551, 4.5.4): "G726-32" packs its codes from each octet's least significant bit, "AAL2-G726-32" from
+        // the most significant (as ATM's AAL2 does); 16, 24, 32 and 40 kbit/s are codes of 2 to 5 bits, in one channel.
+        bool aal2 = encoding.StartsWith("AAL2-", StringComparison.OrdinalIgnoreCase);
+        string g726 = aal2 ? encoding.Substring(5) : encoding;
+        if (g726.StartsWith("G726-", StringComparison.OrdinalIgnoreCase))
+        {
+            int bits = g726.Substring(5) switch { "16" => 2, "24" => 3, "32" => 4, "40" => 5, _ => 0 };
+            return bits > 0 && channels == 1
+                ? new SdpAudioTrack(aal2 ? CodecIds.AdpcmG726 : CodecIds.AdpcmG726Le, payloadType, control, rate, 1, 0, 0, 0, [(byte)bits])
+                : null;
         }
 
         if (!encoding.Equals("MPEG4-GENERIC", StringComparison.OrdinalIgnoreCase))

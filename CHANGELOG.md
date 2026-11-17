@@ -39,6 +39,11 @@ one; code built against 0.18 keeps working.
   that passes only HTTP: a GET carries what the camera sends, RTP included, and a POST the requests, on port 80 unless
   the URL gives one (443 for `rtsps://`). No RTCP receiver reports go through the tunnel. `mcdec --live --http-tunnel`.
   docs/decisions/2026-11-16-live-rtsp-http.md, issue #527.
+- Core: `G726Decoder`, ITU-T G.726 ADPCM at 16, 24, 32 and 40 kbit/s (`CodecIds.AdpcmG726`, `AdpcmG726Le`), from .wav
+  files (format tag 0x45) and from a camera over RTSP (`G726-*`, `AAL2-G726-*`, with `RtspSource.Audio`), where
+  `SkippedAudioCodec` named it before. It decodes exactly the Recommendation's samples, not FFmpeg's (whose adpcm_g726
+  differs), checked against `tools/g726-reference.py`, which passes the Recommendation's test sequences.
+  docs/decisions/2026-11-15-g726.md, issue #527.
 
 ### Fixed
 

@@ -293,6 +293,7 @@ public class AudioPlayerTests
             CodecIds.Mp3 => new Mp3Decoder(audio),
             CodecIds.AdpcmImaWav => new ImaAdpcmDecoder(audio),
             CodecIds.AdpcmMs => new MsAdpcmDecoder(audio),
+            CodecIds.AdpcmG726 => new G726Decoder(audio),
             _ => new PcmDecoder(audio),
         };
         var samples = new List<float>();

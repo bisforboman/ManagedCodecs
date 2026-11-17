@@ -57,10 +57,11 @@ public sealed class RtspSource
     public TimeSpan MaxLag { get; init; } = TimeSpan.FromSeconds(1);
 
     /// <summary>
-    /// Whether to play the camera's sound too: the first AAC (RFC 3640) or G.711 audio track of its SDP, taken with
+    /// Whether to play the camera's sound too: the first AAC (RFC 3640), G.711 or G.726 audio track of its SDP, taken with
     /// <see cref="LivePlayer.TakeAudio"/>. False by default: the session is then for the video alone. A camera with no
     /// such track, or one that refuses to send it, plays its video without sound (<see cref="LivePlayer.Audio"/>,
-    /// <see cref="LivePlayer.SkippedAudioCodec"/>). docs/decisions/2026-11-15-live-rtsp-audio.md. A stream with sound and
+    /// <see cref="LivePlayer.SkippedAudioCodec"/>). docs/decisions/2026-11-15-live-rtsp-audio.md, and for G.726
+    /// docs/decisions/2026-11-15-g726.md. A stream with sound and
     /// no H.264 or JPEG video track plays only with this on: the sound alone, which then makes the player
     /// <see cref="LiveState.Playing"/> and is what <see cref="StallTimeout"/> watches, and
     /// <see cref="LivePlayer.TakeLatest"/> stays null; without it, or with sound that doesn't play, the player fails

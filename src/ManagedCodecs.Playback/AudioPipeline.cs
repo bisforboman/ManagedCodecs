@@ -10,9 +10,9 @@ namespace ManagedCodecs.Playback;
 /// </summary>
 internal static class AudioPipeline
 {
-    /// <summary>Whether a stream of <paramref name="codec"/> plays: AAC, MP3, PCM, IMA and Microsoft ADPCM.</summary>
+    /// <summary>Whether a stream of <paramref name="codec"/> plays: AAC, MP3, PCM, IMA and Microsoft ADPCM, G.726.</summary>
     public static bool CanPlay(string? codec) =>
-        codec is CodecIds.Aac or CodecIds.Mp3 or CodecIds.AdpcmImaWav or CodecIds.AdpcmMs || PcmDecoder.CanDecode(codec);
+        codec is CodecIds.Aac or CodecIds.Mp3 or CodecIds.AdpcmImaWav or CodecIds.AdpcmMs or CodecIds.AdpcmG726 or CodecIds.AdpcmG726Le || PcmDecoder.CanDecode(codec);
 
     /// <summary>A decoder for <paramref name="audio"/>, whose codec <see cref="CanPlay"/>.</summary>
     public static IAudioDecoder CreateDecoder(AudioStreamInfo audio) => audio switch
@@ -21,6 +21,7 @@ internal static class AudioPipeline
         { Codec: var codec } when PcmDecoder.CanDecode(codec) => new PcmDecoder(audio),
         { Codec: CodecIds.AdpcmImaWav } => new ImaAdpcmDecoder(audio),
         { Codec: CodecIds.AdpcmMs } => new MsAdpcmDecoder(audio),
+        { Codec: CodecIds.AdpcmG726 or CodecIds.AdpcmG726Le } => new G726Decoder(audio),
         _ => new AacDecoder(audio),
     };
 

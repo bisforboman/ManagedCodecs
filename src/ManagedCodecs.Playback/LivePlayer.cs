@@ -764,52 +764,32 @@ public sealed class LivePlayer : IDisposable
     // G726Decoder decodes on from the last one's state) to the audio decoding thread, in order. Beside a video they
     // don't feed the stall watchdog or the state: sound without the picture is not that camera playing. As the only
     // track they do (OnlyAudioPackets, and the pump's watch), and what would only turn the sound off ends the player.
-    private Action<byte[]> AudioPackets(SdpAudioTrack track, IAudioDecoder decoder, RtcpSession rtcp, bool only = false)
+    private Action<byte[]> AudioPackets(SdpAudioTrack track, IAudioDecoder decoder, RtcpSession rtcp)
     {
         var depacketizer = new RtpAudioDepacketizer(track);
         var frames = new List<byte[]>();
+        var times = new List<(uint Timestamp, int Index)>();
         long lost = 0;
         long damaged = 0;
-        bool off = false;
         return packet =>
         {
-            if (off)
-            {
-                return;
-            }
-
-            try
-            {
-                depacketizer.Add(packet, frames);
-            }
-            catch (NotSupportedException e)
-            {
-                if (only)
-                {
-                    throw new FatalException(e); // nothing else to play
-                }
-
-                // Interleaved access units: no sound from this camera, and the picture goes on.
-                _error = e;
-                _audioInfo = null;
-                off = true;
-                return;
-            }
-
+            depacketizer.Add(packet, frames, times);
             Interlocked.Add(ref _lost, depacketizer.LostPackets - lost);
             lost = depacketizer.LostPackets;
             Interlocked.Add(ref _audioDamaged, depacketizer.Damaged - damaged);
             damaged = depacketizer.Damaged;
 
-            // The frames a packet completes are from its RTP timestamp on (a fragmented one's packets share theirs).
+            // Each frame's time: a packet's are from its RTP timestamp on (a fragmented one's packets share theirs), and
+            // de-interleaved ones each have their own (docs/decisions/2026-11-17-live-rtp-interleaving.md).
             for (int i = 0; i < frames.Count; i++)
             {
-                _audioUnits.Enqueue(new QueuedAudio(frames[i], decoder, rtcp, RtpTimestamp(packet), i));
+                _audioUnits.Enqueue(new QueuedAudio(frames[i], decoder, rtcp, times[i].Timestamp, times[i].Index));
             }
 
             if (frames.Count > 0)
             {
                 frames.Clear();
+                times.Clear();
                 _audioReceived.Set();
             }
         };
@@ -818,7 +798,7 @@ public sealed class LivePlayer : IDisposable
     // Sound as the session's only track: the camera plays once its packets come, as it does for a picture's.
     private Action<byte[]> OnlyAudioPackets(SdpAudioTrack track, IAudioDecoder decoder, RtcpSession rtcp, Connection connection)
     {
-        var packets = AudioPackets(track, decoder, rtcp, only: true);
+        var packets = AudioPackets(track, decoder, rtcp);
         return packet =>
         {
             connection.Frames = true;
@@ -1055,8 +1035,6 @@ public sealed class LivePlayer : IDisposable
         {
         }
     }
-
-    private static uint RtpTimestamp(byte[] packet) => (uint)((packet[4] << 24) | (packet[5] << 16) | (packet[6] << 8) | packet[7]);
 
     private static uint Ssrc(byte[] packet) => (uint)((packet[8] << 24) | (packet[9] << 16) | (packet[10] << 8) | packet[11]);
 

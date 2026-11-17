@@ -88,6 +88,15 @@ Real streams, by hand:
   bitmap (a `RenderTargetBitmap`), so the order of red and blue and the rows are checked. The first run (2026-11-15):
   100 frames shown of 102 received, each drawn as decoded. With the swap of red and blue taken out it failed at the
   first frame. Nobody has looked at the window, and RTSP hasn't been run on Windows.
+- **In .NET MAUI, on Android and Windows** (`.github/workflows/maui.yml`, weekly and on pull requests that change the
+  sample or Playback): the same server and JPEGs to `mclive-maui` (tools/ManagedCodecs.Maui.Sample), 100 frames, on an
+  Android 14 emulator (x86_64, KVM) on `ubuntu-24.04` and on `windows-2025`. What the platform drew of the view is
+  compared with the decoded frame cell by cell (an 8 by 8 grid of mean colours, within 10 levels: the view is drawn at
+  its own size, so not pixel for pixel). The first runs (2026-11-17): 100 frames shown on each, each drawn as decoded;
+  on the emulator about 15 ms to decode and 54 ms to convert a 320x240 frame (Mono on an emulated phone; 0.8 and
+  0.7 ms on the Windows runner). With red and blue swapped in both handlers, both failed at the first frame (cell
+  (0, 0): decoded mean R 100 B 14, drawn R 14 B 103). Nobody has looked at either window, no real phone has run it,
+  and RTSP hasn't been run there.
 - Not tried yet: mjpg-streamer, an ESP32-CAM, an IP camera.
 
 ### H.264 over RTP
@@ -354,8 +363,16 @@ checks are of the packets and the player.
   - The G.711 payloads are the .wav files' bytes, and decode to the same samples.
   - **Hand-made packets**, for what FFmpeg never sends (its encoder writes no access unit larger than a packet): a
     unit fragmented over three packets; one missing a fragment, missing its end, or ended early by the marker (dropped
-    and counted once); `AAC-lbr`'s 6-bit sizes; headers that don't fit the packet; a non-zero index (interleaving,
-    refused); another payload type, a repeated packet, a lost one.
+    and counted once); `AAC-lbr`'s 6-bit sizes; headers that don't fit the packet; a first AU-Index other than 0
+    (damaged); another payload type, a repeated packet, a lost one.
+  - **Interleaving** (RFC 3640, 3.2.3.2; docs/decisions/2026-11-17-live-rtp-interleaving.md), which no sender at hand
+    writes: a packetizer of the tests' own interleaves `aac-stereo-48k-single.rtp`'s access units as the RFC's 2.5
+    shows (groups of 9, 3 a packet), and they come back in order, each at its own time, released as soon as those
+    before them have come. Then a lost packet with the SDP's bound (5 units) and capped (10 s asked, 250 ms held),
+    each release counted packet by packet; a sender interleaving past the cap (its late units dropped and counted);
+    the timestamp's wrap; an SDP without `constantDuration` and `maxDisplacement`; a fragmented unit among interleaved
+    ones; and through `LivePlayer`, interleaved sound alone as the decoder's chunks in order. The tests' packetizer
+    and the depacketizer share one reading of the RFC.
   - The SDP's audio track: the static types 0 and 8, `PCMA` with a rate, `MPEG4-GENERIC` with its parameters in any
     case and order, the first format that plays across tracks, and what doesn't play by name (`MP4A-LATM`, a payload
     type with no `a=rtpmap`, `MPEG4-GENERIC` in another mode, or without a `config`).
@@ -468,9 +485,10 @@ reports are the tests' own, so the checks are of the arithmetic and of which tim
 
 Many cameras' RTSP servers are built on live555. `tools/live555-check.py` builds live555MediaServer (LIVE555
 2026.11.08, the source from Ubuntu's archive, pinned by SHA-256) and plays its files with `mcdec --live`, as the nightly
-run does mediamtx's. By hand in the cloud session (2026-11-15), not in any workflow yet. The server streams a file once,
-from its start for each reader, so each clip is longer than its run; every frame shown and every chunk taken must be
-the clip's, with no lost packet, damaged frame or reconnect.
+run does mediamtx's. By hand in the cloud session (2026-11-15, and again 2026-11-17 with the end-of-file runs), not in
+any workflow yet. The server streams a file once, from its start for each reader, so each clip is longer than its run
+(but for the end-of-file runs); every frame shown and every chunk taken must be the clip's, with no lost packet, damaged
+frame or reconnect (but the one at a file's end).
 
 | Run | Shown | What it showed |
 |---|---|---|
@@ -482,6 +500,8 @@ the clip's, with no lost packet, damaged frame or reconnect.
 | `.mkv` with `--audio`, UDP only | 400, 766 chunks | all the clip's |
 | `.264` held for 90 s, UDP only | 2250 in 92.1 s | all the clip's, no reconnect |
 | `.264` with B pictures, Digest | 400 | all the clip's |
+| `.264`, 640x360, a 6 s clip played past its end, over the connection | 200 in 8.9 s | all the clip's; BYE, 1 reconnect, longest wait 0.66 s |
+| the same, UDP only | 200 in 8.9 s | the same |
 
 - **What live555 sends:**
   - `Content-Base: rtsp://host/file/`, `a=control:*` for the session and `a=control:track1` a track, and
@@ -511,15 +531,20 @@ the clip's, with no lost packet, damaged frame or reconnect.
   So live555MediaServer itself needs no receiver reports from a reader that sends keep-alives. A camera built on
   live555 that doesn't count `GET_PARAMETER` would need them; none was in reach.
 - **At a file's end** live555 sends an RTCP BYE and stops, leaving the connection open. `LivePlayer` didn't read BYE
-  then: it stalled for 5 s, reconnected, and the file played again from its start (620 frames of a 500-frame clip: 1
-  reconnect, all the clip's). It reads BYE since (docs/decisions/2026-11-15-live-rtcp.md, Since) and connects again
-  after 0.5 s; not yet run against live555.
+  at first: it stalled for 5 s, reconnected, and the file played again from its start (620 frames of a 500-frame clip:
+  1 reconnect, all the clip's). It reads BYE since #571 (docs/decisions/2026-11-15-live-rtcp.md, Since). The
+  end-of-file runs (`mcdec --live --reconnects 1`) play a 6 s clip for 200 frames and need a BYE in `Error` and no wait
+  between two frames shown of 2.5 s or more:
+  - with #571: `Error` "The server ended the stream (RTCP BYE).", 1 reconnect, longest wait 0.66 s (the first backoff,
+    0.5 s, and a new session), over the connection and over UDP alike;
+  - the same runs with `LivePlayer` from before #571: a stall (`TimeoutException`), longest wait 5.66 s, both failed.
 - **Each IDR picture cost a frame not shown** with B pictures (`dropped` 8 of 408, 45 of 2295: one a 2 s GOP). Probably
   the decoder gives its held frames at once at an IDR picture, and the player shows the newest; not looked into.
   Without B pictures, none.
 - **G.711:** live555MediaServer serves it only from a `.wav` (static payload types 0 and 8, no `a=rtpmap`), which has
-  no video: `LivePlayer` fails with "The camera's SDP has no H.264 or JPEG video track", as it does for any audio-only
-  stream. Its Matroska demuxer leaves an A-law track out of the SDP. So G.711 beside video wasn't tried. (FFmpeg's .wav
+  no video: `LivePlayer` failed with "The camera's SDP has no H.264 or JPEG video track" (2026-11-15). It plays sound
+  alone with `RtspSource.Audio` since #553, not tried against live555: `mcdec --live` checks frames, of which there
+  are none. Its Matroska demuxer leaves an A-law track out of the SDP. So G.711 beside video wasn't tried. (FFmpeg's .wav
   needs `-bitexact`: live555 answers 404 to one with a `LIST` chunk.)
 - **Not tried:** RTSP over HTTP (which live555 offers on port 80, 8000 or 8080), RTSPS and SRTP (it has them, by
   code), H.265 and its other formats, multicast, a file the SPS of which has no timing, and a camera built on live555.
@@ -964,6 +989,29 @@ test checks that, that they never go back, and that none is after its pts. Audio
 file (FFmpeg's muxer writes no DefaultDuration for AAC; libavformat fills in 1024 samples' worth, rounded down) run
 to the track's next frame, which the test checks against FFmpeg's next pts; Opus's durations come from FFmpeg's
 parser, which reads the packets, so they too are compared that way.
+
+## More than two channels, downmixed to stereo (the players)
+
+`MediaPlayer`, `AudioPlayer` and `LivePlayer` give stereo: more than two channels are downmixed as FFmpeg 6.1's `-ac 2`
+does in float (docs/decisions/2026-11-17-more-than-two-channels.md). `DownmixTests` checks:
+
+- each speaker's weights for the 22 layouts they were measured on (a tone of its own on each channel through `-ac 2`,
+  least squares on the output), and FFmpeg's default layout for a count with none named (3 to 8 channels);
+- the players' samples against FFmpeg's downmix of the decoded audio (name.stereo.f32, `-ac 2 -f f32le`), within 4 x
+  2^-17 (AAC's own difference from FFmpeg's decoder, AacConformanceTests, over the channels a side sums):
+
+| Sample | Layout, and where it comes from |
+|---|---|
+| aac-3.0, aac-4.0, aac-adts-7.1 | AAC channel configurations 3, 4 and 7, FFmpeg's encoder, a tone a channel |
+| aac-mp4-3.0.mp4 | 3.0 in MP4, the priming packet left out by the edit list (decoded for its overlap, not played) |
+| aac-5.1.mp4, aac-adts-5.1-id3, aac-7.1.mp4 | configurations 6 and 7 |
+| aac-quad-pce, aac-adts-pce, aac-fdk-pce | a program config element: quad (FFmpeg's encoder's own for it) and 5.1 (FFmpeg's, the FDK encoder's) |
+| wav-pcm-quad, wav-pcm-7.1, wav-pcm-s16-6ch | WAVEFORMATEXTENSIBLE's channel mask (quad is not the default for four channels) |
+| mkv-pcm-4ch, mkv-pcm-8ch | none named (Matroska): FFmpeg's default for the count, 4.0 and 7.1 |
+
+Not checked against a file: a multichannel frame trimmed mid-frame (a unit test: the layout is kept), the top speakers and the layouts no encoder here writes (their weights are the measured
+ones, unit tests only), and more than eight channels with no layout, which FFmpeg can't downmix (none is the default
+for the count): the first two play, as before.
 
 ## Several sound tracks (MP4, QuickTime, Matroska, AVI)
 

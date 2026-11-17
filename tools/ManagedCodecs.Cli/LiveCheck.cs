@@ -21,7 +21,9 @@ namespace ManagedCodecs.Cli;
 /// certificate (docs/decisions/2026-11-15-live-rtsps.md). With <c>--lossy</c> the network in between loses packets
 /// for a while and then stops (tools/rtsp-lossy-relay.py): lost packets, damaged frames and frames not the file's are
 /// expected, but no reconnect, and the last <see cref="LossyTail"/> frames and chunks must be the file's again (but for the
-/// chunk that starts a loop of the file).
+/// chunk that starts a loop of the file). With <c>--reconnects N</c> it expects exactly N reconnects rather than none
+/// (live555 ends a file with RTCP BYE and the player connects again: tools/live555-check.py); the longest wait between
+/// two frames shown is printed for it.
 /// </summary>
 [SuppressMessage("Security", "CA5351:Do Not Use Broken Cryptographic Algorithms", Justification = "MD5 to compare frames with the file's: a checksum, not security.")]
 public static class LiveCheck
@@ -33,7 +35,7 @@ public static class LiveCheck
     public const int LossyTail = 75;
 
     /// <summary>Plays <paramref name="url"/> until <paramref name="frames"/> frames are shown; 0 when all is well.</summary>
-    public static int Run(string url, string reference, int frames, TimeSpan timeout, bool audio = false, string? certificateHash = null, bool lossy = false, bool httpTunnel = false)
+    public static int Run(string url, string reference, int frames, TimeSpan timeout, bool audio = false, string? certificateHash = null, bool lossy = false, bool httpTunnel = false, int reconnects = 0)
     {
         var known = ReferenceHashes(reference);
         Console.WriteLine($"{Path.GetFileName(reference)}: {known.Count} distinct frames.");
@@ -50,6 +52,8 @@ public static class LiveCheck
         int chunks = 0;
         int unknownChunks = 0;
         int lastUnknown = 0;
+        var lastShown = TimeSpan.Zero;
+        var longestGap = TimeSpan.Zero;
         var unknownChunkNumbers = new List<int>();
         while (shown < frames && clock.Elapsed < timeout && player.State is not (LiveState.Failed or LiveState.Stopped))
         {
@@ -69,6 +73,12 @@ public static class LiveCheck
                 continue;
             }
 
+            if (shown > 0 && clock.Elapsed - lastShown > longestGap)
+            {
+                longestGap = clock.Elapsed - lastShown;
+            }
+
+            lastShown = clock.Elapsed;
             shown++;
             if (!known.Contains(Hash(frame.Pixels)))
             {
@@ -89,7 +99,8 @@ public static class LiveCheck
             + $"damaged {s.DamagedFrames}, lost packets {s.LostPackets}, reconnects {s.Reconnects}; "
             + $"decode {s.DecodeMilliseconds:0.0} ms, convert {s.ConvertMilliseconds:0.0} ms a frame.");
 
-        bool ok = shown == frames && unknown == 0 && s.LostPackets == 0 && s.DamagedFrames == 0 && s.Reconnects == 0;
+        Console.WriteLine($"longest wait between two frames shown: {longestGap.TotalSeconds:0.00} s.");
+        bool ok = shown == frames && unknown == 0 && s.LostPackets == 0 && s.DamagedFrames == 0 && s.Reconnects == reconnects;
         if (lossy)
         {
             // The audio's last chunks may hold one that isn't the file's: the first of a loop of the file (below).

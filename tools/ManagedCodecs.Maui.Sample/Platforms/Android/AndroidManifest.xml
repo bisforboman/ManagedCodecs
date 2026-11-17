@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- What LivePlayer needs on Android (docs/decisions/2026-11-17-live-maui.md): INTERNET for every socket;
+     CHANGE_WIFI_MULTICAST_STATE for the multicast lock RTSP multicast needs on Wi-Fi; usesCleartextTraffic because
+     MJPEG over http:// goes through Android's HTTP stack, which refuses clear text from Android 9 without it (RTSP's
+     own sockets aren't subject to it). -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+	<application android:allowBackup="false" android:supportsRtl="true" android:usesCleartextTraffic="true"></application>
+	<uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+	<uses-permission android:name="android.permission.INTERNET" />
+	<uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+</manifest>

@@ -9,11 +9,14 @@ is longer than its run, and `mcdec --live` checks each frame shown, and each chu
 - H.264 and AAC from a `.mkv`, with RtspSource.Audio (`--audio`), over both transports: live555 sends one access unit a
   packet (RFC 3640, `mode=AAC-hbr`), as cameras do.
 - Digest authentication, the only kind live555 has.
+- The end of a file, over both transports: live555 sends RTCP BYE and stops, leaving the connection open. LivePlayer
+  must connect again at once (`--reconnects 1`), not after its 5 s stall timeout, and the file plays again from its
+  start: the longest wait between two frames shown must be under END_GAP (docs/decisions/2026-11-15-live-rtcp.md, #571).
 - A session held longer than live555's 65 s without a sign of life from the reader (`--hold`, 90 s), over both
   transports: it must play on without a reconnect. live555 takes an RTSP request with the session's id, or an RTCP
   receiver report, for that sign (docs/decisions/2026-11-15-live-rtcp.md).
-Fails on a frame not in the clip, a lost packet, a damaged frame, a reconnect, too few frames, or a held session
-shorter than `--hold`.
+Fails on a frame not in the clip, a lost packet, a damaged frame, a reconnect (but the one at a file's end), too few
+frames, a held session shorter than `--hold`, or a wait at a file's end of END_GAP or more.
 
 live555's source is downloaded once from Ubuntu's archive (live555.com keeps only its newest version), pinned by
 SHA-256, and built in samples/realworld/ (gitignored; needs g++, make and libssl-dev). live555MediaServer has no options, so
@@ -62,6 +65,11 @@ PATCHES = (
 
 USER, PASSWORD = "viewer", "s3cret"
 FPS = 25
+
+# The end-of-file runs: a clip of END_SECONDS played for END_FRAMES frames (once and then some), and the longest wait
+# allowed between two frames shown. Connecting again after BYE takes the player's first backoff (0.5 s) and an RTSP
+# session's setup; waiting out the stall timeout instead would take more than 5 s.
+END_SECONDS, END_FRAMES, END_GAP = 6, 200, 2.5
 
 
 def live555():
@@ -185,17 +193,23 @@ class Server:
             return status + "\n" + reader.read(length).decode(errors="replace").replace("\r\n", "\n").strip()
 
 
-def play(server, name, clip, frames, audio=False, password=False, hold=0):
-    """mcdec --live on one of the server's files; its output and status. A run with hold must have lasted that long."""
+def play(server, name, clip, frames, audio=False, password=False, hold=0, end=False):
+    """mcdec --live on one of the server's files; its output and status. A run with hold must have lasted that long; one
+    past the file's end (end) must have connected again once, with no wait between frames of END_GAP or more."""
     user = f"{USER}:{PASSWORD}@" if password else ""
     check = subprocess.run(["dotnet", MCDEC, "--live", f"rtsp://{user}127.0.0.1:{server.port}/{name}", clip, "--frames", str(frames),
-                            *(["--audio"] if audio else [])], capture_output=True, text=True)
+                            *(["--audio"] if audio else []), *(["--reconnects", "1"] if end else [])], capture_output=True, text=True)
     output = (check.stdout + check.stderr).strip()
     status = check.returncode
     if hold and status == 0:
         shown = re.search(r"frames shown in ([\d.]+) s", output)
         if shown is None or float(shown.group(1)) < hold:
             output += f"\nThe session wasn't held for {hold} s."
+            status = 1
+    if end and status == 0:
+        gap = re.search(r"longest wait between two frames shown: ([\d.]+) s", output)
+        if gap is None or float(gap.group(1)) >= END_GAP or "RTCP BYE" not in output:
+            output += f"\nThe file's end wasn't a BYE followed by a new session within {END_GAP} s."
             status = 1
     if status != 0:
         output += "\nlive555MediaServer's output:\n" + "\n".join(server.log[-10:])
@@ -230,6 +244,7 @@ def main():
         sound = make_sound(folder, "sound", 20)
         # The held sessions' clip: 15 s longer than the hold, since the player shows the newest frame and may pass some by.
         held = make_h264(folder, "held", args.hold + 15, size="640x360") if args.hold else None
+        short = make_h264(folder, "short", END_SECONDS, size="640x360", b_pictures=False)
 
         with Server(binary, folder) as server:
             print("\n".join(server.log[:2]), flush=True)
@@ -243,11 +258,13 @@ def main():
             record("H.264 and AAC (.mkv)", *play(server, "sound.mkv", sound, args.frames, audio=True))
             if held:
                 record(f"H.264 held for {args.hold} s", *play(server, "held.264", held, args.hold * FPS, hold=args.hold))
+            record(f"The end of a {END_SECONDS} s file (RTCP BYE)", *play(server, "short.264", short, END_FRAMES, end=True))
         with Server(binary, folder, udp_only=True) as server:
             record("H.264 with B pictures, RTP over UDP only", *play(server, "b.264", b, args.frames))
             record("H.264 and AAC, RTP over UDP only", *play(server, "sound.mkv", sound, args.frames, audio=True))
             if held:
                 record(f"H.264 held for {args.hold} s, RTP over UDP only", *play(server, "held.264", held, args.hold * FPS, hold=args.hold))
+            record(f"The end of a {END_SECONDS} s file (RTCP BYE), RTP over UDP only", *play(server, "short.264", short, END_FRAMES, end=True))
         with Server(binary, folder, password=True) as server:
             record("H.264 with B pictures, digest", *play(server, "b.264", b, args.frames, password=True))
 

@@ -107,23 +107,59 @@ public class LiveRtspAudioOnlyTests
     }
 
     [Fact]
-    public void FailsOnInterleavedAccessUnits()
+    public void PlaysInterleavedAccessUnitsInTheirOrder()
     {
-        // The first AU header's index (its low 3 bits after the 13 of the size) made non-zero: interleaved (RFC 3640,
-        // 3.2.3.1), which beside a video only turns the sound off.
-        var packet = (byte[])RtpH264DepacketizerTests.Recording("aac-stereo-48k")[0].Clone();
-        packet[15] |= 1;
-        using var server = new RtspTestServer(SoundOnly("aac-stereo-48k"), async play =>
+        // AAC interleaved as RFC 3640's 2.5 shows (by the tests' packetizer: groups of 9, 3 in a packet), the SDP giving
+        // constantDuration and maxDisplacement: the chunks are the decoder's for the access units in their order.
+        var (track, units) = RtpAudioDepacketizerTests.Interleavable();
+        units = [.. units.Take(18)];
+        var packets = RtpAudioDepacketizerTests.Interleaved(units, 0, 0);
+        string sdp = SoundOnly("aac-stereo-48k-single").Replace("config=119056E500", "config=119056E500;constantDuration=1024;maxDisplacement=5120", StringComparison.Ordinal);
+        var decoder = AudioPipeline.CreateDecoder(new AudioStreamInfo(track.Codec, track.SampleRate, track.Channels, 0, new Rational(1, track.SampleRate), track.Config, 0));
+        var expected = units.Select(unit => decoder.Decode(unit)).Where(frame => frame.SampleCount > 0).Select(frame => AudioPipeline.ToStereo(frame).Samples).ToList();
+        using var server = new RtspTestServer(sdp, async play =>
         {
-            await play.SendAsync(packet);
+            foreach (var packet in packets)
+            {
+                await play.SendAsync(packet);
+            }
+
             await Task.Delay(Timeout.Infinite, play.Token);
         });
 
         using var player = new LivePlayer(new RtspSource(server.Uri) { Audio = true, StallTimeout = Unstalled });
         player.Start();
-        WaitFor(player, () => player.State == LiveState.Failed ? player : null);
 
-        Assert.Contains("interleaves", Assert.IsType<NotSupportedException>(player.Error).Message, StringComparison.Ordinal);
+        // The last group's last units wait for what could still come before them: all but those.
+        foreach (var samples in expected.Take(expected.Count - 3))
+        {
+            Assert.Equal(samples, WaitFor(player, player.TakeAudio).Samples);
+        }
+
+        Assert.Equal((LiveState.Playing, 0L, 0L), (player.State, player.Statistics.DamagedAudioFrames, player.Statistics.LostPackets));
+        Assert.Null(player.Error);
+    }
+
+    [Fact]
+    public void CountsAPacketWithAnAuIndexOtherThanZeroAsDamaged()
+    {
+        // The first AU header's index (its low 3 bits after the 13 of the size) made non-zero, which the AAC modes never
+        // send (RFC 3640, 3.3.6): that packet is damaged, and the sound goes on with the next.
+        var packets = RtpH264DepacketizerTests.Recording("aac-stereo-48k");
+        var broken = (byte[])packets[0].Clone();
+        broken[15] |= 1;
+        using var server = new RtspTestServer(SoundOnly("aac-stereo-48k"), async play =>
+        {
+            await play.SendAsync(broken);
+            await play.SendAsync(packets[1]);
+            await Task.Delay(Timeout.Infinite, play.Token);
+        });
+
+        using var player = new LivePlayer(new RtspSource(server.Uri) { Audio = true, StallTimeout = Unstalled });
+        player.Start();
+        Assert.NotNull(WaitFor(player, player.TakeAudio));
+        Assert.Equal((LiveState.Playing, 1L), (player.State, player.Statistics.DamagedAudioFrames));
+        Assert.Null(player.Error);
         Assert.Equal(1, server.Connections);
     }
 

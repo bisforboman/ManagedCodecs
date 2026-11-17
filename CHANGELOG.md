@@ -50,9 +50,20 @@ next version is a minor one; code built against 0.18 keeps working.
   `SkippedAudioCodec` named it before. It decodes exactly the Recommendation's samples, not FFmpeg's (whose adpcm_g726
   differs), checked against `tools/g726-reference.py`, which passes the Recommendation's test sequences.
   docs/decisions/2026-11-15-g726.md, issue #527.
+- Playback: a camera's AAC sent interleaved (RFC 3640's AU-Index-delta, with `constantDuration` and `maxDisplacement`
+  in the SDP) plays, the access units put back in order. The SDP's displacement is held, but never more than a quarter
+  of a second, and what comes later than that is counted damaged. It used to turn the sound off. A packet whose first
+  AU-Index isn't 0, which no AAC sender sends, is now counted damaged, not the end of the sound.
+  docs/decisions/2026-11-17-live-rtp-interleaving.md, issue #527.
 
 ### Changed
 
+- Playback: sound with more than two channels (5.1 and 7.1 AAC, multichannel PCM) plays downmixed to stereo as
+  FFmpeg's `-ac 2` does in float: the centre and the surrounds at -3 dB, a back centre at -6 dB, the LFE left out, not
+  scaled down (a loud passage can exceed 1, as FFmpeg's output does). Before, only the first two channels played, and
+  a film's dialogue in the centre channel was lost. The layout is AAC's channel configuration or program config
+  element, WAVEFORMATEXTENSIBLE's channel mask in WAV and AVI, else FFmpeg's default for the count; more than eight
+  channels with none named still give their first two. docs/decisions/2026-11-17-more-than-two-channels.md, issue #535.
 - Containers and Playback: a file with several audio streams gives, and plays, the one FFmpeg's command line plays: of
   the tracks marked default (MP4's 'tkhd' enabled flag, Matroska's FlagDefault), or of them all where none is (AVI, which
   has no flag), the one with the most channels, the first of equals. Before, the first stream in the file, which on
@@ -64,6 +75,9 @@ next version is a minor one; code built against 0.18 keeps working.
 
 ### Fixed
 
+- Playback: an MP4 file's AAC sound started off for its first 576 samples (12 ms at 48 kHz): the players skipped the
+  priming packet its edit list leaves out, where the decoder needs it for the overlap the first one played starts
+  from. It is now decoded and gives nothing, as in FFmpeg.
 - Thumbnails: `VideoProbe`'s duration (and where `VideoThumbnail` takes its frame) counts every audio stream, as
   ffprobe's does: a file whose later sound track ran longer than its first (MXF's tracks since 0.18.0, AVI's now) was
   given the first one's end.

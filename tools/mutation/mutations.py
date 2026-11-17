@@ -393,10 +393,6 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
          find="            SetState(LiveState.Playing);\n            packets(packet);", replace="            packets(packet);",
          tests="FullyQualifiedName~LiveRtspAudioOnlyTests.PlaysTheSoundAsTheDecoderDecodesIt"),
-    # ... and interleaved AAC, which beside a video only turns the sound off, ends the player.
-    dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
-         find="throw new FatalException(e); // nothing else to play", replace="_error = e;",
-         tests="FullyQualifiedName~LiveRtspAudioOnlyTests.FailsOnInterleavedAccessUnits"),
     dict(file="src/ManagedCodecs.Playback/Rtsp/RtspConnection.cs",
          find="return sha.ComputeHash(certificate.GetRawCertData()).AsSpan().SequenceEqual(pinned);", replace="return true;",
          tests="FullyQualifiedName~LiveRtspsTests"),
@@ -416,6 +412,39 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.Playback/AudioPipeline.cs",
          find="var right = options.PairMonoTracks && demuxer is MxfDemuxer && track.Channels == 1", replace="var right = options.PairMonoTracks && track.Channels == 1",
          tests="FullyQualifiedName~AudioPlayerTests"),
+    # A packet to discard (an edit list's priming) is decoded by the players, for AAC's overlap, and gives nothing.
+    dict(file="src/ManagedCodecs.Playback/AudioPipeline.cs",
+         find="if (!left && packet.StreamIndex != audio.Right?.StreamIndex)\n",
+         replace="if ((!left && packet.StreamIndex != audio.Right?.StreamIndex) || packet.Discard)\n",
+         tests="DisplayName~h264-audio-edits"),
+    # ---- More than two channels downmixed as FFmpeg's -ac 2 (docs/decisions/2026-11-17-more-than-two-channels.md): the
+    # centre at -3 dB ...
+    dict(file="src/ManagedCodecs.Playback/Downmix.cs",
+         find="2 => (Root, Root),", replace="2 => (1, 1),",
+         tests="FullyQualifiedName~DownmixTests"),
+    # ... a count with no layout named as FFmpeg's default for it (Matroska's PCM) ...
+    dict(file="src/ManagedCodecs.Playback/Downmix.cs",
+         find="            mask = Defaults[channels - 3];\n", replace="            return null;\n",
+         tests="DisplayName~mkv-pcm-4ch"),
+    # ... AAC's layout from its channel configuration (3.0, which isn't the default for three channels) or its program
+    # config element (quad, which isn't the default for four) ...
+    dict(file="src/ManagedCodecs.Aac/AacDecoder.cs",
+         find="_channelMask = _config.Pce?.ChannelMask() ?? ChannelMask(_config.ChannelConfiguration);",
+         replace="_channelMask = _config.Pce is null ? ChannelMask(_config.ChannelConfiguration) : 0;",
+         tests="DisplayName~aac-quad-pce"),
+    dict(file="src/ManagedCodecs.Aac/AacDecoder.cs",
+         find="_channelMask = _config.Pce?.ChannelMask() ?? ChannelMask(_config.ChannelConfiguration);",
+         replace="_channelMask = _config.Pce?.ChannelMask() ?? 0;",
+         tests="DisplayName~aac-3.0"),
+    # ... WAVEFORMATEXTENSIBLE's mask (quad) ...
+    dict(file="src/ManagedCodecs.Containers/WaveFormat.cs",
+         find="            mask = BinaryPrimitives.ReadUInt32LittleEndian(codecPrivate.Span[2..]);\n", replace="",
+         tests="DisplayName~wav-pcm-quad"),
+    # ... and the layout kept on a frame the priming or the end's padding trims (no multichannel sample is trimmed
+    # mid-frame: a unit test).
+    dict(file="src/ManagedCodecs.Core/AudioFrame.cs",
+         find="new AudioFrame(SampleRate, Channels, count) { ChannelMask = ChannelMask, };", replace="new AudioFrame(SampleRate, Channels, count);",
+         tests="FullyQualifiedName~DownmixTests.ATrimmedFrameKeepsItsLayout"),
     # PairMonoTracks false plays an MXF file's mono track alone (as players before 0.18.0 did).
     dict(file="src/ManagedCodecs.Playback/AudioPipeline.cs",
          find="var right = options.PairMonoTracks && demuxer", replace="var right = demuxer",
@@ -1015,6 +1044,31 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
          find="senders.Add((rtcp, Sender(udp, serverRtcp)));", replace="",
          tests="FullyQualifiedName~LiveRtcpTests.ReportsOverUdpFromTheRtcpPortWithWhatWasLost"),
+    # ---- RFC 3640's interleaved AAC (docs/decisions/2026-11-17-live-rtp-interleaving.md), which no sender at hand writes:
+    # a missing unit is given up on once a later one is past the bound ...
+    dict(file="src/ManagedCodecs.Playback/RtpAudioDepacketizer.cs",
+         find="if (earliest != _next && _newest - _next <= _bound)", replace="if (earliest != _next)",
+         tests="FullyQualifiedName~RtpAudioDepacketizerTests.GivesUpOnALostPacketsAccessUnitsOnceTheBoundIsPassed"),
+    # ... the bound is capped at a quarter of a second ...
+    dict(file="src/ManagedCodecs.Playback/RtpAudioDepacketizer.cs",
+         find="_bound = track.MaxDisplacement > 0 ? Math.Min(track.MaxDisplacement, cap) : cap;", replace="_bound = track.MaxDisplacement > 0 ? track.MaxDisplacement : cap;",
+         tests="FullyQualifiedName~RtpAudioDepacketizerTests.GivesUpOnALostPacketsAccessUnitsOnceTheBoundIsPassed"),
+    # ... at the start the first unit due is the earliest held once the bound has passed ...
+    dict(file="src/ManagedCodecs.Playback/RtpAudioDepacketizer.cs",
+         find="            if (_newest - _held.Keys.First() <= _bound)\n            {\n                return;\n            }\n", replace="",
+         tests="FullyQualifiedName~RtpAudioDepacketizerTests.PlacesAFragmentedAccessUnitAmongInterleavedOnes"),
+    # ... the deltas turn it on where the SDP gave no maxDisplacement ...
+    dict(file="src/ManagedCodecs.Playback/RtpAudioDepacketizer.cs",
+         find="_interleaved |= i > 0 && index > 0;", replace="",
+         tests="FullyQualifiedName~RtpAudioDepacketizerTests.DeinterleavesWhatAnSdpWithoutTheParametersAnnounces"),
+    # ... a unit that comes after it was given up on is dropped and counted ...
+    dict(file="src/ManagedCodecs.Playback/RtpAudioDepacketizer.cs",
+         find="                Damage(); // too late: given up on, or given already\n", replace="",
+         tests="FullyQualifiedName~RtpAudioDepacketizerTests.DropsAnAccessUnitThatComesAfterItWasGivenUpOn"),
+    # ... and a first AU-Index other than 0 damages its packet.
+    dict(file="src/ManagedCodecs.Playback/RtpAudioDepacketizer.cs",
+         find="            if (i == 0 && index != 0)\n            {\n                Damage(); // an AU-Index other than 0: not an AAC mode's (variable durations aren't AAC's)\n                return;\n            }\n", replace="",
+         tests="FullyQualifiedName~RtpAudioDepacketizerTests.CountsAPacketWithAnAuIndexOtherThanZeroAsDamaged"),
     # ---- RTCP BYE (docs/decisions/2026-11-15-live-rtcp.md, Since): only the stream's BYE ends it ...
     dict(file="src/ManagedCodecs.Playback/Rtsp/RtcpSession.cs",
          find="goodbye |= BinaryPrimitives.ReadUInt32BigEndian(packet.Slice(4 + (4 * i))) == _source;", replace="goodbye = true;",

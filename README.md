@@ -46,6 +46,7 @@ in between. That comparison is not measured here.
 | `src/ManagedCodecs.Wpf` | `LiveView`: the same in WPF (net10.0-windows); the `ManagedCodecs.Wpf` package, built and packed on Linux, drawn on Windows by `windows.yml` |
 | `tools/ManagedCodecs.Avalonia.Sample` | `mclive`: an Avalonia window showing a camera with `ManagedCodecs.Avalonia`'s `LiveView` (issue #462); run on Linux under Xvfb against FFmpeg's `-f mpjpeg` |
 | `tools/ManagedCodecs.Wpf.Sample` | `mclive-wpf`: the same in WPF with `ManagedCodecs.Wpf`'s `LiveView`; CI builds it on Linux, and `windows.yml` runs it on Windows (`--frames`, a check of what WPF draws) |
+| `tools/ManagedCodecs.Maui.Sample` | `mclive-maui`: the same in .NET MAUI on Android and Windows, a `LiveView` and a handler per platform to copy (not a package); not in the solution (it needs MAUI's workloads): `maui.yml` builds it and runs it on an Android emulator and on Windows (a check of what each platform draws) |
 | `tools/ManagedCodecs.MonoGame.Sample` | `mcplay`: a MonoGame `Game` around `VideoTexture` (`ManagedCodecs.MonoGame`) (its README has the 1080p measurements; issue #254) |
 | `tools/ManagedCodecs.Unity.Sample` | A Unity `MonoBehaviour` that plays a video into a `Texture2D` and an `AudioClip` with the `ManagedCodecs.Unity` package (its `MediaPlayer`); CI compiles it against stubs of UnityEngine, Unity has not run it |
 | `tools/make-samples.sh` | Generates the test samples and FFmpeg's references |
@@ -58,7 +59,7 @@ in between. That comparison is not measured here.
 | `tools/rdd36-rewrite.py` | Rewrites an RDD 36 stream's frames for what FFmpeg's encoders never write (higher and reserved quantization indices, version 1, zero bytes, longer headers), for make-samples.sh |
 | `tools/rtp-record.py` | Records the RTP packets FFmpeg sends to a loopback UDP port, for the RTP depacketizer's tests (make-samples.sh) |
 | `tools/compare.sh` | Times mcdec and FFmpeg on the same file |
-| `tools/live555-check.py` | `LivePlayer` against live555MediaServer (built from source, pinned), H.264 and AAC over both transports, Digest, and a session held past live555's 65 s; by hand, not in a workflow |
+| `tools/live555-check.py` | `LivePlayer` against live555MediaServer (built from source, pinned), H.264 and AAC over both transports, Digest, a session held past live555's 65 s, and a file's end (RTCP BYE, a new session at once); by hand, not in a workflow |
 | `tools/h264-stages.py` | Shares of H.264 decoding by stage, for mcdec and FFmpeg, from perf and callgrind profiles (docs/notes/h264-stages-2026-11.md) |
 | `tools/realworld.py` | Decodes real public films with mcdec and FFmpeg and compares them (nightly, `realworld.yml`) |
 | `tools/mutation/mutate.py` | Breaks each guard in `tools/mutation/mutations.py` and checks that a test fails (every pull request, `mutation.yml`) |
@@ -593,6 +594,10 @@ if (player.TakeLatest() is { } frame)
   plays raw samples.
 - **Samples:** `tools/ManagedCodecs.Avalonia.Sample` (`mclive`) and `tools/ManagedCodecs.Wpf.Sample` (`mclive-wpf`),
   around those controls, take any of the URLs.
+- **MAUI:** a sample, not a package (docs/decisions/2026-11-17-live-maui.md): `tools/ManagedCodecs.Maui.Sample`
+  (`mclive-maui`) has a `LiveView` and a handler for Android and for Windows, each copying the newest frame into the
+  platform's own bitmap, to copy into an application, and the manifest entries Android needs (clear text for
+  `http://`, the multicast lock). iOS and Mac Catalyst come later.
 - **Cost:** a software decoder's. 1080p25 H.264 decodes in about 14 ms a frame on one thread (with 8 ms to convert),
   so a wall of cameras wants their low-resolution substreams. docs/decisions/2026-11-10-live-mjpeg-over-http.md and
   docs/decisions/2026-11-10-live-rtsp-h264.md, docs/decisions/2026-11-12-live-rtsp-jpeg.md,

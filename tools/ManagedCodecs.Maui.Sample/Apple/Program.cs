@@ -13,6 +13,13 @@ public static class Program
 {
     private static void Main(string[] args)
     {
+        // On iOS, Main gets none of the process's arguments (simctl launch's among them): the process's own, its
+        // executable's path left out.
+        if (args.Length == 0)
+        {
+            args = NSProcessInfo.ProcessInfo.Arguments.Skip(1).ToArray();
+        }
+
         // What arrived, for a run nobody watches (maui.yml reads lines that start "mclive-maui:", not this one).
         Console.WriteLine($"mclive-maui started with {args.Length} arguments: {string.Join(' ', args)}");
         MauiProgram.Options = LiveOptions.Parse(args) ?? LiveOptions.None;

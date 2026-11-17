@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- What LivePlayer needs here (docs/decisions/2026-11-17-live-maui.md): NSLocalNetworkUsageDescription, the text of the
+     question the system asks before the first connection to the local network (a camera on the LAN), without which
+     such connections fail; NSAllowsLocalNetworking, so App Transport Security lets MJPEG over http:// reach cameras on
+     the local network (RTSP's own sockets aren't subject to it). RTSP multicast would also need Apple's
+     com.apple.developer.networking.multicast entitlement, granted on request: not in this sample. -->
+<plist version="1.0">
+<dict>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.utilities</string>
+	<key>UIDeviceFamily</key>
+	<array>
+		<integer>2</integer>
+	</array>
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>mclive-maui shows cameras on your local network.</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+</dict>
+</plist>

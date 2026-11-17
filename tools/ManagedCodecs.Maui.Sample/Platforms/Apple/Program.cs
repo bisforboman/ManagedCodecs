@@ -1,0 +1,26 @@
+using Foundation;
+using UIKit;
+
+namespace ManagedCodecs.MauiSample;
+
+/// <summary>
+/// iOS and Mac Catalyst: the entry point. Its arguments are the options (<see cref="LiveOptions"/>), as
+/// <c>xcrun simctl launch --console-pty booted io.github.managedcodecs.mclive URL --frames N</c> or the Mac Catalyst
+/// app's binary run with them gives; arguments that aren't options (a launch from Finder adds its own) start the
+/// page without a URL.
+/// </summary>
+public static class Program
+{
+    private static void Main(string[] args)
+    {
+        MauiProgram.Options = LiveOptions.Parse(args) ?? LiveOptions.None;
+        UIApplication.Main(args, null, typeof(AppDelegate));
+    }
+}
+
+/// <summary>MAUI's application delegate.</summary>
+[Register("AppDelegate")]
+public sealed class AppDelegate : MauiUIApplicationDelegate
+{
+    protected override MauiApp CreateMauiApp() => MauiProgram.CreateMauiApp();
+}

@@ -57,9 +57,15 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
           sdk="$ANDROID_HOME/cmdline-tools/latest/bin"
+          # avdmanager and the emulator look for devices in different places unless told one (the first run's emulator
+          # found no "ci"): the same directory for both, kept for the next step.
+          export ANDROID_AVD_HOME="$HOME/.android/avd"
+          mkdir -p "$ANDROID_AVD_HOME"
+          echo "ANDROID_AVD_HOME=$ANDROID_AVD_HOME" >> "$GITHUB_ENV"
           yes | "$sdk/sdkmanager" --licenses > /dev/null
           "$sdk/sdkmanager" emulator platform-tools 'system-images;android-34;google_apis;x86_64' > /dev/null
           echo no | "$sdk/avdmanager" create avd -n ci -k 'system-images;android-34;google_apis;x86_64' --force
+          "$ANDROID_HOME/emulator/emulator" -list-avds
           "$ANDROID_HOME/emulator/emulator" -accel-check || true
           nohup "$ANDROID_HOME/emulator/emulator" -avd ci -no-window -no-audio -no-boot-anim -no-snapshot -no-metrics -gpu swiftshader_indirect > emulator.log 2>&1 &
           adb="$ANDROID_HOME/platform-tools/adb"

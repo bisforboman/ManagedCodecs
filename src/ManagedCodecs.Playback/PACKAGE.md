@@ -39,7 +39,7 @@ if (player.IsFinished) { /* the video has ended; player.Error says why if it end
 - **Damaged files:** play up to the damage, then end with the exception in `Error`, never thrown at the game loop.
 - **Audio tracks:** the one the demuxer reads unasked plays (the file's first today); `PlaybackOptions.AudioTrack`
   chooses another, counted from 0. An MXF file's mono track a channel plays in stereo: the track chosen left, the
-  next one right.
+  next one right (`PairMonoTracks = false` plays the chosen track alone, on both speakers).
 - **Not a media player:** no seeking. `PlaybackOptions.Loop` plays the file again from its start, the frames' times
   running on.
 

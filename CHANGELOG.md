@@ -13,11 +13,13 @@ run time.
 
 ## Unreleased
 
-Features beside fixes (new public API: `AviDemuxer.AudioTracks` and `SelectAudio`), hence the next version is a minor
+Features beside fixes (new public API: `AviDemuxer.AudioTracks` and `SelectAudio`, `PlaybackOptions.PairMonoTracks`), hence the next version is a minor
 one; code built against 0.18 keeps working.
 
 ### Added
 
+- Playback: `PlaybackOptions.PairMonoTracks` (true by default): false plays an MXF file's mono track alone, on both
+  speakers, rather than with the next mono track as the right channel. Issue #535.
 - Containers: `AviDemuxer` lists every audio stream (`AudioTracks`) and reads those `SelectAudio` chooses, one or
   several in one pass, each as FFmpeg's demuxer gives it; until a choice is made the first is read alone, as before.
   `PlaybackOptions.AudioTrack` plays any of them. Issue #535, docs/decisions/2026-11-15-sound-tracks.md.

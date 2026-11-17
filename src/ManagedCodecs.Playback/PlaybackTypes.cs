@@ -27,10 +27,17 @@ public sealed record PlaybackOptions
     /// with audio tracks but not this many is refused (<see cref="ArgumentOutOfRangeException"/>); one with no audio at
     /// all plays silent whatever this says.
     /// In an MXF file, where a mono track is usually one channel of the programme, a mono track plays as the left
-    /// channel and the next track, if it is mono of the same codec and rate, as the right; any other mono track
-    /// plays on both.
+    /// channel and the next track, if it is mono of the same codec and rate, as the right (unless
+    /// <see cref="PairMonoTracks"/> is false); any other mono track plays on both.
     /// </summary>
     public int? AudioTrack { get; init; }
+
+    /// <summary>
+    /// Whether an MXF file's mono track and the mono track after it (same codec and rate) play as left and right, as
+    /// broadcast files carry a channel a track: true, the default. False plays the track
+    /// <see cref="AudioTrack"/> names alone, on both speakers, as players before 0.18.0 played such files.
+    /// </summary>
+    public bool PairMonoTracks { get; init; } = true;
 }
 
 /// <summary>A decoded video frame as RGBA, and when to show it.</summary>

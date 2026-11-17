@@ -30,6 +30,10 @@ one; code built against 0.18 keeps working.
 - Playback: RTP to a multicast group. A camera that refuses RTP both over the RTSP connection and over UDP to the
   reader alone (461) is asked for `RTP/AVP;multicast`, and `LivePlayer` joins the group its answer names, where it used
   to fail. docs/decisions/2026-11-16-live-rtsp-multicast.md, issue #527.
+- Playback: RTSP over HTTP (Apple's tunnelling), `RtspSource.HttpTunnel`, for a camera behind a firewall or proxy
+  that passes only HTTP: a GET carries what the camera sends, RTP included, and a POST the requests, on port 80 unless
+  the URL gives one (443 for `rtsps://`). No RTCP receiver reports go through the tunnel. `mcdec --live --http-tunnel`.
+  docs/decisions/2026-11-16-live-rtsp-http.md, issue #527.
 
 ### Fixed
 

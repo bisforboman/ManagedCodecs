@@ -1,1 +1,3 @@
 #nullable enable
+ManagedCodecs.Playback.RtspSource.HttpTunnel.get -> bool
+ManagedCodecs.Playback.RtspSource.HttpTunnel.init -> void

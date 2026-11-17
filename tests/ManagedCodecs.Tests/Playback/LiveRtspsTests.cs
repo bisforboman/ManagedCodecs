@@ -127,10 +127,10 @@ public class LiveRtspsTests
         Assert.False(RtspConnection.Accepts(certificate, SslPolicyErrors.RemoteCertificateChainErrors, null));
     }
 
-    private static string Hash(X509Certificate2 certificate) => Convert.ToHexString(SHA256.HashData(certificate.RawData));
+    internal static string Hash(X509Certificate2 certificate) => Convert.ToHexString(SHA256.HashData(certificate.RawData));
 
     // A self-signed certificate for `name` (and 127.0.0.1), with its private key, as a camera has.
-    private static X509Certificate2 SelfSigned(string name)
+    internal static X509Certificate2 SelfSigned(string name)
     {
         using var key = RSA.Create(2048);
         var request = new CertificateRequest($"CN={name}", key, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);

@@ -30,6 +30,7 @@ internal sealed class RtspTestServer : IDisposable
     private readonly CancellationTokenSource _stop = new();
     private readonly Task _accepting;
     private int _connections;
+    private readonly ConcurrentDictionary<string, TaskCompletionSource<ByteReader>> _tunnels = new();
 
     public RtspTestServer(string sdp, Func<RtspPlay, Task> onPlay)
     {
@@ -58,6 +59,21 @@ internal sealed class RtspTestServer : IDisposable
 
     /// <summary>With <see cref="MulticastGroup"/>: leave the group and port out of SETUP's answer.</summary>
     public bool MulticastUnnamed { get; set; }
+
+    /// <summary>
+    /// RTSP over HTTP only (Apple's tunnelling): each connection starts with an HTTP GET or POST; a GET is answered 200 and
+    /// carries what the server sends, and the POST with its cookie carries the requests, in base64.
+    /// </summary>
+    public bool HttpTunnel { get; set; }
+
+    /// <summary>With <see cref="HttpTunnel"/>, the status to refuse the GET with, or null to take it.</summary>
+    public int? TunnelStatus { get; set; }
+
+    /// <summary>With <see cref="HttpTunnel"/>, each connection's HTTP request: its method, path and headers.</summary>
+    public ConcurrentQueue<RtspRequest> TunnelRequests { get; } = new();
+
+    /// <summary>With <see cref="HttpTunnel"/>, the POSTs' bodies as they came, base64 still.</summary>
+    public ConcurrentQueue<string> TunnelBodies { get; } = new();
 
     /// <summary>The SSRC SETUP's answer gives for UDP, or null to give none.</summary>
     public uint? Ssrc { get; set; }
@@ -183,6 +199,17 @@ internal sealed class RtspTestServer : IDisposable
 
             var writing = new SemaphoreSlim(1, 1);
             var reader = new ByteReader(stream);
+            if (HttpTunnel)
+            {
+                var tunnelled = await TunnelAsync(stream, reader, index, token);
+                if (tunnelled is null)
+                {
+                    return; // refused, or the POST's connection, which tunnelled its requests to the GET's
+                }
+
+                reader = tunnelled;
+            }
+
             Task? playing = null;
             var udpClients = new List<IPEndPoint>(); // a track's each, in SETUP's order
             using var connection = CancellationTokenSource.CreateLinkedTokenSource(token);
@@ -377,6 +404,76 @@ internal sealed class RtspTestServer : IDisposable
         }
 
         return new RtspRequest(index, parts[0], parts[1], headers);
+    }
+
+    // The HTTP request a tunnelled connection starts with. A GET is answered (200, or TunnelStatus), and once its POST
+    // has come, the requests' reader is returned; a POST hands its decoded body to its GET's connection and waits.
+    private async Task<ByteReader?> TunnelAsync(Stream stream, ByteReader reader, int index, CancellationToken token)
+    {
+        if (await ReadRequestAsync(reader, index, Interleaved, token) is not { } request)
+        {
+            return null;
+        }
+
+        TunnelRequests.Enqueue(request);
+        var waiting = _tunnels.GetOrAdd(request.Headers.GetValueOrDefault("x-sessioncookie", ""), _ => new(TaskCreationOptions.RunContinuationsAsynchronously));
+        if (request.Method == "POST")
+        {
+            waiting.TrySetResult(new ByteReader(new Base64Reader(reader, TunnelBodies)));
+            await Task.Delay(Timeout.Infinite, token).ContinueWith(_ => { }, TaskScheduler.Default);
+            return null;
+        }
+
+        string answer = TunnelStatus is { } refused
+            ? $"HTTP/1.0 {refused} Refused\r\n\r\n"
+            : "HTTP/1.0 200 OK\r\nContent-Type: application/x-rtsp-tunnelled\r\nCache-Control: no-cache\r\n\r\n";
+        await stream.WriteAsync(Encoding.ASCII.GetBytes(answer), token);
+        return TunnelStatus is null ? await waiting.Task.WaitAsync(token) : null;
+    }
+
+    // A POST's body as the bytes it encodes: base64 in groups of four characters, each write padded on its own.
+    private sealed class Base64Reader(ByteReader reader, ConcurrentQueue<string> bodies) : Stream
+    {
+        public override bool CanRead => true;
+
+        public override bool CanSeek => false;
+
+        public override bool CanWrite => false;
+
+        public override long Length => throw new NotSupportedException();
+
+        public override long Position
+        {
+            get => throw new NotSupportedException();
+            set => throw new NotSupportedException();
+        }
+
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            var quad = await reader.ReadAsync(4, cancellationToken);
+            if (quad is null)
+            {
+                return 0;
+            }
+
+            string text = Encoding.ASCII.GetString(quad);
+            bodies.Enqueue(text);
+            var bytes = Convert.FromBase64String(text);
+            bytes.CopyTo(buffer);
+            return bytes.Length;
+        }
+
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+        public override void Flush()
+        {
+        }
+
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+        public override void SetLength(long value) => throw new NotSupportedException();
+
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
     }
 
     // Lines and counted bytes from one stream (a StreamReader would decode the interleaved packets as text).

@@ -27,6 +27,9 @@ and `SelectAudio`) beside fixes, hence the next version is a minor one; code bui
 
 ### Fixed
 
+- Thumbnails: `VideoProbe`'s duration (and where `VideoThumbnail` takes its frame) counts every audio stream, as
+  ffprobe's does: a file whose later sound track ran longer than its first (MXF's tracks since 0.18.0, AVI's now) was
+  given the first one's end.
 - Thumbnails: `VideoProbe` gives an MXF file's duration as ffprobe's; it gave 0 for every MXF file, so
   `VideoThumbnail` took its frame at the start rather than 10% in.
 - Containers: `MxfDemuxer`'s streams last their header's track durations, as FFmpeg's demuxer reads them: the

@@ -4,8 +4,9 @@ using System.Text;
 namespace ManagedCodecs.Containers;
 
 /// <summary>
-/// Matroska and WebM (RFC 9559, EBML RFC 8794) demuxer: finds the first video and the first audio track and yields
-/// their frames, from the SimpleBlocks and BlockGroups of every Cluster.
+/// Matroska and WebM (RFC 9559, EBML RFC 8794) demuxer: finds the first video track and every audio track and yields
+/// the frames of the video and of the audio tracks chosen (<see cref="Audio"/>, <see cref="SelectAudio"/>), from the
+/// SimpleBlocks and BlockGroups of every Cluster.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -30,8 +31,9 @@ namespace ManagedCodecs.Containers;
 /// </para>
 /// <para>
 /// Header stripping (ContentCompression algorithm 3) is undone, and zlib (algorithm 0) of the frames or the CodecPrivate
-/// inflated. Not supported: other content encodings (bzlib, LZO and encryption) of the exposed tracks, a TrackTimestampScale other than 1, a Tracks element after the first
-/// Cluster, and further tracks.
+/// inflated. Not supported: other content encodings (bzlib, LZO and encryption) of the exposed tracks (an audio track
+/// with one is left out, unless every audio track has one), a TrackTimestampScale other than 1, a Tracks element after
+/// the first Cluster, and video tracks after the first.
 /// </para>
 /// </remarks>
 public sealed class MatroskaDemuxer : IDemuxer
@@ -51,11 +53,17 @@ public sealed class MatroskaDemuxer : IDemuxer
     // Every exposed track's frames in file order; each track's in its own order (decode order) inside it.
     private readonly Entry[] _entries;
 
-    // The video track (slot 0) and the audio track (slot 1), null where the file has none.
+    // The video track (slot 0, null where the file has none) and the audio tracks (slots 1 on, in file order).
     private readonly TrackEntry?[] _tracks;
 
     // Where each slot's packets start (a Sequence), 0 until a Seek moves them.
-    private readonly long[] _start = new long[2];
+    private readonly long[] _start;
+
+    // Each audio slot's stream, and the slot ReadPackets gives (0 for none).
+    private readonly AudioStreamInfo[] _audioStreams = [];
+
+    // The audio slots ReadPackets gives (SelectAudio), Audio's first.
+    private int[] _selectedSlots = [];
 
     /// <summary>Reads the file's headers and walks its clusters; packets are read from the stream later, by <see cref="ReadPackets"/>.</summary>
     /// <param name="stream">A seekable stream holding the file.</param>
@@ -78,8 +86,9 @@ public sealed class MatroskaDemuxer : IDemuxer
         {
             var walk = new Walk(stream);
             walk.Run();
-            _tracks = [walk.VideoTrack, walk.AudioTrack];
-            if (walk.VideoTrack is null && walk.AudioTrack is null)
+            _tracks = [walk.VideoTrack, .. walk.AudioTracks];
+            _start = new long[_tracks.Length];
+            if (walk.VideoTrack is null && walk.AudioTracks.Count == 0)
             {
                 throw new InvalidDataException("Matroska file has no video or audio track.");
             }
@@ -87,8 +96,8 @@ public sealed class MatroskaDemuxer : IDemuxer
             _entries = [.. walk.Entries];
             var timeBase = Rational.Reduce(walk.TimestampScale, 1_000_000_000);
             long duration = double.IsFinite(walk.Duration) && walk.Duration is > 0 and < long.MaxValue ? (long)Math.Round(walk.Duration) : 0;
-            var perSlot = new List<int>[2];
-            for (int slot = 0; slot < 2; slot++)
+            var perSlot = new List<int>[_tracks.Length];
+            for (int slot = 0; slot < perSlot.Length; slot++)
             {
                 perSlot[slot] = [];
             }
@@ -115,14 +124,22 @@ public sealed class MatroskaDemuxer : IDemuxer
                 };
             }
 
-            if (walk.AudioTrack is { } audio)
+            _audioStreams = new AudioStreamInfo[walk.AudioTracks.Count];
+            for (int i = 0; i < _audioStreams.Length; i++)
             {
-                SetAudioTimes(perSlot[1]);
-                Audio = new AudioStreamInfo(audio.Codec, audio.SampleRate, audio.Channels, perSlot[1].Count, timeBase, audio.CodecPrivate, audio.StreamIndex)
+                var audio = walk.AudioTracks[i];
+                SetAudioTimes(perSlot[i + 1]);
+                _audioStreams[i] = new AudioStreamInfo(audio.Codec, audio.SampleRate, audio.Channels, perSlot[i + 1].Count, timeBase, audio.CodecPrivate, audio.StreamIndex)
                 {
                     Duration = duration,
+                    Language = audio.Language == "und" ? null : audio.Language,
+                    Title = audio.Name,
+                    IsDefault = audio.FlagDefault,
                 };
             }
+
+            int played = DefaultAudioTrack.Of(_audioStreams);
+            _selectedSlots = played < 0 ? [] : [played + 1];
         }
         catch (Exception e)
         {
@@ -151,9 +168,44 @@ public sealed class MatroskaDemuxer : IDemuxer
     /// AAC (A_AAC, and the old A_AAC/MPEG2/... and A_AAC/MPEG4/... names, whose AudioSpecificConfig is made from the name
     /// where the CodecPrivate is missing) is <see cref="CodecIds.Aac"/>, its rate and channels from the
     /// AudioSpecificConfig; other codecs keep Matroska's CodecID (A_OPUS, A_VORBIS, ...), with the track's
-    /// SamplingFrequency and Channels.
+    /// SamplingFrequency and Channels. The language is the track's Language (ISO 639-2; "eng" where the element is
+    /// missing, the specification's default; null for "und"), as FFmpeg 6.1 reads it; LanguageBCP47 is not read, as
+    /// FFmpeg 6.1 does not.
     /// </remarks>
-    public AudioStreamInfo? Audio { get; }
+    public AudioStreamInfo? Audio => _selectedSlots.Length > 0 ? _audioStreams[_selectedSlots[0] - 1] : null;
+
+    /// <inheritdoc/>
+    /// <remarks>Tracks whose content encoding the demuxer cannot read are left out.</remarks>
+    public IReadOnlyList<AudioStreamInfo> AudioTracks => _audioStreams;
+
+    /// <inheritdoc/>
+    public void SelectAudio(params int[] streamIndexes)
+    {
+        ArgumentNullException.ThrowIfNull(streamIndexes);
+        if (streamIndexes.Length == 0)
+        {
+            throw new ArgumentException("At least one audio stream must be selected.", nameof(streamIndexes));
+        }
+
+        var slots = new int[streamIndexes.Length];
+        for (int i = 0; i < slots.Length; i++)
+        {
+            int index = Array.FindIndex(_audioStreams, a => a.StreamIndex == streamIndexes[i]);
+            if (index < 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(streamIndexes), streamIndexes[i], "No audio stream of the Matroska demuxer has this index.");
+            }
+
+            if (Array.IndexOf(slots, index + 1, 0, i) >= 0)
+            {
+                throw new ArgumentException($"Audio stream {streamIndexes[i]} is selected twice.", nameof(streamIndexes));
+            }
+
+            slots[i] = index + 1;
+        }
+
+        _selectedSlots = slots;
+    }
 
     /// <summary>Opens the file at <paramref name="path"/>, which the demuxer disposes with itself.</summary>
     public static MatroskaDemuxer Open(string path) => new(File.OpenRead(path));
@@ -174,18 +226,22 @@ public sealed class MatroskaDemuxer : IDemuxer
     /// <inheritdoc/>
     /// <remarks>
     /// The keyframe is the last one in decode order whose pts is at or before <paramref name="pts"/>, as in
-    /// <see cref="Mp4Demuxer.Seek"/>; the other track starts the same way at the same instant. Audio frames are
-    /// keyframes as their blocks say (every one, as encoders write them).
+    /// <see cref="Mp4Demuxer.Seek"/>; every other track, chosen or not, starts the same way at the same instant, and
+    /// <paramref name="streamIndex"/> may be any of <see cref="AudioTracks"/>. Audio frames are keyframes as their
+    /// blocks say (every one, as encoders write them).
     /// </remarks>
     public void Seek(long pts, int streamIndex)
     {
-        int seeked = _tracks[0] is { } v && v.StreamIndex == streamIndex ? 0
-            : _tracks[1] is { } a && a.StreamIndex == streamIndex ? 1
-            : throw new ArgumentOutOfRangeException(nameof(streamIndex), streamIndex, "No video or audio stream of the file has this index.");
+        if (!(_tracks[0] is { } v && v.StreamIndex == streamIndex) && !Array.Exists(_audioStreams, a => a.StreamIndex == streamIndex))
+        {
+            throw new ArgumentOutOfRangeException(nameof(streamIndex), streamIndex, "No video or audio stream of the file has this index.");
+        }
 
-        // The tracks share the Segment's time base.
-        _start[seeked] = KeyframeAtOrBefore(seeked, pts);
-        _start[1 - seeked] = KeyframeAtOrBefore(1 - seeked, pts);
+        // The tracks share the Segment's time base; every audio track starts there too, for a SelectAudio after this.
+        for (int slot = 0; slot < _tracks.Length; slot++)
+        {
+            _start[slot] = KeyframeAtOrBefore(slot, pts);
+        }
     }
 
     /// <summary>Disposes the stream, unless the demuxer was made to leave it open.</summary>
@@ -217,7 +273,7 @@ public sealed class MatroskaDemuxer : IDemuxer
     {
         foreach (var entry in _entries)
         {
-            if (entry.Sequence >= _start[entry.Slot])
+            if ((entry.Slot == 0 || Array.IndexOf(_selectedSlots, entry.Slot) >= 0) && entry.Sequence >= _start[entry.Slot])
             {
                 yield return entry;
             }
@@ -372,7 +428,7 @@ public sealed class MatroskaDemuxer : IDemuxer
         return last > first ? (indices.Count - 1) / ((last - first) * timeBase.ToDouble()) : 0;
     }
 
-    /// <summary>One frame: where its data is, the track slot (0 video, 1 audio), and its packet's values.</summary>
+    /// <summary>One frame: where its data is, the track slot (0 video, 1 on the audio tracks), and its packet's values.</summary>
     private readonly record struct Entry(long Offset, int Size, int Slot, long Sequence, long Pts, long Dts, long Duration, bool Keyframe, int SkipStart = 0, int SkipEnd = 0);
 
     /// <summary>What the demuxer keeps of a TrackEntry.</summary>
@@ -445,6 +501,15 @@ public sealed class MatroskaDemuxer : IDemuxer
         public int BitDepth { get; set; }
 
         public double TimestampScale { get; set; } = 1;
+
+        /// <summary>Language, "eng" where the element is missing (RFC 9559's default).</summary>
+        public string Language { get; set; } = "eng";
+
+        /// <summary>Name, null without one.</summary>
+        public string? Name { get; set; }
+
+        /// <summary>FlagDefault, set where the element is missing (RFC 9559's default).</summary>
+        public bool FlagDefault { get; set; } = true;
     }
 
     /// <summary>The walk through the file at opening: its headers, then every Cluster's blocks.</summary>
@@ -452,14 +517,16 @@ public sealed class MatroskaDemuxer : IDemuxer
     {
         private readonly Window _window = new(stream);
         private readonly long _length = stream.Length;
-        private readonly long[] _sequences = new long[2];
+        private readonly Dictionary<ulong, int> _slots = [];
+        private readonly List<long> _sequences = [0];
         private bool _hasTracks;
 
         public List<Entry> Entries { get; } = [];
 
         public TrackEntry? VideoTrack { get; private set; }
 
-        public TrackEntry? AudioTrack { get; private set; }
+        /// <summary>The audio tracks the demuxer can read, in file order.</summary>
+        public List<TrackEntry> AudioTracks { get; } = [];
 
         public long TimestampScale { get; private set; } = 1_000_000;
 
@@ -610,6 +677,7 @@ public sealed class MatroskaDemuxer : IDemuxer
         private void ReadTracks(ReadOnlySpan<byte> tracks)
         {
             int streamIndex = 0;
+            var audio = new List<TrackEntry>();
             while (Ebml.NextChild(ref tracks, out uint id, out var payload))
             {
                 if (id != Ebml.TrackEntry)
@@ -622,10 +690,23 @@ public sealed class MatroskaDemuxer : IDemuxer
                 if (track.Type == 1 && VideoTrack is null)
                 {
                     VideoTrack = Exposed(track);
+                    _slots[track.Number] = 0;
                 }
-                else if (track.Type == 2 && AudioTrack is null)
+                else if (track.Type == 2)
                 {
-                    AudioTrack = Exposed(track);
+                    audio.Add(track);
+                }
+            }
+
+            // Every audio track the demuxer can read; one it can't is refused only where it is all there is (as the
+            // first audio track was, when it alone was read).
+            foreach (var track in audio)
+            {
+                if (track.Unsupported is null || audio.TrueForAll(t => t.Unsupported is not null))
+                {
+                    AudioTracks.Add(Exposed(track));
+                    _slots[track.Number] = AudioTracks.Count;
+                    _sequences.Add(0);
                 }
             }
         }
@@ -697,6 +778,15 @@ public sealed class MatroskaDemuxer : IDemuxer
                         break;
                     case Ebml.CodecId:
                         track.CodecId = Ebml.String(payload);
+                        break;
+                    case Ebml.FlagDefault:
+                        track.FlagDefault = Ebml.UInt(payload) != 0;
+                        break;
+                    case Ebml.Name:
+                        track.Name = Ebml.String(payload);
+                        break;
+                    case Ebml.Language:
+                        track.Language = Ebml.String(payload);
                         break;
                     case Ebml.CodecPrivate:
                         track.CodecPrivate = payload.ToArray();
@@ -1097,13 +1187,12 @@ public sealed class MatroskaDemuxer : IDemuxer
                 throw new InvalidDataException($"Invalid block header at offset {start}.");
             }
 
-            int slot = VideoTrack is { } v && (ulong)number == v.Number ? 0 : AudioTrack is { } a && (ulong)number == a.Number ? 1 : -1;
-            if (slot < 0)
+            if (!_slots.TryGetValue((ulong)number, out int slot))
             {
                 return;
             }
 
-            var track = slot == 0 ? VideoTrack! : AudioTrack!;
+            var track = slot == 0 ? VideoTrack! : AudioTracks[slot - 1];
             if (clusterTime == long.MinValue)
             {
                 throw new InvalidDataException($"The block at offset {start} comes before its Cluster's Timestamp.");
@@ -1201,7 +1290,7 @@ public sealed class MatroskaDemuxer : IDemuxer
 
             // DiscardPadding: nanoseconds of padding at the block's end (positive) or start (negative), in samples at the
             // track's rate, rounded to nearest as FFmpeg's av_rescale_q; the lace's last frame or first frame drops them.
-            int padding = slot == 1 && discardPadding != 0 && track.SampleRate > 0 ? PaddingSamples(discardPadding, track.SampleRate) : 0;
+            int padding = slot > 0 && discardPadding != 0 && track.SampleRate > 0 ? PaddingSamples(discardPadding, track.SampleRate) : 0;
             for (int f = 0; f < frames; f++)
             {
                 long share = (duration * (f + 1) / frames) - (duration * f / frames);

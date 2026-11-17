@@ -1,4 +1,16 @@
 #nullable enable
+ManagedCodecs.Playback.PlaybackOptions.PairMonoTracks.get -> bool
+ManagedCodecs.Playback.PlaybackOptions.PairMonoTracks.init -> void
+ManagedCodecs.AudioStreamInfo.IsDefault.get -> bool
+ManagedCodecs.AudioStreamInfo.IsDefault.init -> void
+ManagedCodecs.AudioStreamInfo.Language.get -> string?
+ManagedCodecs.AudioStreamInfo.Language.init -> void
+ManagedCodecs.AudioStreamInfo.Title.get -> string?
+ManagedCodecs.AudioStreamInfo.Title.init -> void
+ManagedCodecs.Containers.MatroskaDemuxer.AudioTracks.get -> System.Collections.Generic.IReadOnlyList<ManagedCodecs.AudioStreamInfo!>!
+ManagedCodecs.Containers.MatroskaDemuxer.SelectAudio(params int[]! streamIndexes) -> void
+ManagedCodecs.Containers.Mp4Demuxer.AudioTracks.get -> System.Collections.Generic.IReadOnlyList<ManagedCodecs.AudioStreamInfo!>!
+ManagedCodecs.Containers.Mp4Demuxer.SelectAudio(params int[]! streamIndexes) -> void
 ManagedCodecs.Playback.RtspSource.HttpTunnel.get -> bool
 ManagedCodecs.Playback.RtspSource.HttpTunnel.init -> void
 ManagedCodecs.Containers.AviDemuxer.AudioTracks.get -> System.Collections.Generic.IReadOnlyList<ManagedCodecs.AudioStreamInfo!>!

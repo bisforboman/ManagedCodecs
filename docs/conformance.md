@@ -432,6 +432,10 @@ by a parser and sender reports of the tests' own.
   - Over UDP: the reports reach the server's RTCP port, and a sequence number the server skipped counts as one lost.
 - **Mutation entries:** the fraction's floor at 0, a sender report echoed only to its own stream, and the reports'
   sending over UDP.
+- **RTCP BYE**: `RtcpSessionTests` reads which BYE is the stream's (alone, in a compound packet, among other SSRCs, with
+  a reason; not another SSRC's, not before the first packet, not cut short). `LiveRtcpTests`: the video's BYE over the
+  connection and over UDP makes the player connect again after 0.5 s with the test's clock short of the stall timeout;
+  the sound's BYE beside a video ends nothing.
 - **Not tried yet:** a camera or server that drops a reader without them. mediamtx plays with and without.
 
 ### Capture times
@@ -506,9 +510,10 @@ the clip's, with no lost packet, damaged frame or reconnect.
 
   So live555MediaServer itself needs no receiver reports from a reader that sends keep-alives. A camera built on
   live555 that doesn't count `GET_PARAMETER` would need them; none was in reach.
-- **At a file's end** live555 sends an RTCP BYE and stops, leaving the connection open. `LivePlayer` doesn't read BYE
-  (docs/decisions/2026-11-15-live-rtcp.md, point 4): it stalls for 5 s, reconnects, and the file plays again from its
-  start (620 frames of a 500-frame clip: 1 reconnect, all the clip's).
+- **At a file's end** live555 sends an RTCP BYE and stops, leaving the connection open. `LivePlayer` didn't read BYE
+  then: it stalled for 5 s, reconnected, and the file played again from its start (620 frames of a 500-frame clip: 1
+  reconnect, all the clip's). It reads BYE since (docs/decisions/2026-11-15-live-rtcp.md, Since) and connects again
+  after 0.5 s; not yet run against live555.
 - **Each IDR picture cost a frame not shown** with B pictures (`dropped` 8 of 408, 45 of 2295: one a 2 s GOP). Probably
   the decoder gives its held frames at once at an IDR picture, and the player shows the newest; not looked into.
   Without B pictures, none.
@@ -959,6 +964,21 @@ test checks that, that they never go back, and that none is after its pts. Audio
 file (FFmpeg's muxer writes no DefaultDuration for AAC; libavformat fills in 1024 samples' worth, rounded down) run
 to the track's next frame, which the test checks against FFmpeg's next pts; Opus's durations come from FFmpeg's
 parser, which reads the packets, so they too are compared that way.
+
+## Several sound tracks (MP4, QuickTime, Matroska, AVI)
+
+`Mp4Demuxer`, `MatroskaDemuxer` and `AviDemuxer` list every sound track (`AudioTracks`), with ffprobe's stream index,
+language, title and default disposition, and give the one FFmpeg's command line plays until another is chosen
+(docs/decisions/2026-11-15-sound-tracks.md, where what each file says and how FFmpeg reads it are measured).
+`AudioTracksTests` compares the list with ffprobe's (name.audiotracks.json) and `Audio` with the stream FFmpeg's command
+line maps (name.audioplayed) on every MP4, QuickTime, Matroska and AVI sample; the conformance tests compare every track's
+packets with FFmpeg's, each read alone and several in one pass. The samples: mp4-audio-tracks (the second track marked
+default), mov-audio-tracks (QuickTime's Macintosh language codes), mkv-audio-tracks (the first marked default, with
+fewer channels) and mkv-audio-nodefault (none marked: the most channels), and avi-audio-channels (AVI marks none: a mono stream before a
+stereo one, the second plays). What FFmpeg's muxers don't write is checked
+by patching: Matroska without Language or FlagDefault, or with "und", and every Macintosh language code (0 to 0x3FF)
+and the packed codes' top bit, each against ffprobe's answer. Channels are ffprobe's decoder's (HE-AAC's parametric
+stereo reports two for a mono track) and are compared on the samples made for the choice only.
 
 ## MXF demuxing
 

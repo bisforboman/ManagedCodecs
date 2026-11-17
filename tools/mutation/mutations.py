@@ -177,6 +177,47 @@ MUTATIONS = [
          find="long pts = state.Bytes / blockSize;", replace="long pts = state.Position; state.Position += length / blockSize;",
          tests="FullyQualifiedName~AviDemuxerTests"),
 
+    # ---- Several sound tracks in MP4 and Matroska (docs/decisions/2026-11-15-sound-tracks.md): FFmpeg's choice and reading, measured
+    # The track FFmpeg's command line plays: the default flag before the channels ...
+    dict(file="src/ManagedCodecs.Containers/DefaultAudioTrack.cs",
+         find="a.IsDefault != b.IsDefault ? a.IsDefault : a.Channels > b.Channels", replace="a.Channels > b.Channels",
+         tests="FullyQualifiedName~AudioTracksTests"),
+    # ... and the channels between equals (mkv-audio-nodefault).
+    dict(file="src/ManagedCodecs.Containers/DefaultAudioTrack.cs",
+         find="a.IsDefault != b.IsDefault ? a.IsDefault : a.Channels > b.Channels", replace="a.IsDefault && !b.IsDefault",
+         tests="FullyQualifiedName~AudioTracksTests"),
+    # AVI marks no stream default: the most channels plays (avi-audio-channels), not the first.
+    dict(file="src/ManagedCodecs.Containers/Avi/AviDemuxer.cs",
+         find="int played = DefaultAudioTrack.Of(AudioTracks);", replace="int played = AudioTracks.Count > 0 ? 0 : -1;",
+         tests="FullyQualifiedName~AudioTracksTests"),
+    # Matroska's missing Language and FlagDefault are the specification's defaults, and "und" is no language to ffprobe.
+    dict(file="src/ManagedCodecs.Containers/Matroska/MatroskaDemuxer.cs",
+         find='public string Language { get; set; } = "eng";', replace='public string Language { get; set; } = "und";',
+         tests="FullyQualifiedName~AudioTracksTests"),
+    dict(file="src/ManagedCodecs.Containers/Matroska/MatroskaDemuxer.cs",
+         find="public bool FlagDefault { get; set; } = true;", replace="public bool FlagDefault { get; set; }",
+         tests="FullyQualifiedName~AudioTracksTests"),
+    dict(file="src/ManagedCodecs.Containers/Matroska/MatroskaDemuxer.cs",
+         find='Language = audio.Language == "und" ? null : audio.Language,', replace="Language = audio.Language,",
+         tests="FullyQualifiedName~AudioTracksTests"),
+    # An audio track it can't read is left out only while another can be read.
+    dict(file="src/ManagedCodecs.Containers/Matroska/MatroskaDemuxer.cs",
+         find="if (track.Unsupported is null || audio.TrueForAll(t => t.Unsupported is not null))", replace="if (true)",
+         tests="FullyQualifiedName~MatroskaDemuxerTests"),
+    # MP4's language: FFmpeg's Macintosh codes, 0x7FFF none, and the packed letters' top bit ignored.
+    dict(file="src/ManagedCodecs.Containers/Mp4/Mp4Demuxer.cs",
+         find="0x7FFF => null,", replace="0x7FFF => \"und\",",
+         tests="FullyQualifiedName~AudioTracksTests"),
+    dict(file="src/ManagedCodecs.Containers/Mp4/Mp4Demuxer.cs",
+         find="letters[0] = (char)(((c >> 10) & 31) + 0x60);", replace="letters[0] = (char)((c >> 10) + 0x60);",
+         tests="FullyQualifiedName~AudioTracksTests"),
+    # A track chosen after a seek starts at the time sought.
+    dict(file="src/ManagedCodecs.Containers/Mp4/Mp4Demuxer.cs",
+         find="_audioStarts[i] = _audioTables[i].KeyframeAtOrBefore(", replace="_audioStarts[i] = 0 * _audioTables[i].KeyframeAtOrBefore(",
+         tests="FullyQualifiedName~AudioTracksTests"),
+    dict(file="src/ManagedCodecs.Containers/Matroska/MatroskaDemuxer.cs",
+         find="for (int slot = 0; slot < _tracks.Length; slot++)", replace="for (int slot = 0; slot < 2; slot++)",
+         tests="FullyQualifiedName~AudioTracksTests"),
     # ---- MXF partitions (SMPTE ST 377-1): rules only some files reach
     # A key's byte 8 (the registry version) is ignored: earlier encoders wrote the fill item's with version 1 (6.3.3).
     dict(file="src/ManagedCodecs.Containers/Mxf/Klv.cs",
@@ -343,6 +384,19 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
          find="if (setup.Status == 461 && source.Secure)", replace="if (false)",
          tests="FullyQualifiedName~LiveRtspsTests"),
+    # ---- A stream with sound only (docs/decisions/2026-11-16-live-audio-only.md), which no camera recording has: refused
+    # unless RtspSource.Audio asks for sound ...
+    dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
+         find="if (!source.Audio)", replace="if (false)",
+         tests="FullyQualifiedName~LiveRtspAudioOnlyTests.FailsWithoutAudioSayingSo"),
+    # ... the sound's packets make the player Playing ...
+    dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
+         find="            SetState(LiveState.Playing);\n            packets(packet);", replace="            packets(packet);",
+         tests="FullyQualifiedName~LiveRtspAudioOnlyTests.PlaysTheSoundAsTheDecoderDecodesIt"),
+    # ... and interleaved AAC, which beside a video only turns the sound off, ends the player.
+    dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
+         find="throw new FatalException(e); // nothing else to play", replace="_error = e;",
+         tests="FullyQualifiedName~LiveRtspAudioOnlyTests.FailsOnInterleavedAccessUnits"),
     dict(file="src/ManagedCodecs.Playback/Rtsp/RtspConnection.cs",
          find="return sha.ComputeHash(certificate.GetRawCertData()).AsSpan().SequenceEqual(pinned);", replace="return true;",
          tests="FullyQualifiedName~LiveRtspsTests"),
@@ -360,7 +414,11 @@ MUTATIONS = [
          tests="DisplayName~mxf-d10-pcm24-cut"),
     # Only an MXF file's mono tracks play as left and right: elsewhere two mono tracks may be two languages (#535).
     dict(file="src/ManagedCodecs.Playback/AudioPipeline.cs",
-         find="var right = demuxer is MxfDemuxer && track.Channels == 1", replace="var right = track.Channels == 1",
+         find="var right = options.PairMonoTracks && demuxer is MxfDemuxer && track.Channels == 1", replace="var right = options.PairMonoTracks && track.Channels == 1",
+         tests="FullyQualifiedName~AudioPlayerTests"),
+    # PairMonoTracks false plays an MXF file's mono track alone (as players before 0.18.0 did).
+    dict(file="src/ManagedCodecs.Playback/AudioPipeline.cs",
+         find="var right = options.PairMonoTracks && demuxer", replace="var right = demuxer",
          tests="FullyQualifiedName~AudioPlayerTests"),
     # A clip of sound the file ends in keeps its last bytes, not whole samples only (mxf-opatom-pcm-cut).
     dict(file="src/ManagedCodecs.Containers/Mxf/MxfDemuxer.cs",
@@ -410,9 +468,10 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.Containers/Mp4/Mp4Demuxer.cs",
          find="if (Sizes[i] != 0 && IsKeyframe(i) && Pts(i) <= pts)", replace="if (Sizes[i] != 0 && IsKeyframe(i) && Pts(i) < pts)",
          tests="FullyQualifiedName~SeekTests"),
-    # The other stream starts at the same instant, not at its beginning.
+    # The other stream starts at the same instant, not at its beginning (seeking by the audio, the video's start).
     dict(file="src/ManagedCodecs.Containers/Mp4/Mp4Demuxer.cs",
-         find="int otherStart = otherBase is { } b ? other.KeyframeAtOrBefore(Timestamps.Rescale(pts, seekedBase, b)) : 0;", replace="int otherStart = 0;",
+         find="_videoStart = Video is { } v ? _video.KeyframeAtOrBefore(Timestamps.Rescale(pts, timeBase, v.TimeBase)) : 0;",
+         replace="_videoStart = Video is { } v && timeBase == v.TimeBase ? _video.KeyframeAtOrBefore(pts) : 0;",
          tests="FullyQualifiedName~SeekTests"),
 
     # ---- Matroska (as FFmpeg reads it)
@@ -956,6 +1015,18 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
          find="senders.Add((rtcp, Sender(udp, serverRtcp)));", replace="",
          tests="FullyQualifiedName~LiveRtcpTests.ReportsOverUdpFromTheRtcpPortWithWhatWasLost"),
+    # ---- RTCP BYE (docs/decisions/2026-11-15-live-rtcp.md, Since): only the stream's BYE ends it ...
+    dict(file="src/ManagedCodecs.Playback/Rtsp/RtcpSession.cs",
+         find="goodbye |= BinaryPrimitives.ReadUInt32BigEndian(packet.Slice(4 + (4 * i))) == _source;", replace="goodbye = true;",
+         tests="FullyQualifiedName~RtcpSessionTests.SaysWhenTheSenderSaysGoodbyeForTheStream"),
+    # ... and ends the session at once, over the connection ...
+    dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
+         find="                if (rtcp.Report(message.Data, _clock.Elapsed))\n                {\n                    goodbye();\n                }", replace="                rtcp.Report(message.Data, _clock.Elapsed);",
+         tests="FullyQualifiedName~LiveRtcpTests.ConnectsAgainAtOnceWhenTheServerSaysGoodbye"),
+    # ... and over UDP.
+    dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
+         find="Observe(ReadReportsAsync(udp, server, rtcp, Goodbye(connection, cancel)));", replace="Observe(ReadReportsAsync(udp, server, rtcp, null));",
+         tests="FullyQualifiedName~LiveRtcpTests.ConnectsAgainAtOnceWhenTheServerSaysGoodbye"),
     # ---- A lossy network (LossyNetworkTests, issue #527): a gap inside a unit ended by its own marker damages only it ...
     dict(file="src/ManagedCodecs.Playback/RtpH264Depacketizer.cs",
          find="            _gapBeforeNext = false;\n            completed.Add(Complete(damaged: false));", replace="            completed.Add(Complete(damaged: false));",
@@ -987,7 +1058,8 @@ MUTATIONS = [
          tests="FullyQualifiedName~LiveRtcpTests.PlacesAnAacPacketsLaterFramesByTheLengthOfThoseBeforeThem"),
     # ---- Audio over RTSP (docs/decisions/2026-11-15-live-rtsp-audio.md): no second SETUP unless RtspSource.Audio asks ...
     dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
-         find="if (source.Audio && sdp.Audio is { } audioTrack)", replace="if (sdp.Audio is { } audioTrack)",
+         find="if (track is not null && source.Audio && sdp.Audio is { } audioTrack)",
+         replace="if (track is not null && sdp.Audio is { } audioTrack)",
          tests="FullyQualifiedName~LiveRtspAudioTests.SetsUpNoAudioUnlessAskedTo"),
     # ... the audio's packets don't count against a stall, on the RTSP connection ...
     dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",

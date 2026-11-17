@@ -269,6 +269,25 @@ public sealed record AudioStreamInfo(
     /// nearest). 0 where the container says nothing.
     /// </summary>
     public long Duration { get; init; }
+
+    /// <summary>
+    /// The track's language as the container gives it and ffprobe reports it (its <c>language</c> tag): ISO 639-2 in
+    /// MP4 (the 'mdhd' language, "und" included) and Matroska (its Language, "eng" where the element is missing as the
+    /// specification's default, null for "und"); null where the container has none.
+    /// </summary>
+    public string? Language { get; init; }
+
+    /// <summary>The track's name as the container gives it and ffprobe reports it (its <c>title</c> tag: Matroska's Name), or null.</summary>
+    public string? Title { get; init; }
+
+    /// <summary>
+    /// Whether the container marks the track as one to play by default, as ffprobe's <c>disposition:default</c>:
+    /// Matroska's FlagDefault (set where the element is missing, the specification's default), MP4's 'tkhd'
+    /// track_enabled. A container without such a flag leaves it false. <see cref="IDemuxer.Audio"/> is, until the
+    /// caller chooses (<see cref="IDemuxer.SelectAudio"/>), the track FFmpeg's command line plays: of those marked
+    /// default (or, where none is, of them all) the one with the most channels, the first of equals.
+    /// </summary>
+    public bool IsDefault { get; init; }
 }
 
 /// <summary>Reads packets out of a container format (AVI, MP4, ...).</summary>
@@ -278,8 +297,9 @@ public interface IDemuxer : IDisposable
     VideoStreamInfo? Video { get; }
 
     /// <summary>
-    /// The audio stream <see cref="ReadPackets"/> gives: the file's first, or the first of those chosen with
-    /// <see cref="SelectAudio"/>. Null if there is none (or the container does not expose audio).
+    /// The audio stream <see cref="ReadPackets"/> gives: the first of those chosen with <see cref="SelectAudio"/>, and
+    /// until a choice is made the one FFmpeg's command line plays (<see cref="AudioStreamInfo.IsDefault"/>; the file's
+    /// first where no track is marked, as in MXF). Null if there is none (or the container does not expose audio).
     /// </summary>
     AudioStreamInfo? Audio { get; }
 
@@ -293,7 +313,7 @@ public interface IDemuxer : IDisposable
     /// <summary>
     /// Chooses the audio streams the next <see cref="ReadPackets"/> (or another read started after this call) gives,
     /// beside the video: one, or several to read them in one pass, interleaved in file order.
-    /// <see cref="Audio"/> becomes the first one named. Until it is called the file's first audio stream is read alone.
+    /// <see cref="Audio"/> becomes the first one named. Until it is called <see cref="Audio"/> is read alone.
     /// A stream's packets are the same whichever others are read with it. This default, for a demuxer that reads one
     /// audio stream, takes that stream only.
     /// </summary>

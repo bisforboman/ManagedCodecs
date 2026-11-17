@@ -22,7 +22,6 @@ public class Mp4ConformanceTests
         var lines = File.ReadAllLines(TestSamples.ReferenceOf(sampleName, ".packets.framemd5"));
 
         using var demuxer = Mp4Demuxer.Open(TestSamples.PathOf(sampleName));
-        var packets = demuxer.ReadPackets().ToList();
         bool fragmented = HasMovieFragments(TestSamples.PathOf(sampleName));
 
         // framemd5 numbers streams as FFmpeg maps them: video first, then audio; ffprobe by track.
@@ -32,15 +31,31 @@ public class Mp4ConformanceTests
             streams.Add((video.StreamIndex, video.FrameCount, video.CodecPrivate));
         }
 
-        if (demuxer.Audio is { } audio)
+        // Every sound track (several in mp4-audio-tracks and mkv-audio-tracks), each read after choosing it.
+        int? played = demuxer.Audio?.StreamIndex;
+        foreach (var audio in demuxer.AudioTracks)
         {
             streams.Add((audio.StreamIndex, audio.FrameCount, audio.CodecPrivate));
         }
+
+        var reads = streams.Where(s => s.Index != demuxer.Video?.StreamIndex).ToDictionary(s => s.Index, s =>
+        {
+            demuxer.SelectAudio(s.Index);
+            return demuxer.ReadPackets().ToList();
+        });
+        if (played is { } chosen)
+        {
+            demuxer.SelectAudio(chosen);
+        }
+
+        var packets = demuxer.ReadPackets().ToList();
 
         Assert.Equal(expected.Select(e => e.StreamIndex).Distinct().Order(), streams.Select(s => s.Index).Order());
         for (int mapped = 0; mapped < streams.Count; mapped++)
         {
             var (index, count, codecPrivate) = streams[mapped];
+
+            // framemd5 maps every video and audio stream (-map 0:v? -map 0:a?): the video first, then the audio in file order.
             var extradata = FrameMd5.ParseExtradata(lines, mapped);
             if (extradata is null)
             {
@@ -52,7 +67,7 @@ public class Mp4ConformanceTests
             }
 
             var theirs = expected.Where(e => e.StreamIndex == index).ToList();
-            var ours = packets.Where(p => p.StreamIndex == index).ToList();
+            var ours = (reads.TryGetValue(index, out var read) ? read : packets).Where(p => p.StreamIndex == index).ToList();
             Assert.Equal(theirs.Count, ours.Count);
             Assert.Equal(theirs.Count, count);
 

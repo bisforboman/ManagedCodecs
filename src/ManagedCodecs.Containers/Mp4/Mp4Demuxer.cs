@@ -45,13 +45,18 @@ public sealed class Mp4Demuxer : IDemuxer
     private readonly Stream _stream;
     private readonly bool _leaveOpen;
 
-    // The samples of each exposed track (empty without one), merged in file order as they are read.
+    // The samples of each exposed track (empty without one), merged in file order as they are read: the video's, and
+    // the chosen audio track's of every audio track's.
     private readonly SampleTable _video;
-    private readonly SampleTable _audio;
+    private readonly SampleTable[] _audioTables = [];
+    private readonly AudioStreamInfo[] _audioStreams = [];
+
+    // The audio tracks ReadPackets gives (SelectAudio, positions in _audioTables), Audio's first.
+    private int[] _selected = [];
 
     // Where each track's samples start, 0 until a Seek moves them.
     private int _videoStart;
-    private int _audioStart;
+    private int[] _audioStarts = [];
 
     /// <summary>Reads the file's headers ('moov' and, in fragmented files, every 'moof'); packets are read from the stream later, by <see cref="ReadPackets"/>.</summary>
     /// <param name="stream">A seekable stream holding the file, which <see cref="Dispose"/> disposes.</param>
@@ -104,7 +109,7 @@ public sealed class Mp4Demuxer : IDemuxer
             uint movieTimescale = 0;
             var movieMatrix = Matrix.Identity;
             Track? video = null;
-            Track? audio = null;
+            var audios = new List<Track>();
             int trackIndex = 0;
             int priming = 0;
             ReadOnlySpan<byte> mvex = default;
@@ -124,9 +129,9 @@ public sealed class Mp4Demuxer : IDemuxer
                     {
                         video = new Track(payload, isAudio: false) { StreamIndex = trackIndex };
                     }
-                    else if (audio is null && handler == Box.Soun)
+                    else if (handler == Box.Soun)
                     {
-                        audio = new Track(payload, isAudio: true) { StreamIndex = trackIndex };
+                        audios.Add(new Track(payload, isAudio: true) { StreamIndex = trackIndex });
                     }
 
                     trackIndex++;
@@ -141,14 +146,14 @@ public sealed class Mp4Demuxer : IDemuxer
                 }
             }
 
-            if (video is null && audio is null)
+            if (video is null && audios.Count == 0)
             {
                 throw new InvalidDataException("MP4 file has no video or audio track.");
             }
 
             if (hasFragments)
             {
-                Track?[] fragmentTracks = [video, audio];
+                Track?[] fragmentTracks = [video, .. audios];
                 ReadTrackExtends(mvex, fragmentTracks);
                 ReadFragments(stream, fragmentTracks);
             }
@@ -156,7 +161,6 @@ public sealed class Mp4Demuxer : IDemuxer
             // A track not asked for is still read as far as its fragments go (where a later fragment's data starts can
             // depend on its), but builds no sample table.
             _video = new SampleTable(0, 0);
-            _audio = new SampleTable(0, 0);
             if (video is not null && tracks.HasFlag(MediaTypes.Video))
             {
                 var samples = video.BuildSamples(movieTimescale);
@@ -191,26 +195,40 @@ public sealed class Mp4Demuxer : IDemuxer
                 };
             }
 
-            if (audio is not null && tracks.HasFlag(MediaTypes.Audio))
+            if (tracks.HasFlag(MediaTypes.Audio))
             {
-                var samples = audio.BuildSamples(movieTimescale);
-                if (priming > 0 && !audio.HasEditList && samples.Count > 0)
+                _audioTables = new SampleTable[audios.Count];
+                _audioStreams = new AudioStreamInfo[audios.Count];
+                for (int i = 0; i < audios.Count; i++)
                 {
-                    samples.SkipSamples[0] = priming;
+                    var audio = audios[i];
+                    var samples = audio.BuildSamples(movieTimescale);
+
+                    // The iTunes tag is the movie's: it primes the first audio track, as it did when that was the only one read.
+                    if (i == 0 && priming > 0 && !audio.HasEditList && samples.Count > 0)
+                    {
+                        samples.SkipSamples[0] = priming;
+                    }
+
+                    _audioTables[i] = samples;
+                    _audioStreams[i] = new AudioStreamInfo(
+                        audio.Codec,
+                        audio.SampleRate,
+                        audio.Channels,
+                        samples.Sizes.Count(size => size > 0),
+                        new Rational(1, checked((int)audio.Timescale)),
+                        audio.CodecPrivate,
+                        audio.StreamIndex)
+                    {
+                        Duration = audio.StreamDuration(movieTimescale, samples),
+                        Language = audio.Language,
+                        IsDefault = audio.Enabled,
+                    };
                 }
 
-                _audio = samples;
-                Audio = new AudioStreamInfo(
-                    audio.Codec,
-                    audio.SampleRate,
-                    audio.Channels,
-                    samples.Sizes.Count(size => size > 0),
-                    new Rational(1, checked((int)audio.Timescale)),
-                    audio.CodecPrivate,
-                    audio.StreamIndex)
-                {
-                    Duration = audio.StreamDuration(movieTimescale, samples),
-                };
+                _audioStarts = new int[audios.Count];
+                int played = DefaultAudioTrack.Of(_audioStreams);
+                _selected = played < 0 ? [] : [played];
             }
         }
         catch (Exception e)
@@ -226,6 +244,36 @@ public sealed class Mp4Demuxer : IDemuxer
 
     /// <inheritdoc/>
     public VideoStreamInfo? Video { get; }
+
+    // The Macintosh language codes FFmpeg 6.1 names, by code ("" for none), as ffprobe reports each when it is patched into
+    // a QuickTime file's 'mdhd' (2026-11-16): Apple's codes, in FFmpeg's ISO 639-2 spelling.
+    private static readonly string[] MacintoshLanguages =
+    [
+        "eng", "fra", "ger", "ita", "dut", "sve", "spa", "dan", "por", "nor", "heb", "jpn", "ara", "fin", "gre",
+        "ice", "mlt", "tur", "hr", "chi", "urd", "hin", "tha", "kor", "lit", "pol", "hun", "est", "lav", "smi", "fo",
+        "per", "rus", "chi", "", "iri", "alb", "ron", "ces", "slk", "slv", "yid", "sr", "mac", "bul", "ukr", "bel",
+        "uzb", "kaz", "aze", "aze", "arm", "geo", "mol", "kir", "tgk", "tuk", "mon", "", "pus", "kur", "kas", "snd",
+        "tib", "nep", "san", "mar", "ben", "asm", "guj", "pa", "ori", "mal", "kan", "tam", "tel", "sin", "bur", "khm",
+        "lao", "vie", "ind", "tgl", "may", "may", "amh", "tir", "orm", "som", "swa", "kin", "run", "nya", "mlg",
+        "epo", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
+        "", "", "", "", "", "", "", "wel", "baq", "cat", "lat", "que", "grn", "aym", "tat", "uig", "dzo", "jav",
+    ];
+
+    /// <summary>
+    /// An 'mdhd' language as FFmpeg reads it: below 0x400 a Macintosh language code (<see cref="MacintoshLanguages"/>),
+    /// 0x7FFF none, else three letters of five bits each plus 0x60 (ISO 639-2/T, 14496-12 8.4.2), the top bit ignored.
+    /// </summary>
+    internal static string? LanguageOf(ushort code) => code switch
+    {
+        < 0x400 => code < MacintoshLanguages.Length && MacintoshLanguages[code].Length > 0 ? MacintoshLanguages[code] : null,
+        0x7FFF => null,
+        _ => string.Create(3, code, static (letters, c) =>
+        {
+            letters[0] = (char)(((c >> 10) & 31) + 0x60);
+            letters[1] = (char)(((c >> 5) & 31) + 0x60);
+            letters[2] = (char)((c & 31) + 0x60);
+        }),
+    };
 
     /// <summary>
     /// The encoder delay an iTunes-style tag gives, in decoded samples (moov/udta/meta/ilst, a '----' item named
@@ -263,7 +311,44 @@ public sealed class Mp4Demuxer : IDemuxer
     }
 
     /// <inheritdoc/>
-    public AudioStreamInfo? Audio { get; }
+    /// <remarks>
+    /// The language is the 'mdhd' one as FFmpeg 6.1 reads it: ISO 639-2/T packed in three letters ("und" included), or
+    /// below 0x400 a Macintosh language code, which FFmpeg turns into an ISO 639-2 code by a table of its own (taken here
+    /// by reading ffprobe's answer for each code: docs/decisions/2026-11-16-audio-tracks.md); null for 0x7FFF and the
+    /// codes it doesn't name. <see cref="AudioStreamInfo.IsDefault"/> is 'tkhd' track_enabled (14496-12 8.3.2), which
+    /// FFmpeg reports as the default disposition. MP4 gives no title (FFmpeg's muxer writes none).
+    /// </remarks>
+    public AudioStreamInfo? Audio => _selected.Length > 0 ? _audioStreams[_selected[0]] : null;
+
+    /// <inheritdoc/>
+    public IReadOnlyList<AudioStreamInfo> AudioTracks => _audioStreams;
+
+    /// <inheritdoc/>
+    public void SelectAudio(params int[] streamIndexes)
+    {
+        ArgumentNullException.ThrowIfNull(streamIndexes);
+        if (streamIndexes.Length == 0)
+        {
+            throw new ArgumentException("At least one audio stream must be selected.", nameof(streamIndexes));
+        }
+
+        var selected = new int[streamIndexes.Length];
+        for (int i = 0; i < selected.Length; i++)
+        {
+            selected[i] = Array.FindIndex(_audioStreams, a => a.StreamIndex == streamIndexes[i]);
+            if (selected[i] < 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(streamIndexes), streamIndexes[i], "No audio stream of the MP4 demuxer has this index.");
+            }
+
+            if (Array.IndexOf(selected, selected[i], 0, i) >= 0)
+            {
+                throw new ArgumentException($"Audio stream {streamIndexes[i]} is selected twice.", nameof(streamIndexes));
+            }
+        }
+
+        _selected = selected;
+    }
 
     /// <summary>Opens the file at <paramref name="path"/>, which the demuxer disposes with itself.</summary>
     public static Mp4Demuxer Open(string path) => new(File.OpenRead(path));
@@ -279,20 +364,22 @@ public sealed class Mp4Demuxer : IDemuxer
     /// Times are those of the packets, edits applied, so a time a packet of the stream has finds it. The keyframe is
     /// the last one in decode order whose pts is at or before <paramref name="pts"/>: then every frame shown from that
     /// time on decodes from it (a frame with an earlier pts than its keyframe's, a leading B frame of an open GOP, is not
-    /// shown from that time). The other track starts the same way at the same instant; every audio sample is a
-    /// keyframe.
+    /// shown from that time). Every other track, chosen or not, starts the same way at the same instant, and
+    /// <paramref name="streamIndex"/> may be any of <see cref="AudioTracks"/>; every audio sample is a keyframe.
     /// </remarks>
     public void Seek(long pts, int streamIndex)
     {
-        var (seeked, other, seekedBase, otherBase) =
-            // A track without samples is still the stream: its read starts (and ends) at the beginning.
-            Video is { } video && streamIndex == video.StreamIndex ? (_video, _audio, video.TimeBase, Audio?.TimeBase)
-            : Audio is { } audio && streamIndex == audio.StreamIndex ? (_audio, _video, audio.TimeBase, Video?.TimeBase)
+        int audio = Array.FindIndex(_audioStreams, a => a.StreamIndex == streamIndex);
+        var timeBase = Video is { } video && streamIndex == video.StreamIndex ? video.TimeBase
+            : audio >= 0 ? _audioStreams[audio].TimeBase
             : throw new ArgumentOutOfRangeException(nameof(streamIndex), streamIndex, "No video or audio stream of the file has this index.");
 
-        int start = seeked.KeyframeAtOrBefore(pts);
-        int otherStart = otherBase is { } b ? other.KeyframeAtOrBefore(Timestamps.Rescale(pts, seekedBase, b)) : 0;
-        (_videoStart, _audioStart) = ReferenceEquals(seeked, _video) ? (start, otherStart) : (otherStart, start);
+        // Every track, chosen or not, starts at the same instant (a track without samples at its beginning, and end).
+        _videoStart = Video is { } v ? _video.KeyframeAtOrBefore(Timestamps.Rescale(pts, timeBase, v.TimeBase)) : 0;
+        for (int i = 0; i < _audioTables.Length; i++)
+        {
+            _audioStarts[i] = _audioTables[i].KeyframeAtOrBefore(Timestamps.Rescale(pts, timeBase, _audioStreams[i].TimeBase));
+        }
     }
 
     /// <summary>
@@ -320,15 +407,28 @@ public sealed class Mp4Demuxer : IDemuxer
     // packets numbered as they are from the start.
     private IEnumerable<(SampleTable Track, int Index, long Sequence)> Samples()
     {
-        int v = _videoStart;
-        int a = _audioStart;
-        long videoPackets = _video.PacketsBefore(v);
-        long audioPackets = _audio.PacketsBefore(a);
-        for (int i = 0; v < _video.Count || a < _audio.Count; i++)
+        // The video's samples and each chosen audio track's: a cursor and a packet count each.
+        SampleTable[] tracks = [_video, .. _selected.Select(t => _audioTables[t])];
+        int[] next = [_videoStart, .. _selected.Select(t => _audioStarts[t])];
+        long[] packets = [.. tracks.Select((track, t) => track.PacketsBefore(next[t]))];
+        for (int i = 0; ; i++)
         {
-            bool fromVideo = a == _audio.Count || (v < _video.Count && _video.Offsets[v] <= _audio.Offsets[a]);
-            var track = fromVideo ? _video : _audio;
-            int index = fromVideo ? v++ : a++;
+            int from = -1;
+            for (int t = 0; t < tracks.Length; t++)
+            {
+                if (next[t] < tracks[t].Count && (from < 0 || tracks[t].Offsets[next[t]] < tracks[from].Offsets[next[from]]))
+                {
+                    from = t;
+                }
+            }
+
+            if (from < 0)
+            {
+                yield break;
+            }
+
+            var track = tracks[from];
+            int index = next[from]++;
             int size = track.Sizes[index];
             if (size == 0)
             {
@@ -341,7 +441,7 @@ public sealed class Mp4Demuxer : IDemuxer
                 throw new InvalidDataException($"Sample {i} lies outside the file.");
             }
 
-            yield return (track, index, fromVideo ? videoPackets++ : audioPackets++);
+            yield return (track, index, packets[from]++);
         }
     }
 
@@ -729,6 +829,7 @@ public sealed class Mp4Demuxer : IDemuxer
             if (FindChild(trak, Box.Tkhd, out var tkhd))
             {
                 TrackId = ReadUInt32(tkhd, tkhd.Length > 0 && tkhd[0] == 1 ? 20 : 12);
+                Enabled = tkhd.Length >= 4 && (tkhd[3] & 1) != 0;
                 Matrix = Matrix.Read(tkhd, tkhd.Length > 0 && tkhd[0] == 1 ? 52 : 40);
             }
 
@@ -743,6 +844,8 @@ public sealed class Mp4Demuxer : IDemuxer
             }
 
             Timescale = ReadUInt32(mdhd, mdhd.Length > 0 && mdhd[0] == 1 ? 20 : 12);
+            int languageAt = mdhd.Length > 0 && mdhd[0] == 1 ? 32 : 20;
+            Language = mdhd.Length >= languageAt + 2 ? LanguageOf(BinaryPrimitives.ReadUInt16BigEndian(mdhd[languageAt..])) : null;
             MediaDuration = mdhd.Length > 0 && mdhd[0] == 1
                 ? (long)Math.Min(BinaryPrimitives.ReadUInt64BigEndian(Require(mdhd, 32, "mdhd")[24..]), long.MaxValue)
                 : ReadUInt32(Require(mdhd, 20, "mdhd"), 16);
@@ -787,6 +890,12 @@ public sealed class Mp4Demuxer : IDemuxer
 
         /// <summary>track_ID from 'tkhd', which 'trex' and 'tfhd' refer to.</summary>
         public uint TrackId { get; }
+
+        /// <summary>The 'tkhd' track_enabled flag.</summary>
+        public bool Enabled { get; }
+
+        /// <summary>The 'mdhd' language as FFmpeg reads it (<see cref="LanguageOf"/>), or null.</summary>
+        public string? Language { get; }
 
         public uint Timescale { get; }
 

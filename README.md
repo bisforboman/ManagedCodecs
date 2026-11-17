@@ -77,7 +77,9 @@ writes a feature, unit tests and hand-built or rewritten streams cover it. [docs
 says feature by feature which encoder made the samples (libx264, OpenH264, JM) and what is not checked. Every night
 the [real-world check](https://github.com/bisforboman/ManagedCodecs/actions/workflows/realworld.yml)
 (`tools/realworld.py`) decodes six of Blender's open movies, real H.264 and AAC from real encoders, and four cameras' MJPEG against FFmpeg:
-every frame identical, the audio within 2^-17. On every pull request (docs-only ones skip its steps) the
+every frame identical, the audio within 2^-17. It also reads four MXF files from writers other than FFmpeg (two of
+archive.org's `mxfburger`, MPEG-2 and PCM, and the first megabytes of two NASA broadcast files, MPEG-2 and 4K H.264)
+and compares them with FFmpeg's demuxer packet by packet: size, MD5, times, keyframes and durations. On every pull request (docs-only ones skip its steps) the
 [mutation check](https://github.com/bisforboman/ManagedCodecs/actions/workflows/mutation.yml)
 (`tools/mutation/mutate.py`) breaks, one at a time, the guards a passing test could miss (the frame threading waits,
 and code that reproduces FFmpeg's reading where it differs from the spec), and needs a test to fail for each.
@@ -549,8 +551,8 @@ if (player.TakeLatest() is { } frame)
   - A server that refuses both (461 again, a camera set to multicast only) gets asked for RTP to a multicast group:
     the group and ports its answer names are joined, and the receiver reports go to the group.
   - Final answers: 401 after the challenge's answer, 403, 404, 454, 461 to RTP over the connection, over UDP and to
-    a multicast group, an SDP with no H.264 or JPEG track or with H.264 in RTP's interleaved mode, and a JPEG type or
-    Q RFC 2435 reserves.
+    a multicast group, an SDP with no H.264 or JPEG track (unless it has sound and `Audio` is on: below) or with
+    H.264 in RTP's interleaved mode, and a JPEG type or Q RFC 2435 reserves.
   - Checked against GStreamer's RTSP server by hand, and nightly against mediamtx, over UDP too (docs/conformance.md,
     H.264 over RTSP, JPEG over RTP, RTP over UDP).
   - **RTSPS:** an `rtsps://` URL (port 322 by default) plays over TLS, RTP inside the encrypted connection; a server
@@ -577,6 +579,10 @@ if (player.TakeLatest() is { } frame)
   - Sound never stops the picture: a camera that refuses the audio's SETUP plays without it (`Error` says why), audio
     of another kind (Opus, LATM with its config in the stream) is named by `SkippedAudioCodec`, and lost packets are a gap in the sound.
   - Off by default: without `Audio` the session is for the video alone.
+  - **Sound only:** a stream with an audio track and no H.264 or JPEG one plays with `Audio` on, the sound as the
+    session's one track: its packets make the player `Playing` and are what `StallTimeout` watches, and `TakeLatest()`
+    stays null (`LivePlayer.Audio` says what plays). Without `Audio`, or with sound that doesn't play, the player fails
+    and `Error` says why (docs/decisions/2026-11-16-live-audio-only.md).
   - `mclive` and `mclive-wpf` stay silent (neither Avalonia nor WPF plays raw samples without a native library or a
     platform API).
   - Checked nightly against mediamtx, over the connection and over UDP (docs/conformance.md, Audio over RTSP).

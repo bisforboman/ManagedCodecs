@@ -45,6 +45,32 @@ internal sealed record RtcpReport(uint Ssrc, List<RtcpReportBlock> Blocks, strin
     /// <summary>A time as NTP's seconds since 1900 (of the era up to 2036).</summary>
     public static uint NtpSeconds(DateTime time) => (uint)(time - new DateTime(1900, 1, 1, 0, 0, 0, DateTimeKind.Utc)).TotalSeconds;
 
+    /// <summary>A BYE (6.6) for the SSRCs.</summary>
+    public static byte[] Bye(params uint[] sources) => Bye(sources, null);
+
+    /// <summary>A BYE (6.6) for the SSRCs, with a reason after them (its length, its text, padded to 32 bits).</summary>
+    public static byte[] Bye(uint[] sources, string? reason)
+    {
+        var text = reason is null ? [] : System.Text.Encoding.ASCII.GetBytes(reason);
+        int reasonLength = reason is null ? 0 : (1 + text.Length + 3) & ~3;
+        var packet = new byte[4 + (4 * sources.Length) + reasonLength];
+        packet[0] = (byte)(0x80 | sources.Length);
+        packet[1] = 203;
+        BinaryPrimitives.WriteUInt16BigEndian(packet.AsSpan(2), (ushort)((packet.Length / 4) - 1));
+        for (int i = 0; i < sources.Length; i++)
+        {
+            BinaryPrimitives.WriteUInt32BigEndian(packet.AsSpan(4 + (4 * i)), sources[i]);
+        }
+
+        if (reason is not null)
+        {
+            packet[4 + (4 * sources.Length)] = (byte)text.Length;
+            text.CopyTo(packet.AsSpan(5 + (4 * sources.Length)));
+        }
+
+        return packet;
+    }
+
     /// <summary>A sender report (6.4.1) with no report blocks.</summary>
     public static byte[] SenderReport(uint ssrc, uint ntpSeconds, uint ntpFraction, uint rtpTime)
     {
@@ -259,6 +285,32 @@ public class RtcpSessionTests
         session.Received(Packet(40001, 0, Source + 1), TimeSpan.Zero);
         var block = Assert.Single(RtcpReport.Parse(session.Build(TimeSpan.FromSeconds(1))).Blocks);
         Assert.Equal((Source + 1, 0, 0, 40001u, 0u, 0u), (block.Source, block.Lost, block.Fraction, block.Highest, block.LastSenderReport, block.Delay));
+    }
+
+    [Fact]
+    public void SaysWhenTheSenderSaysGoodbyeForTheStream()
+    {
+        var session = new RtcpSession(90000);
+
+        // Before the stream's first packet there is no stream to end.
+        Assert.False(session.Report(RtcpReport.Bye(Source), TimeSpan.Zero));
+        session.Received(Packet(1, 0), TimeSpan.Zero);
+
+        // Another SSRC's, a sender report, and a BYE cut short or of another version end nothing.
+        Assert.False(session.Report(RtcpReport.Bye(Source + 1), TimeSpan.Zero));
+        Assert.False(session.Report(RtcpReport.SenderReport(Source, 1, 0, 0), TimeSpan.Zero));
+        Assert.False(session.Report(RtcpReport.Bye(Source).AsSpan(0, 4), TimeSpan.Zero));
+        var version = RtcpReport.Bye(Source);
+        version[0] = (byte)((version[0] & 0x3F) | 0x40);
+        Assert.False(session.Report(version, TimeSpan.Zero));
+
+        // The stream's: alone, in a compound packet after a sender report and a description, among other SSRCs, and with a
+        // reason after the SSRCs.
+        Assert.True(session.Report(RtcpReport.Bye(Source), TimeSpan.Zero));
+        byte[] description = [0x81, 202, 0, 2, 0xCA, 0xFE, 0x12, 0x34, 1, 1, (byte)'x', 0];
+        Assert.True(session.Report([.. RtcpReport.SenderReport(Source, 1, 0, 0), .. description, .. RtcpReport.Bye(Source)], TimeSpan.Zero));
+        Assert.True(session.Report(RtcpReport.Bye(Source + 1, Source), TimeSpan.Zero));
+        Assert.True(session.Report(RtcpReport.Bye([Source], "end of file"), TimeSpan.Zero));
     }
 
     [Fact]

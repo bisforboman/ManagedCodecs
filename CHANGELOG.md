@@ -13,14 +13,20 @@ run time.
 
 ## Unreleased
 
-Features beside fixes (new public API: `AviDemuxer.AudioTracks` and `SelectAudio`), hence the next version is a minor
-one; code built against 0.18 keeps working.
+Features beside fixes (new public API: `AudioTracks` and `SelectAudio` in `AviDemuxer`, `Mp4Demuxer` and
+`MatroskaDemuxer`; `AudioStreamInfo.Language`, `Title` and `IsDefault`; `PlaybackOptions.PairMonoTracks`), hence the
+next version is a minor one; code built against 0.18 keeps working.
 
 ### Added
 
-- Containers: `AviDemuxer` lists every audio stream (`AudioTracks`) and reads those `SelectAudio` chooses, one or
-  several in one pass, each as FFmpeg's demuxer gives it; until a choice is made the first is read alone, as before.
-  `PlaybackOptions.AudioTrack` plays any of them. Issue #535, docs/decisions/2026-11-15-sound-tracks.md.
+- Playback: `PlaybackOptions.PairMonoTracks` (true by default): false plays an MXF file's mono track alone, on both
+  speakers, rather than with the next mono track as the right channel. Issue #535.
+- Containers: `AviDemuxer`, `Mp4Demuxer` (QuickTime too) and `MatroskaDemuxer` list every audio stream
+  (`AudioTracks`) and read those `SelectAudio` chooses, one or several in one pass, each as FFmpeg's demuxer gives it;
+  until a choice is made the one FFmpeg's command line plays is read alone (see Changed). `PlaybackOptions.AudioTrack`
+  plays any of them. Issue #535, docs/decisions/2026-11-15-sound-tracks.md.
+- Core: `AudioStreamInfo.Language`, `Title` and `IsDefault`, as ffprobe reports them: MP4's 'mdhd' language
+  (QuickTime's Macintosh language codes included) and 'tkhd' enabled flag, Matroska's Language, Name and FlagDefault.
 - Playback: JPEG over RTSP larger than 2040 pixels, whose size RFC 2435's header can't give: `LivePlayer` takes it
   from the camera's SDP (GStreamer's `a=x-dimensions`, RFC 6064's `a=framesize`) or from ONVIF's RTP header extension,
   where it used to fail. docs/decisions/2026-11-12-live-rtsp-jpeg.md (Since), issue #527.
@@ -30,6 +36,11 @@ one; code built against 0.18 keeps working.
 - Playback: RTP to a multicast group. A camera that refuses RTP both over the RTSP connection and over UDP to the
   reader alone (461) is asked for `RTP/AVP;multicast`, and `LivePlayer` joins the group its answer names, where it used
   to fail. docs/decisions/2026-11-16-live-rtsp-multicast.md, issue #527.
+- Playback: an RTSP stream with sound and no video (a microphone, an intercom, an audio-only restream) plays with
+  `RtspSource.Audio`: the sound is the session's one track, its packets make `LivePlayer` `Playing` and are what
+  `StallTimeout` watches, and `TakeLatest()` stays null. Without `Audio`, or with sound that doesn't play, the player
+  fails and `Error` says why (it used to fail for want of a video track). docs/decisions/2026-11-16-live-audio-only.md,
+  issue #527.
 - Playback: RTSP over HTTP (Apple's tunnelling), `RtspSource.HttpTunnel`, for a camera behind a firewall or proxy
   that passes only HTTP: a GET carries what the camera sends, RTP included, and a POST the requests, on port 80 unless
   the URL gives one (443 for `rtsps://`). No RTCP receiver reports go through the tunnel. `mcdec --live --http-tunnel`.
@@ -39,6 +50,17 @@ one; code built against 0.18 keeps working.
   `SkippedAudioCodec` named it before. It decodes exactly the Recommendation's samples, not FFmpeg's (whose adpcm_g726
   differs), checked against `tools/g726-reference.py`, which passes the Recommendation's test sequences.
   docs/decisions/2026-11-15-g726.md, issue #527.
+
+### Changed
+
+- Containers and Playback: a file with several audio streams gives, and plays, the one FFmpeg's command line plays: of
+  the tracks marked default (MP4's 'tkhd' enabled flag, Matroska's FlagDefault), or of them all where none is (AVI, which
+  has no flag), the one with the most channels, the first of equals. Before, the first stream in the file, which on
+  such files was another one than FFmpeg plays. `SelectAudio` and `PlaybackOptions.AudioTrack` choose another; MXF still
+  plays its first.
+- Playback: `LivePlayer` reads RTCP BYE. When the camera says goodbye for the stream (as live555 does at the end of a
+  file, leaving the connection open), the player connects again after its first backoff, `Error` saying so, rather than
+  waiting for `StallTimeout`. A goodbye for the sound beside a video ends nothing. docs/decisions/2026-11-15-live-rtcp.md.
 
 ### Fixed
 

@@ -184,8 +184,10 @@ jobs:
       - name: Build
         run: |
           arch=$(uname -m | sed 's/x86_64/x64/')
-          dotnet build tools/ManagedCodecs.Maui.Sample -f net10.0-maccatalyst -p:RuntimeIdentifier=maccatalyst-$arch
-          dotnet build tools/ManagedCodecs.Maui.Sample -f net10.0-ios -p:RuntimeIdentifier=iossimulator-$arch
+          # Restore evaluates every target framework the project lists, Android's too, whose workload isn't here: each
+          # build lists only its own.
+          dotnet build tools/ManagedCodecs.Maui.Sample -p:TargetFrameworks=net10.0-maccatalyst -p:RuntimeIdentifier=maccatalyst-$arch
+          dotnet build tools/ManagedCodecs.Maui.Sample -p:TargetFrameworks=net10.0-ios -p:RuntimeIdentifier=iossimulator-$arch
 
       # As on the other platforms: the app's two "mclive-maui:" lines on standard output say how it went. perl's alarm
       # bounds each run (macOS has no timeout command).

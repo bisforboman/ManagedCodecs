@@ -447,7 +447,7 @@ MUTATIONS = [
     # ... and the layout kept on a frame the priming trims.
     dict(file="src/ManagedCodecs.Core/AudioFrame.cs",
          find="new AudioFrame(SampleRate, Channels, count) { ChannelMask = ChannelMask, };", replace="new AudioFrame(SampleRate, Channels, count);",
-         tests="DisplayName~aac-3.0"),
+         tests="DisplayName~aac-mp4-3.0"),
     # PairMonoTracks false plays an MXF file's mono track alone (as players before 0.18.0 did).
     dict(file="src/ManagedCodecs.Playback/AudioPipeline.cs",
          find="var right = options.PairMonoTracks && demuxer", replace="var right = demuxer",

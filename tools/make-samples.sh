@@ -818,6 +818,9 @@ for spec in 3.0:3:aac-3.0.aac 4.0:4:aac-4.0.aac 7.1:8:aac-adts-7.1.aac quad:4:aa
   IFS=: read -r layout channels name <<< "$spec"
   ff -f lavfi -i "aevalsrc=$(tones "$channels"):s=48000:d=1:c=$layout" -c:a aac -b:a 256k -aac_pns 0 -f adts "samples/$name"
 done
+# The same 3.0 in MP4, whose edit list trims the priming from the first frame: the layout must outlive the trimming (3.0
+# is not the default for three channels, 2.1).
+ff -f lavfi -i "aevalsrc=$(tones 3):s=48000:d=1:c=3.0" -c:a aac -b:a 256k -aac_pns 0 samples/aac-mp4-3.0.mp4
 for spec in quad:4:wav-pcm-quad.wav 7.1:8:wav-pcm-7.1.wav; do
   IFS=: read -r layout channels name <<< "$spec"
   ff -f lavfi -i "aevalsrc=$(tones "$channels"):s=48000:d=1:c=$layout" -c:a pcm_f32le "samples/$name"
@@ -1266,7 +1269,7 @@ for f in samples/*faac*.aac; do ff -i "$f" -f f32le "${f%.*}.delay.f32"; done
 # More than two channels: name.stereo.f32, decoded audio as FFmpeg's -ac 2 downmixes it to stereo in float, by default
 # (what the players give).
 for f in samples/aac-5.1.mp4 samples/aac-7.1.mp4 samples/aac-adts-5.1-id3.aac samples/aac-adts-pce.aac samples/aac-fdk-pce.aac \
-  samples/aac-3.0.aac samples/aac-4.0.aac samples/aac-adts-7.1.aac samples/aac-quad-pce.aac samples/wav-pcm-s16-6ch.wav samples/wav-pcm-quad.wav samples/wav-pcm-7.1.wav \
+  samples/aac-3.0.aac samples/aac-mp4-3.0.mp4 samples/aac-4.0.aac samples/aac-adts-7.1.aac samples/aac-quad-pce.aac samples/wav-pcm-s16-6ch.wav samples/wav-pcm-quad.wav samples/wav-pcm-7.1.wav \
   samples/mkv-pcm-4ch.mkv samples/mkv-pcm-8ch.mkv; do
   ff -i "$f" -map 0:a:0 -ac 2 -f f32le "${f%.*}.stereo.f32"
 done

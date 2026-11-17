@@ -942,6 +942,7 @@ does in float (docs/decisions/2026-11-17-more-than-two-channels.md). `DownmixTes
 | Sample | Layout, and where it comes from |
 |---|---|
 | aac-3.0, aac-4.0, aac-adts-7.1 | AAC channel configurations 3, 4 and 7, FFmpeg's encoder, a tone a channel |
+| aac-mp4-3.0.mp4 | 3.0 in MP4, its first frame trimmed by the edit list: the layout outlives the trimming |
 | aac-5.1.mp4, aac-adts-5.1-id3, aac-7.1.mp4 | configurations 6 and 7 |
 | aac-quad-pce, aac-adts-pce, aac-fdk-pce | a program config element: quad (FFmpeg's encoder's own for it) and 5.1 (FFmpeg's, the FDK encoder's) |
 | wav-pcm-quad, wav-pcm-7.1, wav-pcm-s16-6ch | WAVEFORMATEXTENSIBLE's channel mask (quad is not the default for four channels) |

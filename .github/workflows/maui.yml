@@ -151,4 +151,8 @@ jobs:
           Get-Content out.txt | ForEach-Object { '    ' + $_ } | Add-Content $env:GITHUB_STEP_SUMMARY
           if (-not $exited) { Write-Error 'mclive-maui did not exit within 3 minutes'; exit 3 }
           if ((Get-Content out.txt | Measure-Object -Line).Lines -lt 2) { Write-Error 'mclive-maui printed no result'; exit 4 }
+          # The sample means 2 for a frame drawn wrong, but its one such run here (2026-11-17) ended with 1, for a reason
+          # not found (WinUI's shutdown?). So the text decides, as on Android, and the code is printed.
+          "mclive-maui exited with $($run.ExitCode)"
+          if (-not (Select-String -Path out.txt -Pattern 'every frame drawn as decoded' -Quiet)) { exit 2 }
           exit $run.ExitCode

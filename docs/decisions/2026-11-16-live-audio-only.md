@@ -25,7 +25,7 @@ doesn't keep a stalled picture's connection, `ConnectsAgainWhenTheVideoStallsTho
   that refuses the SDP's config leave the picture playing without sound. With sound only, there is nothing left to
   play, and a retry gets the same SDP: final (`Error`).
 - **An SDP with neither** fails as before, naming the audio format when there is one that doesn't play
-  (`G726-32`, `opus`).
+  (`opus`).
 
 ## Decided
 
@@ -49,7 +49,7 @@ Asked with the multiple-choice prompt (2026-11-16); the owner took each recommen
   - one SETUP, on channels 0 and 1 or after a 461 over UDP;
   - `TakeLatest()` null and no video frame counted;
   - without `Audio`, a final error naming it and no SETUP;
-  - G.726, or a config the decoder refuses, final with no SETUP;
+  - Opus, or a config the decoder refuses, final with no SETUP;
   - interleaved access units final;
   - the stall timeout counts from the sound's last packet, over the connection and over UDP.
 - Mutation entries (tools/mutation/mutations.py) for the three rules no recording reaches otherwise: the refusal

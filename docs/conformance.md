@@ -468,9 +468,10 @@ reports are the tests' own, so the checks are of the arithmetic and of which tim
 
 Many cameras' RTSP servers are built on live555. `tools/live555-check.py` builds live555MediaServer (LIVE555
 2026.11.08, the source from Ubuntu's archive, pinned by SHA-256) and plays its files with `mcdec --live`, as the nightly
-run does mediamtx's. By hand in the cloud session (2026-11-15), not in any workflow yet. The server streams a file once,
-from its start for each reader, so each clip is longer than its run; every frame shown and every chunk taken must be
-the clip's, with no lost packet, damaged frame or reconnect.
+run does mediamtx's. By hand in the cloud session (2026-11-15, and again 2026-11-17 with the end-of-file runs), not in
+any workflow yet. The server streams a file once, from its start for each reader, so each clip is longer than its run
+(but for the end-of-file runs); every frame shown and every chunk taken must be the clip's, with no lost packet, damaged
+frame or reconnect (but the one at a file's end).
 
 | Run | Shown | What it showed |
 |---|---|---|
@@ -482,6 +483,8 @@ the clip's, with no lost packet, damaged frame or reconnect.
 | `.mkv` with `--audio`, UDP only | 400, 766 chunks | all the clip's |
 | `.264` held for 90 s, UDP only | 2250 in 92.1 s | all the clip's, no reconnect |
 | `.264` with B pictures, Digest | 400 | all the clip's |
+| `.264`, 640x360, a 6 s clip played past its end, over the connection | 200 in 8.9 s | all the clip's; BYE, 1 reconnect, longest wait 0.66 s |
+| the same, UDP only | 200 in 8.9 s | the same |
 
 - **What live555 sends:**
   - `Content-Base: rtsp://host/file/`, `a=control:*` for the session and `a=control:track1` a track, and
@@ -511,15 +514,20 @@ the clip's, with no lost packet, damaged frame or reconnect.
   So live555MediaServer itself needs no receiver reports from a reader that sends keep-alives. A camera built on
   live555 that doesn't count `GET_PARAMETER` would need them; none was in reach.
 - **At a file's end** live555 sends an RTCP BYE and stops, leaving the connection open. `LivePlayer` didn't read BYE
-  then: it stalled for 5 s, reconnected, and the file played again from its start (620 frames of a 500-frame clip: 1
-  reconnect, all the clip's). It reads BYE since (docs/decisions/2026-11-15-live-rtcp.md, Since) and connects again
-  after 0.5 s; not yet run against live555.
+  at first: it stalled for 5 s, reconnected, and the file played again from its start (620 frames of a 500-frame clip:
+  1 reconnect, all the clip's). It reads BYE since #571 (docs/decisions/2026-11-15-live-rtcp.md, Since). The
+  end-of-file runs (`mcdec --live --reconnects 1`) play a 6 s clip for 200 frames and need a BYE in `Error` and no wait
+  between two frames shown of 2.5 s or more:
+  - with #571: `Error` "The server ended the stream (RTCP BYE).", 1 reconnect, longest wait 0.66 s (the first backoff,
+    0.5 s, and a new session), over the connection and over UDP alike;
+  - the same runs with `LivePlayer` from before #571: a stall (`TimeoutException`), longest wait 5.66 s, both failed.
 - **Each IDR picture cost a frame not shown** with B pictures (`dropped` 8 of 408, 45 of 2295: one a 2 s GOP). Probably
   the decoder gives its held frames at once at an IDR picture, and the player shows the newest; not looked into.
   Without B pictures, none.
 - **G.711:** live555MediaServer serves it only from a `.wav` (static payload types 0 and 8, no `a=rtpmap`), which has
-  no video: `LivePlayer` fails with "The camera's SDP has no H.264 or JPEG video track", as it does for any audio-only
-  stream. Its Matroska demuxer leaves an A-law track out of the SDP. So G.711 beside video wasn't tried. (FFmpeg's .wav
+  no video: `LivePlayer` failed with "The camera's SDP has no H.264 or JPEG video track" (2026-11-15). It plays sound
+  alone with `RtspSource.Audio` since #553, not tried against live555: `mcdec --live` checks frames, of which there
+  are none. Its Matroska demuxer leaves an A-law track out of the SDP. So G.711 beside video wasn't tried. (FFmpeg's .wav
   needs `-bitexact`: live555 answers 404 to one with a `LIST` chunk.)
 - **Not tried:** RTSP over HTTP (which live555 offers on port 80, 8000 or 8080), RTSPS and SRTP (it has them, by
   code), H.265 and its other formats, multicast, a file the SPS of which has no timing, and a camera built on live555.

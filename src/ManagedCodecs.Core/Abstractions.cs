@@ -215,7 +215,8 @@ public sealed record VideoStreamInfo(
     /// The stream's length in <c>TimeBase</c> ticks as the container gives it, as FFmpeg's stream duration: MP4's edits'
     /// summed length (a leading empty edit only moves the start), else the shorter of the track's 'mdhd' duration and
     /// its samples' summed durations (the longer in fragmented MP4, whose 'mdhd' leaves the fragments out); AVI's
-    /// 'strh' length in frames. 0 where the container says nothing.
+    /// 'strh' length in frames; MXF's material package track duration (the sound's rescaled to samples, rounded to the
+    /// nearest). 0 where the container says nothing.
     /// </summary>
     public long Duration { get; init; }
 
@@ -245,7 +246,8 @@ public sealed record AudioStreamInfo(
     /// The stream's length in <c>TimeBase</c> ticks as the container gives it, as FFmpeg's stream duration: MP4's edits'
     /// summed length (a leading empty edit only moves the start), else the shorter of the track's 'mdhd' duration and
     /// its samples' summed durations (the longer in fragmented MP4, whose 'mdhd' leaves the fragments out); AVI's
-    /// 'strh' length in frames. 0 where the container says nothing.
+    /// 'strh' length in frames; MXF's material package track duration (the sound's rescaled to samples, rounded to the
+    /// nearest). 0 where the container says nothing.
     /// </summary>
     public long Duration { get; init; }
 }

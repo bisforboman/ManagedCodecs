@@ -13,11 +13,26 @@ run time.
 
 ## Unreleased
 
+A feature (JPEG over 2040 pixels over RTSP) beside fixes, hence the next version is a minor one.
+
 ### Added
 
 - Playback: JPEG over RTSP larger than 2040 pixels, whose size RFC 2435's header can't give: `LivePlayer` takes it
   from the camera's SDP (GStreamer's `a=x-dimensions`, RFC 6064's `a=framesize`) or from ONVIF's RTP header extension,
   where it used to fail. docs/decisions/2026-11-12-live-rtsp-jpeg.md (Since), issue #527.
+
+### Fixed
+
+- Thumbnails: `VideoProbe` gives an MXF file's duration as ffprobe's; it gave 0 for every MXF file, so
+  `VideoThumbnail` took its frame at the start rather than 10% in.
+- Containers: `MxfDemuxer`'s streams last their header's track durations, as FFmpeg's demuxer reads them: the
+  video's `Duration` was 0, and each sound track's ran to its last packet, short of the header's in a file cut short.
+  The sound's is rescaled to samples and rounded to the nearest, as FFmpeg's; a file written to a pipe, whose header
+  gives none, is as before.
+- Containers: `MxfDemuxer` marks every MPEG-2 I picture a keyframe, as libavformat's parser does: an open GOP's I
+  picture, which the index gives no random access flag, was none, and in a file cut before its index (which went with
+  the footer) only the first picture was one; it now reads the picture header's coding type there. Seeking lands on
+  them too. Found by the nightly check (`tools/realworld.py`, which now compares keyframes and durations too).
 
 ## 0.18.0 – 2026-11-16
 

@@ -19,7 +19,11 @@ namespace ManagedCodecs.Containers;
 /// <para>
 /// A picture packet is an edit unit: its decode time counts them (<see cref="VideoStreamInfo.TimeBase"/> is one over the
 /// edit rate), its presentation time adds the index table's temporal offset where the index says the element is
-/// reordered, and it is a keyframe where the index entry has its random access flag (without an index, the first), or
+/// reordered, and it is a keyframe where the index entry has its random access flag (without an index, the first, and an MPEG-2 picture whose picture header says I, as
+/// libavformat's parser reads it: a file cut before its footer's index), for
+/// MPEG-2 also where the entry has neither prediction flag (an I picture: one that opens a GOP whose first B pictures
+/// lean on the GOP before has no random access flag, and libavformat's MPEG-2 parser marks every I picture a
+/// keyframe, which a seek to it wants too: the I picture and those after it decode), or
 /// always for an intra-only codec (ProRes, VC-3, JPEG 2000, and D-10's MPEG-2, I pictures only by SMPTE ST 356), whose index entries FFmpeg's muxer leaves without it. A sound packet's times count samples, its duration its bytes over the block
 /// alignment. The essence elements are found by walking the file's KLV items once, when opening; partition packs,
 /// header metadata, index segments and fill items between them are skipped.
@@ -57,6 +61,10 @@ public sealed class MxfDemuxer : IDemuxer
 
     // Each packet's bytes in the file: its size, but an 8-channel AES3 element's whole value.
     private readonly List<int> _lengths = [];
+
+    // The MPEG-2 pictures (by sequence) whose picture header says I, read where no index was known when the walk found
+    // them: a file cut before its footer's index (IntraPicture).
+    private readonly HashSet<long> _intraPictures = [];
 
     // The packet (an index into _packets) of the essence element a file cut short ends in, or -1.
     private int _cut = -1;
@@ -247,6 +255,7 @@ public sealed class MxfDemuxer : IDemuxer
                 if (_packets[_cut].StreamIndex == _videoIndex)
                 {
                     _videoCount--;
+                    _intraPictures.Remove(_videoCount);
                 }
                 else
                 {
@@ -487,6 +496,11 @@ public sealed class MxfDemuxer : IDemuxer
 
                 if (video is not null && number == video.TrackNumber)
                 {
+                    if (video.Codec == "mpeg2video" && !indexes.ContainsKey(video.BodySid) && IntraPicture(valueStart, size))
+                    {
+                        _intraPictures.Add(_videoCount);
+                    }
+
                     _packets.Add(new PacketInfo(videoIndex, _videoCount++, (int)size, false, 0, 0, 0));
                     _positions.Add(valueStart);
                     _lengths.Add((int)size);
@@ -531,6 +545,21 @@ public sealed class MxfDemuxer : IDemuxer
     // the content package's sound item (item type 06h, ST 379-1 7.1) with element type 10h (SMPTE ST 331 7.1), as D-10's
     // sound is (ST 386).
     private static bool IsAes3Element(uint trackNumber) => (trackNumber >> 24) == 0x06 && ((trackNumber >> 8) & 0xFF) == 0x10;
+
+    /// <summary>
+    /// Whether the MPEG-2 picture element at <paramref name="valueStart"/> holds an I picture: its first picture header
+    /// (ISO/IEC 13818-2 6.2.3: start code 00 00 01 00, a 10-bit temporal reference, then the 3-bit picture coding type, 1
+    /// for I) in its first 4 KiB, after the sequence and GOP headers and their extensions. libavformat's MPEG-2 parser
+    /// marks such a packet a keyframe, and an index entry, where there is one, says the same by its flags.
+    /// </summary>
+    private bool IntraPicture(long valueStart, long size)
+    {
+        var head = new byte[(int)Math.Min(size, 4096)];
+        _stream.Position = valueStart;
+        _stream.ReadExactly(head);
+        int at = head.AsSpan().IndexOf((ReadOnlySpan<byte>)[0, 0, 1, 0]);
+        return at >= 0 && at + 5 < head.Length && ((head[at + 5] >> 3) & 7) == 1;
+    }
 
     /// <summary>
     /// The PCM an 8-channel AES3 element at <paramref name="valueStart"/> (its value, <paramref name="size"/> bytes)
@@ -668,7 +697,14 @@ public sealed class MxfDemuxer : IDemuxer
         }
     }
 
-    /// <summary>Times every packet (<see cref="Time"/>) and describes the streams by the packets found so far.</summary>
+    /// <summary>
+    /// Times every packet (<see cref="Time"/>) and describes the streams by the packets found so far. A stream's
+    /// <see cref="VideoStreamInfo.Duration"/> is its material package track's (ST 377-1 B.11), as FFmpeg's demuxer gives
+    /// it: the picture's in edit units, each sound track's rescaled from edit units to samples, rounded to the nearest. A
+    /// file cut short keeps the header's, longer than its packets, as ffprobe does. Where the header doesn't say (a file
+    /// written to a pipe: -1), the picture's is 0, as the container says nothing, and a sound track's runs to its last
+    /// packet's end.
+    /// </summary>
     private void Describe()
     {
         if (_video is { } video)
@@ -688,6 +724,7 @@ public sealed class MxfDemuxer : IDemuxer
                 ColorPrimaries = video.ColorPrimaries,
                 ColorTransfer = video.ColorTransfer,
                 ColorMatrix = video.ColorMatrix,
+                Duration = video.Duration ?? 0,
             };
         }
 
@@ -698,7 +735,9 @@ public sealed class MxfDemuxer : IDemuxer
             long samples = Time(audio, sound.Index, null, sound.Aes3Channels * sound.Aes3Bytes);
             sound.Info = new AudioStreamInfo(audio.Codec is { } codec ? AudioCodec(codec) : "unknown", rate, audio.Channels, _packets.Count(p => p.StreamIndex == sound.Index), new Rational(1, rate), ReadOnlyMemory<byte>.Empty, sound.Index)
             {
-                Duration = samples,
+                Duration = audio.Duration is { } units && audio.EditRate.Numerator > 0
+                    ? ((2 * units * rate * audio.EditRate.Denominator) + audio.EditRate.Numerator) / (2L * audio.EditRate.Numerator)
+                    : samples,
             };
         }
 
@@ -714,6 +753,7 @@ public sealed class MxfDemuxer : IDemuxer
     private long Time(MxfTrack track, int stream, MxfIndex? index, int aes3BlockAlign = 0)
     {
         bool intra = track.Codec is "prores" or "dnxhd" or "jpeg2000" || MxfLabels.IsD10Container(track.EssenceContainer ?? []);
+        bool mpeg2 = track.Codec == "mpeg2video";
         int blockAlign = aes3BlockAlign > 0 ? aes3BlockAlign : BlockAlign(track);
         long samples = 0;
 
@@ -755,7 +795,9 @@ public sealed class MxfDemuxer : IDemuxer
                 long unit = packet.Sequence;
                 var entry = index?.Entry(unit);
                 long pts = shown.TryGetValue(unit, out long display) ? display : unit;
-                bool keyframe = intra || (entry is { } f ? (f.Flags & MxfIndex.RandomAccess) != 0 : unit == 0);
+                bool keyframe = intra || (entry is { } f
+                    ? (f.Flags & MxfIndex.RandomAccess) != 0 || (mpeg2 && (f.Flags & MxfIndex.Predicted) == 0)
+                    : unit == 0 || _intraPictures.Contains(unit));
                 _packets[i] = packet with { Dts = unit - delay, Pts = pts, Duration = 1, IsKeyframe = keyframe };
             }
         }

@@ -388,7 +388,7 @@ checks the lists after each. MXF (#469): 30 minutes of `file` seeded with the MX
 
 ### Probing a video
 
-`ManagedCodecs.Thumbnails`'s `VideoProbe.Read(stream)` gives an MP4, Matroska or AVI file's facts without decoding a frame:
+`ManagedCodecs.Thumbnails`'s `VideoProbe.Read(stream)` gives an MP4, Matroska, AVI or MXF file's facts without decoding a frame:
 `Duration` as ffprobe's `format=duration`, the coded and the displayed size (stretched by the pixels' aspect ratio,
 wider above 1 and taller below, then turned by the rotation), codec, frame rate, rotation and the audio's codec, rate
 and channels. Each is checked against ffprobe on every sample (VideoProbeTests). The stream must be seekable (an MP4
@@ -396,7 +396,8 @@ file's index can follow its data): buffer an upload first. A codec this library 
 `NotSupportedException`, a file without video `InvalidDataException`. The duration comes from the streams' `Duration` (`VideoStreamInfo`, `AudioStreamInfo`), which the
 demuxers give as FFmpeg's stream duration: MP4's edits' length, capped at the samples they take, else the track's,
 AVI's stream header length; a Matroska file's is its Segment's Duration, from its earliest packet, as FFmpeg's (a live
-recording without one: its packets').
+recording without one: its packets'); MXF's, its header's track durations (a file written to a pipe has none: its
+packets').
 
 ```csharp
 var info = VideoProbe.Read("upload.mp4");

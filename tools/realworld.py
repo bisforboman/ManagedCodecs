@@ -105,6 +105,10 @@ PACKET_FILES = {
         "https://archive.org/download/Russian-EVA-44-VR-Lab-Animation_613184.mxf/Russian-EVA-44-VR-Lab-Animation_613184.mxf",
         "9aa9bba1fbb7fcb55f4b7f897634f204629c436153e54f9f232741127a2c21b1", 32 << 20,
         "NASA's broadcast file (jsc-pao-video-collection, a US government work), its first 32 MiB of 2.6 GB"),
+    "nasa_crew7_4k_h264.mxf": (
+        "https://archive.org/download/jsc-pao-video-collection/jsc2023m000150_Meet_Andreas_Mogensen_Crew-7_Pilot_3_Minute.mxf",
+        "1867848bfb3884db3cb40c4453d0072cf00927216193a87b5f2c4bfdc3c79977", 48 << 20,
+        "NASA's broadcast master of the same collection, its first 48 MiB of 12 GB: 3840x2160 H.264 at 59.94, eight mono 24-bit sound tracks"),
 }
 
 
@@ -291,7 +295,7 @@ def ffprobe_packets(path):
         return result.stdout
 
     streams = json.loads(run("-nofind_stream_info", "-of", "json", "-show_entries",
-                             "stream=index,codec_type,codec_name,sample_rate,channels,time_base"))["streams"]
+                             "stream=index,codec_type,codec_name,sample_rate,channels,time_base,duration_ts"))["streams"]
     # +nofillin+noparse: without what libavformat fills in or its parsers cut (src/ManagedCodecs.Containers/CLAUDE.md).
     packets = []
     for line in run("-fflags", "+nofillin+noparse", "-show_packets", "-show_data_hash", "MD5", "-show_entries",
@@ -300,7 +304,16 @@ def ffprobe_packets(path):
         if len(fields) >= 5 and fields[0].isdigit():
             number = lambda text: None if text == "N/A" else int(text)
             packets.append((int(fields[0]), number(fields[1]), number(fields[2]), int(fields[3]), fields[4].removeprefix("MD5:")))
-    return streams, packets
+    # By default: the keyframe flags and durations libavformat adds (its parsers' and its intra-only rule; the
+    # demuxer itself gives none), as make-samples.sh's .packets.csv has them for MxfConformanceTests.
+    parsed = []
+    for line in run("-show_packets", "-show_data_hash", "MD5", "-show_entries",
+                    "packet=stream_index,duration,size,flags,data_hash", "-of", "csv=p=0").splitlines():
+        fields = line.split(",")
+        if len(fields) >= 5 and fields[0].isdigit():
+            parsed.append((int(fields[0]), None if fields[1] == "N/A" else int(fields[1]), int(fields[2]),
+                           fields[3].startswith("K"), fields[4].removeprefix("MD5:")))
+    return streams, packets, parsed
 
 
 def compare_packets(path):
@@ -309,7 +322,9 @@ def compare_packets(path):
     problems (empty: they match), and a summary. Compared: the codec's name, the audio's rate and channels, the number
     of packets, each one's size and MD5, and its pts and dts where FFmpeg's demuxer gives one (it gives none where it
     reads no index: MxfConformanceTests), as times, each side's ticks by its own time base. A file cut short ends in a
-    partial packet, which both give.
+    partial packet, which both give. Each stream's duration against the header's as ffprobe reads it (duration_ts,
+    where it gives one), and each packet's keyframe flag and duration against ffprobe's default listing, where
+    libavformat adds them, wherever that listing holds the same packets (its parsers can cut a partial one).
     """
     run = subprocess.run(["dotnet", MCDEC, "--packets", path], capture_output=True, text=True, check=False)
     if run.returncode != 0:
@@ -318,14 +333,14 @@ def compare_packets(path):
     ours = {}
     for line in run.stdout.splitlines():
         if line.startswith("stream "):
-            _, index, kind, codec, *facts, base = line.split()
-            ours_streams[kind] = (int(index), codec, facts, fractions.Fraction(base))
+            _, index, kind, codec, *facts, base, duration = line.split()
+            ours_streams[kind] = (int(index), codec, facts, fractions.Fraction(base), int(duration))
             ours[int(index)] = []
         elif line:
-            index, pts, dts, _, size, _, md5 = line.split(",")
-            ours[int(index)].append((int(pts), int(dts), int(size), md5))
+            index, pts, dts, duration, size, flag, md5 = line.split(",")
+            ours[int(index)].append((int(pts), int(dts), int(size), md5, flag == "K", int(duration)))
 
-    streams, packets = ffprobe_packets(path)
+    streams, packets, parsed = ffprobe_packets(path)
     problems = []
     summary = []
     for kind in ("video", "audio"):
@@ -334,7 +349,7 @@ def compare_packets(path):
             if theirs_stream is not None:
                 problems.append(f"no {kind} stream, FFmpeg has {theirs_stream['codec_name']}")
             continue
-        index, codec, facts, base = ours_streams[kind]
+        index, codec, facts, base, own_duration = ours_streams[kind]
         if theirs_stream is None:
             problems.append(f"{kind} stream {codec}, FFmpeg has none")
             continue
@@ -343,12 +358,14 @@ def compare_packets(path):
         if kind == "audio" and facts != [theirs_stream["sample_rate"], str(theirs_stream["channels"])]:
             problems.append(f"audio {' '.join(facts)}, FFmpeg's {theirs_stream['sample_rate']} {theirs_stream['channels']}")
         their_base = fractions.Fraction(theirs_stream["time_base"])
+        if "duration_ts" in theirs_stream and own_duration * base != theirs_stream["duration_ts"] * their_base:
+            problems.append(f"{kind} lasts {own_duration} x {base}, FFmpeg's {theirs_stream['duration_ts']} x {their_base}")
         theirs = [p[1:] for p in packets if p[0] == theirs_stream["index"]]
         mine = ours[index]
         timed = 0
         if len(mine) != len(theirs):
             problems.append(f"{kind}: {len(mine)} packets, FFmpeg's {len(theirs)}")
-        for i, ((pts, dts, size, md5), (their_pts, their_dts, their_size, their_md5)) in enumerate(zip(mine, theirs)):
+        for i, ((pts, dts, size, md5, _, _), (their_pts, their_dts, their_size, their_md5)) in enumerate(zip(mine, theirs)):
             if (size, md5) != (their_size, their_md5):
                 problems.append(f"{kind} packet {i}: {size} bytes {md5}, FFmpeg's {their_size} bytes {their_md5}")
                 break
@@ -362,7 +379,19 @@ def compare_packets(path):
                     print(f"  {kind} packet {j}: pts {mine[j][0]} dts {mine[j][1]}; FFmpeg's pts {theirs[j][0]} dts {theirs[j][1]}", flush=True)
                 break
             timed += their_pts is not None
-        summary.append(f"{kind} {codec}: {len(mine)} packets ({timed} with FFmpeg's times)")
+
+        # Keyframes and durations, where the default listing holds the same packets.
+        flagged = [p[1:] for p in parsed if p[0] == theirs_stream["index"]]
+        flags = "keyframes and durations not compared (FFmpeg's parsers cut the packets otherwise)"
+        if [(p[2], p[3]) for p in mine] == [(p[1], p[3]) for p in flagged]:
+            keyframes = sum(p[4] for p in mine)
+            flags = f"{keyframes} keyframes and the durations as FFmpeg's"
+            for i, ((_, _, _, _, key, duration), (their_duration, _, their_key, _)) in enumerate(zip(mine, flagged)):
+                if key != their_key or (their_duration is not None and duration * base != their_duration * their_base):
+                    problems.append(f"{kind} packet {i}: keyframe {key}, duration {duration}; FFmpeg's {their_key}, {their_duration}")
+                    flags = "keyframes or durations differ"
+                    break
+        summary.append(f"{kind} {codec}: {len(mine)} packets ({timed} with FFmpeg's times; {flags})")
     others = len(streams) - sum(1 for kind in ("video", "audio") if any(s["codec_type"] == kind for s in streams))
     if others:
         summary.append(f"{others} more streams in FFmpeg's reading, not compared")

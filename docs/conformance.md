@@ -495,23 +495,30 @@ crops by the container's size.
 ### MXF from other writers
 
 Every MXF sample is FFmpeg's own muxers' (or GStreamer's, which adds nothing to them). `tools/realworld.py` also reads
-three files from other writers (its PACKET_FILES; a job each), whose codec this library only names, so they are
+four files from other writers (its PACKET_FILES; a job each), whose codec this library only names, so they are
 compared packet by packet: `mcdec --packets` against FFmpeg's demuxer's own packets (`ffprobe -fflags
 +nofillin+noparse -show_data_hash MD5`), for the video and the first sound track: the codec's name, the sound's rate
 and channels, the number of packets, each one's size and MD5, and its presentation and decode times where FFmpeg
-gives any. The cloud sessions can't download them (archive.org's data hosts are refused there), so the comparison was
-first run in CI, on the branch.
+gives any; each stream's duration against the header's as ffprobe reads it (`-nofind_stream_info`'s `duration_ts`);
+and each packet's keyframe flag and duration against ffprobe's default listing, where libavformat adds them (its
+parsers and its intra-only rule: FFmpeg's demuxer itself gives none), wherever that listing holds the same packets
+(a parser can cut a file's last partial packet otherwise). Every samples/mxf-*.mxf passes the same comparison
+(`tools/realworld.py --packets`). The cloud sessions can't download the files (archive.org's data hosts are refused
+there), so the comparison was first run in CI, on the branch.
 
 - Two of archive.org's `mxfburger` files (Public Domain Mark, pinned by the SHA-1 archive.org lists), a 9-second
   advertisement: MPEG-2 at 29.97 with B pictures and temporal offsets, 280 pictures, with 16-bit mono and with 24-bit
   5.1 PCM. Their first run found that `MxfDemuxer` never applied a reordered picture's offsets (Temporal offsets,
-  under MXF demuxing).
+  under MXF demuxing), and that an open GOP's I picture, which the index gives no random access flag, is a keyframe
+  to FFmpeg.
 - The first 32 MiB of a NASA broadcast file of 2.6 GB (jsc-pao-video-collection; by HTTP range, pinned by those bytes'
   SHA-256), read as a file cut short: MPEG-2 and 24-bit PCM, 274 packets each, and seven more streams in FFmpeg's
   reading, which are not compared (what they are was not looked at).
+- The first 48 MiB of another file of that collection, 12 GB whole (pinned the same way): 3840x2160 H.264 at 59.94,
+  every picture a keyframe in the index, and eight mono 24-bit sound tracks, the first of which is compared (the others
+  wait for #535). Its first run, before the keyframes and durations were compared, matched packet for packet.
 
-Not compared there: keyframe flags (FFmpeg's demuxer itself gives none) and the header's facts beyond the codec and
-the sound's format.
+Not compared there: the header's facts beyond the codec, the sound's format and the durations.
 
 ## SIMD and ARM64
 
@@ -527,7 +534,7 @@ Decoding straight into the output frame: opt-in, `MjpegDecoder.ZeroCopy` (6% few
 
 ## MP4 demuxing
 
-`VideoProbe` (ManagedCodecs.Thumbnails) is checked against ffprobe on every MP4, Matroska and AVI sample with H.264 or MJPEG
+`VideoProbe` (ManagedCodecs.Thumbnails) is checked against ffprobe on every MP4, Matroska, AVI and MXF sample with H.264 or MJPEG
 video (make-samples.sh's name.probe.json): `format=duration` within 1.5 µs, width and height, sample aspect ratio,
 rotation, average frame rate and the audio stream's rate and channels. The duration is the streams' container
 durations as FFmpeg reads them: MP4's edits' length, but no longer than the samples they take (JM's field-picture
@@ -538,7 +545,13 @@ outlasts its video, and the file lasts as long as ffprobe says), except PCM's, w
 ends nothing (avi-mjpeg-pcm-u8's runs 0.2 s past its video; the camera AVIs' a few ms); Matroska's Segment Duration, which
 FFmpeg takes as the file's own, from the earliest packet (AAC's, 21 ms before the video, at its CodecDelay), not each
 stream's start plus it; without one (mkv-h264-live) ffprobe gives no duration, and the probe's, from the first packet
-to the end of the last, is checked against ffprobe's packets. H.264's size is the decoder's frame size
+to the end of the last, is checked against ffprobe's packets. MXF's are the header metadata's track durations (the
+material package's, ST 377-1 B.11), as FFmpeg's demuxer reads them, the sound's rescaled from edit units to samples and
+rounded to the nearest (`MxfConformanceTests` compares both streams' with name.headers.json); a file cut short keeps the
+header's, longer than its packets (mxf-h264-pcm-cut lasts 2 s, as ffprobe says, its packets 1.2 s); a file written to
+a pipe has none (FFmpeg's muxer can't go back to write them), and ffprobe then gives no duration: the probe's, from the
+first packet to the end of the last, is checked against ffprobe's packets, the sound's alone where the pipe file has
+lost its index (mxf-h264-pipe-norip: ffprobe lists no video times there). H.264's size is the decoder's frame size
 from the SPS, which can crop the container's.
 
 MP3 (decoded: MP3, below) is `CodecIds.Mp3`: h264-mp3 (FFmpeg's MP4 muxer: `mp4a`, object type 0x6B) and
@@ -917,8 +930,11 @@ what the file says, the file is followed and the test says so:
   (PosTableIndex 0, offsets 0), so those packets' pts are their dts though libx264 writes B pictures.
   `MxfConformanceTests` rewrites an H.264 sample's index to check that the offsets are applied whichever delta entry
   says reordered and not without one, and that the random access flag sets the keyframes. mxf-mpeg2-b's GOPs are open:
-  the index gives their I pictures no random access flag, so only its first packet is a keyframe here, where
-  libavformat's parser marks every I picture one (the test lets that sample's differ, and no other's).
+  the index gives their I pictures no random access flag (their first B pictures lean on the GOP before), but
+  libavformat's parser marks every I picture a keyframe, and so does `MxfDemuxer` for MPEG-2, by the entry's prediction
+  flags (Table 28: an I picture has neither): its keyframes are FFmpeg's, as the mxfburger files' were in the nightly
+  check's logs. Not for H.264, whose keyframes FFmpeg's parser takes from the stream (IDR pictures, recovery points),
+  not from the picture type: there the random access flag alone counts (`AppliesTheIndexTablesTemporalOffsetsAndFlags`).
 - Clip-wrapped essence (FFmpeg's OP-Atom muxer, `-f mxf_opatom`: one track a file, the whole clip one element, though
   its essence container labels say frame wrapping): mxf-opatom-h264 is cut by the index entries' stream offsets,
   mxf-opatom-dnxhr by the index's constant edit unit size (no entries), each packet an edit unit as FFmpeg's;
@@ -942,7 +958,12 @@ what the file says, the file is followed and the test says so:
   AES3 element: a sample counts where its kept channels' words are there, the words after them may be missing; checked
   by hand at cuts 8, 16 and 24 bytes into a sample as well) and mxf-opatom-pcm-cut (its one sound clip, which FFmpeg's
   demuxer still cuts into 1920-sample pieces without the index, the track's edit unit being a sample; the last piece
-  keeps a partial sample's bytes). A clip-wrapped H.264 file cut short is one packet of the clip's bytes, as FFmpeg's
+  keeps a partial sample's bytes), and mxf-mpeg2-b-cut (MPEG-2 with B pictures, 100 bytes into its 20th picture).
+  Without the index, which went with the footer, the keyframes are the I pictures, which libavformat's MPEG-2 parser
+  finds by their picture headers' coding type (ISO/IEC 13818-2 6.2.3) and `MxfDemuxer` reads the same way, at open,
+  for each MPEG-2 picture found while no index is known; the times are the edit units, which libavformat's are too
+  there (it can't place the B pictures: an I or P picture's pts is unknown). The NASA MPEG-2 file's first 32 MiB
+  (MXF from other writers, above) showed it first. A clip-wrapped H.264 file cut short is one packet of the clip's bytes, as FFmpeg's
   demuxer gives it (`-fflags +noparse`: libavformat's H.264 parser then cuts it into pictures, which `ffprobe` shows by
   default); a file cut inside its header metadata is refused (`ReadsAClipCutShortAsOnePacket`). A clip-wrapped file cut
   short whose index survives (none of FFmpeg's muxers write one before the essence) is refused: no file shows what

@@ -14,7 +14,7 @@ to copy, not a package: `LiveView.cs`, `LiveViewHandler.cs` and the handler of e
     filled through a direct buffer; `Choreographer` paces it.
   - Windows: WinUI's `Image` showing a `WriteableBitmap` (blue, green, red, alpha: red and blue swapped, as in WPF);
     `CompositionTarget.Rendering` paces it.
-  - iOS and Mac Catalyst (one handler, Platforms/Apple): a `UIView` whose layer shows a `CGImage` of the frame (made
+  - iOS and Mac Catalyst (one handler, Apple/): a `UIView` whose layer shows a `CGImage` of the frame (made
     from a bitmap context of the frame's size, red, green, blue and a skipped alpha: no swap), a new image per frame
     as a layer's contents can't change in place; Core Animation scales it (`ContentsGravity`); `CADisplayLink` paces
     it.

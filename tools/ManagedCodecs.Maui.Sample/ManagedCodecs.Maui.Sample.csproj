@@ -58,11 +58,12 @@
     </ItemGroup>
   </Target>
 
-  <!-- iOS and Mac Catalyst share one handler and entry point (Platforms/Apple), compiled for those two only; each has
-       its own Info.plist (and Mac Catalyst its Entitlements.plist) in its own folder, where MAUI looks for them. -->
+  <!-- iOS and Mac Catalyst share one handler and entry point (Apple/, compiled for those two only: not under
+       Platforms/, whose folders other than the target's own MAUI removes after these items); each has its own
+       Info.plist (and Mac Catalyst its Entitlements.plist) in its Platforms folder, where MAUI looks for them. -->
   <ItemGroup>
-    <Compile Remove="Platforms\Apple\**" />
-    <Compile Include="Platforms\Apple\**\*.cs" Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'ios' Or $([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'maccatalyst'" />
+    <Compile Remove="Apple\**" />
+    <Compile Include="Apple\**\*.cs" Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'ios' Or $([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'maccatalyst'" />
   </ItemGroup>
 
   <ItemGroup>

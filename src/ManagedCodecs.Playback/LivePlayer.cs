@@ -424,6 +424,7 @@ public sealed class LivePlayer : IDisposable
         var watchdog = WatchAsync(connection, cancel);
         RtspConnection? rtsp = null;
         RtpUdpPorts? udp = null;
+        bool multicast = false;
         AudioSession? audio = null;
         Task? keepAlive = null;
         Task? audioPump = null;
@@ -511,7 +512,19 @@ public sealed class LivePlayer : IDisposable
                 udp = RtpUdpPorts.Bind(rtsp.LocalEndPoint.Address);
                 cancel.Token.Register(udp.Dispose);
                 connection.Udp = true;
-                setup = await Request(rtsp, "SETUP", trackUrl, [new("Transport", $"RTP/AVP;unicast;client_port={udp.RtpPort}-{udp.RtcpPort}")], cancel.Token).ConfigureAwait(false);
+                setup = await rtsp.RequestAsync("SETUP", trackUrl, [new("Transport", $"RTP/AVP;unicast;client_port={udp.RtpPort}-{udp.RtcpPort}")], cancel.Token).ConfigureAwait(false);
+                if (setup.Status == 461)
+                {
+                    // Nor to this reader alone: a camera set to send to a multicast group only, which names it.
+                    udp.Dispose();
+                    udp = null;
+                    multicast = true;
+                    setup = await Request(rtsp, "SETUP", trackUrl, [new("Transport", "RTP/AVP;multicast")], cancel.Token).ConfigureAwait(false);
+                }
+                else
+                {
+                    Check(setup, "SETUP");
+                }
             }
             else
             {
@@ -528,6 +541,11 @@ public sealed class LivePlayer : IDisposable
             }
 
             var transport = RtspTransport.Parse(setup.Header("Transport"));
+            if (multicast)
+            {
+                udp = JoinGroup(transport, rtsp);
+                cancel.Token.Register(udp.Dispose);
+            }
 
             // The audio, when asked for: a second SETUP in the same session, on the transport the video's got
             // (docs/decisions/2026-11-15-live-rtsp-audio.md).
@@ -535,7 +553,7 @@ public sealed class LivePlayer : IDisposable
             _audioInfo = onlyInfo;
             if (track is not null && source.Audio && sdp.Audio is { } audioTrack)
             {
-                audio = await SetupAudioAsync(rtsp, audioTrack, Sdp.Resolve(baseUrl, audioTrack.Control), udp is not null, transport.Channel, cancel.Token).ConfigureAwait(false);
+                audio = await SetupAudioAsync(rtsp, audioTrack, Sdp.Resolve(baseUrl, audioTrack.Control), udp is not null, multicast, transport.Channel, cancel.Token).ConfigureAwait(false);
                 if (audio?.Udp is { } audioPorts)
                 {
                     cancel.Token.Register(audioPorts.Dispose);
@@ -569,22 +587,32 @@ public sealed class LivePlayer : IDisposable
             }
             else
             {
-                var server = Plain(transport.Source ?? rtsp.RemoteEndPoint.Address);
-                if (transport.ServerRtpPort is { } serverRtp)
+                // A group's packets come from whichever of the camera's addresses faces it: only a source the answer
+                // names is held to; the reports go to the group, as every receiver's do (RFC 3550, 6.2).
+                var server = Server(transport, rtsp, multicast);
+                if (multicast)
                 {
-                    var serverRtcp = new IPEndPoint(server, transport.ServerRtcpPort ?? serverRtp + 1);
-                    udp.Punch(new IPEndPoint(server, serverRtp), serverRtcp);
+                    senders.Add((rtcp, Sender(udp, new IPEndPoint(transport.Destination!, transport.RtcpPort!.Value))));
+                }
+                else if (transport.ServerRtpPort is { } serverRtp)
+                {
+                    var serverRtcp = new IPEndPoint(server!, transport.ServerRtcpPort ?? serverRtp + 1);
+                    udp.Punch(new IPEndPoint(server!, serverRtp), serverRtcp);
                     senders.Add((rtcp, Sender(udp, serverRtcp)));
                 }
 
                 Observe(ReadReportsAsync(udp, server, rtcp));
                 if (audio?.Udp is { } audioUdp)
                 {
-                    var audioServer = Plain(audio.Transport.Source ?? rtsp.RemoteEndPoint.Address);
-                    if (audio.Transport.ServerRtpPort is { } audioRtp)
+                    var audioServer = Server(audio.Transport, rtsp, multicast);
+                    if (multicast)
                     {
-                        var audioRtcp = new IPEndPoint(audioServer, audio.Transport.ServerRtcpPort ?? audioRtp + 1);
-                        audioUdp.Punch(new IPEndPoint(audioServer, audioRtp), audioRtcp);
+                        senders.Add((audio.Rtcp, Sender(audioUdp, new IPEndPoint(audio.Transport.Destination!, audio.Transport.RtcpPort!.Value))));
+                    }
+                    else if (audio.Transport.ServerRtpPort is { } audioRtp)
+                    {
+                        var audioRtcp = new IPEndPoint(audioServer!, audio.Transport.ServerRtcpPort ?? audioRtp + 1);
+                        audioUdp.Punch(new IPEndPoint(audioServer!, audioRtp), audioRtcp);
                         senders.Add((audio.Rtcp, Sender(audioUdp, audioRtcp)));
                     }
 
@@ -631,7 +659,23 @@ public sealed class LivePlayer : IDisposable
 
     // The audio track's decoder and SETUP. Null, with Error saying why, when the decoder refuses the SDP's config or the
     // camera the SETUP: the video plays on without sound (a failing connection still throws, as for the video).
-    private async Task<AudioSession?> SetupAudioAsync(RtspConnection rtsp, SdpAudioTrack track, string url, bool overUdp, int videoChannel, CancellationToken token)
+    // Where a track's packets over UDP must come from: the answer's source, else the camera's address; from a group,
+    // only a source the answer names (null: any).
+    private static IPAddress? Server(RtspTransport transport, RtspConnection rtsp, bool multicast) =>
+        transport.Source is { } source ? Plain(source) : multicast ? null : Plain(rtsp.RemoteEndPoint.Address);
+
+    // The ports of the multicast group a SETUP answer names (destination, port), joined.
+    private static RtpUdpPorts JoinGroup(RtspTransport transport, RtspConnection rtsp)
+    {
+        if (transport.Destination is not { } group || transport.RtpPort is not { } port || transport.RtcpPort is not { } rtcpPort)
+        {
+            throw new InvalidDataException("The camera's SETUP answer for multicast names no group address and port.");
+        }
+
+        return RtpUdpPorts.Join(group, port, rtcpPort, rtsp.LocalEndPoint.Address, transport.TimeToLive);
+    }
+
+    private async Task<AudioSession?> SetupAudioAsync(RtspConnection rtsp, SdpAudioTrack track, string url, bool overUdp, bool multicast, int videoChannel, CancellationToken token)
     {
         var info = AudioInfo(track);
         IAudioDecoder decoder;
@@ -650,10 +694,12 @@ public sealed class LivePlayer : IDisposable
             return null;
         }
 
-        var ports = overUdp ? RtpUdpPorts.Bind(rtsp.LocalEndPoint.Address) : null;
+        var ports = overUdp && !multicast ? RtpUdpPorts.Bind(rtsp.LocalEndPoint.Address) : null;
         try
         {
-            string asked = ports is null ? "RTP/AVP/TCP;unicast;interleaved=2-3" : $"RTP/AVP;unicast;client_port={ports.RtpPort}-{ports.RtcpPort}";
+            string asked = multicast ? "RTP/AVP;multicast"
+                : ports is null ? "RTP/AVP/TCP;unicast;interleaved=2-3"
+                : $"RTP/AVP;unicast;client_port={ports.RtpPort}-{ports.RtcpPort}";
             var setup = await rtsp.RequestAsync("SETUP", url, [new("Transport", asked)], token).ConfigureAwait(false);
             if (setup.Status is < 200 or >= 300)
             {
@@ -663,6 +709,16 @@ public sealed class LivePlayer : IDisposable
             }
 
             var transport = RtspTransport.Parse(setup.Header("Transport"));
+            if (multicast)
+            {
+                if (transport.Destination is null || transport.RtpPort is null)
+                {
+                    _error = new IOException("The camera's SETUP answer for the audio track names no multicast group: playing without audio.");
+                    return null;
+                }
+
+                ports = JoinGroup(transport, rtsp);
+            }
 
             // An answer that names no channel (read as 0) would put the audio on the video's: the one asked for.
             int channel = transport.Channel == videoChannel ? 2 : transport.Channel;
@@ -877,12 +933,12 @@ public sealed class LivePlayer : IDisposable
     };
 
     // RTCP over UDP: the server's sender reports, until the ports close with the session (the receive then throws).
-    private async Task ReadReportsAsync(RtpUdpPorts udp, IPAddress server, RtcpSession rtcp)
+    private async Task ReadReportsAsync(RtpUdpPorts udp, IPAddress? server, RtcpSession rtcp)
     {
         while (true)
         {
             var (packet, from) = await udp.ReceiveReportAsync().ConfigureAwait(false);
-            if (Plain(from.Address).Equals(server))
+            if (server is null || Plain(from.Address).Equals(server))
             {
                 rtcp.Report(packet, _clock.Elapsed);
             }
@@ -893,7 +949,7 @@ public sealed class LivePlayer : IDisposable
     // window, until control ends: the video's is the read of the RTSP connection, which still carries the keep-alives.
     // The first track's packets (watched: the video's, or the sound's alone) count against a stall; the audio's beside a
     // video don't.
-    private async Task PumpUdpAsync(Task control, RtpUdpPorts udp, IPAddress server, uint? ssrc, Action<byte[]> handle, RtcpSession rtcp, bool watched, CancellationToken token)
+    private async Task PumpUdpAsync(Task control, RtpUdpPorts udp, IPAddress? server, uint? ssrc, Action<byte[]> handle, RtcpSession rtcp, bool watched, CancellationToken token)
     {
         var reorder = new RtpReorderBuffer(ReorderWindow);
         var ready = new List<byte[]>();
@@ -918,7 +974,7 @@ public sealed class LivePlayer : IDisposable
                 {
                     var (packet, from) = await receive.ConfigureAwait(false);
                     receive = null;
-                    if (!Plain(from.Address).Equals(server) || (ssrc is { } expected && (packet.Length < 12 || Ssrc(packet) != expected)))
+                    if ((server is not null && !Plain(from.Address).Equals(server)) || (ssrc is { } expected && (packet.Length < 12 || Ssrc(packet) != expected)))
                     {
                         continue; // not this session's stream
                     }
@@ -1001,7 +1057,7 @@ public sealed class LivePlayer : IDisposable
 
         if (response.Status == 461)
         {
-            throw new FatalException(new NotSupportedException($"The camera refused RTP both over the RTSP connection and over UDP ({response.Status} {response.Reason} to {method}); multicast isn't supported."));
+            throw new FatalException(new NotSupportedException($"The camera refused RTP over the RTSP connection, over UDP and to a multicast group ({response.Status} {response.Reason} to {method})."));
         }
 
         throw error;

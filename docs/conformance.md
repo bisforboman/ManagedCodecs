@@ -270,6 +270,28 @@ it on purpose.
     `LiveRtspUdpTests` checks the second through `LivePlayer`: the second pass's frames are shown.
 - **Not tried yet:** a real lossy network (Wi-Fi, a WAN), a NAT between camera and viewer, and an IP camera.
 
+### Multicast
+
+`LivePlayer` asks for RTP to a multicast group when a server answers 461 both to RTP over the RTSP connection and to
+RTP over UDP to the reader alone (docs/decisions/2026-11-16-live-rtsp-multicast.md).
+
+- **`LiveRtspMulticastTests`** runs `RtspTestServer` set to multicast only, as mediamtx with `rtspTransports:
+  [multicast]` is, sending to a group of the test's own on the loopback interface:
+  - SETUP goes three times: over the connection, over UDP with the reader's ports, then `RTP/AVP;multicast`, with no
+    ports of the reader's and no punch packets;
+  - in lockstep, every H.264 frame shown is `H264Decoder`'s for the units so far;
+  - AAC and A-law sound each from a group of its own, the chunks the decoder's for the packets in order;
+  - a receiver report reaches another member of the group, on its RTCP port, about the stream's SSRC;
+  - another sender to the same group and port, numbered as the next packet, changes no frame: only the SSRC the
+    answer names is taken (a group's packets may come from any of the camera's addresses, so the address isn't held to
+    unless the answer names a `source`);
+  - an answer that names no group is retried, and `destination`, `port` and `ttl` are read as mediamtx writes them.
+- **mediamtx 1.21.3, by hand** (2026-11-16), `rtspTransports: [multicast]`, FFmpeg publishing over RTMP (mediamtx
+  refuses an RTSP publisher there): it answers 461 to both unicast transports, then
+  `RTP/AVP;multicast;destination=224.1.0.1;port=8002-8003;ttl=127;ssrc=...`. 300 frames and 567 chunks of AAC, all the
+  clip's but the first chunk and a loop's (3 allowed), none lost or damaged, no reconnect.
+- **Not tried yet:** a camera's multicast, a network with IGMP snooping or more than one hop between, and IPv6 groups.
+
 ### RTSPS
 
 `RtspSource` takes `rtsps://` URLs: RTSP over TLS, RTP interleaved inside it (docs/decisions/2026-11-15-live-rtsps.md).
@@ -301,6 +323,7 @@ checks are of the packets and the player.
 | `heaac-stereo-44k.rtp` | the same | HE-AAC (the FDK encoder's stream), 3 to 5 a packet |
 | `wav-alaw-codes.rtp` | FFmpeg, RFC 3551 | A-law mono as the static payload type 8, no `a=rtpmap` |
 | `wav-mulaw-codes.rtp` | the same | µ-law stereo as `PCMU/8000/2` |
+| `aac-stereo-48k-latm.rtp` | FFmpeg, `-rtpflags latm`: RFC 6416's `MP4A-LATM`, `cpresent=0` | AAC LC, an access unit an audioMuxElement, an element a packet |
 | `gstreamer/aac-single.rtp` (committed, tools/gst-audio-record.py) | GStreamer 1.24's `rtpmp4gpay`, RFC 3640, `mode=AAC-hbr` | AAC LC (FFmpeg's encoder through `avenc_aac`), one access unit a packet |
 | `gstreamer/aac-fragmented.rtp` | the same with `mtu=200` | every access unit over 3 to 5 packets: 163 packets for 41 |
 | `gstreamer/alaw.rtp`, `gstreamer/mulaw.rtp` | GStreamer's `rtppcmapay`, `rtppcmupay` | the static payload types 8 and 0 with no `a=rtpmap`, 1024 samples a packet |
@@ -322,7 +345,8 @@ checks are of the packets and the player.
     over UDP, HE-AAC, A-law, µ-law over UDP), and the audio's SETUP is in the video's session, on channels 2 and 3 or
     a port pair of its own.
   - Without `Audio` there is one SETUP and no sound, even from a server that sends it.
-  - The audio's SETUP refused, LATM, and a `config` the decoder refuses: the video plays, `Audio` is null, and
+  - The audio's SETUP refused, LATM with its config in the stream (`cpresent=1`), and a `config` the decoder refuses:
+    the video plays, `Audio` is null, and
     `Error` or `SkippedAudioCodec` says why.
   - 94 frames never taken leave the newest 23 (0.49 s) and count 71 dropped.
   - A lost packet and a frame the decoder rejects are counted, and the sound goes on.
@@ -343,6 +367,21 @@ checks are of the packets and the player.
   169 packets each, none dropped or damaged, no packet lost; `latm` named by `SkippedAudioCodec` and not played. Its
   sender reports gave both tracks capture times (`mcplay`'s lip sync held 471 to 483 of about 540 pictures, 31 to
   102 ms each), and the sessions took the receiver reports.
+- **AAC as LATM** (RFC 6416, issue #527; `RtpLatmTests`):
+  - FFmpeg's recording gives back the MP4's access units byte for byte; the AudioSpecificConfig taken out of its
+    StreamMuxConfig (`400023203fc0`: `1190`) is the MP4's, less the MP4's sync extension, which says no more.
+  - `LatmConfig` reads StreamMuxConfigs built bit by bit: FFmpeg's, GStreamer's (with the backward-compatible sync
+    extension), 2 and 64 access units an element, SBR signalled first, SBR and PS in the sync extension, and
+    `audioMuxVersion` 1 with the config's length given. It refuses what cameras don't send (several programs or layers,
+    frames of a fixed length, `audioMuxVersionA` 1, a program config element, an object type other than AAC LC).
+  - The SDP: `cpresent=0` with a config plays; `cpresent` left out (1) or a config it can't read is skipped and named.
+  - Hand-made packets: an element over three packets with two access units, a length of 255 and over; data after the
+    access units left alone; an element missing its first, a middle or its last packet dropped (after a gap the next
+    one is given only if its lengths add up to exactly its bytes, as nothing marks an element's first packet); lengths
+    that run past the element; an element larger than its access units can be.
+  - `LiveRtspAudioTests` plays the recording through `LivePlayer`, over the connection and over UDP.
+  - **GStreamer 1.24's `rtpmp4apay`, by hand** (2026-11-15, its RTSP server with the H.264 pattern): with its default
+    MTU and with `mtu=300` (each element over packets), 280 chunks each in 6 s, none dropped or damaged, no packet lost.
 - **Not tried yet:** an IP camera (their G.711 and one access unit a packet are covered by GStreamer's and FFmpeg's
   packetizers only).
 
@@ -666,8 +705,9 @@ its edit's end until the first was read that way. QuickTime files (`aac-quicktim
 
 ## AVI audio
 
-`AviDemuxer.Audio` is the file's first audio stream (docs/decisions/2026-11-08-avi-audio.md); `AviConformanceTests`
-compares its packets with ffprobe's (name.packets.csv: size and MD5 of every packet, pts, dts and duration where
+`AviDemuxer.AudioTracks` lists every audio stream, `Audio` being the first unless `SelectAudio` chooses others
+(docs/decisions/2026-11-08-avi-audio.md, 2026-11-15-sound-tracks.md); `AviConformanceTests` compares each one's
+packets, read alone, with ffprobe's (name.packets.csv: size and MD5 of every packet, pts, dts and duration where
 FFmpeg gives them) and its codec private data with FFmpeg's extradata, on every AVI sample:
 
 | Sample | What |
@@ -679,6 +719,7 @@ FFmpeg gives them) and its codec private data with FFmpeg's extradata, on every 
 | avi-mjpeg-ima | 4-bit IMA ADPCM at 22.05 kHz, stereo, in 512-byte blocks: a packet a block, timed in blocks (dwScale wSamplesPerBlock); `CodecIds.AdpcmImaWav` |
 | avi-mjpeg-ms-adpcm | Microsoft ADPCM at 22.05 kHz, stereo, in 512-byte blocks, timed as IMA's; `CodecIds.AdpcmMs` |
 | avi-mjpeg-mp3-cbr | MP3 in the CBR layout of VirtualDub and older muxers, written by `tools/avi-mp3-cbr.py` |
+| avi-mjpeg-three-audio | Three audio streams, MP3 stereo, 16-bit PCM mono and AAC, each a tone of its own: each read alone, and all three in one pass in ffprobe's file order; a seek by one before choosing the others; `PlaybackOptions.AudioTrack` plays each (`AudioPlayerTests`) |
 
 The CBR layout (dwScale 1, dwRate the bytes a second, dwSampleSize 1) cuts its chunks anywhere in a frame:
 `tools/avi-mp3-cbr.py` rewrites an FFmpeg AVI's MP3 into chunks of 417, 1000, 61, 731, 2048 and 5 bytes in turn,
@@ -902,8 +943,8 @@ what the file says, the file is followed and the test says so:
   and all named backwards, a track's packets being the same whichever others are read with it. By hand: `Audio`
   following the choice, a read under way keeping its tracks, the refusals, a seek moving the tracks not selected too;
   `MxfFollowTests` grows mxf-h264-mono4 under two of its four tracks. Not covered by a file: two tracks naming the
-  same essence elements (the first is read). The other demuxers still read their first audio stream alone (the
-  interface's defaults, checked on a one-stream demuxer).
+  same essence elements (the first is read). AVI lists its streams too (AVI, above); MP4 and Matroska still read
+  their first audio stream alone (the interface's defaults, checked on a one-stream demuxer).
 - The players on those tracks (`PlaybackOptions.AudioTrack`): `AudioPlayer` and `MediaPlayer` play mxf-h264-mono4's
   mono tracks in pairs, the track named as the left channel and the next as the right, sample for sample FFmpeg's
   `join` filter's stereo of the two (name.pair01.f32, name.pair23.f32); `AudioPlayerTests` also takes each track as

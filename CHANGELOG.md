@@ -13,13 +13,23 @@ run time.
 
 ## Unreleased
 
-A feature (JPEG over 2040 pixels over RTSP) beside fixes, hence the next version is a minor one.
+Features beside fixes (new public API: `AviDemuxer.AudioTracks` and `SelectAudio`), hence the next version is a minor
+one; code built against 0.18 keeps working.
 
 ### Added
 
+- Containers: `AviDemuxer` lists every audio stream (`AudioTracks`) and reads those `SelectAudio` chooses, one or
+  several in one pass, each as FFmpeg's demuxer gives it; until a choice is made the first is read alone, as before.
+  `PlaybackOptions.AudioTrack` plays any of them. Issue #535, docs/decisions/2026-11-15-sound-tracks.md.
 - Playback: JPEG over RTSP larger than 2040 pixels, whose size RFC 2435's header can't give: `LivePlayer` takes it
   from the camera's SDP (GStreamer's `a=x-dimensions`, RFC 6064's `a=framesize`) or from ONVIF's RTP header extension,
   where it used to fail. docs/decisions/2026-11-12-live-rtsp-jpeg.md (Since), issue #527.
+- Playback: a camera's AAC sent as LATM (RFC 6416's `MP4A-LATM`, with its StreamMuxConfig in the SDP) plays with
+  `RtspSource.Audio`, where `SkippedAudioCodec` named it before. docs/decisions/2026-11-15-live-rtsp-audio.md (Since),
+  issue #527.
+- Playback: RTP to a multicast group. A camera that refuses RTP both over the RTSP connection and over UDP to the
+  reader alone (461) is asked for `RTP/AVP;multicast`, and `LivePlayer` joins the group its answer names, where it used
+  to fail. docs/decisions/2026-11-16-live-rtsp-multicast.md, issue #527.
 - Playback: an RTSP stream with sound and no video (a microphone, an intercom, an audio-only restream) plays with
   `RtspSource.Audio`: the sound is the session's one track, its packets make `LivePlayer` `Playing` and are what
   `StallTimeout` watches, and `TakeLatest()` stays null. Without `Audio`, or with sound that doesn't play, the player
@@ -28,6 +38,9 @@ A feature (JPEG over 2040 pixels over RTSP) beside fixes, hence the next version
 
 ### Fixed
 
+- Thumbnails: `VideoProbe`'s duration (and where `VideoThumbnail` takes its frame) counts every audio stream, as
+  ffprobe's does: a file whose later sound track ran longer than its first (MXF's tracks since 0.18.0, AVI's now) was
+  given the first one's end.
 - Thumbnails: `VideoProbe` gives an MXF file's duration as ffprobe's; it gave 0 for every MXF file, so
   `VideoThumbnail` took its frame at the start rather than 10% in.
 - Containers: `MxfDemuxer`'s streams last their header's track durations, as FFmpeg's demuxer reads them: the

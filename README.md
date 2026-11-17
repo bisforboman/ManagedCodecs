@@ -110,7 +110,7 @@ and code that reproduces FFmpeg's reading where it differs from the spec), and n
   'alaw', 'ulaw') and Matroska (A_PCM by
   BitDepth), ISO MP4 (`ipcm`, `fpcm`). `MediaPlayer` plays it beside video
   (docs/decisions/2026-11-10-pcm-containers.md).
-- **Containers**: AVI (video, and the first audio stream: MP3 in both its chunk layouts, AAC, integer and float PCM
+- **Containers**: AVI (video, and every audio stream, `AudioTracks` and `SelectAudio`: MP3 in both its chunk layouts, AAC, integer and float PCM
   and 4-bit IMA and Microsoft ADPCM, which `PcmDecoder`, `ImaAdpcmDecoder` and `MsAdpcmDecoder` decode exactly as
   FFmpeg, others by their format tag such as `0x0031` for GSM 6.10; docs/decisions/2026-11-08-avi-audio.md), MP4 (video and audio tracks, fragmented files too, edit lists of several edits),
   Matroska and WebM (video and audio tracks, every kind of lacing, BlockGroups, live files of unknown size, header
@@ -532,9 +532,11 @@ if (player.TakeLatest() is { } frame)
   - JPEG (RFC 2435: 4:2:0 and 4:2:2, restart markers, in-band or computed tables, over 2040 pixels with the size from
     the SDP or ONVIF's header extension) is rebuilt into whole JPEGs and
     decoded as MJPEG over HTTP is, the newest waiting; an incomplete frame is dropped (`DamagedFrames`).
-  - Final answers: 401 after the challenge's answer, 403, 404, 454, 461 to both RTP over the connection and over UDP
-    (multicast only), an SDP with no H.264 or JPEG track (unless it has sound and `Audio` is on: below) or with H.264
-    in RTP's interleaved mode, and a JPEG type or Q RFC 2435 reserves.
+  - A server that refuses both (461 again, a camera set to multicast only) gets asked for RTP to a multicast group:
+    the group and ports its answer names are joined, and the receiver reports go to the group.
+  - Final answers: 401 after the challenge's answer, 403, 404, 454, 461 to RTP over the connection, over UDP and to
+    a multicast group, an SDP with no H.264 or JPEG track (unless it has sound and `Audio` is on: below) or with
+    H.264 in RTP's interleaved mode, and a JPEG type or Q RFC 2435 reserves.
   - Checked against GStreamer's RTSP server by hand, and nightly against mediamtx, over UDP too (docs/conformance.md,
     H.264 over RTSP, JPEG over RTP, RTP over UDP).
   - **RTSPS:** an `rtsps://` URL (port 322 by default) plays over TLS, RTP inside the encrypted connection; a server
@@ -542,9 +544,10 @@ if (player.TakeLatest() is { } frame)
     pinned: `new RtspSource(uri) { CertificateHash = "AB:CD:..." }` accepts that certificate (its SHA-256, as a browser
     or `openssl x509 -fingerprint -sha256` shows it) and no other, as most cameras' are self-signed
     (docs/decisions/2026-11-15-live-rtsps.md).
-  - Not yet: multicast, SRTP, H.265.
+  - Not yet: SRTP, H.265.
 - **Sound:** `new RtspSource(uri) { Audio = true }` plays the camera's sound too: the first audio track of its SDP
-  that is AAC (RFC 3640's `MPEG4-GENERIC`, AAC LC and HE-AAC) or G.711 (A-law, µ-law), set up beside the video on the
+  that is AAC (RFC 3640's `MPEG4-GENERIC`, AAC LC and HE-AAC, or RFC 6416's `MP4A-LATM`) or G.711 (A-law, µ-law),
+  set up beside the video on the
   same transport. `player.TakeAudio()` returns it as float stereo chunks, in order, for the application's sound output
   (as `MediaPlayer.TakeAudio()` does).
   - Lip sync is the application's, by capture times: the picture and the sound each come as soon as they are decoded,
@@ -555,7 +558,7 @@ if (player.TakeLatest() is { } frame)
   - Half a second waits at most. Past that the oldest chunk is dropped (`LiveStatistics.DroppedAudioFrames`), so a
     sound that plays slower than the camera sends never falls further behind.
   - Sound never stops the picture: a camera that refuses the audio's SETUP plays without it (`Error` says why), audio
-    of another kind (LATM, G.726, Opus) is named by `SkippedAudioCodec`, and lost packets are a gap in the sound.
+    of another kind (G.726, Opus, LATM with its config in the stream) is named by `SkippedAudioCodec`, and lost packets are a gap in the sound.
   - Off by default: without `Audio` the session is for the video alone.
   - **Sound only:** a stream with an audio track and no H.264 or JPEG one plays with `Audio` on, the sound as the
     session's one track: its packets make the player `Playing` and are what `StallTimeout` watches, and `TakeLatest()`

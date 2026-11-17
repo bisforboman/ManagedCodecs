@@ -84,7 +84,7 @@ public class LiveRtspAudioOnlyTests
     }
 
     [Theory]
-    [InlineData("m=audio 0 RTP/AVP 96\r\na=rtpmap:96 MP4A-LATM/16000/1\r\na=fmtp:96 cpresent=0;config=400028103fc0\r\n", "MP4A-LATM")]
+    [InlineData("m=audio 0 RTP/AVP 98\r\na=rtpmap:98 G726-32/8000\r\n", "G726-32")]
 
     // An AudioSpecificConfig the decoder refuses: the same on every connection.
     [InlineData("m=audio 0 RTP/AVP 96\r\na=rtpmap:96 MPEG4-GENERIC/48000/2\r\na=fmtp:96 mode=AAC-hbr;sizelength=13;indexlength=3;indexdeltalength=3;config=0190\r\n", null)]

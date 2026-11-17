@@ -60,9 +60,9 @@ public sealed partial class LiveViewHandler : ViewHandler<LiveView, WinImage>
         var rgba = frame.Pixels;
         for (int i = 0; i < _bgra.Length; i += 4)
         {
-            _bgra[i] = rgba[i]; // TEMPORARY, to see the check fail: no swap of red and blue.
+            _bgra[i] = rgba[i + 2];
             _bgra[i + 1] = rgba[i + 1];
-            _bgra[i + 2] = rgba[i + 2];
+            _bgra[i + 2] = rgba[i];
             _bgra[i + 3] = rgba[i + 3];
         }
 

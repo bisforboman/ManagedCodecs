@@ -857,7 +857,8 @@ MUTATIONS = [
     # ---- RTP over UDP (docs/decisions/2026-11-14-live-rtsp-udp.md), which the loopback interface never loses or
     # reorders: a 461 to RTP over the RTSP connection means SETUP again for UDP ...
     dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
-         find="if (setup.Status == 461)", replace="if (false)",
+         find="            if (setup.Status == 461)\n            {\n                udp = RtpUdpPorts.Bind",
+         replace="            if (false)\n            {\n                udp = RtpUdpPorts.Bind",
          tests="FullyQualifiedName~LiveRtspUdpTests.FallsBackToUdpAndShowsEachFrameAsTheDecoderDecodesIt"),
     # ... a packet ahead of the expected one waits the window for it ...
     dict(file="src/ManagedCodecs.Playback/Rtsp/RtpReorderBuffer.cs",
@@ -865,12 +866,22 @@ MUTATIONS = [
          tests="FullyQualifiedName~RtpReorderBufferTests.PutsPacketsBackInOrderWithinTheWindow"),
     # ... and only the server's packets count: its address ...
     dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
-         find="if (!Plain(from.Address).Equals(server) || ", replace="if (",
+         find="if ((server is not null && !Plain(from.Address).Equals(server)) || ", replace="if (",
          tests="FullyQualifiedName~LiveRtspUdpTests.PutsPacketsBackInOrderAndIgnoresDuplicatesAndStrangers"),
     # ... and the SSRC SETUP's answer gave.
     dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
          find=" || (ssrc is { } expected && (packet.Length < 12 || Ssrc(packet) != expected)))", replace=")",
          tests="FullyQualifiedName~LiveRtspUdpTests.PutsPacketsBackInOrderAndIgnoresDuplicatesAndStrangers"),
+    # Multicast (issue #527): after a 461 to UDP as well, SETUP asks for a group ...
+    dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
+         find="                    multicast = true;\n", replace="                    throw new IOException(\"461\");\n",
+         tests="FullyQualifiedName~LiveRtspMulticastTests.JoinsTheGroupAndShowsEachFrameAsTheDecoderDecodesIt"),
+    # ... whose packets may come from any of the camera's addresses (mediamtx's from the machine's, not the RTSP
+    # connection's): the SSRC alone tells its stream, unless the answer names a source.
+    dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
+         find="transport.Source is { } source ? Plain(source) : multicast ? null : Plain(rtsp.RemoteEndPoint.Address)",
+         replace="transport.Source is { } source ? Plain(source) : Plain(rtsp.RemoteEndPoint.Address)",
+         tests="FullyQualifiedName~LiveRtspMulticastTests"),
     # ---- RTCP receiver reports (docs/decisions/2026-11-15-live-rtcp.md), which no recording carries: duplicates
     # outnumbering losses in an interval give a fraction of 0, not a negative one read as a large one ...
     dict(file="src/ManagedCodecs.Playback/Rtsp/RtcpSession.cs",

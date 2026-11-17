@@ -23,6 +23,9 @@ Features beside fixes, hence the next version is a minor one.
 - Playback: a camera's AAC sent as LATM (RFC 6416's `MP4A-LATM`, with its StreamMuxConfig in the SDP) plays with
   `RtspSource.Audio`, where `SkippedAudioCodec` named it before. docs/decisions/2026-11-15-live-rtsp-audio.md (Since),
   issue #527.
+- Playback: RTP to a multicast group. A camera that refuses RTP both over the RTSP connection and over UDP to the
+  reader alone (461) is asked for `RTP/AVP;multicast`, and `LivePlayer` joins the group its answer names, where it used
+  to fail. docs/decisions/2026-11-16-live-rtsp-multicast.md, issue #527.
 
 ### Fixed
 

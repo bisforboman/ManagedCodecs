@@ -532,8 +532,10 @@ if (player.TakeLatest() is { } frame)
   - JPEG (RFC 2435: 4:2:0 and 4:2:2, restart markers, in-band or computed tables, over 2040 pixels with the size from
     the SDP or ONVIF's header extension) is rebuilt into whole JPEGs and
     decoded as MJPEG over HTTP is, the newest waiting; an incomplete frame is dropped (`DamagedFrames`).
-  - Final answers: 401 after the challenge's answer, 403, 404, 454, 461 to both RTP over the connection and over UDP
-    (multicast only), an SDP with no H.264 or JPEG track or with H.264 in RTP's interleaved mode, and a JPEG type or
+  - A server that refuses both (461 again, a camera set to multicast only) gets asked for RTP to a multicast group:
+    the group and ports its answer names are joined, and the receiver reports go to the group.
+  - Final answers: 401 after the challenge's answer, 403, 404, 454, 461 to RTP over the connection, over UDP and to
+    a multicast group, an SDP with no H.264 or JPEG track or with H.264 in RTP's interleaved mode, and a JPEG type or
     Q RFC 2435 reserves.
   - Checked against GStreamer's RTSP server by hand, and nightly against mediamtx, over UDP too (docs/conformance.md,
     H.264 over RTSP, JPEG over RTP, RTP over UDP).
@@ -542,7 +544,7 @@ if (player.TakeLatest() is { } frame)
     pinned: `new RtspSource(uri) { CertificateHash = "AB:CD:..." }` accepts that certificate (its SHA-256, as a browser
     or `openssl x509 -fingerprint -sha256` shows it) and no other, as most cameras' are self-signed
     (docs/decisions/2026-11-15-live-rtsps.md).
-  - Not yet: multicast, SRTP, H.265.
+  - Not yet: SRTP, H.265.
 - **Sound:** `new RtspSource(uri) { Audio = true }` plays the camera's sound too: the first audio track of its SDP
   that is AAC (RFC 3640's `MPEG4-GENERIC`, AAC LC and HE-AAC, or RFC 6416's `MP4A-LATM`) or G.711 (A-law, µ-law),
   set up beside the video on the

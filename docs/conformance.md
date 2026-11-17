@@ -270,6 +270,28 @@ it on purpose.
     `LiveRtspUdpTests` checks the second through `LivePlayer`: the second pass's frames are shown.
 - **Not tried yet:** a real lossy network (Wi-Fi, a WAN), a NAT between camera and viewer, and an IP camera.
 
+### Multicast
+
+`LivePlayer` asks for RTP to a multicast group when a server answers 461 both to RTP over the RTSP connection and to
+RTP over UDP to the reader alone (docs/decisions/2026-11-16-live-rtsp-multicast.md).
+
+- **`LiveRtspMulticastTests`** runs `RtspTestServer` set to multicast only, as mediamtx with `rtspTransports:
+  [multicast]` is, sending to a group of the test's own on the loopback interface:
+  - SETUP goes three times: over the connection, over UDP with the reader's ports, then `RTP/AVP;multicast`, with no
+    ports of the reader's and no punch packets;
+  - in lockstep, every H.264 frame shown is `H264Decoder`'s for the units so far;
+  - AAC and A-law sound each from a group of its own, the chunks the decoder's for the packets in order;
+  - a receiver report reaches another member of the group, on its RTCP port, about the stream's SSRC;
+  - another sender to the same group and port, numbered as the next packet, changes no frame: only the SSRC the
+    answer names is taken (a group's packets may come from any of the camera's addresses, so the address isn't held to
+    unless the answer names a `source`);
+  - an answer that names no group is retried, and `destination`, `port` and `ttl` are read as mediamtx writes them.
+- **mediamtx 1.21.3, by hand** (2026-11-16), `rtspTransports: [multicast]`, FFmpeg publishing over RTMP (mediamtx
+  refuses an RTSP publisher there): it answers 461 to both unicast transports, then
+  `RTP/AVP;multicast;destination=224.1.0.1;port=8002-8003;ttl=127;ssrc=...`. 300 frames and 567 chunks of AAC, all the
+  clip's but the first chunk and a loop's (3 allowed), none lost or damaged, no reconnect.
+- **Not tried yet:** a camera's multicast, a network with IGMP snooping or more than one hop between, and IPv6 groups.
+
 ### RTSPS
 
 `RtspSource` takes `rtsps://` URLs: RTSP over TLS, RTP interleaved inside it (docs/decisions/2026-11-15-live-rtsps.md).

@@ -818,8 +818,8 @@ for spec in 3.0:3:aac-3.0.aac 4.0:4:aac-4.0.aac 7.1:8:aac-adts-7.1.aac quad:4:aa
   IFS=: read -r layout channels name <<< "$spec"
   ff -f lavfi -i "aevalsrc=$(tones "$channels"):s=48000:d=1:c=$layout" -c:a aac -b:a 256k -aac_pns 0 -f adts "samples/$name"
 done
-# The same 3.0 in MP4, whose edit list trims the priming from the first frame: the layout must outlive the trimming (3.0
-# is not the default for three channels, 2.1).
+# The same 3.0 in MP4, whose edit list leaves out the priming packet, which the players decode for its overlap and drop
+# (3.0 is not the default for three channels, 2.1).
 ff -f lavfi -i "aevalsrc=$(tones 3):s=48000:d=1:c=3.0" -c:a aac -b:a 256k -aac_pns 0 samples/aac-mp4-3.0.mp4
 for spec in quad:4:wav-pcm-quad.wav 7.1:8:wav-pcm-7.1.wav; do
   IFS=: read -r layout channels name <<< "$spec"

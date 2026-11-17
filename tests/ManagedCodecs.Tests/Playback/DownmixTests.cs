@@ -78,6 +78,15 @@ public class DownmixTests
     [InlineData(16, 0UL)]
     public void LeavesTheseAsTheyWere(int channels, ulong mask) => Assert.Null(Downmix.Weights(mask, channels));
 
+    /// <summary>A frame trimmed at its start or end (priming, Matroska's padding) keeps its layout.</summary>
+    [Fact]
+    public void ATrimmedFrameKeepsItsLayout()
+    {
+        var frame = new AudioFrame(48000, 3, 1024) { ChannelMask = 0x7 };
+        Assert.Equal(0x7UL, frame.Drop(100, 0).ChannelMask);
+        Assert.Equal(0x7UL, frame.Drop(0, 100).ChannelMask);
+    }
+
     [Theory]
     [MemberData(nameof(Samples))]
     public void PlaysAsFfmpegDownmixesIt(string name)

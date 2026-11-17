@@ -14,8 +14,8 @@ run time.
 ## Unreleased
 
 Features beside fixes (new public API: `AudioTracks` and `SelectAudio` in `AviDemuxer`, `Mp4Demuxer` and
-`MatroskaDemuxer`; `AudioStreamInfo.Language`, `Title` and `IsDefault`; `PlaybackOptions.PairMonoTracks`), hence the next version is a minor one; code
-built against 0.18 keeps working.
+`MatroskaDemuxer`; `AudioStreamInfo.Language`, `Title` and `IsDefault`; `PlaybackOptions.PairMonoTracks`), hence the
+next version is a minor one; code built against 0.18 keeps working.
 
 ### Added
 

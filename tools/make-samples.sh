@@ -87,6 +87,24 @@ for spec in pcm_u8:1:8000:pcm-u8 pcm_s16le:2:44100:pcm-s16 pcm_s24le:2:48000:pcm
   IFS=: read -r codec channels rate name <<< "$spec"
   ff -f lavfi -i "sine=frequency=440:sample_rate=$rate:d=1.3" -ac "$channels" -c:a "$codec" "samples/wav-$name.wav"
 done
+# G.726 in .wav files (G726Decoder; format tag 0x45, wBitsPerSample the bits a code, the codes from each byte's most
+# significant bit), at 16, 24, 32 and 40 kbit/s, three ways. wav-g726-N: FFmpeg's encoder on a tone, for the files
+# FFmpeg writes (its codec is not the Recommendation's: docs/decisions/2026-11-15-g726.md). wav-g726-itu-N: the
+# Recommendation's encoder (tools/g726-reference.py) on a loud sweep with quiet stretches and steps, which reaches the
+# tone and transition detectors, the poles' limits and the output's. wav-g726-codes-N: random codes, as no encoder sends
+# them, for the 16-bit wraps of the predictor's sums.
+g726_pcm=$(mktemp)
+g726_codes=$(mktemp)
+ff -f lavfi -i "aevalsrc='0.95*sin(2*PI*(200+1700*t)*t)*(1-0.9*lt(mod(t,0.4),0.1))+0.6*gt(mod(t,0.37),0.33)':s=8000:d=1.3" \
+  -f s16le "$g726_pcm"
+for bits in 2 3 4 5; do
+  ff -f lavfi -i "sine=frequency=440:sample_rate=8000:d=1.3" -c:a g726 -b:a "$((8 * bits))k" "samples/wav-g726-$((8 * bits)).wav"
+  python3 tools/g726-reference.py encode "$bits" be "$g726_pcm" "$g726_codes"
+  ff -f g726 -code_size "$bits" -ar 8000 -i "$g726_codes" -c:a copy "samples/wav-g726-itu-$((8 * bits)).wav"
+  python3 -c "import random, sys; random.seed($bits); sys.stdout.buffer.write(random.randbytes(6000))" > "$g726_codes"
+  ff -f g726 -code_size "$bits" -ar 8000 -i "$g726_codes" -c:a copy "samples/wav-g726-codes-$((8 * bits)).wav"
+done
+rm "$g726_pcm" "$g726_codes"
 # H.264 in AVI: Annex B (start codes, the SPS and PPS in the stream, no avcC), which H264Decoder reads without a
 # configuration record: libx264's High with B pictures and a keyframe every 12 frames (its 'idx1' index flags them, which
 # Seek starts from), and Constrained Baseline beside MP3 (FFmpeg's muxer drops its second video frame while
@@ -1214,6 +1232,15 @@ for f in samples/*.avi samples/*.mp4 samples/*.mkv samples/*.wav; do
       ff -i "$f" -map 0:a:0 -f f32le "${f%.*}.pcm.f32" ;;
     adpcm_ima_wav) ff -i "$f" -map 0:a:0 -f f32le "${f%.*}.ima.f32" ;;
     adpcm_ms) ff -i "$f" -map 0:a:0 -f f32le "${f%.*}.msadpcm.f32" ;;
+    adpcm_g726)
+      # G.726: name.g726.f32 is the reference decoder's output (tools/g726-reference.py, G726Decoder's values exactly),
+      # name.g726.ffmpeg.f32 FFmpeg's, which is not exact to the Recommendation and only close (G726DecoderTests).
+      g726_codes=$(mktemp)
+      ff -i "$f" -map 0:a:0 -c:a copy -f g726 "$g726_codes"
+      python3 tools/g726-reference.py decode "$(($(ffprobe -v error -select_streams a:0 -show_entries stream=bit_rate -of csv=p=0 "$f") / 8000))" \
+        be "$g726_codes" "${f%.*}.g726.f32"
+      rm "$g726_codes"
+      ff -i "$f" -map 0:a:0 -f f32le "${f%.*}.g726.ffmpeg.f32" ;;
   esac
 done
 # .wav files: packets as FFmpeg's wav demuxer gives them (name.packets.csv).
@@ -1289,5 +1316,27 @@ for spec in aac-stereo-48k.mp4:aac-stereo-48k: "aac-stereo-48k.mp4:aac-stereo-48
   wait "$recorder"
   port=$((port + 2))
 done
+
+# G.726 over RTP (RFC 3551, 4.5.4; docs/decisions/2026-11-15-g726.md), for RtpG726Tests and LiveRtspAudioTests: FFmpeg's
+# packetizer on the wav-g726-itu samples' codes at each rate, as they are ("AAL2-G726-32/8000": from each byte's most
+# significant bit, rtp-aal2-g726-N) and repacked from the least significant ("G726-32/8000", rtp-g726-N), on a dynamic
+# payload type; a packet holds up to 1024 bytes of whole codes.
+g726_codes=$(mktemp)
+g726_le=$(mktemp)
+for bits in 2 3 4 5; do
+  ff -i "samples/wav-g726-itu-$((8 * bits)).wav" -c:a copy -f g726 "$g726_codes"
+  python3 tools/g726-reference.py repack "$bits" be "$g726_codes" "$g726_le"
+  for spec in "g726:$g726_codes:rtp-aal2-g726" "g726le:$g726_le:rtp-g726"; do
+    IFS=: read -r format input name <<< "$spec"
+    name="samples/$name-$((8 * bits))"
+    python3 tools/rtp-record.py "$port" "$name.rtp" &
+    recorder=$!
+    sleep 0.5
+    ffmpeg -nostdin -hide_banner -loglevel error -y -f "$format" -code_size "$bits" -ar 8000 -i "$input" -c:a copy -f rtp -sdp_file "$name.sdp" "rtp://127.0.0.1:$port"
+    wait "$recorder"
+    port=$((port + 2))
+  done
+done
+rm "$g726_codes" "$g726_le"
 
 echo "Samples and references written to samples/."

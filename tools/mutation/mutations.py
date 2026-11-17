@@ -1013,6 +1013,15 @@ MUTATIONS = [
          find="delta[c] = Math.Clamp((Adaptation[nibble] * delta[c]) >> 8, 16, MaxDelta);",
          replace="delta[c] = Math.Max((Adaptation[nibble] * delta[c]) >> 8, 16);",
          tests="FullyQualifiedName~MsAdpcmDecoderTests"),
+    # G.726 (docs/decisions/2026-11-15-g726.md), checked against the Recommendation, not FFmpeg: the reconstructed
+    # signal wraps in 16 bits, as the Recommendation's sums do, which only random codes reach ...
+    dict(file="src/ManagedCodecs.Core/G726Decoder.cs",
+         find="int sr = (short)(se + signedDq);", replace="int sr = se + signedDq;",
+         tests="DisplayName~wav-g726-codes"),
+    # ... and the output is limited to the uniform PCM interface's 14 bits, which a loud input overshoots.
+    dict(file="src/ManagedCodecs.Core/G726Decoder.cs",
+         find="Math.Clamp(DecodeCode(code), -8192, 8191) / 8192f", replace="DecodeCode(code) / 8192f",
+         tests="DisplayName~wav-g726-itu"),
     # ---- MP3: where the decoder does what FFmpeg's does and the spec leaves open, or what only some streams reach.
     # A frame whose main data starts before the reservoir does (a stream cut from a longer one): its granules are
     # skipped, silent, by their lengths until the data is there (mp3-cut).

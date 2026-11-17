@@ -28,6 +28,30 @@
     <WindowsAppSDKSelfContained Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">true</WindowsAppSDKSelfContained>
   </PropertyGroup>
 
+  <!-- The Windows App SDK compiles a file of its own into a self-contained unpackaged app,
+       UndockedRegFreeWinRT-AutoInitializer.cs (from the NuGet cache), whose P/Invoke of the SDK's own bootstrap DLL
+       has no DefaultDllImportSearchPaths: CA5392, an error here as every Security rule is
+       (docs/decisions/2026-11-06-security-analyzers.md). Not this repository's code and not ours to change, so the
+       rule is off for that one file only, by a global config naming its full path (a .editorconfig can't reach the
+       NuGet cache); any other file keeps the rule. Checked on Linux with a stand-in of that name: it builds, and the
+       same code under another name fails. -->
+  <Target Name="SuppressWindowsAppSdkInitializerFinding" BeforeTargets="CoreCompile">
+    <ItemGroup>
+      <_WindowsAppSdkInitializer Include="@(Compile)" Condition="'%(Filename)' == 'UndockedRegFreeWinRT-AutoInitializer'" />
+    </ItemGroup>
+    <PropertyGroup>
+      <_WindowsAppSdkInitializerPath>@(_WindowsAppSdkInitializer->'%(FullPath)')</_WindowsAppSdkInitializerPath>
+      <_WindowsAppSdkInitializerPath>$([System.String]::Copy('$(_WindowsAppSdkInitializerPath)').Replace('\', '/'))</_WindowsAppSdkInitializerPath>
+      <_WindowsAppSdkInitializerConfig>$(IntermediateOutputPath)windowsappsdk-initializer.globalconfig</_WindowsAppSdkInitializerConfig>
+    </PropertyGroup>
+    <WriteLinesToFile Condition="'$(_WindowsAppSdkInitializerPath)' != ''" File="$(_WindowsAppSdkInitializerConfig)"
+                      Lines="is_global = true;[$(_WindowsAppSdkInitializerPath)];dotnet_diagnostic.CA5392.severity = none"
+                      Overwrite="true" WriteOnlyWhenDifferent="true" />
+    <ItemGroup Condition="'$(_WindowsAppSdkInitializerPath)' != ''">
+      <EditorConfigFiles Include="$(_WindowsAppSdkInitializerConfig)" />
+    </ItemGroup>
+  </Target>
+
   <ItemGroup>
     <PackageReference Include="Microsoft.Maui.Controls" />
   </ItemGroup>

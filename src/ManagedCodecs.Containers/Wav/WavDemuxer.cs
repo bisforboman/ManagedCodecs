@@ -4,7 +4,7 @@ namespace ManagedCodecs.Containers;
 
 /// <summary>
 /// A .wav file (RIFF WAVE): one audio stream, its 'fmt ' chunk a WAVEFORMATEX named as AVI's audio is (integer and
-/// float PCM by their depth, WAVE_FORMAT_EXTENSIBLE by its sub-format, IMA and Microsoft ADPCM, MP3; any other format by its tag in
+/// float PCM by their depth, WAVE_FORMAT_EXTENSIBLE by its sub-format, IMA and Microsoft ADPCM, G.726, MP3; any other format by its tag in
 /// hex), its 'data' chunk the packets, as FFmpeg's wav demuxer gives them.
 /// </summary>
 /// <remarks>
@@ -13,7 +13,8 @@ namespace ManagedCodecs.Containers;
 /// what the data has left; timed in samples (<see cref="AudioStreamInfo.TimeBase"/> is one over the sample rate): PCM's
 /// a sample a block, IMA ADPCM's wSamplesPerBlock a block (a block cut short its whole groups of 4 bytes a channel, as
 /// <see cref="ImaAdpcmDecoder"/> decodes it), Microsoft ADPCM's likewise (a block cut short its header's two samples
-/// and two codes a byte over the channels, as <see cref="MsAdpcmDecoder"/> decodes it). MP3 is cut into frames by their
+/// and two codes a byte over the channels, as <see cref="MsAdpcmDecoder"/> decodes it), G.726's the codes its bytes hold
+/// (wBitsPerSample bits each). MP3 is cut into frames by their
 /// headers instead, as FFmpeg's parser cuts it, skipping bytes that start none, each frame its samples long. Other formats' packets are timed by the bytes
 /// before them over nAvgBytesPerSec, an estimate no sample checks.
 /// </para>
@@ -229,6 +230,11 @@ public sealed class WavDemuxer : IDemuxer
                 int headers = 7 * format.Channels;
                 int rest = length % block;
                 duration = ((long)(length / block) * samplesPerBlock) + (rest >= headers ? 2 + ((rest - headers) * 2 / format.Channels) : 0);
+            }
+            else if (format.Codec == CodecIds.AdpcmG726)
+            {
+                // wBitsPerSample bits a sample: FFmpeg's muxer makes nBlockAlign the bytes of 8 codes (1 for 2 and 4 bits).
+                duration = (long)length * 8 / format.BitsPerSample;
             }
             else
             {

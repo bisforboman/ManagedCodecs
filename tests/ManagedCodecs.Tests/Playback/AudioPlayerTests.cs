@@ -160,6 +160,25 @@ public class AudioPlayerTests
     }
 
     /// <summary>
+    /// <see cref="PlaybackOptions.AudioTrack"/> in an AVI file of three audio streams (MP3, PCM and AAC): each plays
+    /// alone, as its decoder gives it, mono on both speakers (only MXF's mono tracks are paired).
+    /// </summary>
+    [Theory]
+    [InlineData(0, 1)]
+    [InlineData(1, 2)]
+    [InlineData(2, 3)]
+    public void PlaysTheAviStreamTheOptionsName(int track, int streamIndex)
+    {
+        const string Name = "avi-mjpeg-three-audio.avi";
+        var expected = Expected(Name, track);
+        using var player = new AudioPlayer(TestSamples.PathOf(Name), new PlaybackOptions { AudioTrack = track });
+        Assert.Equal(streamIndex, player.Audio.StreamIndex);
+        player.Start();
+        Assert.Equal(expected, Drain(player, expected.Count + 1));
+        Assert.Null(player.Error);
+    }
+
+    /// <summary>
     /// The pairing itself, on hand-made 16-bit packets: a track's samples wait for the other's, whatever the packets'
     /// sizes and order; what one track has past the other's end plays beside silence; packets of other streams and
     /// discarded ones give nothing. And only an MXF file's mono tracks are a pair: elsewhere two mono tracks are two
@@ -199,11 +218,28 @@ public class AudioPlayerTests
         Assert.Null(alone.Flush());
     }
 
+    /// <summary>
+    /// Unset, <see cref="PlaybackOptions.AudioTrack"/> plays the track the demuxer gives unasked, wherever it is in the
+    /// list; a number counts from 0 in the file's order, whichever that is.
+    /// </summary>
+    [Fact]
+    public void PlaysTheDemuxersAudioUnasked()
+    {
+        static AudioStreamInfo Stereo(int index) => new(CodecIds.PcmS16Le, 48000, 2, 0, new Rational(1, 48000), default, index);
+        var demuxer = new Tracks(true, Stereo(1), Stereo(2)) { Unasked = 1 };
+        Assert.Equal(2, PlayedAudio.Choose(demuxer, new PlaybackOptions())!.Track.StreamIndex);
+        Assert.Equal(1, PlayedAudio.Choose(demuxer, new PlaybackOptions { AudioTrack = 0 })!.Track.StreamIndex);
+        Assert.Equal(1, PlayedAudio.Choose(new Tracks(true, Stereo(1), Stereo(2)), new PlaybackOptions())!.Track.StreamIndex);
+    }
+
     private sealed class Tracks(bool several, params AudioStreamInfo[] tracks) : IDemuxer
     {
+        /// <summary>Which track <see cref="Audio"/> is.</summary>
+        public int Unasked { get; init; }
+
         public VideoStreamInfo? Video => null;
 
-        public AudioStreamInfo? Audio => tracks[0];
+        public AudioStreamInfo? Audio => tracks[Unasked];
 
         public IReadOnlyList<AudioStreamInfo> AudioTracks => several ? tracks : [tracks[0]];
 
@@ -257,6 +293,7 @@ public class AudioPlayerTests
             CodecIds.Mp3 => new Mp3Decoder(audio),
             CodecIds.AdpcmImaWav => new ImaAdpcmDecoder(audio),
             CodecIds.AdpcmMs => new MsAdpcmDecoder(audio),
+            CodecIds.AdpcmG726 => new G726Decoder(audio),
             _ => new PcmDecoder(audio),
         };
         var samples = new List<float>();

@@ -255,11 +255,11 @@ public class RtpAudioDepacketizerTests
     [InlineData("m=audio 0 RTP/AVP 96\r\na=rtpmap:96 mpeg4-generic/16000/1\r\na=fmtp:96 streamtype=5; profile-level-id=15; mode=AAC-hbr; config=1408; SizeLength=13; IndexLength=3; IndexDeltaLength=3\r\n", CodecIds.Aac, 16000, 1, null)]
 
     // The first format that plays, in the SDP's order, across audio tracks.
-    [InlineData("m=audio 0 RTP/AVP 98 8\r\na=rtpmap:98 G726-32/8000\r\n", CodecIds.PcmAlaw, 8000, 1, null)]
+    [InlineData("m=audio 0 RTP/AVP 98 8\r\na=rtpmap:98 G729/8000\r\n", CodecIds.PcmAlaw, 8000, 1, null)]
     [InlineData("m=audio 0 RTP/AVP 98\r\na=rtpmap:98 opus/48000/2\r\nm=audio 0 RTP/AVP 0\r\n", CodecIds.PcmMulaw, 8000, 1, null)]
 
     // None that plays: the first one's name.
-    [InlineData("m=audio 0 RTP/AVP 96\r\na=rtpmap:96 MP4A-LATM/16000/1\r\na=fmtp:96 cpresent=0;config=400028103fc0\r\n", null, 0, 0, "MP4A-LATM")]
+    [InlineData("m=audio 0 RTP/AVP 96\r\na=rtpmap:96 MP4A-LATM/16000/1\r\na=fmtp:96 cpresent=1;config=400028103fc0\r\n", null, 0, 0, "MP4A-LATM")] // its config in the stream, which is not read
     [InlineData("m=audio 0 RTP/AVP 2\r\n", null, 0, 0, "payload type 2")]
     [InlineData("m=audio 0 RTP/AVP 96\r\na=rtpmap:96 MPEG4-GENERIC/48000/2\r\na=fmtp:96 mode=AAC-hbr;sizelength=13;indexlength=3;indexdeltalength=3\r\n", null, 0, 0, "MPEG4-GENERIC")] // no config
     [InlineData("m=audio 0 RTP/AVP 96\r\na=rtpmap:96 MPEG4-GENERIC/48000/2\r\na=fmtp:96 mode=CELP-vbr;sizelength=6;config=1190\r\n", null, 0, 0, "MPEG4-GENERIC")]

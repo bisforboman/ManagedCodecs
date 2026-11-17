@@ -1,5 +1,3 @@
 #nullable enable
-ManagedCodecs.Playback.AudioChunk.CaptureTime.get -> System.DateTime?
-ManagedCodecs.Playback.PlaybackOptions.AudioTrack.get -> int
-ManagedCodecs.Playback.PlaybackOptions.AudioTrack.init -> void
-ManagedCodecs.Playback.RgbaFrame.CaptureTime.get -> System.DateTime?
+ManagedCodecs.Playback.RtspSource.HttpTunnel.get -> bool
+ManagedCodecs.Playback.RtspSource.HttpTunnel.init -> void

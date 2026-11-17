@@ -10,9 +10,9 @@ namespace ManagedCodecs.Playback;
 /// </summary>
 internal static class AudioPipeline
 {
-    /// <summary>Whether a stream of <paramref name="codec"/> plays: AAC, MP3, PCM, IMA and Microsoft ADPCM.</summary>
+    /// <summary>Whether a stream of <paramref name="codec"/> plays: AAC, MP3, PCM, IMA and Microsoft ADPCM, G.726.</summary>
     public static bool CanPlay(string? codec) =>
-        codec is CodecIds.Aac or CodecIds.Mp3 or CodecIds.AdpcmImaWav or CodecIds.AdpcmMs || PcmDecoder.CanDecode(codec);
+        codec is CodecIds.Aac or CodecIds.Mp3 or CodecIds.AdpcmImaWav or CodecIds.AdpcmMs or CodecIds.AdpcmG726 or CodecIds.AdpcmG726Le || PcmDecoder.CanDecode(codec);
 
     /// <summary>A decoder for <paramref name="audio"/>, whose codec <see cref="CanPlay"/>.</summary>
     public static IAudioDecoder CreateDecoder(AudioStreamInfo audio) => audio switch
@@ -21,6 +21,7 @@ internal static class AudioPipeline
         { Codec: var codec } when PcmDecoder.CanDecode(codec) => new PcmDecoder(audio),
         { Codec: CodecIds.AdpcmImaWav } => new ImaAdpcmDecoder(audio),
         { Codec: CodecIds.AdpcmMs } => new MsAdpcmDecoder(audio),
+        { Codec: CodecIds.AdpcmG726 or CodecIds.AdpcmG726Le } => new G726Decoder(audio),
         _ => new AacDecoder(audio),
     };
 
@@ -68,10 +69,9 @@ internal sealed class PlayedAudio
     /// <exception cref="ArgumentOutOfRangeException"><see cref="PlaybackOptions.AudioTrack"/> is negative, or the file has audio tracks but not that many.</exception>
     public static PlayedAudio? Choose(IDemuxer demuxer, PlaybackOptions options)
     {
-        int index = options.AudioTrack;
-        if (index < 0)
+        if (options.AudioTrack < 0)
         {
-            throw new ArgumentOutOfRangeException(nameof(options), index, "PlaybackOptions.AudioTrack is negative.");
+            throw new ArgumentOutOfRangeException(nameof(options), options.AudioTrack, "PlaybackOptions.AudioTrack is negative.");
         }
 
         var tracks = demuxer.AudioTracks;
@@ -79,6 +79,9 @@ internal sealed class PlayedAudio
         {
             return null;
         }
+
+        // Unasked, the track the demuxer gives by default.
+        int index = options.AudioTrack ?? Math.Max(0, IndexOf(tracks, demuxer.Audio));
 
         if (index >= tracks.Count)
         {
@@ -91,6 +94,19 @@ internal sealed class PlayedAudio
             ? next
             : null;
         return new PlayedAudio(track, right);
+    }
+
+    private static int IndexOf(IReadOnlyList<AudioStreamInfo> tracks, AudioStreamInfo? audio)
+    {
+        for (int i = 0; i < tracks.Count; i++)
+        {
+            if (tracks[i].StreamIndex == audio?.StreamIndex)
+            {
+                return i;
+            }
+        }
+
+        return -1;
     }
 
     /// <summary>Has the demuxer's next read give the track's packets (and its right channel's).</summary>

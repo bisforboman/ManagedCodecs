@@ -56,12 +56,23 @@ public sealed class RtspSource
     public TimeSpan MaxLag { get; init; } = TimeSpan.FromSeconds(1);
 
     /// <summary>
-    /// Whether to play the camera's sound too: the first AAC (RFC 3640) or G.711 audio track of its SDP, taken with
+    /// Whether to play the camera's sound too: the first AAC (RFC 3640), G.711 or G.726 audio track of its SDP, taken with
     /// <see cref="LivePlayer.TakeAudio"/>. False by default: the session is then for the video alone. A camera with no
     /// such track, or one that refuses to send it, plays its video without sound (<see cref="LivePlayer.Audio"/>,
-    /// <see cref="LivePlayer.SkippedAudioCodec"/>). docs/decisions/2026-11-15-live-rtsp-audio.md.
+    /// <see cref="LivePlayer.SkippedAudioCodec"/>). docs/decisions/2026-11-15-live-rtsp-audio.md, and for G.726
+    /// docs/decisions/2026-11-15-g726.md.
     /// </summary>
     public bool Audio { get; init; }
+
+    /// <summary>
+    /// Whether to tunnel RTSP through HTTP, for a camera behind a firewall or proxy that lets only HTTP pass: two HTTP
+    /// connections to the camera, a GET that carries what it sends and a POST that carries the requests (Apple's
+    /// tunnelling, which many cameras, live555 and GStreamer's server offer). The URL stays an <c>rtsp://</c> one; its
+    /// port is then the camera's HTTP port, 80 when it gives none (443 for <c>rtsps://</c>, the tunnel over HTTPS). RTP
+    /// comes inside the GET's answer, as over the RTSP connection; a camera that refuses that (461) can't play this way.
+    /// False by default. docs/decisions/2026-11-16-live-rtsp-http.md.
+    /// </summary>
+    public bool HttpTunnel { get; init; }
 
     /// <summary>
     /// For an <c>rtsps://</c> source, the SHA-256 of the certificate the camera presents, in hex (64 digits; colons and
@@ -94,8 +105,11 @@ public sealed class RtspSource
     internal string RequestUrl =>
         Uri.GetComponents(UriComponents.SchemeAndServer | UriComponents.PathAndQuery, UriFormat.UriEscaped);
 
-    // rtsp's port 554, rtsps' 322 (IANA), unless the URL gives one.
-    internal int Port => Uri.Port > 0 ? Uri.Port : Secure ? 322 : 554;
+    // rtsp's port 554, rtsps' 322 (IANA), unless the URL gives one; through the HTTP tunnel HTTP's, 80 (443 for rtsps).
+    internal int Port => Uri.Port > 0 ? Uri.Port : HttpTunnel ? (Secure ? 443 : 80) : Secure ? 322 : 554;
+
+    // The path the HTTP tunnel's GET and POST name: the URL's, with its query.
+    internal string? TunnelPath => HttpTunnel ? Uri.GetComponents(UriComponents.PathAndQuery, UriFormat.UriEscaped) : null;
 
     private static byte[] ParseHash(string hex)
     {

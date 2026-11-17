@@ -112,6 +112,19 @@ public static class CodecIds
     /// files; FFmpeg's adpcm_ms); <see cref="MsAdpcmDecoder"/>.
     /// </summary>
     public const string AdpcmMs = "ADPCM_MS";
+
+    /// <summary>
+    /// ITU-T G.726 ADPCM (16, 24, 32 or 40 kbit/s: codes of 2 to 5 bits, the stream's CodecPrivate byte), the codes packed
+    /// from each byte's most significant bit (the WAVE format tag 0x45 as FFmpeg writes it, RTP's AAL2-G726-*; FFmpeg's
+    /// adpcm_g726); <see cref="G726Decoder"/>.
+    /// </summary>
+    public const string AdpcmG726 = "ADPCM_G726";
+
+    /// <summary>
+    /// ITU-T G.726 ADPCM as <see cref="AdpcmG726"/>, the codes packed from each byte's least significant bit (RTP's
+    /// G726-16, G726-24, G726-32 and G726-40, RFC 3551; FFmpeg's adpcm_g726le); <see cref="G726Decoder"/>.
+    /// </summary>
+    public const string AdpcmG726Le = "ADPCM_G726LE";
 }
 
 /// <summary>One compressed unit of data pulled out of a container, e.g. one MJPEG frame.</summary>
@@ -221,7 +234,8 @@ public sealed record VideoStreamInfo(
     /// The stream's length in <c>TimeBase</c> ticks as the container gives it, as FFmpeg's stream duration: MP4's edits'
     /// summed length (a leading empty edit only moves the start), else the shorter of the track's 'mdhd' duration and
     /// its samples' summed durations (the longer in fragmented MP4, whose 'mdhd' leaves the fragments out); AVI's
-    /// 'strh' length in frames. 0 where the container says nothing.
+    /// 'strh' length in frames; MXF's material package track duration (the sound's rescaled to samples, rounded to the
+    /// nearest). 0 where the container says nothing.
     /// </summary>
     public long Duration { get; init; }
 
@@ -251,7 +265,8 @@ public sealed record AudioStreamInfo(
     /// The stream's length in <c>TimeBase</c> ticks as the container gives it, as FFmpeg's stream duration: MP4's edits'
     /// summed length (a leading empty edit only moves the start), else the shorter of the track's 'mdhd' duration and
     /// its samples' summed durations (the longer in fragmented MP4, whose 'mdhd' leaves the fragments out); AVI's
-    /// 'strh' length in frames. 0 where the container says nothing.
+    /// 'strh' length in frames; MXF's material package track duration (the sound's rescaled to samples, rounded to the
+    /// nearest). 0 where the container says nothing.
     /// </summary>
     public long Duration { get; init; }
 }

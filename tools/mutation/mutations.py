@@ -196,10 +196,39 @@ MUTATIONS = [
          find="if (TryFromFooter(stream, runIn, header, out partitions))", replace="if (false)",
          tests="FullyQualifiedName~MxfPartitionTests"),
     # ---- MXF demuxer (packets as FFmpeg's)
+    # A stream lasts its header's track duration, as ffprobe's, longer than the packets in a file cut short
+    # (mxf-h264-pcm-cut) ...
+    dict(file="src/ManagedCodecs.Containers/Mxf/MxfDemuxer.cs",
+         find="Duration = video.Duration ?? 0,", replace="Duration = 0,",
+         tests="FullyQualifiedName~MxfConformanceTests|FullyQualifiedName~VideoProbeTests"),
+    # ... the sound's rescaled from edit units to samples rounded to the nearest, as FFmpeg does (6 frames at 29.97
+    # are 9609.6 samples: 9610, mxf-d10-525), not truncated.
+    dict(file="src/ManagedCodecs.Containers/Mxf/MxfDemuxer.cs",
+         find="((2 * units * rate * audio.EditRate.Denominator) + audio.EditRate.Numerator) / (2L * audio.EditRate.Numerator)",
+         replace="units * rate * audio.EditRate.Denominator / audio.EditRate.Numerator",
+         tests="FullyQualifiedName~MxfConformanceTests"),
     # An intra-only codec's packets are all keyframes, whatever the index says (FFmpeg's muxer leaves ProRes without
     # the random access flag: mxf-prores-pcm16).
     dict(file="src/ManagedCodecs.Containers/Mxf/MxfDemuxer.cs",
          find="bool keyframe = intra || (entry", replace="bool keyframe = (entry",
+         tests="FullyQualifiedName~MxfConformanceTests"),
+    # An MPEG-2 I picture is a keyframe without the random access flag (an open GOP's), as libavformat's parser marks
+    # it (mxf-mpeg2-b) ...
+    dict(file="src/ManagedCodecs.Containers/Mxf/MxfDemuxer.cs",
+         find="|| (mpeg2 && (f.Flags & MxfIndex.Predicted) == 0)", replace="",
+         tests="FullyQualifiedName~MxfConformanceTests"),
+    # ... MPEG-2's only: an H.264 entry's flags don't make a keyframe of it (AppliesTheIndexTablesTemporalOffsetsAndFlags).
+    # Without an index (a file cut before its footer's), an MPEG-2 picture is a keyframe where its picture header says
+    # I, as libavformat's parser reads it (mxf-mpeg2-b-cut) ...
+    dict(file="src/ManagedCodecs.Containers/Mxf/MxfDemuxer.cs",
+         find=": unit == 0 || _intraPictures.Contains(unit));", replace=": unit == 0);",
+         tests="FullyQualifiedName~MxfConformanceTests"),
+    # ... I alone (picture coding type 1), not P (2) or B (3).
+    dict(file="src/ManagedCodecs.Containers/Mxf/MxfDemuxer.cs",
+         find="((head[at + 5] >> 3) & 7) == 1", replace="((head[at + 5] >> 3) & 7) != 0",
+         tests="FullyQualifiedName~MxfConformanceTests"),
+    dict(file="src/ManagedCodecs.Containers/Mxf/MxfDemuxer.cs",
+         find="(mpeg2 && (f.Flags & MxfIndex.Predicted) == 0)", replace="((f.Flags & MxfIndex.Predicted) == 0)",
          tests="FullyQualifiedName~MxfConformanceTests"),
     # The temporal offsets apply only where the index says an element is reordered (11.2.3, PosTableIndex -1) ...
     dict(file="src/ManagedCodecs.Containers/Mxf/MxfDemuxer.cs",
@@ -309,7 +338,7 @@ MUTATIONS = [
     # RTSPS (docs/decisions/2026-11-15-live-rtsps.md): rtsps' default port 322, no plain UDP over TLS, and the
     # certificate check, pinned or the system's.
     dict(file="src/ManagedCodecs.Playback/RtspSource.cs",
-         find="Uri.Port > 0 ? Uri.Port : Secure ? 322 : 554;", replace="Uri.Port > 0 ? Uri.Port : 554;",
+         find=": HttpTunnel ? (Secure ? 443 : 80) : Secure ? 322 : 554;", replace=": HttpTunnel ? (Secure ? 443 : 80) : 554;",
          tests="FullyQualifiedName~LiveRtspsTests"),
     dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
          find="if (setup.Status == 461 && source.Secure)", replace="if (false)",
@@ -851,6 +880,16 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
          find="TimeSpan.FromTicks(timeout.Ticks / 2)", replace="timeout",
          tests="FullyQualifiedName~LiveRtspTests.KeepsTheSessionAliveAtHalfItsTimeout"),
+    # RTSP over HTTP (issue #527): no receiver reports through the tunnel, as live555 ended a tunnelled session at
+    # 65 s for them (docs/decisions/2026-11-16-live-rtsp-http.md) ...
+    dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
+         find="                if (!source.HttpTunnel)\n                {\n                    senders.Add(",
+         replace="                if (true)\n                {\n                    senders.Add(",
+         tests="FullyQualifiedName~LiveRtspHttpTests.KeepsTheSessionByKeepAlivesAndSendsNoReceiverReports"),
+    # ... and a 461 inside the tunnel is final: UDP beside it is what the tunnel is there to avoid.
+    dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
+         find="if (setup.Status == 461 && source.HttpTunnel)", replace="if (false)",
+         tests="FullyQualifiedName~LiveRtspHttpTests.DoesNotFallBackToUdpBesideTheTunnel"),
     # ---- JPEG over RTP (RFC 2435; docs/decisions/2026-11-12-live-rtsp-jpeg.md), rules neither FFmpeg's nor GStreamer's
     # packetizer reaches (both send Q 255 with the tables in every frame): Q below 128 scales K.1's tables by
     # Appendix A ...
@@ -866,10 +905,21 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.Playback/RtpJpegDepacketizer.cs",
          find="if (_damaged || offset != _scan.Length || ", replace="if (_damaged || ",
          tests="FullyQualifiedName~RtpJpegDepacketizerTests.DropsAFrameMissingAPacketAndKeepsTheOthers"),
+    # Over 2040 pixels (issue #527), sizes only ONVIF's header extension and RFC 6064's a=framesize give (no sender in
+    # reach writes either): the extension's SOF0 wins over the SDP's size ...
+    dict(file="src/ManagedCodecs.Playback/RtpJpegDepacketizer.cs",
+         find="(width, height) = _extensionWidth > 0 ? (_extensionWidth, _extensionHeight) : (_sdpWidth, _sdpHeight);",
+         replace="(width, height) = (_sdpWidth, _sdpHeight);",
+         tests="FullyQualifiedName~RtpJpegDepacketizerTests.TakesALargeFramesSizeFromOnvifsHeaderExtension"),
+    # ... and a=framesize for the track's payload type wins over GStreamer's a=x-dimensions.
+    dict(file="src/ManagedCodecs.Playback/Rtsp/Sdp.cs",
+         find="m.FrameSize.TryGetValue(type, out var size) && size.Width > 0 ? size : m.Size", replace="m.Size",
+         tests="FullyQualifiedName~RtpJpegDepacketizerTests.ReadsAJpegTracksSizeFromTheSdp"),
     # ---- RTP over UDP (docs/decisions/2026-11-14-live-rtsp-udp.md), which the loopback interface never loses or
     # reorders: a 461 to RTP over the RTSP connection means SETUP again for UDP ...
     dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
-         find="if (setup.Status == 461)", replace="if (false)",
+         find="            if (setup.Status == 461)\n            {\n                udp = RtpUdpPorts.Bind",
+         replace="            if (false)\n            {\n                udp = RtpUdpPorts.Bind",
          tests="FullyQualifiedName~LiveRtspUdpTests.FallsBackToUdpAndShowsEachFrameAsTheDecoderDecodesIt"),
     # ... a packet ahead of the expected one waits the window for it ...
     dict(file="src/ManagedCodecs.Playback/Rtsp/RtpReorderBuffer.cs",
@@ -877,12 +927,22 @@ MUTATIONS = [
          tests="FullyQualifiedName~RtpReorderBufferTests.PutsPacketsBackInOrderWithinTheWindow"),
     # ... and only the server's packets count: its address ...
     dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
-         find="if (!Plain(from.Address).Equals(server) || ", replace="if (",
+         find="if ((server is not null && !Plain(from.Address).Equals(server)) || ", replace="if (",
          tests="FullyQualifiedName~LiveRtspUdpTests.PutsPacketsBackInOrderAndIgnoresDuplicatesAndStrangers"),
     # ... and the SSRC SETUP's answer gave.
     dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
          find=" || (ssrc is { } expected && (packet.Length < 12 || Ssrc(packet) != expected)))", replace=")",
          tests="FullyQualifiedName~LiveRtspUdpTests.PutsPacketsBackInOrderAndIgnoresDuplicatesAndStrangers"),
+    # Multicast (issue #527): after a 461 to UDP as well, SETUP asks for a group ...
+    dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
+         find="                    multicast = true;\n", replace="                    throw new IOException(\"461\");\n",
+         tests="FullyQualifiedName~LiveRtspMulticastTests.JoinsTheGroupAndShowsEachFrameAsTheDecoderDecodesIt"),
+    # ... whose packets may come from any of the camera's addresses (mediamtx's from the machine's, not the RTSP
+    # connection's): the SSRC alone tells its stream, unless the answer names a source.
+    dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
+         find="transport.Source is { } source ? Plain(source) : multicast ? null : Plain(rtsp.RemoteEndPoint.Address)",
+         replace="transport.Source is { } source ? Plain(source) : Plain(rtsp.RemoteEndPoint.Address)",
+         tests="FullyQualifiedName~LiveRtspMulticastTests"),
     # ---- RTCP receiver reports (docs/decisions/2026-11-15-live-rtcp.md), which no recording carries: duplicates
     # outnumbering losses in an interval give a fraction of 0, not a negative one read as a large one ...
     dict(file="src/ManagedCodecs.Playback/Rtsp/RtcpSession.cs",
@@ -896,6 +956,18 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
          find="senders.Add((rtcp, Sender(udp, serverRtcp)));", replace="",
          tests="FullyQualifiedName~LiveRtcpTests.ReportsOverUdpFromTheRtcpPortWithWhatWasLost"),
+    # ---- A lossy network (LossyNetworkTests, issue #527): a gap inside a unit ended by its own marker damages only it ...
+    dict(file="src/ManagedCodecs.Playback/RtpH264Depacketizer.cs",
+         find="            _gapBeforeNext = false;\n            completed.Add(Complete(damaged: false));", replace="            completed.Add(Complete(damaged: false));",
+         tests="FullyQualifiedName~RtpH264DepacketizerTests.AGapInsideAUnitDamagesOnlyThatUnit"),
+    # ... the SDP's parameter sets come before every IDR picture, or one that lost a packet leaves none to decode by ...
+    dict(file="src/ManagedCodecs.Playback/RtpH264Depacketizer.cs",
+         find="var put = _first || (_keyframe && !_inBand && !_ownParameterSets) ? _parameterSets : [];", replace="var put = _first ? _parameterSets : [];",
+         tests="FullyQualifiedName~LiveRtspUdpTests.PlaysOnWhenTheFirstIdrPictureLostAPacket"),
+    # ... until the stream sends its own, which may be newer than the SDP's.
+    dict(file="src/ManagedCodecs.Playback/RtpH264Depacketizer.cs",
+         find="var put = _first || (_keyframe && !_inBand && !_ownParameterSets) ? _parameterSets : [];", replace="var put = _first || _keyframe ? _parameterSets : [];",
+         tests="FullyQualifiedName~RtpH264DepacketizerTests.PutsTheSdpsParameterSetsBeforeTheFirstUnitAndEachIdrPicture"),
     # ---- Capture times (docs/decisions/2026-11-15-live-rtcp.md, point 3), which need B pictures to tell a frame from
     # its unit: the live decoder's frames keep their own packets' times, not FFmpeg's for a stream with none ...
     dict(file="src/ManagedCodecs.H264/H264Decoder.cs",
@@ -933,6 +1005,16 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.Playback/RtpAudioDepacketizer.cs",
          find="if (_fragmentSize >= 0 && (header.Timestamp != _fragmentTimestamp || size != _fragmentSize))", replace="if (false)",
          tests="FullyQualifiedName~RtpAudioDepacketizerTests.DropsAFragmentedAccessUnitWhenAnotherStartsBeforeItsEnd"),
+    # AAC as LATM (RFC 6416, issue #527), rules only hand-made packets reach (FFmpeg's packetizer sends an element a
+    # packet): after a gap, an element is given only if its lengths add up to exactly its bytes, as nothing marks an
+    # element's first packet ...
+    dict(file="src/ManagedCodecs.Playback/RtpAudioDepacketizer.cs",
+         find="if (!whole || (suspect && at != element.Length))", replace="if (!whole)",
+         tests="FullyQualifiedName~RtpLatmTests.DropsAnElementMissingAPacket"),
+    # ... and an element larger than its access units can be is dropped rather than grown without bound.
+    dict(file="src/ManagedCodecs.Playback/RtpAudioDepacketizer.cs",
+         find="if (_fragment.Length + payload.Length > _latmSubFrames * (MaxAccessUnit + 256))", replace="if (false)",
+         tests="FullyQualifiedName~RtpLatmTests.DropsAnElementLargerThanItsAccessUnitsCanBe"),
     # MJPEG over HTTP: the first delimiter line names the boundary, whatever the header said (cameras get it wrong).
     dict(file="src/ManagedCodecs.Playback/MultipartReader.cs",
          find="            if (_first)\n", replace="            if (_boundary is null)\n",
@@ -982,6 +1064,15 @@ MUTATIONS = [
          find="delta[c] = Math.Clamp((Adaptation[nibble] * delta[c]) >> 8, 16, MaxDelta);",
          replace="delta[c] = Math.Max((Adaptation[nibble] * delta[c]) >> 8, 16);",
          tests="FullyQualifiedName~MsAdpcmDecoderTests"),
+    # G.726 (docs/decisions/2026-11-15-g726.md), checked against the Recommendation, not FFmpeg: the reconstructed
+    # signal wraps in 16 bits, as the Recommendation's sums do, which only random codes reach ...
+    dict(file="src/ManagedCodecs.Core/G726Decoder.cs",
+         find="int sr = (short)(se + signedDq);", replace="int sr = se + signedDq;",
+         tests="DisplayName~wav-g726-codes"),
+    # ... and the output is limited to the uniform PCM interface's 14 bits, which a loud input overshoots.
+    dict(file="src/ManagedCodecs.Core/G726Decoder.cs",
+         find="Math.Clamp(DecodeCode(code), -8192, 8191) / 8192f", replace="DecodeCode(code) / 8192f",
+         tests="DisplayName~wav-g726-itu"),
     # ---- MP3: where the decoder does what FFmpeg's does and the spec leaves open, or what only some streams reach.
     # A frame whose main data starts before the reservoir does (a stream cut from a longer one): its granules are
     # skipped, silent, by their lengths until the data is there (mp3-cut).

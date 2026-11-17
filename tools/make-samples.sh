@@ -51,6 +51,13 @@ ff -f lavfi -i testsrc2=size=160x120:rate=25 -f lavfi -i "sine=frequency=440:sam
   -c:a aac -b:a 64k samples/avi-mjpeg-aac.avi
 ff -f lavfi -i testsrc2=size=160x120:rate=25 -f lavfi -i "sine=frequency=440:sample_rate=22050" -t 1 -c:v mjpeg -q:v 5 \
   -c:a pcm_s16le samples/avi-mjpeg-pcm.avi
+# Several audio streams (AviDemuxer.AudioTracks, SelectAudio): MP3 stereo (a frame a chunk), 16-bit PCM mono
+# (dwSampleSize set: timed by bytes) and AAC, each a tone of its own, one 'strl' after another; FFmpeg's demuxer gives
+# a stream each, numbered 1 to 3 after the video.
+ff -f lavfi -i testsrc2=size=160x120:rate=25 -f lavfi -i "sine=frequency=440:sample_rate=44100" \
+  -f lavfi -i "sine=frequency=550:sample_rate=22050" -f lavfi -i "sine=frequency=660:sample_rate=48000" -t 1 \
+  -map 0 -map 1 -map 2 -map 3 -c:v mjpeg -q:v 5 -c:a:0 libmp3lame -b:a:0 64k -c:a:1 pcm_s16le -c:a:2 aac -b:a:2 64k \
+  samples/avi-mjpeg-three-audio.avi
 # 8-bit PCM, as cameras write it (PcmDecoder): unsigned, at 11.025 kHz, here in stereo for the channels' interleaving.
 # The audio runs 0.2 s past the video, as cameras' often does a little: ffprobe's duration is still the video's (VideoProbe).
 ff -f lavfi -i testsrc2=size=160x120:rate=25:d=1 -f lavfi -i "aevalsrc=0.4*sin(2*PI*440*t)|0.3*sin(2*PI*660*t):s=11025:d=1.2" \
@@ -80,6 +87,24 @@ for spec in pcm_u8:1:8000:pcm-u8 pcm_s16le:2:44100:pcm-s16 pcm_s24le:2:48000:pcm
   IFS=: read -r codec channels rate name <<< "$spec"
   ff -f lavfi -i "sine=frequency=440:sample_rate=$rate:d=1.3" -ac "$channels" -c:a "$codec" "samples/wav-$name.wav"
 done
+# G.726 in .wav files (G726Decoder; format tag 0x45, wBitsPerSample the bits a code, the codes from each byte's most
+# significant bit), at 16, 24, 32 and 40 kbit/s, three ways. wav-g726-N: FFmpeg's encoder on a tone, for the files
+# FFmpeg writes (its codec is not the Recommendation's: docs/decisions/2026-11-15-g726.md). wav-g726-itu-N: the
+# Recommendation's encoder (tools/g726-reference.py) on a loud sweep with quiet stretches and steps, which reaches the
+# tone and transition detectors, the poles' limits and the output's. wav-g726-codes-N: random codes, as no encoder sends
+# them, for the 16-bit wraps of the predictor's sums.
+g726_pcm=$(mktemp)
+g726_codes=$(mktemp)
+ff -f lavfi -i "aevalsrc='0.95*sin(2*PI*(200+1700*t)*t)*(1-0.9*lt(mod(t,0.4),0.1))+0.6*gt(mod(t,0.37),0.33)':s=8000:d=1.3" \
+  -f s16le "$g726_pcm"
+for bits in 2 3 4 5; do
+  ff -f lavfi -i "sine=frequency=440:sample_rate=8000:d=1.3" -c:a g726 -b:a "$((8 * bits))k" "samples/wav-g726-$((8 * bits)).wav"
+  python3 tools/g726-reference.py encode "$bits" be "$g726_pcm" "$g726_codes"
+  ff -f g726 -code_size "$bits" -ar 8000 -i "$g726_codes" -c:a copy "samples/wav-g726-itu-$((8 * bits)).wav"
+  python3 -c "import random, sys; random.seed($bits); sys.stdout.buffer.write(random.randbytes(6000))" > "$g726_codes"
+  ff -f g726 -code_size "$bits" -ar 8000 -i "$g726_codes" -c:a copy "samples/wav-g726-codes-$((8 * bits)).wav"
+done
+rm "$g726_pcm" "$g726_codes"
 # H.264 in AVI: Annex B (start codes, the SPS and PPS in the stream, no avcC), which H264Decoder reads without a
 # configuration record: libx264's High with B pictures and a keyframe every 12 frames (its 'idx1' index flags them, which
 # Seek starts from), and Constrained Baseline beside MP3 (FFmpeg's muxer drops its second video frame while
@@ -997,6 +1022,9 @@ mxf_cut samples/mxf-h264-pcm.mxf samples/mxf-h264-pcm-cut.mxf 1 30 1000
 mxf_cut samples/mxf-h264-pcm.mxf samples/mxf-h264-pcm-cut-video.mxf 0 40 100
 mxf_cut samples/mxf-d10-pcm24.mxf samples/mxf-d10-pcm24-cut.mxf 1 3 1000
 mxf_cut samples/mxf-opatom-pcm.mxf samples/mxf-opatom-pcm-cut.mxf 0 1 40000
+# mxf-mpeg2-b-cut: mxf-mpeg2-b ends 100 bytes into its 20th picture, so its index (in the footer) is gone: the keyframes
+# are the I pictures, which libavformat's parser finds in the picture headers and MxfDemuxer reads the same way.
+mxf_cut samples/mxf-mpeg2-b.mxf samples/mxf-mpeg2-b-cut.mxf 0 20 100
 # name.headers.json: the streams as FFmpeg's demuxer reads them from the header metadata, nothing decoded
 # (ffprobe -nofind_stream_info: with probing, the size and aspect ratio are the decoder's), and the file's operational
 # pattern, material package and start timecode.
@@ -1152,7 +1180,7 @@ for f in samples/*.mp4 samples/*.avi samples/*.mkv; do
   if [ -n "$t" ]; then echo "$t" > "${f%.*}.display"; fi
 done
 # name.probe.json: the file's duration and its streams' facts as ffprobe reports them, for VideoProbe (Thumbnails).
-for f in samples/*.mp4 samples/*.avi samples/*.mkv samples/*.h264 samples/*.264; do
+for f in samples/*.mp4 samples/*.avi samples/*.mkv samples/*.mxf samples/*.h264 samples/*.264; do
   ffprobe -v error -of json -show_entries format=duration,start_time:stream=index,codec_type,codec_name,width,height,sample_aspect_ratio,r_frame_rate,avg_frame_rate,sample_rate,channels,duration:stream_side_data=rotation \
     "$f" > "${f%.*}.probe.json"
 done
@@ -1212,8 +1240,10 @@ for f in samples/*.mov; do
   ffprobe -v error -select_streams v:0 -of compact=p=0 \
     -show_entries frame=color_range,color_space,color_primaries,color_transfer,chroma_location,sample_aspect_ratio "$f" > "${f%.*}.color"
 done
+# -map 0:v? -map 0:a?: every video and audio stream, so that a file with several audio streams (avi-mjpeg-three-audio)
+# has each one's extradata, at its own index (ffmpeg keeps one of a kind unasked).
 for f in samples/*.mp4 samples/*.mov samples/*.mkv samples/*.webm samples/*.avi samples/*.h264 samples/*.264; do
-  ff -copyts -i "$f" -c copy -f framemd5 "${f%.*}.packets.framemd5"
+  ff -copyts -i "$f" -map 0:v? -map 0:a? -c copy -f framemd5 "${f%.*}.packets.framemd5"
   ffprobe -v error -show_packets -show_data_hash MD5 -show_entries packet=stream_index,pts,dts,duration,size,flags,data_hash \
     -of csv=p=0 "$f" > "${f%.*}.packets.csv"
 done
@@ -1291,6 +1321,15 @@ for f in samples/*.avi samples/*.mp4 samples/*.mkv samples/*.wav; do
       ff -i "$f" -map 0:a:0 -f f32le "${f%.*}.pcm.f32" ;;
     adpcm_ima_wav) ff -i "$f" -map 0:a:0 -f f32le "${f%.*}.ima.f32" ;;
     adpcm_ms) ff -i "$f" -map 0:a:0 -f f32le "${f%.*}.msadpcm.f32" ;;
+    adpcm_g726)
+      # G.726: name.g726.f32 is the reference decoder's output (tools/g726-reference.py, G726Decoder's values exactly),
+      # name.g726.ffmpeg.f32 FFmpeg's, which is not exact to the Recommendation and only close (G726DecoderTests).
+      g726_codes=$(mktemp)
+      ff -i "$f" -map 0:a:0 -c:a copy -f g726 "$g726_codes"
+      python3 tools/g726-reference.py decode "$(($(ffprobe -v error -select_streams a:0 -show_entries stream=bit_rate -of csv=p=0 "$f") / 8000))" \
+        be "$g726_codes" "${f%.*}.g726.f32"
+      rm "$g726_codes"
+      ff -i "$f" -map 0:a:0 -f f32le "${f%.*}.g726.ffmpeg.f32" ;;
   esac
 done
 # .wav files: packets as FFmpeg's wav demuxer gives them (name.packets.csv).
@@ -1351,7 +1390,11 @@ port=$((port + 2))
 # (-single), as cameras send; and its RFC 3551 one on the G.711 .wav files: A-law mono as the static payload type 8
 # with no a=rtpmap, μ-law stereo as "PCMU/8000/2". FFmpeg's encoder never writes an access unit larger than a packet,
 # so fragments are hand-made in the tests.
+# -latm: the AAC LC sample as LATM (RFC 6416's MP4A-LATM, -rtpflags latm: an access unit an audioMuxElement, one a
+# packet, the StreamMuxConfig as the SDP's config=), for RtpLatmTests. Not the HE-AAC one: FFmpeg writes that config
+# from the stream's rate and channels alone (AAC LC at 44.1 kHz for a 22.05 kHz core with SBR).
 for spec in aac-stereo-48k.mp4:aac-stereo-48k: "aac-stereo-48k.mp4:aac-stereo-48k-single:-max_delay 0" heaac-stereo-44k.mp4:heaac-stereo-44k: \
+  "aac-stereo-48k.mp4:aac-stereo-48k-latm:-rtpflags latm" \
   wav-alaw-codes.wav:wav-alaw-codes: wav-mulaw-codes.wav:wav-mulaw-codes:; do
   IFS=: read -r input name options <<< "$spec"
   python3 tools/rtp-record.py "$port" "samples/$name.rtp" &
@@ -1362,5 +1405,27 @@ for spec in aac-stereo-48k.mp4:aac-stereo-48k: "aac-stereo-48k.mp4:aac-stereo-48
   wait "$recorder"
   port=$((port + 2))
 done
+
+# G.726 over RTP (RFC 3551, 4.5.4; docs/decisions/2026-11-15-g726.md), for RtpG726Tests and LiveRtspAudioTests: FFmpeg's
+# packetizer on the wav-g726-itu samples' codes at each rate, as they are ("AAL2-G726-32/8000": from each byte's most
+# significant bit, rtp-aal2-g726-N) and repacked from the least significant ("G726-32/8000", rtp-g726-N), on a dynamic
+# payload type; a packet holds up to 1024 bytes of whole codes.
+g726_codes=$(mktemp)
+g726_le=$(mktemp)
+for bits in 2 3 4 5; do
+  ff -i "samples/wav-g726-itu-$((8 * bits)).wav" -c:a copy -f g726 "$g726_codes"
+  python3 tools/g726-reference.py repack "$bits" be "$g726_codes" "$g726_le"
+  for spec in "g726:$g726_codes:rtp-aal2-g726" "g726le:$g726_le:rtp-g726"; do
+    IFS=: read -r format input name <<< "$spec"
+    name="samples/$name-$((8 * bits))"
+    python3 tools/rtp-record.py "$port" "$name.rtp" &
+    recorder=$!
+    sleep 0.5
+    ffmpeg -nostdin -hide_banner -loglevel error -y -f "$format" -code_size "$bits" -ar 8000 -i "$input" -c:a copy -f rtp -sdp_file "$name.sdp" "rtp://127.0.0.1:$port"
+    wait "$recorder"
+    port=$((port + 2))
+  done
+done
+rm "$g726_codes" "$g726_le"
 
 echo "Samples and references written to samples/."

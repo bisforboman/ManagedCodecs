@@ -49,8 +49,9 @@ in between. That comparison is not measured here.
 | `tools/ManagedCodecs.MonoGame.Sample` | `mcplay`: a MonoGame `Game` around `VideoTexture` (`ManagedCodecs.MonoGame`) (its README has the 1080p measurements; issue #254) |
 | `tools/ManagedCodecs.Unity.Sample` | A Unity `MonoBehaviour` that plays a video into a `Texture2D` and an `AudioClip` with the `ManagedCodecs.Unity` package (its `MediaPlayer`); CI compiles it against stubs of UnityEngine, Unity has not run it |
 | `tools/make-samples.sh` | Generates the test samples and FFmpeg's references |
+| `tools/g726-reference.py` | ITU-T G.726 in plain integers: the reference `G726Decoder` is checked against (FFmpeg's isn't the Recommendation's), the encoder behind the `wav-g726-itu` samples, and `verify`, which runs the Recommendation's test sequences |
 | `tools/gst-rtsp-server.py` | A GStreamer RTSP server with a live H.264 or JPEG test pattern, and a tone as AAC, G.711 or LATM (no auth, Basic or Digest), for trying `LivePlayer` by hand |
-| `tools/gst-jpeg-record.py` | Makes the committed JPEG over RTP recordings in `samples/gstreamer/` (GStreamer's `rtpjpegpay`: types 0, 64 and 65) |
+| `tools/gst-jpeg-record.py` | Makes the committed JPEG over RTP recordings in `samples/gstreamer/` (GStreamer's `rtpjpegpay`: types 0, 64 and 65, and 2048 pixels wide with its server's SDP) |
 | `tools/gst-audio-record.py` | Makes the committed audio over RTP recordings there (GStreamer's `rtpmp4gpay`, one AAC access unit a packet and fragmented ones; `rtppcmapay`, `rtppcmupay`) |
 | `tools/rtsp-nightly.py` | `LivePlayer` against mediamtx serving an H.264 and an MJPEG clip, each frame checked against the clip's, and an H.264 clip with AAC sound, each chunk of audio checked too, and over a network that loses and reorders packets (`mcdec --live`); nightly in `realworld.yml` |
 | `tools/rtsp-lossy-relay.py` | Relays an RTSP session and drops, repeats and reorders its RTP over UDP by a seeded choice, reading the client's receiver reports; `rtsp-nightly.py` puts it between mediamtx and `LivePlayer` |
@@ -117,7 +118,11 @@ and code that reproduces FFmpeg's reading where it differs from the spec), and n
   'alaw', 'ulaw') and Matroska (A_PCM by
   BitDepth), ISO MP4 (`ipcm`, `fpcm`). `MediaPlayer` plays it beside video
   (docs/decisions/2026-11-10-pcm-containers.md).
-- **Containers**: AVI (video, and the first audio stream: MP3 in both its chunk layouts, AAC, integer and float PCM
+- **G.726** (`G726Decoder`, in ManagedCodecs.Core): ITU-T G.726 ADPCM at 16, 24, 32 and 40 kbit/s, exactly the
+  Recommendation's samples, which are not FFmpeg's (its adpcm_g726 decoder is a codec of its own); from `.wav` files
+  (format tag 0x45) and over RTSP (`G726-*`, `AAL2-G726-*`). The reference it is checked against,
+  `tools/g726-reference.py`, passes the Recommendation's test sequences (docs/decisions/2026-11-15-g726.md).
+- **Containers**: AVI (video, and every audio stream, `AudioTracks` and `SelectAudio`: MP3 in both its chunk layouts, AAC, integer and float PCM
   and 4-bit IMA and Microsoft ADPCM, which `PcmDecoder`, `ImaAdpcmDecoder` and `MsAdpcmDecoder` decode exactly as
   FFmpeg, others by their format tag such as `0x0031` for GSM 6.10; docs/decisions/2026-11-08-avi-audio.md), MP4 (video and audio tracks, fragmented files too, edit lists of several edits),
   Matroska and WebM (video and audio tracks, every kind of lacing, BlockGroups, live files of unknown size, header
@@ -397,7 +402,7 @@ checks the lists after each. MXF (#469): 30 minutes of `file` seeded with the MX
 
 ### Probing a video
 
-`ManagedCodecs.Thumbnails`'s `VideoProbe.Read(stream)` gives an MP4, Matroska or AVI file's facts without decoding a frame:
+`ManagedCodecs.Thumbnails`'s `VideoProbe.Read(stream)` gives an MP4, Matroska, AVI or MXF file's facts without decoding a frame:
 `Duration` as ffprobe's `format=duration`, the coded and the displayed size (stretched by the pixels' aspect ratio,
 wider above 1 and taller below, then turned by the rotation), codec, frame rate, rotation and the audio's codec, rate
 and channels. Each is checked against ffprobe on every sample (VideoProbeTests). The stream must be seekable (an MP4
@@ -405,7 +410,8 @@ file's index can follow its data): buffer an upload first. A codec this library 
 `NotSupportedException`, a file without video `InvalidDataException`. The duration comes from the streams' `Duration` (`VideoStreamInfo`, `AudioStreamInfo`), which the
 demuxers give as FFmpeg's stream duration: MP4's edits' length, capped at the samples they take, else the track's,
 AVI's stream header length; a Matroska file's is its Segment's Duration, from its earliest packet, as FFmpeg's (a live
-recording without one: its packets').
+recording without one: its packets'); MXF's, its header's track durations (a file written to a pipe has none: its
+packets').
 
 ```csharp
 var info = VideoProbe.Read("upload.mp4");
@@ -479,7 +485,7 @@ while (player.TakeAudio() is { } audio) { /* audio.Samples at audio.SampleRate t
   FFmpeg's scaler (tools/ManagedCodecs.MonoGame.Sample/README.md); the fast path is checked against the formula on random
   samples of every 8-bit layout.
 - **Speed:** on 4 vCPUs at 2.1 GHz, 1080p24 and 1080p30 keep up, decoding and conversion included (mcplay's README).
-- **Audio it doesn't decode** (Opus, Vorbis, GSM 6.10, ...; AAC, MP3, PCM, G.711 and IMA and Microsoft ADPCM play) plays as none: `Audio` is null and
+- **Audio it doesn't decode** (Opus, Vorbis, GSM 6.10, ...; AAC, MP3, PCM, G.711, G.726 and IMA and Microsoft ADPCM play) plays as none: `Audio` is null and
   `SkippedAudioCodec` names it (the container's Codec ID, such as `A_OPUS`, or AVI's format tag, `0x0031`), for a warning; the Godot, Unity and
   mcplay samples print one.
 - **Not a media player:** no seeking and no clock of its own (pause by stopping the clock you pass); `Loop` plays the
@@ -537,10 +543,13 @@ if (player.TakeLatest() is { } frame)
     (`LiveStatistics.LostPackets`).
   - If decoding falls more than `MaxLag` (1 s) behind the camera, pictures are skipped up to the next IDR picture
     (`SkippedFrames`).
-  - JPEG (RFC 2435: 4:2:0 and 4:2:2, restart markers, in-band or computed tables) is rebuilt into whole JPEGs and
+  - JPEG (RFC 2435: 4:2:0 and 4:2:2, restart markers, in-band or computed tables, over 2040 pixels with the size from
+    the SDP or ONVIF's header extension) is rebuilt into whole JPEGs and
     decoded as MJPEG over HTTP is, the newest waiting; an incomplete frame is dropped (`DamagedFrames`).
-  - Final answers: 401 after the challenge's answer, 403, 404, 454, 461 to both RTP over the connection and over UDP
-    (multicast only), an SDP with no H.264 or JPEG track or with H.264 in RTP's interleaved mode, and a JPEG type or
+  - A server that refuses both (461 again, a camera set to multicast only) gets asked for RTP to a multicast group:
+    the group and ports its answer names are joined, and the receiver reports go to the group.
+  - Final answers: 401 after the challenge's answer, 403, 404, 454, 461 to RTP over the connection, over UDP and to
+    a multicast group, an SDP with no H.264 or JPEG track or with H.264 in RTP's interleaved mode, and a JPEG type or
     Q RFC 2435 reserves.
   - Checked against GStreamer's RTSP server by hand, and nightly against mediamtx, over UDP too (docs/conformance.md,
     H.264 over RTSP, JPEG over RTP, RTP over UDP).
@@ -549,9 +558,13 @@ if (player.TakeLatest() is { } frame)
     pinned: `new RtspSource(uri) { CertificateHash = "AB:CD:..." }` accepts that certificate (its SHA-256, as a browser
     or `openssl x509 -fingerprint -sha256` shows it) and no other, as most cameras' are self-signed
     (docs/decisions/2026-11-15-live-rtsps.md).
-  - Not yet: multicast, SRTP, H.265, JPEG over 2040 pixels.
+  - **RTSP over HTTP:** `new RtspSource(uri) { HttpTunnel = true }` tunnels the session through HTTP (port 80 unless
+    the URL gives one, 443 for `rtsps://`), for a camera behind a firewall or proxy that passes only HTTP: a GET carries
+    what the camera sends, RTP included, and a POST the requests (docs/decisions/2026-11-16-live-rtsp-http.md).
+  - Not yet: SRTP, H.265.
 - **Sound:** `new RtspSource(uri) { Audio = true }` plays the camera's sound too: the first audio track of its SDP
-  that is AAC (RFC 3640's `MPEG4-GENERIC`, AAC LC and HE-AAC) or G.711 (A-law, µ-law), set up beside the video on the
+  that is AAC (RFC 3640's `MPEG4-GENERIC`, AAC LC and HE-AAC, or RFC 6416's `MP4A-LATM`), G.711 (A-law, µ-law) or G.726,
+  set up beside the video on the
   same transport. `player.TakeAudio()` returns it as float stereo chunks, in order, for the application's sound output
   (as `MediaPlayer.TakeAudio()` does).
   - Lip sync is the application's, by capture times: the picture and the sound each come as soon as they are decoded,
@@ -562,7 +575,7 @@ if (player.TakeLatest() is { } frame)
   - Half a second waits at most. Past that the oldest chunk is dropped (`LiveStatistics.DroppedAudioFrames`), so a
     sound that plays slower than the camera sends never falls further behind.
   - Sound never stops the picture: a camera that refuses the audio's SETUP plays without it (`Error` says why), audio
-    of another kind (LATM, G.726, Opus) is named by `SkippedAudioCodec`, and lost packets are a gap in the sound.
+    of another kind (Opus, LATM with its config in the stream) is named by `SkippedAudioCodec`, and lost packets are a gap in the sound.
   - Off by default: without `Audio` the session is for the video alone.
   - `mclive` and `mclive-wpf` stay silent (neither Avalonia nor WPF plays raw samples without a native library or a
     platform API).

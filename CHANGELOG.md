@@ -13,7 +13,55 @@ run time.
 
 ## Unreleased
 
-New public API (`CaptureTime`, `AudioTracks`, `SelectAudio`, `AudioTrack`), hence the next version is a minor one; code built against 0.17 keeps working.
+Features beside fixes (new public API: `AviDemuxer.AudioTracks` and `SelectAudio`), hence the next version is a minor
+one; code built against 0.18 keeps working.
+
+### Added
+
+- Containers: `AviDemuxer` lists every audio stream (`AudioTracks`) and reads those `SelectAudio` chooses, one or
+  several in one pass, each as FFmpeg's demuxer gives it; until a choice is made the first is read alone, as before.
+  `PlaybackOptions.AudioTrack` plays any of them. Issue #535, docs/decisions/2026-11-15-sound-tracks.md.
+- Playback: JPEG over RTSP larger than 2040 pixels, whose size RFC 2435's header can't give: `LivePlayer` takes it
+  from the camera's SDP (GStreamer's `a=x-dimensions`, RFC 6064's `a=framesize`) or from ONVIF's RTP header extension,
+  where it used to fail. docs/decisions/2026-11-12-live-rtsp-jpeg.md (Since), issue #527.
+- Playback: a camera's AAC sent as LATM (RFC 6416's `MP4A-LATM`, with its StreamMuxConfig in the SDP) plays with
+  `RtspSource.Audio`, where `SkippedAudioCodec` named it before. docs/decisions/2026-11-15-live-rtsp-audio.md (Since),
+  issue #527.
+- Playback: RTP to a multicast group. A camera that refuses RTP both over the RTSP connection and over UDP to the
+  reader alone (461) is asked for `RTP/AVP;multicast`, and `LivePlayer` joins the group its answer names, where it used
+  to fail. docs/decisions/2026-11-16-live-rtsp-multicast.md, issue #527.
+- Playback: RTSP over HTTP (Apple's tunnelling), `RtspSource.HttpTunnel`, for a camera behind a firewall or proxy
+  that passes only HTTP: a GET carries what the camera sends, RTP included, and a POST the requests, on port 80 unless
+  the URL gives one (443 for `rtsps://`). No RTCP receiver reports go through the tunnel. `mcdec --live --http-tunnel`.
+  docs/decisions/2026-11-16-live-rtsp-http.md, issue #527.
+- Core: `G726Decoder`, ITU-T G.726 ADPCM at 16, 24, 32 and 40 kbit/s (`CodecIds.AdpcmG726`, `AdpcmG726Le`), from .wav
+  files (format tag 0x45) and from a camera over RTSP (`G726-*`, `AAL2-G726-*`, with `RtspSource.Audio`), where
+  `SkippedAudioCodec` named it before. It decodes exactly the Recommendation's samples, not FFmpeg's (whose adpcm_g726
+  differs), checked against `tools/g726-reference.py`, which passes the Recommendation's test sequences.
+  docs/decisions/2026-11-15-g726.md, issue #527.
+
+### Fixed
+
+- Thumbnails: `VideoProbe`'s duration (and where `VideoThumbnail` takes its frame) counts every audio stream, as
+  ffprobe's does: a file whose later sound track ran longer than its first (MXF's tracks since 0.18.0, AVI's now) was
+  given the first one's end.
+- Thumbnails: `VideoProbe` gives an MXF file's duration as ffprobe's; it gave 0 for every MXF file, so
+  `VideoThumbnail` took its frame at the start rather than 10% in.
+- Containers: `MxfDemuxer`'s streams last their header's track durations, as FFmpeg's demuxer reads them: the
+  video's `Duration` was 0, and each sound track's ran to its last packet, short of the header's in a file cut short.
+  The sound's is rescaled to samples and rounded to the nearest, as FFmpeg's; a file written to a pipe, whose header
+  gives none, is as before.
+- Containers: `MxfDemuxer` marks every MPEG-2 I picture a keyframe, as libavformat's parser does: an open GOP's I
+  picture, which the index gives no random access flag, was none, and in a file cut before its index (which went with
+  the footer) only the first picture was one; it now reads the picture header's coding type there. Seeking lands on
+  them too. Found by the nightly check (`tools/realworld.py`, which now compares keyframes and durations too).
+
+## 0.18.0 – 2026-11-16
+
+Live cameras in Avalonia and WPF: two new packages, ManagedCodecs.Avalonia and ManagedCodecs.Wpf, with a `LiveView`
+control; lip sync for RTSP cameras by capture times (`CaptureTime`), and RTCP receiver reports; and sound tracks after
+the first (`AudioTracks`, `SelectAudio`, `PlaybackOptions.AudioTrack`), MXF's mono tracks playing as left and right.
+New public API, hence a minor version; code built against 0.17 keeps working.
 
 ### Added
 
@@ -27,7 +75,8 @@ New public API (`CaptureTime`, `AudioTracks`, `SelectAudio`, `AudioTrack`), henc
   other demuxers still list their first audio stream only (to follow, issue #535).
   docs/decisions/2026-11-15-sound-tracks.md.
 - Playback: `PlaybackOptions.AudioTrack` chooses which audio track `MediaPlayer` and `AudioPlayer` play, counted from
-  0 in the file's order; a file with tracks but not that many is refused (`ArgumentOutOfRangeException`).
+  0 in the file's order (null, the default, plays the demuxer's `Audio`); a file with tracks but not that many is
+  refused (`ArgumentOutOfRangeException`).
 - ManagedCodecs.Avalonia and ManagedCodecs.Wpf, two new packages: `LiveView`, a control that shows a `LivePlayer`'s
   newest frame on each frame the UI renders, laid out as an `Image` (`Stretch`, `StretchDirection`). The application
   makes, starts and disposes the player. docs/decisions/2026-11-15-live-controls.md.
@@ -52,6 +101,11 @@ New public API (`CaptureTime`, `AudioTracks`, `SelectAudio`, `AudioTrack`), henc
   says (MPEG-2 with B pictures, as broadcast MXF has it): they were the stored order's, each packet's pts its dts. The
   decode times now start before 0 by the reordering's depth, as FFmpeg's. Found by the nightly check's first MXF files
   from other writers (`tools/realworld.py`, packet by packet against FFmpeg).
+- Playback: a live H.264 camera whose parameter sets come only in its SDP (`sprop-parameter-sets`, as FFmpeg's
+  packetizer sends them) showed no picture at all on that connection, though `State` said `Playing`, when a packet
+  of the first IDR picture was lost: the parameter sets came before that picture alone, and it was skipped. They now
+  come before every IDR picture until the stream sends its own.
+- Playback: `LiveStatistics.DamagedFrames` counted a whole H.264 picture after one that lost a packet as damaged too.
 - Containers: `MxfDemuxer.Video` carries the picture descriptor's colour (`ColorPrimaries`, `ColorTransfer`,
   `ColorMatrix`, and `ColorRange` by its black and white reference levels), as FFmpeg's demuxer reads it; it was left
   unspecified. Decoded H.264 frames take it where the stream's VUI says nothing, as with MP4's 'colr', so HDR and

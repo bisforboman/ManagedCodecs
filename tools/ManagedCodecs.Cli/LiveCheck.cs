@@ -33,7 +33,7 @@ public static class LiveCheck
     public const int LossyTail = 75;
 
     /// <summary>Plays <paramref name="url"/> until <paramref name="frames"/> frames are shown; 0 when all is well.</summary>
-    public static int Run(string url, string reference, int frames, TimeSpan timeout, bool audio = false, string? certificateHash = null, bool lossy = false)
+    public static int Run(string url, string reference, int frames, TimeSpan timeout, bool audio = false, string? certificateHash = null, bool lossy = false, bool httpTunnel = false)
     {
         var known = ReferenceHashes(reference);
         Console.WriteLine($"{Path.GetFileName(reference)}: {known.Count} distinct frames.");
@@ -41,7 +41,7 @@ public static class LiveCheck
 
         var uri = new Uri(url);
         using var player = uri.Scheme is "rtsp" or "rtsps"
-            ? new LivePlayer(new RtspSource(uri) { Audio = audio, CertificateHash = certificateHash })
+            ? new LivePlayer(new RtspSource(uri) { Audio = audio, CertificateHash = certificateHash, HttpTunnel = httpTunnel })
             : new LivePlayer(new MjpegHttpSource(uri));
         player.Start();
         var clock = Stopwatch.StartNew();

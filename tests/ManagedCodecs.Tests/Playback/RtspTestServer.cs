@@ -22,9 +22,15 @@ internal sealed class RtspTestServer : IDisposable
     private readonly TcpListener _listener = new(IPAddress.Loopback, 0);
     private readonly UdpClient _rtp = new(new IPEndPoint(IPAddress.Loopback, 0));
     private readonly UdpClient _rtcp = new(new IPEndPoint(IPAddress.Loopback, 0));
+
+    // A group's packets, from another address than the RTSP connection's, as a camera's (mediamtx's) come from
+    // whichever of its addresses faces the network.
+    private readonly UdpClient _groupRtp = new(new IPEndPoint(IPAddress.Parse("127.0.0.2"), 0));
+    private readonly UdpClient _groupRtcp = new(new IPEndPoint(IPAddress.Parse("127.0.0.2"), 0));
     private readonly CancellationTokenSource _stop = new();
     private readonly Task _accepting;
     private int _connections;
+    private readonly ConcurrentDictionary<string, TaskCompletionSource<ByteReader>> _tunnels = new();
 
     public RtspTestServer(string sdp, Func<RtspPlay, Task> onPlay)
     {
@@ -41,6 +47,33 @@ internal sealed class RtspTestServer : IDisposable
     /// <c>rtspTransports: [udp]</c>. A SETUP asking for UDP is accepted either way.
     /// </summary>
     public bool UdpOnly { get; set; }
+
+    /// <summary>
+    /// Answer 461 to every SETUP but one for multicast, as mediamtx set to multicast only does, and send each track to
+    /// a group of its own from this address on (the next track's is the next address), all on <see cref="MulticastPort"/>.
+    /// </summary>
+    public IPAddress? MulticastGroup { get; set; }
+
+    /// <summary>The groups' RTP port; RTCP is the next.</summary>
+    public int MulticastPort { get; set; }
+
+    /// <summary>With <see cref="MulticastGroup"/>: leave the group and port out of SETUP's answer.</summary>
+    public bool MulticastUnnamed { get; set; }
+
+    /// <summary>
+    /// RTSP over HTTP only (Apple's tunnelling): each connection starts with an HTTP GET or POST; a GET is answered 200 and
+    /// carries what the server sends, and the POST with its cookie carries the requests, in base64.
+    /// </summary>
+    public bool HttpTunnel { get; set; }
+
+    /// <summary>With <see cref="HttpTunnel"/>, the status to refuse the GET with, or null to take it.</summary>
+    public int? TunnelStatus { get; set; }
+
+    /// <summary>With <see cref="HttpTunnel"/>, each connection's HTTP request: its method, path and headers.</summary>
+    public ConcurrentQueue<RtspRequest> TunnelRequests { get; } = new();
+
+    /// <summary>With <see cref="HttpTunnel"/>, the POSTs' bodies as they came, base64 still.</summary>
+    public ConcurrentQueue<string> TunnelBodies { get; } = new();
 
     /// <summary>The SSRC SETUP's answer gives for UDP, or null to give none.</summary>
     public uint? Ssrc { get; set; }
@@ -95,6 +128,8 @@ internal sealed class RtspTestServer : IDisposable
         _listener.Stop();
         _rtp.Dispose();
         _rtcp.Dispose();
+        _groupRtp.Dispose();
+        _groupRtcp.Dispose();
         try
         {
             _accepting.Wait(TimeSpan.FromSeconds(5));
@@ -164,6 +199,17 @@ internal sealed class RtspTestServer : IDisposable
 
             var writing = new SemaphoreSlim(1, 1);
             var reader = new ByteReader(stream);
+            if (HttpTunnel)
+            {
+                var tunnelled = await TunnelAsync(stream, reader, index, token);
+                if (tunnelled is null)
+                {
+                    return; // refused, or the POST's connection, which tunnelled its requests to the GET's
+                }
+
+                reader = tunnelled;
+            }
+
             Task? playing = null;
             var udpClients = new List<IPEndPoint>(); // a track's each, in SETUP's order
             using var connection = CancellationTokenSource.CreateLinkedTokenSource(token);
@@ -173,8 +219,15 @@ internal sealed class RtspTestServer : IDisposable
                 {
                     Requests.Enqueue(request);
                     string cseq = request.Headers.GetValueOrDefault("CSeq", "0");
-                    var (status, reason, headers, body) = Answer(request, index);
-                    if (request.Method == "SETUP" && status == 200 && ClientPort(request) is { } port)
+                    var (status, reason, headers, body) = Answer(request, index, udpClients.Count);
+                    if (request.Method == "SETUP" && status == 200 && MulticastGroup is { } group)
+                    {
+                        // Sent on the loopback interface, where the client joins for a connection to this machine.
+                        _groupRtp.Client.SetSocketOption(SocketOptionLevel.IP, SocketOptionName.MulticastInterface, IPAddress.Loopback.GetAddressBytes());
+                        _groupRtcp.Client.SetSocketOption(SocketOptionLevel.IP, SocketOptionName.MulticastInterface, IPAddress.Loopback.GetAddressBytes());
+                        udpClients.Add(new IPEndPoint(GroupOf(group, udpClients.Count), MulticastPort));
+                    }
+                    else if (request.Method == "SETUP" && status == 200 && ClientPort(request) is { } port)
                     {
                         udpClients.Add(new IPEndPoint(IPAddress.Loopback, port));
                     }
@@ -204,7 +257,7 @@ internal sealed class RtspTestServer : IDisposable
 
                     if (request.Method == "PLAY" && status == 200 && playing is null)
                     {
-                        var play = new RtspPlay(stream, writing, index, connection.Token, udpClients.Count > 0 ? (_rtp, _rtcp, udpClients.ToArray()) : null);
+                        var play = new RtspPlay(stream, writing, index, connection.Token, udpClients.Count == 0 ? null : MulticastGroup is null ? (_rtp, _rtcp, udpClients.ToArray()) : (_groupRtp, _groupRtcp, udpClients.ToArray()));
                         playing = Task.Run(async () =>
                         {
                             try
@@ -234,7 +287,14 @@ internal sealed class RtspTestServer : IDisposable
         }
     }
 
-    private (int Status, string Reason, List<(string, string)> Headers, string Body) Answer(RtspRequest request, int index)
+    private static IPAddress GroupOf(IPAddress first, int track)
+    {
+        var bytes = first.GetAddressBytes();
+        bytes[3] += (byte)track;
+        return new IPAddress(bytes);
+    }
+
+    private (int Status, string Reason, List<(string, string)> Headers, string Body) Answer(RtspRequest request, int index, int tracks)
     {
         if (Status?.Invoke(request.Method, index) is { } forced)
         {
@@ -258,6 +318,9 @@ internal sealed class RtspTestServer : IDisposable
         {
             "OPTIONS" => (200, "OK", [("Public", "OPTIONS, DESCRIBE, SETUP, PLAY, GET_PARAMETER, TEARDOWN")], ""),
             "DESCRIBE" => (200, "OK", [("Content-Base", Uri + "/"), ("Content-Type", "application/sdp")], Sdp),
+            "SETUP" when MulticastGroup is { } group => request.Headers.GetValueOrDefault("Transport", "").Contains("multicast", StringComparison.Ordinal)
+                ? (200, "OK", [("Session", $"S{index}ession;timeout={SessionTimeout}"), ("Transport", MulticastUnnamed ? "RTP/AVP;multicast" : $"RTP/AVP;multicast;destination={GroupOf(group, tracks)};port={MulticastPort}-{MulticastPort + 1};ttl=1{(Ssrc is { } stream ? $";ssrc={stream:X8}" : "")}")], "")
+                : (461, "Unsupported Transport", [], ""),
             "SETUP" when ClientPort(request) is { } port =>
                 (200, "OK", [("Session", $"S{index}ession;timeout={SessionTimeout}"), ("Transport", $"RTP/AVP;unicast;client_port={port}-{port + 1};server_port={RtpEndPoint.Port}-{((IPEndPoint)_rtcp.Client.LocalEndPoint!).Port}{(Ssrc is { } ssrc ? $";ssrc={ssrc:X8}" : "")}")], ""),
             "SETUP" when UdpOnly => (461, "Unsupported Transport", [], ""),
@@ -341,6 +404,76 @@ internal sealed class RtspTestServer : IDisposable
         }
 
         return new RtspRequest(index, parts[0], parts[1], headers);
+    }
+
+    // The HTTP request a tunnelled connection starts with. A GET is answered (200, or TunnelStatus), and once its POST
+    // has come, the requests' reader is returned; a POST hands its decoded body to its GET's connection and waits.
+    private async Task<ByteReader?> TunnelAsync(Stream stream, ByteReader reader, int index, CancellationToken token)
+    {
+        if (await ReadRequestAsync(reader, index, Interleaved, token) is not { } request)
+        {
+            return null;
+        }
+
+        TunnelRequests.Enqueue(request);
+        var waiting = _tunnels.GetOrAdd(request.Headers.GetValueOrDefault("x-sessioncookie", ""), _ => new(TaskCreationOptions.RunContinuationsAsynchronously));
+        if (request.Method == "POST")
+        {
+            waiting.TrySetResult(new ByteReader(new Base64Reader(reader, TunnelBodies)));
+            await Task.Delay(Timeout.Infinite, token).ContinueWith(_ => { }, TaskScheduler.Default);
+            return null;
+        }
+
+        string answer = TunnelStatus is { } refused
+            ? $"HTTP/1.0 {refused} Refused\r\n\r\n"
+            : "HTTP/1.0 200 OK\r\nContent-Type: application/x-rtsp-tunnelled\r\nCache-Control: no-cache\r\n\r\n";
+        await stream.WriteAsync(Encoding.ASCII.GetBytes(answer), token);
+        return TunnelStatus is null ? await waiting.Task.WaitAsync(token) : null;
+    }
+
+    // A POST's body as the bytes it encodes: base64 in groups of four characters, each write padded on its own.
+    private sealed class Base64Reader(ByteReader reader, ConcurrentQueue<string> bodies) : Stream
+    {
+        public override bool CanRead => true;
+
+        public override bool CanSeek => false;
+
+        public override bool CanWrite => false;
+
+        public override long Length => throw new NotSupportedException();
+
+        public override long Position
+        {
+            get => throw new NotSupportedException();
+            set => throw new NotSupportedException();
+        }
+
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            var quad = await reader.ReadAsync(4, cancellationToken);
+            if (quad is null)
+            {
+                return 0;
+            }
+
+            string text = Encoding.ASCII.GetString(quad);
+            bodies.Enqueue(text);
+            var bytes = Convert.FromBase64String(text);
+            bytes.CopyTo(buffer);
+            return bytes.Length;
+        }
+
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+        public override void Flush()
+        {
+        }
+
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+        public override void SetLength(long value) => throw new NotSupportedException();
+
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
     }
 
     // Lines and counted bytes from one stream (a StreamReader would decode the interleaved packets as text).

@@ -6,7 +6,8 @@ namespace ManagedCodecs.Playback.Rtsp;
 /// <summary>
 /// The two UDP ports an RTSP session over UDP receives on (RFC 3550, 11): RTP on an even port, RTCP on the next, both
 /// on the local address of the RTSP connection. The RTCP port receives the server's sender reports and sends the receiver
-/// reports. docs/decisions/2026-11-14-live-rtsp-udp.md, docs/decisions/2026-11-15-live-rtcp.md.
+/// reports. docs/decisions/2026-11-14-live-rtsp-udp.md, docs/decisions/2026-11-15-live-rtcp.md. Or, for multicast
+/// (<see cref="Join"/>), the group's two ports, shared with every other receiver on the machine.
 /// </summary>
 internal sealed class RtpUdpPorts : IDisposable
 {
@@ -71,6 +72,74 @@ internal sealed class RtpUdpPorts : IDisposable
             {
                 throw new SocketException((int)SocketError.AddressAlreadyInUse);
             }
+        }
+    }
+
+    /// <summary>
+    /// The two ports of a multicast group (RFC 2326, 12.39: <c>destination</c> and <c>port</c> of SETUP's answer),
+    /// joined on the interface the RTSP connection uses; a connection to this machine itself (loopback) also joins on
+    /// the system's default interface, where a server here sends unless told otherwise.
+    /// </summary>
+    /// <exception cref="SocketException">The ports can't be bound or the group joined.</exception>
+    public static RtpUdpPorts Join(IPAddress group, int rtpPort, int rtcpPort, IPAddress local, int timeToLive)
+    {
+        if (local.IsIPv4MappedToIPv6)
+        {
+            local = local.MapToIPv4();
+        }
+
+        Socket Open(int port)
+        {
+            var socket = new Socket(group.AddressFamily, SocketType.Dgram, ProtocolType.Udp);
+            try
+            {
+                // Other receivers of the group on this machine bind the same port. Bound to the group itself, the
+                // socket gets only its packets; Windows doesn't bind a group, and filters by what was joined.
+                socket.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
+                bool windows = System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(System.Runtime.InteropServices.OSPlatform.Windows);
+                bool v6 = group.AddressFamily == AddressFamily.InterNetworkV6;
+                socket.Bind(new IPEndPoint(windows ? (v6 ? IPAddress.IPv6Any : IPAddress.Any) : group, port));
+                if (v6)
+                {
+                    socket.SetSocketOption(SocketOptionLevel.IPv6, SocketOptionName.AddMembership, new IPv6MulticastOption(group));
+                    socket.SetSocketOption(SocketOptionLevel.IPv6, SocketOptionName.MulticastTimeToLive, timeToLive);
+                }
+                else
+                {
+                    bool here = local.AddressFamily == AddressFamily.InterNetwork;
+                    socket.SetSocketOption(SocketOptionLevel.IP, SocketOptionName.AddMembership, new MulticastOption(group, here ? local : IPAddress.Any));
+                    if (here && IPAddress.IsLoopback(local))
+                    {
+                        socket.SetSocketOption(SocketOptionLevel.IP, SocketOptionName.AddMembership, new MulticastOption(group, IPAddress.Any));
+                    }
+
+                    if (here)
+                    {
+                        socket.SetSocketOption(SocketOptionLevel.IP, SocketOptionName.MulticastInterface, local.GetAddressBytes());
+                    }
+
+                    socket.SetSocketOption(SocketOptionLevel.IP, SocketOptionName.MulticastTimeToLive, timeToLive);
+                }
+
+                return socket;
+            }
+            catch (SocketException)
+            {
+                socket.Dispose();
+                throw;
+            }
+        }
+
+        var rtp = Open(rtpPort);
+        try
+        {
+            rtp.ReceiveBufferSize = 4 * 1024 * 1024;
+            return new RtpUdpPorts(rtp, Open(rtcpPort));
+        }
+        catch (SocketException)
+        {
+            rtp.Dispose();
+            throw;
         }
     }
 

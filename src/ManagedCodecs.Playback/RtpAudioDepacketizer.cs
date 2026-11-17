@@ -5,8 +5,10 @@ namespace ManagedCodecs.Playback;
 /// <summary>
 /// Turns RTP packets carrying audio back into what a decoder takes: AAC's access units (RFC 3640, modes AAC-hbr and
 /// AAC-lbr: an AU header section, then the access units, several to a packet or one fragmented over packets), or
-/// G.711's samples (RFC 3551: a packet's payload as it is). A gap in the sequence numbers drops the fragmented access
-/// unit it cut; nothing stands in for what was lost (docs/decisions/2026-11-15-live-rtsp-audio.md).
+/// AAC's as LATM (RFC 6416: audioMuxElements, each a length and an access unit, or several, whole in a packet or over
+/// packets up to the marker bit), or G.711's samples and G.726's codes (RFC 3551: a packet's payload as it is). A gap in the sequence
+/// numbers drops the fragmented access unit or audioMuxElement it cut; nothing stands in for what was lost
+/// (docs/decisions/2026-11-15-live-rtsp-audio.md).
 /// </summary>
 internal sealed class RtpAudioDepacketizer
 {
@@ -18,12 +20,14 @@ internal sealed class RtpAudioDepacketizer
     private readonly int _sizeLength;
     private readonly int _indexLength;
     private readonly int _indexDeltaLength;
+    private readonly int _latmSubFrames;
     private readonly MemoryStream _fragment = new();
     private int _fragmentSize = -1;
     private uint _fragmentTimestamp;
     private bool _dropped;
     private uint _droppedTimestamp;
     private int _expected = -1;
+    private bool _afterGap;
 
     public RtpAudioDepacketizer(SdpAudioTrack track)
     {
@@ -32,6 +36,7 @@ internal sealed class RtpAudioDepacketizer
         _sizeLength = track.SizeLength;
         _indexLength = track.IndexLength;
         _indexDeltaLength = track.IndexDeltaLength;
+        _latmSubFrames = track.LatmSubFrames;
     }
 
     /// <summary>Packets the sequence numbers say never arrived.</summary>
@@ -42,7 +47,7 @@ internal sealed class RtpAudioDepacketizer
 
     /// <summary>
     /// Adds an RTP packet (header included), appending to <paramref name="completed"/> the access units it completes
-    /// (AAC), or its samples (G.711).
+    /// (AAC), or its payload (G.711's samples, G.726's codes).
     /// </summary>
     /// <exception cref="NotSupportedException">AAC access units interleaved (a non-zero index, RFC 3640, 3.2.3.1).</exception>
     public void Add(ReadOnlySpan<byte> packet, List<byte[]> completed)
@@ -71,6 +76,7 @@ internal sealed class RtpAudioDepacketizer
             {
                 LostPackets += gap;
                 DropFragment();
+                _afterGap = true;
             }
         }
 
@@ -85,7 +91,85 @@ internal sealed class RtpAudioDepacketizer
             return;
         }
 
+        if (_latmSubFrames > 0)
+        {
+            AddLatm(header, payload, completed);
+            return;
+        }
+
         AddAac(header, payload, completed);
+    }
+
+    // LATM (RFC 6416, 6.1): an audioMuxElement's bytes over one packet or more, the last with the marker bit. Without
+    // the config in the stream (cpresent=0) it is, for each access unit, PayloadLengthInfo (bytes that add up, the
+    // last one below 255; ISO/IEC 14496-3, 1.7.3.2.5) and then that many bytes; other data may follow the last.
+    // Nothing marks an element's first packet, so the one after a gap may have lost its start: it is given only if its
+    // lengths add up to exactly its bytes.
+    private void AddLatm(RtpH264Depacketizer.RtpHeader header, ReadOnlySpan<byte> payload, List<byte[]> completed)
+    {
+        if (_fragmentSize >= 0 && header.Timestamp != _fragmentTimestamp)
+        {
+            DropFragment(); // another element before the marker came
+        }
+
+        if (_dropped && header.Timestamp == _droppedTimestamp)
+        {
+            return; // the rest of an element already dropped (and counted)
+        }
+
+        if (_fragment.Length + payload.Length > _latmSubFrames * (MaxAccessUnit + 256))
+        {
+            // More than its access units can be: dropped, with what follows of it.
+            _fragmentSize = 0;
+            _fragmentTimestamp = header.Timestamp;
+            DropFragment();
+            return;
+        }
+
+        _fragmentSize = 0; // an element is open (its size isn't known ahead)
+        _fragmentTimestamp = header.Timestamp;
+        _fragment.Write(payload);
+        if (!header.Marker)
+        {
+            return;
+        }
+
+        bool suspect = _afterGap;
+        _afterGap = false;
+        var element = _fragment.GetBuffer().AsSpan(0, (int)_fragment.Length);
+        int at = 0;
+        int first = completed.Count;
+        bool whole = true;
+        for (int i = 0; i < _latmSubFrames && whole; i++)
+        {
+            int size = 0;
+            int part;
+            do
+            {
+                whole = at < element.Length;
+                part = whole ? element[at++] : 0;
+                size += part;
+            }
+            while (whole && part == 255);
+
+            whole = whole && size <= element.Length - at;
+            if (whole && size > 0)
+            {
+                completed.Add(element.Slice(at, size).ToArray());
+            }
+
+            at += size;
+        }
+
+        if (!whole || (suspect && at != element.Length))
+        {
+            // The lengths promise more than came (or, after a gap, don't fit): none of its access units is given.
+            completed.RemoveRange(first, completed.Count - first);
+            Damage();
+        }
+
+        _fragment.SetLength(0);
+        _fragmentSize = -1;
     }
 
     // The AU header section (RFC 3640, 3.2.1): 16 bits counting the headers' bits, then a header for each access unit,

@@ -10,7 +10,8 @@ goes for `jm/`: field pictures (PAFF), also next to MBAFF frames, in 4:0:0 and w
 own decoder (ldecod), or for the interlaced ones (`jm-planes-*`, three 4:0:0 streams spliced by
 `tools/h264-splice-planes.py`) FFmpeg's decodes of the three monochrome streams, stacked, and the packets as ffprobe lists them; `tools/make-samples.sh` copies them here last. These are
 the only references not from FFmpeg. `gstreamer/` holds JPEG over RTP recordings by GStreamer's packetizer (types 0,
-64 and 65, which FFmpeg's never sends) beside the JPEGs that went in, made by `tools/gst-jpeg-record.py`, and audio
+64 and 65, which FFmpeg's never sends, and a frame 2048 pixels wide, its size in the SDP beside it) beside the JPEGs
+that went in, made by `tools/gst-jpeg-record.py`, and audio
 over RTP recordings by GStreamer's packetizers (one AAC access unit a packet, access units over several packets,
 A-law and µ-law) beside what went in (`.frames`) and an SDP, made by `tools/gst-audio-record.py`; the tests read
 them where they are. And for `heaac/`: HE-AAC (spectral band

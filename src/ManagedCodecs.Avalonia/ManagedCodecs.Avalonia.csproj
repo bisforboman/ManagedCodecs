@@ -7,9 +7,6 @@
     <PackageId>ManagedCodecs.Avalonia</PackageId>
     <Description>Live cameras in Avalonia: LiveView shows a LivePlayer's newest frame (MJPEG over HTTP, H.264 or JPEG over RTSP and RTSPS), decoded in pure managed C# by ManagedCodecs.Playback, no native libraries. Windows, macOS and Linux.</Description>
     <PackageTags>$(PackageTags);playback;live;camera;rtsp;ip-camera;avalonia</PackageTags>
-    <!-- New in the release after 0.17.0: no earlier version on nuget.org to validate against (a restore of the baseline
-         fails, NU1101). The baseline pull request after the release that first ships it removes this line. -->
-    <PackageValidationBaselineVersion></PackageValidationBaselineVersion>
   </PropertyGroup>
 
   <!-- Its own page on nuget.org in place of the shared PACKAGE.md (Directory.Build.props). -->

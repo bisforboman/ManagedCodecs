@@ -1,13 +1,17 @@
 #nullable enable
+ManagedCodecs.Playback.RtspSource.HttpTunnel.get -> bool
+ManagedCodecs.Playback.RtspSource.HttpTunnel.init -> void
+ManagedCodecs.Containers.AviDemuxer.AudioTracks.get -> System.Collections.Generic.IReadOnlyList<ManagedCodecs.AudioStreamInfo!>!
+ManagedCodecs.Containers.AviDemuxer.SelectAudio(params int[]! streamIndexes) -> void
+const ManagedCodecs.CodecIds.AdpcmG726 = "ADPCM_G726" -> string!
+const ManagedCodecs.CodecIds.AdpcmG726Le = "ADPCM_G726LE" -> string!
+ManagedCodecs.G726Decoder
+ManagedCodecs.G726Decoder.Channels.get -> int
+ManagedCodecs.G726Decoder.Decode(ManagedCodecs.Packet packet) -> ManagedCodecs.AudioFrame!
+ManagedCodecs.G726Decoder.Decode(System.ReadOnlySpan<byte> packet) -> ManagedCodecs.AudioFrame!
+ManagedCodecs.G726Decoder.G726Decoder(ManagedCodecs.AudioStreamInfo! stream) -> void
+ManagedCodecs.G726Decoder.SampleRate.get -> int
 const ManagedCodecs.CodecIds.Rdd36 = "RDD36" -> string!
-ManagedCodecs.Containers.MxfDemuxer.AudioTracks.get -> System.Collections.Generic.IReadOnlyList<ManagedCodecs.AudioStreamInfo!>!
-ManagedCodecs.Containers.MxfDemuxer.SelectAudio(params int[]! streamIndexes) -> void
-ManagedCodecs.IDemuxer.AudioTracks.get -> System.Collections.Generic.IReadOnlyList<ManagedCodecs.AudioStreamInfo!>!
-ManagedCodecs.IDemuxer.SelectAudio(params int[]! streamIndexes) -> void
-ManagedCodecs.Playback.AudioChunk.CaptureTime.get -> System.DateTime?
-ManagedCodecs.Playback.PlaybackOptions.AudioTrack.get -> int
-ManagedCodecs.Playback.PlaybackOptions.AudioTrack.init -> void
-ManagedCodecs.Playback.RgbaFrame.CaptureTime.get -> System.DateTime?
 ManagedCodecs.Rdd36.Rdd36Decoder
 ManagedCodecs.Rdd36.Rdd36Decoder.Decode(ManagedCodecs.Packet packet) -> System.Collections.Generic.IReadOnlyList<ManagedCodecs.VideoFrame!>!
 ManagedCodecs.Rdd36.Rdd36Decoder.Decode(System.ReadOnlySpan<byte> packet) -> ManagedCodecs.VideoFrame!

@@ -433,7 +433,18 @@ public sealed class LivePlayer : IDisposable
         {
             try
             {
-                rtsp = await RtspConnection.ConnectAsync(source.Uri.Host, source.Port, source.Credential, source.Secure, source.PinnedCertificate, cancel.Token).ConfigureAwait(false);
+                rtsp = await RtspConnection.ConnectAsync(source.Uri.Host, source.Port, source.Credential, source.Secure, source.PinnedCertificate, source.TunnelPath, cancel.Token).ConfigureAwait(false);
+            }
+            catch (HttpTunnelException e)
+            {
+                // A camera that refuses the tunnel (or knows no such stream) answers the same on the next try; anything
+                // else (busy, no HTTP answer) may pass then. No exception filter: see ExceptionFilterTests.
+                if (e.Status is 401 or 403 or 404 or 405 or 501)
+                {
+                    throw new FatalException(e);
+                }
+
+                throw;
             }
             catch (System.Security.Authentication.AuthenticationException e)
             {
@@ -500,6 +511,12 @@ public sealed class LivePlayer : IDisposable
             // docs/decisions/2026-11-14-live-rtsp-udp.md).
             string trackUrl = Sdp.Resolve(baseUrl, track?.Control ?? only!.Control);
             var setup = await rtsp.RequestAsync("SETUP", trackUrl, [new("Transport", "RTP/AVP/TCP;unicast;interleaved=0-1")], cancel.Token).ConfigureAwait(false);
+            if (setup.Status == 461 && source.HttpTunnel)
+            {
+                // Through the tunnel RTP can only come inside it: UDP beside it is what the tunnel is there to avoid.
+                throw new FatalException(new NotSupportedException("The camera refuses RTP inside the HTTP tunnel (461), and RTP over UDP beside it isn't tried."));
+            }
+
             if (setup.Status == 461 && source.Secure)
             {
                 // Over RTSPS the media stays inside TLS: UDP beside it would be in the clear, and encrypted UDP is SRTP
@@ -575,9 +592,16 @@ public sealed class LivePlayer : IDisposable
             var ending = cancel.Token;
             if (udp is null)
             {
+                // Through the HTTP tunnel none: live555 (2026.11.08) takes an interleaved report in the POST for a broken
+                // request and stops hearing the keep-alives after it, so it ended the session at 65 s; without them it
+                // played on (docs/decisions/2026-11-16-live-rtsp-http.md). The keep-alives keep the session there.
                 var connected = rtsp;
-                senders.Add((rtcp, new Func<byte[], Task>(report => connected.SendPacketAsync(transport.Channel + 1, report, ending))));
-                if (audio is not null)
+                if (!source.HttpTunnel)
+                {
+                    senders.Add((rtcp, new Func<byte[], Task>(report => connected.SendPacketAsync(transport.Channel + 1, report, ending))));
+                }
+
+                if (audio is not null && !source.HttpTunnel)
                 {
                     senders.Add((audio.Rtcp, new Func<byte[], Task>(report => connected.SendPacketAsync(audio.Channel + 1, report, ending))));
                 }

@@ -19,6 +19,7 @@ internal sealed class RtspConnection : IDisposable
     private const int MaxBody = 1024 * 1024;
 
     private readonly TcpClient _tcp;
+    private readonly TcpClient? _post;
     private readonly Stream _stream;
     private readonly NetworkCredential? _credential;
     private readonly SemaphoreSlim _writing = new(1, 1);
@@ -28,8 +29,9 @@ internal sealed class RtspConnection : IDisposable
     private int _end;
     private int _sequence;
 
-    private RtspConnection(TcpClient tcp, Stream stream, NetworkCredential? credential)
+    private RtspConnection(TcpClient tcp, Stream stream, NetworkCredential? credential, TcpClient? post = null)
     {
+        _post = post;
         _tcp = tcp;
         _stream = stream;
         _credential = credential;
@@ -47,35 +49,56 @@ internal sealed class RtspConnection : IDisposable
     /// <summary>
     /// Connects to <paramref name="host"/>; with <paramref name="secure"/>, then over TLS (RTSPS: the server name checked
     /// against the certificate), the certificate accepted by the system's validation or, where <paramref name="pinned"/>
-    /// is given, only if its SHA-256 is that.
+    /// is given, only if its SHA-256 is that. With <paramref name="tunnelPath"/>, RTSP goes over HTTP instead: two
+    /// connections to the port, a GET and a POST of that path (<see cref="HttpTunnel"/>), each over TLS when secure.
     /// </summary>
     /// <exception cref="System.Security.Authentication.AuthenticationException">The TLS handshake failed, or the certificate was refused.</exception>
-    public static async Task<RtspConnection> ConnectAsync(string host, int port, NetworkCredential? credential, bool secure, byte[]? pinned, CancellationToken token)
+    /// <exception cref="HttpTunnelException">The tunnel's GET was refused.</exception>
+    public static async Task<RtspConnection> ConnectAsync(string host, int port, NetworkCredential? credential, bool secure, byte[]? pinned, string? tunnelPath, CancellationToken token)
     {
         var tcp = new TcpClient { NoDelay = true };
+        TcpClient? post = null;
         try
         {
-            // netstandard2.1 has no ConnectAsync (or TLS handshake) with a token: closing the client ends the attempt.
-            Stream stream;
-            using (token.Register(tcp.Dispose))
+            var stream = await OpenAsync(tcp, host, port, secure, pinned, token).ConfigureAwait(false);
+            if (tunnelPath is not null)
             {
-                await tcp.ConnectAsync(host, port).ConfigureAwait(false);
-                stream = tcp.GetStream();
-                if (secure)
+                post = new TcpClient { NoDelay = true };
+                var posting = await OpenAsync(post, host, port, secure, pinned, token).ConfigureAwait(false);
+                using (token.Register(tcp.Dispose))
+                using (token.Register(post.Dispose))
                 {
-                    var tls = new SslStream(stream, false, (_, certificate, _, errors) => Accepts(certificate, errors, pinned));
-                    await tls.AuthenticateAsClientAsync(host).ConfigureAwait(false);
-                    stream = tls;
+                    stream = await HttpTunnel.OpenAsync(stream, posting, port is 80 or 443 ? host : $"{host}:{port}", tunnelPath, token).ConfigureAwait(false);
                 }
             }
 
             token.ThrowIfCancellationRequested();
-            return new RtspConnection(tcp, stream, credential);
+            return new RtspConnection(tcp, stream, credential, post);
         }
         catch
         {
             tcp.Dispose();
+            post?.Dispose();
             throw;
+        }
+    }
+
+    // A connection to the host, over TLS when secure. netstandard2.1 has no ConnectAsync (or TLS handshake) with a
+    // token: closing the client ends the attempt.
+    private static async Task<Stream> OpenAsync(TcpClient tcp, string host, int port, bool secure, byte[]? pinned, CancellationToken token)
+    {
+        using (token.Register(tcp.Dispose))
+        {
+            await tcp.ConnectAsync(host, port).ConfigureAwait(false);
+            Stream stream = tcp.GetStream();
+            if (secure)
+            {
+                var tls = new SslStream(stream, false, (_, certificate, _, errors) => Accepts(certificate, errors, pinned));
+                await tls.AuthenticateAsClientAsync(host).ConfigureAwait(false);
+                stream = tls;
+            }
+
+            return stream;
         }
     }
 
@@ -260,6 +283,7 @@ internal sealed class RtspConnection : IDisposable
     {
         _stream.Dispose();
         _tcp.Dispose();
+        _post?.Dispose();
         _writing.Dispose();
     }
 

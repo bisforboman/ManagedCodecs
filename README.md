@@ -544,6 +544,9 @@ if (player.TakeLatest() is { } frame)
     pinned: `new RtspSource(uri) { CertificateHash = "AB:CD:..." }` accepts that certificate (its SHA-256, as a browser
     or `openssl x509 -fingerprint -sha256` shows it) and no other, as most cameras' are self-signed
     (docs/decisions/2026-11-15-live-rtsps.md).
+  - **RTSP over HTTP:** `new RtspSource(uri) { HttpTunnel = true }` tunnels the session through HTTP (port 80 unless
+    the URL gives one, 443 for `rtsps://`), for a camera behind a firewall or proxy that passes only HTTP: a GET carries
+    what the camera sends, RTP included, and a POST the requests (docs/decisions/2026-11-16-live-rtsp-http.md).
   - Not yet: SRTP, H.265.
 - **Sound:** `new RtspSource(uri) { Audio = true }` plays the camera's sound too: the first audio track of its SDP
   that is AAC (RFC 3640's `MPEG4-GENERIC`, AAC LC and HE-AAC, or RFC 6416's `MP4A-LATM`) or G.711 (A-law, µ-law),

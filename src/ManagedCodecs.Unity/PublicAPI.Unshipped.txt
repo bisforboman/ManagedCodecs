@@ -1,3 +1,5 @@
 #nullable enable
+ManagedCodecs.Playback.RtspSource.HttpTunnel.get -> bool
+ManagedCodecs.Playback.RtspSource.HttpTunnel.init -> void
 ManagedCodecs.Containers.AviDemuxer.AudioTracks.get -> System.Collections.Generic.IReadOnlyList<ManagedCodecs.AudioStreamInfo!>!
 ManagedCodecs.Containers.AviDemuxer.SelectAudio(params int[]! streamIndexes) -> void

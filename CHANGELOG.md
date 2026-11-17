@@ -34,6 +34,11 @@ built against 0.18 keeps working.
 - Playback: RTP to a multicast group. A camera that refuses RTP both over the RTSP connection and over UDP to the
   reader alone (461) is asked for `RTP/AVP;multicast`, and `LivePlayer` joins the group its answer names, where it used
   to fail. docs/decisions/2026-11-16-live-rtsp-multicast.md, issue #527.
+- Playback: an RTSP stream with sound and no video (a microphone, an intercom, an audio-only restream) plays with
+  `RtspSource.Audio`: the sound is the session's one track, its packets make `LivePlayer` `Playing` and are what
+  `StallTimeout` watches, and `TakeLatest()` stays null. Without `Audio`, or with sound that doesn't play, the player
+  fails and `Error` says why (it used to fail for want of a video track). docs/decisions/2026-11-16-live-audio-only.md,
+  issue #527.
 - Playback: RTSP over HTTP (Apple's tunnelling), `RtspSource.HttpTunnel`, for a camera behind a firewall or proxy
   that passes only HTTP: a GET carries what the camera sends, RTP included, and a POST the requests, on port 80 unless
   the URL gives one (443 for `rtsps://`). No RTCP receiver reports go through the tunnel. `mcdec --live --http-tunnel`.

@@ -203,8 +203,9 @@ public sealed class LivePlayer : IDisposable
     }
 
     /// <summary>
-    /// The newest decoded frame, or null when none was decoded since the last call. Its <see cref="RgbaFrame.Time"/> is
-    /// when its JPEG, or the H.264 access unit that gave it, had arrived whole, from <see cref="Start"/>.
+    /// The newest decoded frame, or null when none was decoded since the last call (always, from an RTSP stream with
+    /// sound only: <see cref="RtspSource.Audio"/>). Its <see cref="RgbaFrame.Time"/> is when its JPEG, or the H.264
+    /// access unit that gave it, had arrived whole, from <see cref="Start"/>.
     /// </summary>
     public RgbaFrame? TakeLatest()
     {
@@ -460,15 +461,56 @@ public sealed class LivePlayer : IDisposable
             var describe = await Request(rtsp, "DESCRIBE", url, [new("Accept", "application/sdp")], cancel.Token).ConfigureAwait(false);
             string baseUrl = describe.Header("Content-Base") ?? describe.Header("Content-Location") ?? url;
             var sdp = Sdp.Parse(describe.Body);
-            var track = sdp.Track ?? throw new FatalException(new NotSupportedException("The camera's SDP has no H.264 or JPEG video track."));
-            if (track.Codec == SdpCodec.H264 && track.PacketizationMode == 2)
+            var track = sdp.Track;
+            SdpAudioTrack? only = null;
+            if (track is null)
+            {
+                // Sound only: played when asked for, as the session's one track (docs/decisions/2026-11-16-live-audio-only.md).
+                if (sdp.Audio is null)
+                {
+                    throw new FatalException(new NotSupportedException(
+                        sdp.SkippedAudio is { } skipped
+                            ? $"The camera's SDP has no H.264 or JPEG video track, and its audio ({skipped}) isn't supported."
+                            : "The camera's SDP has no H.264 or JPEG video track."));
+                }
+
+                if (!source.Audio)
+                {
+                    throw new FatalException(new NotSupportedException("The camera's stream has sound only (no H.264 or JPEG video track), and RtspSource.Audio is off."));
+                }
+
+                only = sdp.Audio;
+            }
+            else if (track.Codec == SdpCodec.H264 && track.PacketizationMode == 2)
             {
                 throw new FatalException(new NotSupportedException("The camera sends H.264 in RTP's interleaved mode (packetization-mode=2), which isn't supported."));
             }
 
+            // Sound only: its decoder before its SETUP, as for the audio beside a video; one that refuses the SDP's
+            // config refuses it on every connection.
+            AudioStreamInfo? onlyInfo = null;
+            IAudioDecoder? onlyDecoder = null;
+            if (only is not null)
+            {
+                onlyInfo = AudioInfo(only);
+                try
+                {
+                    onlyDecoder = AudioPipeline.CreateDecoder(onlyInfo);
+                }
+                catch (Exception e)
+                {
+                    if (e is not (InvalidDataException or NotSupportedException))
+                    {
+                        throw;
+                    }
+
+                    throw new FatalException(e);
+                }
+            }
+
             // RTP over this connection; over UDP when the server refuses that (461; decision 1 of
             // docs/decisions/2026-11-14-live-rtsp-udp.md).
-            string trackUrl = Sdp.Resolve(baseUrl, track.Control);
+            string trackUrl = Sdp.Resolve(baseUrl, track?.Control ?? only!.Control);
             var setup = await rtsp.RequestAsync("SETUP", trackUrl, [new("Transport", "RTP/AVP/TCP;unicast;interleaved=0-1")], cancel.Token).ConfigureAwait(false);
             if (setup.Status == 461 && source.HttpTunnel)
             {
@@ -526,8 +568,8 @@ public sealed class LivePlayer : IDisposable
             // The audio, when asked for: a second SETUP in the same session, on the transport the video's got
             // (docs/decisions/2026-11-15-live-rtsp-audio.md).
             _skippedAudio = source.Audio ? sdp.SkippedAudio : null;
-            _audioInfo = null;
-            if (source.Audio && sdp.Audio is { } audioTrack)
+            _audioInfo = onlyInfo;
+            if (track is not null && source.Audio && sdp.Audio is { } audioTrack)
             {
                 audio = await SetupAudioAsync(rtsp, audioTrack, Sdp.Resolve(baseUrl, audioTrack.Control), udp is not null, multicast, transport.Channel, cancel.Token).ConfigureAwait(false);
                 if (audio?.Udp is { } audioPorts)
@@ -541,9 +583,12 @@ public sealed class LivePlayer : IDisposable
             keepAlive = KeepAliveAsync(rtsp, getParameter ? "GET_PARAMETER" : "OPTIONS", sessionUrl, timeout, cancel.Token);
 
             // Each track's receiver reports go back the way its packets come: on the RTSP connection's next channel,
-            // or from the RTCP port to the server's (docs/decisions/2026-11-15-live-rtcp.md).
-            var rtcp = new RtcpSession(VideoClockRate);
-            var handle = track.Codec == SdpCodec.Jpeg ? JpegPackets(track, connection, rtcp) : H264Packets(track, connection, rtcp);
+            // or from the RTCP port to the server's (docs/decisions/2026-11-15-live-rtcp.md). With sound only, the
+            // sound's packets are what the stall watchdog watches and what makes the player Playing.
+            var rtcp = new RtcpSession(only?.SampleRate ?? VideoClockRate);
+            var handle = only is not null ? OnlyAudioPackets(only, onlyDecoder!, rtcp, connection)
+                : track!.Codec == SdpCodec.Jpeg ? JpegPackets(track, connection, rtcp)
+                : H264Packets(track, connection, rtcp);
             var senders = new List<(RtcpSession Rtcp, Func<byte[], Task> Send)>();
             var ending = cancel.Token;
             if (udp is null)
@@ -657,7 +702,7 @@ public sealed class LivePlayer : IDisposable
 
     private async Task<AudioSession?> SetupAudioAsync(RtspConnection rtsp, SdpAudioTrack track, string url, bool overUdp, bool multicast, int videoChannel, CancellationToken token)
     {
-        var info = new AudioStreamInfo(track.Codec, track.SampleRate, track.Channels, 0, new Rational(1, track.SampleRate), track.Config, 1);
+        var info = AudioInfo(track);
         IAudioDecoder decoder;
         try
         {
@@ -714,9 +759,10 @@ public sealed class LivePlayer : IDisposable
     }
 
     // Audio over RTP: AAC's access units (RFC 3640) or G.711's samples and G.726's codes (a packet's payload, which
-    // G726Decoder decodes on from the last one's state) to the audio decoding thread, in order. They
-    // don't feed the stall watchdog or the state: sound without a picture is not a camera playing.
-    private Action<byte[]> AudioPackets(SdpAudioTrack track, IAudioDecoder decoder, RtcpSession rtcp)
+    // G726Decoder decodes on from the last one's state) to the audio decoding thread, in order. Beside a video they
+    // don't feed the stall watchdog or the state: sound without the picture is not that camera playing. As the only
+    // track they do (OnlyAudioPackets, and the pump's watch), and what would only turn the sound off ends the player.
+    private Action<byte[]> AudioPackets(SdpAudioTrack track, IAudioDecoder decoder, RtcpSession rtcp, bool only = false)
     {
         var depacketizer = new RtpAudioDepacketizer(track);
         var frames = new List<byte[]>();
@@ -736,6 +782,11 @@ public sealed class LivePlayer : IDisposable
             }
             catch (NotSupportedException e)
             {
+                if (only)
+                {
+                    throw new FatalException(e); // nothing else to play
+                }
+
                 // Interleaved access units: no sound from this camera, and the picture goes on.
                 _error = e;
                 _audioInfo = null;
@@ -761,6 +812,21 @@ public sealed class LivePlayer : IDisposable
             }
         };
     }
+
+    // Sound as the session's only track: the camera plays once its packets come, as it does for a picture's.
+    private Action<byte[]> OnlyAudioPackets(SdpAudioTrack track, IAudioDecoder decoder, RtcpSession rtcp, Connection connection)
+    {
+        var packets = AudioPackets(track, decoder, rtcp, only: true);
+        return packet =>
+        {
+            connection.Frames = true;
+            SetState(LiveState.Playing);
+            packets(packet);
+        };
+    }
+
+    private static AudioStreamInfo AudioInfo(SdpAudioTrack track) =>
+        new(track.Codec, track.SampleRate, track.Channels, 0, new Rational(1, track.SampleRate), track.Config, 1);
 
     // H.264 over RTP (RFC 6184): access units in order to the decoding thread, each with its arrival time.
     private Action<byte[]> H264Packets(SdpVideoTrack track, Connection connection, RtcpSession rtcp)
@@ -829,9 +895,9 @@ public sealed class LivePlayer : IDisposable
         };
     }
 
-    // RTP interleaved on the RTSP connection: the packets of the video's channel, and of the audio's when it has one,
-    // until the connection ends, and on the channel after each its RTCP (the camera's sender reports). Only the
-    // video's packets count against a stall.
+    // RTP interleaved on the RTSP connection: the packets of the first track's channel (the video's, or the sound's when
+    // it is the only one), and of the audio's beside a video, until the connection ends, and on the channel after each
+    // its RTCP (the camera's sender reports). Only the first track's packets count against a stall.
     private async Task PumpTcpAsync(RtspConnection rtsp, int channel, Action<byte[]> handle, RtcpSession rtcp, AudioSession? audio, CancellationToken token)
     {
         int audioChannel = audio?.Channel ?? -1;
@@ -906,7 +972,8 @@ public sealed class LivePlayer : IDisposable
 
     // RTP over UDP: the server's packets (its address, and its SSRC when SETUP's answer gave one) through the reorder
     // window, until control ends: the video's is the read of the RTSP connection, which still carries the keep-alives.
-    // The video's packets (watched) count against a stall; the audio's don't.
+    // The first track's packets (watched: the video's, or the sound's alone) count against a stall; the audio's beside a
+    // video don't.
     private async Task PumpUdpAsync(Task control, RtpUdpPorts udp, IPAddress? server, uint? ssrc, Action<byte[]> handle, RtcpSession rtcp, bool watched, CancellationToken token)
     {
         var reorder = new RtpReorderBuffer(ReorderWindow);

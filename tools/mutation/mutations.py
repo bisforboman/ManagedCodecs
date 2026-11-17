@@ -967,11 +967,11 @@ MUTATIONS = [
     # ... and ends the session at once, over the connection ...
     dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
          find="                if (rtcp.Report(message.Data, _clock.Elapsed))\n                {\n                    goodbye();\n                }", replace="                rtcp.Report(message.Data, _clock.Elapsed);",
-         tests="DisplayName~ConnectsAgainAtOnceWhenTheServerSaysGoodbye(udp: False)"),
+         tests="FullyQualifiedName~LiveRtcpTests.ConnectsAgainAtOnceWhenTheServerSaysGoodbye"),
     # ... and over UDP.
     dict(file="src/ManagedCodecs.Playback/LivePlayer.cs",
          find="Observe(ReadReportsAsync(udp, server, rtcp, Goodbye(connection, cancel)));", replace="Observe(ReadReportsAsync(udp, server, rtcp, null));",
-         tests="DisplayName~ConnectsAgainAtOnceWhenTheServerSaysGoodbye(udp: True)"),
+         tests="FullyQualifiedName~LiveRtcpTests.ConnectsAgainAtOnceWhenTheServerSaysGoodbye"),
     # ---- A lossy network (LossyNetworkTests, issue #527): a gap inside a unit ended by its own marker damages only it ...
     dict(file="src/ManagedCodecs.Playback/RtpH264Depacketizer.cs",
          find="            _gapBeforeNext = false;\n            completed.Add(Complete(damaged: false));", replace="            completed.Add(Complete(damaged: false));",

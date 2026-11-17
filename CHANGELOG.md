@@ -13,16 +13,20 @@ run time.
 
 ## Unreleased
 
-Features beside fixes (new public API: `AviDemuxer.AudioTracks` and `SelectAudio`, `PlaybackOptions.PairMonoTracks`),
-hence the next version is a minor one; code built against 0.18 keeps working.
+Features beside fixes (new public API: `AudioTracks` and `SelectAudio` in `AviDemuxer`, `Mp4Demuxer` and
+`MatroskaDemuxer`; `AudioStreamInfo.Language`, `Title` and `IsDefault`; `PlaybackOptions.PairMonoTracks`), hence the next version is a minor one; code
+built against 0.18 keeps working.
 
 ### Added
 
 - Playback: `PlaybackOptions.PairMonoTracks` (true by default): false plays an MXF file's mono track alone, on both
   speakers, rather than with the next mono track as the right channel. Issue #535.
-- Containers: `AviDemuxer` lists every audio stream (`AudioTracks`) and reads those `SelectAudio` chooses, one or
-  several in one pass, each as FFmpeg's demuxer gives it; until a choice is made the first is read alone, as before.
-  `PlaybackOptions.AudioTrack` plays any of them. Issue #535, docs/decisions/2026-11-15-sound-tracks.md.
+- Containers: `AviDemuxer`, `Mp4Demuxer` (QuickTime too) and `MatroskaDemuxer` list every audio stream
+  (`AudioTracks`) and read those `SelectAudio` chooses, one or several in one pass, each as FFmpeg's demuxer gives it;
+  until a choice is made the one FFmpeg's command line plays is read alone (see Changed). `PlaybackOptions.AudioTrack`
+  plays any of them. Issue #535, docs/decisions/2026-11-15-sound-tracks.md.
+- Core: `AudioStreamInfo.Language`, `Title` and `IsDefault`, as ffprobe reports them: MP4's 'mdhd' language
+  (QuickTime's Macintosh language codes included) and 'tkhd' enabled flag, Matroska's Language, Name and FlagDefault.
 - Playback: JPEG over RTSP larger than 2040 pixels, whose size RFC 2435's header can't give: `LivePlayer` takes it
   from the camera's SDP (GStreamer's `a=x-dimensions`, RFC 6064's `a=framesize`) or from ONVIF's RTP header extension,
   where it used to fail. docs/decisions/2026-11-12-live-rtsp-jpeg.md (Since), issue #527.
@@ -41,6 +45,14 @@ hence the next version is a minor one; code built against 0.18 keeps working.
   `SkippedAudioCodec` named it before. It decodes exactly the Recommendation's samples, not FFmpeg's (whose adpcm_g726
   differs), checked against `tools/g726-reference.py`, which passes the Recommendation's test sequences.
   docs/decisions/2026-11-15-g726.md, issue #527.
+
+### Changed
+
+- Containers and Playback: a file with several audio streams gives, and plays, the one FFmpeg's command line plays: of
+  the tracks marked default (MP4's 'tkhd' enabled flag, Matroska's FlagDefault), or of them all where none is (AVI, which
+  has no flag), the one with the most channels, the first of equals. Before, the first stream in the file, which on
+  such files was another one than FFmpeg plays. `SelectAudio` and `PlaybackOptions.AudioTrack` choose another; MXF still
+  plays its first.
 
 ### Fixed
 

@@ -58,6 +58,11 @@ ff -f lavfi -i testsrc2=size=160x120:rate=25 -f lavfi -i "sine=frequency=440:sam
   -f lavfi -i "sine=frequency=550:sample_rate=22050" -f lavfi -i "sine=frequency=660:sample_rate=48000" -t 1 \
   -map 0 -map 1 -map 2 -map 3 -c:v mjpeg -q:v 5 -c:a:0 libmp3lame -b:a:0 64k -c:a:1 pcm_s16le -c:a:2 aac -b:a:2 64k \
   samples/avi-mjpeg-three-audio.avi
+# avi-audio-channels: a mono PCM stream before a stereo one. AVI marks no stream default, so FFmpeg's command line plays
+# the one with more channels, the second (name.audioplayed), which AviDemuxer.Audio gives too.
+ff -f lavfi -i testsrc2=size=160x120:rate=25 -f lavfi -i "sine=frequency=440:sample_rate=22050" \
+  -f lavfi -i "sine=frequency=660:sample_rate=22050" -t 1 -map 0 -map 1 -map 2 -c:v mjpeg -q:v 5 -c:a pcm_s16le \
+  -ac:a:0 1 -ac:a:1 2 samples/avi-audio-channels.avi
 # 8-bit PCM, as cameras write it (PcmDecoder): unsigned, at 11.025 kHz, here in stereo for the channels' interleaving.
 # The audio runs 0.2 s past the video, as cameras' often does a little: ffprobe's duration is still the video's (VideoProbe).
 ff -f lavfi -i testsrc2=size=160x120:rate=25:d=1 -f lavfi -i "aevalsrc=0.4*sin(2*PI*440*t)|0.3*sin(2*PI*660*t):s=11025:d=1.2" \
@@ -254,6 +259,17 @@ ff -f lavfi -i testsrc2=size=320x240:rate=25 -t 2 -c:v libx264 -bf 2 -g 12 sampl
 ff -f lavfi -i testsrc2=size=320x240:rate=30000/1001 -t 2 -c:v libx264 -bf 0 -movflags +faststart samples/h264-faststart.mp4
 ff -f lavfi -i testsrc2=size=320x240:rate=25 -t 1 -c:v mpeg4 -bf 2 samples/mpeg4-bframes.mp4
 ff -f lavfi -i testsrc2=size=320x240:rate=25 -t 1 -c:v libx264 -bf 0 -output_ts_offset 0.4 samples/h264-delayed.mp4
+# Several sound tracks (name.audiotracks.json, name.audioplayed; docs/decisions/2026-11-16-audio-tracks.md): the demuxer
+# lists them all and gives the one FFmpeg's command line plays. mp4-audio-tracks: stereo AAC (eng) then 5.1 AAC (swe),
+# the second marked default (the 'tkhd' enabled flag), so the second is played. mov-audio-tracks: QuickTime, whose
+# muxer writes Macintosh language codes (eng 0, jpn 11), neither track marked: the first is enabled by the muxer.
+tracks_src=(-f lavfi -i testsrc2=size=160x120:rate=25 -f lavfi -i sine=frequency=440:sample_rate=48000
+  -f lavfi -i sine=frequency=660:sample_rate=48000)
+ff "${tracks_src[@]}" -t 0.5 -map 0 -map 1 -map 2 -c:v libx264 -c:a aac -ac:a:0 2 -ac:a:1 6 \
+  -metadata:s:a:0 language=eng -metadata:s:a:1 language=swe -disposition:a:0 0 -disposition:a:1 default \
+  samples/mp4-audio-tracks.mp4
+ff "${tracks_src[@]}" -t 0.5 -map 0 -map 1 -map 2 -c:v libx264 -c:a aac -ac:a:0 2 -ac:a:1 1 \
+  -metadata:s:a:0 language=eng -metadata:s:a:1 language=jpn samples/mov-audio-tracks.mov
 # Fragmented MP4 (moof/traf/trun) with H.264 (B frames) and AAC: an empty moov and a fragment per keyframe, with data
 # offsets from an explicit base; the same with default-base-is-moof and fragments every 0.4 s; and the first fragment's
 # samples in the moov's own tables, the rest in fragments. None has an edit list.
@@ -872,6 +888,14 @@ ff -i samples/aac-fdk-pce.aac -c copy samples/aac-fdk-pce-remux.mp4
 # H.264 with B-frames (no decode times in Matroska) and AAC, whose CodecDelay moves the audio's timestamps back; Cues.
 ff -f lavfi -i testsrc2=size=160x120:rate=25 -f lavfi -i sine=frequency=440:sample_rate=48000 -t 2 -c:v libx264 -bf 3 \
   -g 12 -c:a aac -b:a 64k samples/mkv-h264-aac.mkv
+# Several sound tracks (as mp4-audio-tracks): mkv-audio-tracks has a stereo track marked default (eng, "Main") before a
+# 5.1 one (swe, "Commentary"), so the first is played though it has fewer channels; mkv-audio-nodefault marks neither,
+# so the one with more channels, the second, is played.
+ff "${tracks_src[@]}" -t 0.5 -map 0 -map 1 -map 2 -c:v libx264 -c:a aac -ac:a:0 2 -ac:a:1 6 \
+  -metadata:s:a:0 language=eng -metadata:s:a:0 title=Main -metadata:s:a:1 language=swe -metadata:s:a:1 title=Commentary \
+  -disposition:a:0 default -disposition:a:1 0 samples/mkv-audio-tracks.mkv
+ff "${tracks_src[@]}" -t 0.5 -map 0 -map 1 -map 2 -c:v libx264 -c:a aac -ac:a:0 2 -ac:a:1 6 -disposition:a:0 0 \
+  -disposition:a:1 0 samples/mkv-audio-nodefault.mkv
 # Written as live: no Cues and no Duration.
 ff -f lavfi -i testsrc2=size=160x120:rate=25 -f lavfi -i sine=frequency=440:sample_rate=48000 -t 1 -c:v libx264 -bf 2 \
   -g 12 -c:a aac -b:a 64k -live 1 samples/mkv-h264-live.mkv
@@ -1150,6 +1174,14 @@ for f in samples/*.avi samples/*.mp4; do
   t=$(ffprobe -v error -select_streams v:0 -of compact=p=0 \
     -show_entries frame=color_range,color_space,color_primaries,color_transfer,chroma_location,sample_aspect_ratio "$f")
   if [ -n "$t" ]; then echo "$t" > "${f%.*}.color"; fi
+done
+# name.audiotracks.json: a file's sound tracks as ffprobe lists them (channels, language, title, default disposition), and
+# name.audioplayed the one FFmpeg's command line plays (its stream index), for IDemuxer.AudioTracks and Audio.
+for f in samples/*.mp4 samples/*.mov samples/*.mkv samples/*.webm samples/*.avi; do
+  ffprobe -v error -select_streams a -show_entries stream=index,channels:stream_tags=language,title:stream_disposition=default \
+    -of json "$f" > "${f%.*}.audiotracks.json"
+  ffmpeg -nostdin -hide_banner -i "$f" -t 0.01 -f null - 2>&1 | sed -n 's/^ *Stream #0:\([0-9]*\) -> #0:[0-9]* (.* -> pcm_.*/\1/p' \
+    > "${f%.*}.audioplayed"
 done
 # -map 0:v? -map 0:a?: every video and audio stream, so that a file with several audio streams (avi-mjpeg-three-audio)
 # has each one's extradata, at its own index (ffmpeg keeps one of a kind unasked).

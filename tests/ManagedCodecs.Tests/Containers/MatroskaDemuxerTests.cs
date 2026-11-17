@@ -69,6 +69,27 @@ public class MatroskaDemuxerTests
         Assert.Throws<NotSupportedException>(() => new MatroskaDemuxer(new MemoryStream(file)));
     }
 
+    /// <summary>
+    /// An audio track whose content encoding can't be read is left out of the list while another can be read (its
+    /// blocks skipped); where every audio track has one, it is refused as before, when the first alone was read.
+    /// </summary>
+    [Fact]
+    public void LeavesOutAnAudioTrackItCannotReadWhileAnotherCan()
+    {
+        var lzo = Element(0x6D80, Element(0x6240, UInt(0x5033, 0), Element(0x5034, UInt(0x4254, 2))));
+        var file = File(
+            Tracks(Video(1, "V_MJPEG", []), Audio(2, "A_PCM/INT/LIT", 8000, 1, extra: lzo), Audio(3, "A_PCM/INT/LIT", 8000, 2)),
+            Cluster(0, SimpleBlock(1, 0, keyframe: true, [1]), SimpleBlock(2, 0, keyframe: true, [2, 2]), SimpleBlock(3, 0, keyframe: true, [3, 3, 3, 3])));
+        using (var demuxer = new MatroskaDemuxer(new MemoryStream(file)))
+        {
+            Assert.Equal(2, Assert.Single(demuxer.AudioTracks).StreamIndex);
+            Assert.Equal([0, 2], demuxer.ReadPackets().Select(p => p.StreamIndex));
+        }
+
+        var onlyLzo = File(Tracks(Video(1, "V_MJPEG", []), Audio(2, "A_PCM/INT/LIT", 8000, 1, extra: lzo)), Cluster(0, SimpleBlock(1, 0, keyframe: true, [1])));
+        Assert.Throws<NotSupportedException>(() => new MatroskaDemuxer(new MemoryStream(onlyLzo)));
+    }
+
     /// <summary>zlib (ContentCompAlgo 0) of the frames and the CodecPrivate (scope 3) is inflated; ReadPacketInfo gives the inflated sizes.</summary>
     [Fact]
     public void InflatesZlib()
@@ -319,14 +340,15 @@ public class MatroskaDemuxerTests
         Element(0xE0, UInt(0xB0, 64), UInt(0xBA, 48)),
         extra ?? []);
 
-    private static byte[] Audio(int number, string codec, double rate, int channels, long defaultDuration = 0, byte[]? codecPrivate = null, double outputRate = 0) => Element(
+    private static byte[] Audio(int number, string codec, double rate, int channels, long defaultDuration = 0, byte[]? codecPrivate = null, double outputRate = 0, byte[]? extra = null) => Element(
         0xAE,
         UInt(0xD7, number),
         UInt(0x83, 2),
         Text(0x86, codec),
         codecPrivate is null ? [] : Element(0x63A2, codecPrivate),
         defaultDuration > 0 ? UInt(0x23E383, defaultDuration) : [],
-        Element(0xE1, Float(0xB5, rate), UInt(0x9F, channels), outputRate > 0 ? Float(0x78B5, outputRate) : []));
+        Element(0xE1, Float(0xB5, rate), UInt(0x9F, channels), outputRate > 0 ? Float(0x78B5, outputRate) : []),
+        extra ?? []);
 
     private static byte[] Cluster(long time, params byte[][] blocks) => Cluster(time, unknownSize: false, blocks);
 

@@ -416,6 +416,11 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.Playback/AudioPipeline.cs",
          find="var right = options.PairMonoTracks && demuxer is MxfDemuxer && track.Channels == 1", replace="var right = options.PairMonoTracks && track.Channels == 1",
          tests="FullyQualifiedName~AudioPlayerTests"),
+    # A packet to discard (an edit list's priming) is decoded by the players, for AAC's overlap, and gives nothing.
+    dict(file="src/ManagedCodecs.Playback/AudioPipeline.cs",
+         find="if (!left && packet.StreamIndex != audio.Right?.StreamIndex)\n",
+         replace="if ((!left && packet.StreamIndex != audio.Right?.StreamIndex) || packet.Discard)\n",
+         tests="DisplayName~h264-audio-edits"),
     # ---- More than two channels downmixed as FFmpeg's -ac 2 (docs/decisions/2026-11-17-more-than-two-channels.md): the
     # centre at -3 dB ...
     dict(file="src/ManagedCodecs.Playback/Downmix.cs",

@@ -321,7 +321,7 @@ public class AudioPlayerTests
             _ => new PcmDecoder(audio),
         };
         var samples = new List<float>();
-        foreach (var packet in demuxer.ReadPackets().Where(p => p.StreamIndex == audio.StreamIndex && !p.Discard))
+        foreach (var packet in demuxer.ReadPackets().Where(p => p.StreamIndex == audio.StreamIndex))
         {
             var frame = decoder.Decode(packet);
             for (int i = 0; i < frame.SampleCount; i++)

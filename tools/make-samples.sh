@@ -814,7 +814,7 @@ ff -i samples/aac-adts-pce.aac -c copy samples/aac-adts-pce-remux.mp4
 # pair). In WAV, WAVEFORMATEXTENSIBLE's mask names the layout: quad (not FFmpeg's default for four channels, 4.0) and
 # 7.1. Matroska names none: four and eight channels of PCM are FFmpeg's default layouts for the count (4.0, 7.1).
 tones() { python3 -c "import sys; print('|'.join(f'0.2*sin(2*PI*{110 * (i + 1)}*t)' for i in range(int(sys.argv[1]))))" "$1"; }
-for spec in 3.0:3:aac-3.0.aac 4.0:4:aac-4.0.aac 7.1:8:aac-7.1.aac quad:4:aac-quad-pce.aac; do
+for spec in 3.0:3:aac-3.0.aac 4.0:4:aac-4.0.aac 7.1:8:aac-adts-7.1.aac quad:4:aac-quad-pce.aac; do
   IFS=: read -r layout channels name <<< "$spec"
   ff -f lavfi -i "aevalsrc=$(tones "$channels"):s=48000:d=1:c=$layout" -c:a aac -b:a 256k -aac_pns 0 -f adts "samples/$name"
 done
@@ -1265,8 +1265,8 @@ for f in samples/heaac-*.mp4 samples/heaacv2-*.mp4 samples/heaac-*.aac; do ff -i
 for f in samples/*faac*.aac; do ff -i "$f" -f f32le "${f%.*}.delay.f32"; done
 # More than two channels: name.stereo.f32, decoded audio as FFmpeg's -ac 2 downmixes it to stereo in float, by default
 # (what the players give).
-for f in samples/aac-5.1.mp4 samples/aac-adts-5.1-id3.aac samples/aac-adts-pce.aac samples/aac-3.0.aac samples/aac-4.0.aac \
-  samples/aac-7.1.aac samples/aac-quad-pce.aac samples/wav-pcm-s16-6ch.wav samples/wav-pcm-quad.wav samples/wav-pcm-7.1.wav \
+for f in samples/aac-5.1.mp4 samples/aac-7.1.mp4 samples/aac-adts-5.1-id3.aac samples/aac-adts-pce.aac samples/aac-fdk-pce.aac \
+  samples/aac-3.0.aac samples/aac-4.0.aac samples/aac-adts-7.1.aac samples/aac-quad-pce.aac samples/wav-pcm-s16-6ch.wav samples/wav-pcm-quad.wav samples/wav-pcm-7.1.wav \
   samples/mkv-pcm-4ch.mkv samples/mkv-pcm-8ch.mkv; do
   ff -i "$f" -map 0:a:0 -ac 2 -f f32le "${f%.*}.stereo.f32"
 done

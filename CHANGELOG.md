@@ -70,6 +70,9 @@ next version is a minor one; code built against 0.18 keeps working.
 
 ### Fixed
 
+- Playback: an MP4 file's AAC sound started off for its first 576 samples (12 ms at 48 kHz): the players skipped the
+  priming packet its edit list leaves out, where the decoder needs it for the overlap the first one played starts
+  from. It is now decoded and gives nothing, as in FFmpeg.
 - Thumbnails: `VideoProbe`'s duration (and where `VideoThumbnail` takes its frame) counts every audio stream, as
   ffprobe's does: a file whose later sound track ran longer than its first (MXF's tracks since 0.18.0, AVI's now) was
   given the first one's end.

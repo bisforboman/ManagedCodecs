@@ -143,17 +143,19 @@ internal sealed class PlayedAudio
         private int _sampleRate = audio.Track.SampleRate;
 
         /// <summary>
-        /// The audio the packet completes as stereo, or null: a packet of another stream, one to discard or that decodes
-        /// to nothing, or a mono track's samples whose other channel has not come yet.
+        /// The audio the packet completes as stereo, or null: a packet of another stream, one to discard (decoded for its
+        /// state) or that decodes to nothing, or a mono track's samples whose other channel has not come yet.
         /// </summary>
         public AudioChunk? Decode(Packet packet)
         {
             bool left = packet.StreamIndex == audio.Track.StreamIndex;
-            if ((!left && packet.StreamIndex != audio.Right?.StreamIndex) || packet.Discard)
+            if (!left && packet.StreamIndex != audio.Right?.StreamIndex)
             {
                 return null;
             }
 
+            // A packet to discard (an edit list's priming) is decoded all the same, for the state the next one starts
+            // from (AAC's overlap), and gives nothing.
             var frame = (left ? _decoder : _rightDecoder!).Decode(packet);
             if (frame.SampleCount == 0)
             {

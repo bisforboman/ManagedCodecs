@@ -18,11 +18,12 @@ permissions:
   contents: read
 
 jobs:
-  # A build and a test run a mutation, the threading ones up to three runs: about 6 minutes for the list in all.
+  # A build and a test run a mutation, the threading ones up to three runs. With the samples made first, 47 to 51
+  # minutes for 254 entries (2026-11-17), when 60 cut a run off three entries short: 90 leaves room for the list to grow.
   mutation:
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 90
     steps:
       # The pull request's merge commit and its first parent, the base it merges into: their difference is the change.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7

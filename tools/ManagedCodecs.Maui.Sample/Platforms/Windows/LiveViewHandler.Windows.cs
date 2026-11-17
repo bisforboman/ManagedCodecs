@@ -4,6 +4,7 @@ using Microsoft.Maui.Handlers;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
 using WinImage = Microsoft.UI.Xaml.Controls.Image;
+using WinStretch = Microsoft.UI.Xaml.Media.Stretch;
 
 namespace ManagedCodecs.MauiSample;
 
@@ -17,7 +18,7 @@ public sealed partial class LiveViewHandler : ViewHandler<LiveView, WinImage>
     private WriteableBitmap? _bitmap;
     private byte[] _bgra = [];
 
-    protected override WinImage CreatePlatformView() => new() { Stretch = Stretch.Uniform };
+    protected override WinImage CreatePlatformView() => new() { Stretch = WinStretch.Uniform };
 
     protected override void ConnectHandler(WinImage platformView)
     {
@@ -36,10 +37,10 @@ public sealed partial class LiveViewHandler : ViewHandler<LiveView, WinImage>
     private static void MapAspect(LiveViewHandler handler, LiveView view) =>
         handler.PlatformView.Stretch = view.Aspect switch
         {
-            Aspect.AspectFill => Stretch.UniformToFill,
-            Aspect.Fill => Stretch.Fill,
-            Aspect.Center => Stretch.None,
-            _ => Stretch.Uniform,
+            Aspect.AspectFill => WinStretch.UniformToFill,
+            Aspect.Fill => WinStretch.Fill,
+            Aspect.Center => WinStretch.None,
+            _ => WinStretch.Uniform,
         };
 
     private void OnRendering(object? sender, object e) => OnFrame();

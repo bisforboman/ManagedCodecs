@@ -13,8 +13,8 @@ run time.
 
 ## Unreleased
 
-Features (JPEG over 2040 pixels over RTSP; an AVI file's every audio stream, new public API: `AviDemuxer.AudioTracks`
-and `SelectAudio`) beside fixes, hence the next version is a minor one; code built against 0.18 keeps working.
+Features beside fixes (new public API: `AviDemuxer.AudioTracks` and `SelectAudio`), hence the next version is a minor
+one; code built against 0.18 keeps working.
 
 ### Added
 
@@ -24,6 +24,9 @@ and `SelectAudio`) beside fixes, hence the next version is a minor one; code bui
 - Playback: JPEG over RTSP larger than 2040 pixels, whose size RFC 2435's header can't give: `LivePlayer` takes it
   from the camera's SDP (GStreamer's `a=x-dimensions`, RFC 6064's `a=framesize`) or from ONVIF's RTP header extension,
   where it used to fail. docs/decisions/2026-11-12-live-rtsp-jpeg.md (Since), issue #527.
+- Playback: a camera's AAC sent as LATM (RFC 6416's `MP4A-LATM`, with its StreamMuxConfig in the SDP) plays with
+  `RtspSource.Audio`, where `SkippedAudioCodec` named it before. docs/decisions/2026-11-15-live-rtsp-audio.md (Since),
+  issue #527.
 
 ### Fixed
 

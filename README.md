@@ -544,7 +544,8 @@ if (player.TakeLatest() is { } frame)
     (docs/decisions/2026-11-15-live-rtsps.md).
   - Not yet: multicast, SRTP, H.265.
 - **Sound:** `new RtspSource(uri) { Audio = true }` plays the camera's sound too: the first audio track of its SDP
-  that is AAC (RFC 3640's `MPEG4-GENERIC`, AAC LC and HE-AAC) or G.711 (A-law, µ-law), set up beside the video on the
+  that is AAC (RFC 3640's `MPEG4-GENERIC`, AAC LC and HE-AAC, or RFC 6416's `MP4A-LATM`) or G.711 (A-law, µ-law),
+  set up beside the video on the
   same transport. `player.TakeAudio()` returns it as float stereo chunks, in order, for the application's sound output
   (as `MediaPlayer.TakeAudio()` does).
   - Lip sync is the application's, by capture times: the picture and the sound each come as soon as they are decoded,
@@ -555,7 +556,7 @@ if (player.TakeLatest() is { } frame)
   - Half a second waits at most. Past that the oldest chunk is dropped (`LiveStatistics.DroppedAudioFrames`), so a
     sound that plays slower than the camera sends never falls further behind.
   - Sound never stops the picture: a camera that refuses the audio's SETUP plays without it (`Error` says why), audio
-    of another kind (LATM, G.726, Opus) is named by `SkippedAudioCodec`, and lost packets are a gap in the sound.
+    of another kind (G.726, Opus, LATM with its config in the stream) is named by `SkippedAudioCodec`, and lost packets are a gap in the sound.
   - Off by default: without `Audio` the session is for the video alone.
   - `mclive` and `mclive-wpf` stay silent (neither Avalonia nor WPF plays raw samples without a native library or a
     platform API).

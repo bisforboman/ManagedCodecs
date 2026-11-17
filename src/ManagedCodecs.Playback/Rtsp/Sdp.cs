@@ -281,6 +281,13 @@ internal sealed record SdpVideoTrack(SdpCodec Codec, int PayloadType, string? Co
 internal sealed record SdpAudioTrack(string Codec, int PayloadType, string? Control, int SampleRate, int Channels, int SizeLength, int IndexLength, int IndexDeltaLength, byte[] Config)
 {
     /// <summary>
+    /// AAC as LATM (RFC 6416's <c>MP4A-LATM</c>): the access units in each audioMuxElement (the StreamMuxConfig's
+    /// numSubFrames + 1); 0 for AAC by RFC 3640 and for G.711. <see cref="Config"/> is then the AudioSpecificConfig
+    /// taken out of the SDP's StreamMuxConfig.
+    /// </summary>
+    public int LatmSubFrames { get; init; }
+
+    /// <summary>
     /// The track a format describes, or null when it isn't one that plays: an encoding other than MPEG4-GENERIC, PCMU
     /// and PCMA, or MPEG4-GENERIC in a mode other than AAC-hbr and AAC-lbr, or without a size field or a config.
     /// </summary>
@@ -314,6 +321,11 @@ internal sealed record SdpAudioTrack(string Codec, int PayloadType, string? Cont
         if (encoding.Equals("PCMU", StringComparison.OrdinalIgnoreCase) || encoding.Equals("PCMA", StringComparison.OrdinalIgnoreCase))
         {
             return new SdpAudioTrack(encoding.Equals("PCMU", StringComparison.OrdinalIgnoreCase) ? CodecIds.PcmMulaw : CodecIds.PcmAlaw, payloadType, control, rate, channels, 0, 0, 0, []);
+        }
+
+        if (encoding.Equals("MP4A-LATM", StringComparison.OrdinalIgnoreCase))
+        {
+            return Latm(payloadType, control, rate, channels, fmtp);
         }
 
         if (!encoding.Equals("MPEG4-GENERIC", StringComparison.OrdinalIgnoreCase))
@@ -361,6 +373,37 @@ internal sealed record SdpAudioTrack(string Codec, int PayloadType, string? Cont
         bool aac = mode.Equals("AAC-hbr", StringComparison.OrdinalIgnoreCase) || mode.Equals("AAC-lbr", StringComparison.OrdinalIgnoreCase);
         return aac && sizeLength is > 0 and <= 16 && indexLength <= 16 && indexDeltaLength <= 16 && config.Length > 0
             ? new SdpAudioTrack(CodecIds.Aac, payloadType, control, rate, channels, sizeLength, indexLength, indexDeltaLength, config)
+            : null;
+    }
+
+    // AAC as LATM (RFC 6416, 6.1): the StreamMuxConfig is the SDP's (cpresent=0, which the RFC asks of RTSP; left out,
+    // cpresent is 1: the config comes in the stream, which isn't read), and one LatmConfig reads.
+    private static SdpAudioTrack? Latm(int payloadType, string? control, int rate, int channels, string fmtp)
+    {
+        bool inStream = true;
+        byte[] config = [];
+        foreach (var parameter in fmtp.Split(';'))
+        {
+            int equals = parameter.IndexOf('=');
+            if (equals < 0)
+            {
+                continue;
+            }
+
+            string name = parameter.Substring(0, equals).Trim();
+            string value = parameter.Substring(equals + 1).Trim();
+            if (name.Equals("cpresent", StringComparison.OrdinalIgnoreCase))
+            {
+                inStream = value != "0";
+            }
+            else if (name.Equals("config", StringComparison.OrdinalIgnoreCase))
+            {
+                config = Hex(value);
+            }
+        }
+
+        return !inStream && LatmConfig.TryParse(config, out var audioSpecificConfig, out int subFrames)
+            ? new SdpAudioTrack(CodecIds.Aac, payloadType, control, rate, channels, 0, 0, 0, audioSpecificConfig) { LatmSubFrames = subFrames }
             : null;
     }
 

@@ -58,6 +58,7 @@ ManagedCodecs.Containers.Mp4Demuxer.Seek(long pts, int streamIndex) -> void
 ManagedCodecs.Containers.Mp4Demuxer.Video.get -> ManagedCodecs.VideoStreamInfo?
 ManagedCodecs.Containers.MxfDemuxer
 ManagedCodecs.Containers.MxfDemuxer.Audio.get -> ManagedCodecs.AudioStreamInfo?
+ManagedCodecs.Containers.MxfDemuxer.AudioTracks.get -> System.Collections.Generic.IReadOnlyList<ManagedCodecs.AudioStreamInfo!>!
 ManagedCodecs.Containers.MxfDemuxer.Dispose() -> void
 ManagedCodecs.Containers.MxfDemuxer.MxfDemuxer(System.IO.Stream! stream, bool leaveOpen = false) -> void
 ManagedCodecs.Containers.MxfDemuxer.ReadPacketInfo() -> System.Collections.Generic.IEnumerable<ManagedCodecs.PacketInfo>!
@@ -65,6 +66,7 @@ ManagedCodecs.Containers.MxfDemuxer.ReadPackets() -> System.Collections.Generic.
 ManagedCodecs.Containers.MxfDemuxer.ReadPacketsAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerable<ManagedCodecs.Packet>!
 ManagedCodecs.Containers.MxfDemuxer.Refresh() -> System.Collections.Generic.IEnumerable<ManagedCodecs.Packet>!
 ManagedCodecs.Containers.MxfDemuxer.Seek(long pts, int streamIndex) -> void
+ManagedCodecs.Containers.MxfDemuxer.SelectAudio(params int[]! streamIndexes) -> void
 ManagedCodecs.Containers.MxfDemuxer.StartTimecode.get -> ManagedCodecs.Timecode?
 ManagedCodecs.Containers.MxfDemuxer.Video.get -> ManagedCodecs.VideoStreamInfo?
 ManagedCodecs.Containers.WavDemuxer

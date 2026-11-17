@@ -551,7 +551,7 @@ public sealed class LivePlayer : IDisposable
             // sound's packets are what the stall watchdog watches and what makes the player Playing.
             var rtcp = new RtcpSession(only?.SampleRate ?? VideoClockRate);
             var handle = only is not null ? OnlyAudioPackets(only, onlyDecoder!, rtcp, connection)
-                : track!.Codec == SdpCodec.Jpeg ? JpegPackets(track.PayloadType, connection, rtcp)
+                : track!.Codec == SdpCodec.Jpeg ? JpegPackets(track, connection, rtcp)
                 : H264Packets(track, connection, rtcp);
             var senders = new List<(RtcpSession Rtcp, Func<byte[], Task> Send)>();
             var ending = cancel.Token;
@@ -777,9 +777,9 @@ public sealed class LivePlayer : IDisposable
 
     // JPEG over RTP (RFC 2435): each frame rebuilt as a whole JPEG and offered to decoding as one over HTTP is; an
     // incomplete one is dropped (docs/decisions/2026-11-12-live-rtsp-jpeg.md, decision 1).
-    private Action<byte[]> JpegPackets(int payloadType, Connection connection, RtcpSession rtcp)
+    private Action<byte[]> JpegPackets(SdpVideoTrack track, Connection connection, RtcpSession rtcp)
     {
-        var depacketizer = new RtpJpegDepacketizer(payloadType);
+        var depacketizer = new RtpJpegDepacketizer(track.PayloadType, track.Width, track.Height);
         var frames = new List<RtpJpegFrame>();
         long lost = 0;
         return packet =>

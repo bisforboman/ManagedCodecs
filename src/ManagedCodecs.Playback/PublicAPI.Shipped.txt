@@ -1,5 +1,6 @@
 #nullable enable
 ManagedCodecs.Playback.AudioChunk
+ManagedCodecs.Playback.AudioChunk.CaptureTime.get -> System.DateTime?
 ManagedCodecs.Playback.AudioChunk.SampleRate.get -> int
 ManagedCodecs.Playback.AudioChunk.Samples.get -> float[]!
 ManagedCodecs.Playback.AudioPlayer
@@ -90,6 +91,8 @@ ManagedCodecs.Playback.MjpegHttpSource.StallTimeout.init -> void
 ManagedCodecs.Playback.MjpegHttpSource.Uri.get -> System.Uri!
 ManagedCodecs.Playback.PlaybackOptions
 ManagedCodecs.Playback.PlaybackOptions.<Clone>$() -> ManagedCodecs.Playback.PlaybackOptions!
+ManagedCodecs.Playback.PlaybackOptions.AudioTrack.get -> int?
+ManagedCodecs.Playback.PlaybackOptions.AudioTrack.init -> void
 ManagedCodecs.Playback.PlaybackOptions.DecoderThreads.get -> int
 ManagedCodecs.Playback.PlaybackOptions.DecoderThreads.init -> void
 ManagedCodecs.Playback.PlaybackOptions.Equals(ManagedCodecs.Playback.PlaybackOptions? other) -> bool
@@ -116,6 +119,7 @@ ManagedCodecs.Playback.PlaybackStatistics.Equals(ManagedCodecs.Playback.Playback
 ManagedCodecs.Playback.PlaybackStatistics.PlaybackStatistics() -> void
 ManagedCodecs.Playback.PlaybackStatistics.PlaybackStatistics(long DecodedFrames, double DecodeMilliseconds, long ConvertedFrames, double ConvertMilliseconds, long DroppedFrames) -> void
 ManagedCodecs.Playback.RgbaFrame
+ManagedCodecs.Playback.RgbaFrame.CaptureTime.get -> System.DateTime?
 ManagedCodecs.Playback.RgbaFrame.Height.get -> int
 ManagedCodecs.Playback.RgbaFrame.Pixels.get -> byte[]!
 ManagedCodecs.Playback.RgbaFrame.SampleAspectRatio.get -> ManagedCodecs.Rational

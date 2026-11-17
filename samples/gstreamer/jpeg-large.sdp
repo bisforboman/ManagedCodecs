@@ -1,0 +1,14 @@
+v=0
+s=Session streamed with GStreamer
+i=rtsp-server
+t=0 0
+a=tool:GStreamer
+a=type:broadcast
+a=control:*
+a=range:npt=0-
+m=video 0 RTP/AVP 26
+c=IN IP4 0.0.0.0
+a=rtpmap:26 JPEG/90000
+a=framerate:25.000000
+a=x-dimensions:2048,64
+a=control:stream=0

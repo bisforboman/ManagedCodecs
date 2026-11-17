@@ -140,7 +140,7 @@ damaged frame or reconnect. The first run, in the cloud sandbox (2026-11-11): 15
 40 units skipped while waiting for the first IDR picture after joining, 5.8 ms to decode and 1.0 ms to convert a frame.
 A clip other than the one streamed fails it from the first frame.
 
-- Not tried yet: live555, an IP camera.
+- Not tried yet: an IP camera. live555: below, "live555MediaServer".
 
 ### JPEG over RTP
 
@@ -154,6 +154,7 @@ checks every rebuilt JPEG decodes to exactly what the JPEG that was packetized d
 | `gstreamer/jpeg-422.rtp` | GStreamer 1.24's `rtpjpegpay` | 0 (4:2:2) | 255 |
 | `gstreamer/jpeg-420-restart.rtp` | GStreamer, JPEGs with a restart marker every MCU row | 65 | 255 |
 | `gstreamer/jpeg-422-restart.rtp` | GStreamer, the same in 4:2:2 | 64 | 255 |
+| `gstreamer/jpeg-large.rtp` | GStreamer, 2048x64: wider than RFC 2435's header can say, which then gives 0 | 1 | 255 |
 
 - **GStreamer's recordings are committed** (decision 2), with the JPEGs that went in: 320x240, 5 frames each, made by
   tools/gst-jpeg-record.py from Pillow's JPEGs (quality 50, standard Huffman tables), about 230 KB.
@@ -169,6 +170,16 @@ checks every rebuilt JPEG decodes to exactly what the JPEG that was packetized d
 - **Loss:** a frame missing its first, a middle or its last packet is dropped and the others are kept.
 - **Refused:** reserved types, dynamic types and reserved Q values throw `NotSupportedException`.
 - **Tables:** the depacketizer's copies of T.81's tables equal `ManagedCodecs.Mjpeg`'s.
+- **Over 2040 pixels** (issue #527): RFC 2435's header gives the size in 8-pixel units in a byte, so a larger frame's
+  is 0, and the size comes from elsewhere:
+  - GStreamer's server puts it in the SDP (`a=x-dimensions:2048,64`; `gstreamer/jpeg-large.sdp` is its answer to
+    DESCRIBE, recorded by tools/gst-jpeg-record.py): its recording rebuilds to the JPEGs that went in;
+  - RFC 6064's `a=framesize:26 2592-1944` is read too, for the track's payload type only, and wins over
+    `a=x-dimensions`;
+  - ONVIF's RTP header extension (profile 0xFFD8, or 0xFFFF where it goes on), which carries the frame's own JPEG
+    marker segments: its SOF0's size wins over the SDP's. Hand-made packets: the extension added to GStreamer's,
+    after padding and another segment; another profile, no SOF0, a SOF0 cut short or not marker segments give no size;
+  - with no size from anywhere the frame can't be rebuilt, and the player ends with `NotSupportedException`, as before.
 - **Mutation entries:** Q below 128, the reused tables, and the fragment offset check.
 
 `LiveRtspJpegTests` plays GStreamer's recordings through `LivePlayer`:
@@ -176,6 +187,7 @@ checks every rebuilt JPEG decodes to exactly what the JPEG that was packetized d
   no `a=rtpmap`, one has `a=rtpmap:96 JPEG/90000`.
 - An incomplete frame is dropped and counted (`DamagedFrames`, `LostPackets`).
 - A reserved type ends the player with `NotSupportedException`.
+- GStreamer's 2048x64 recording with its server's SDP shows each frame at 2048x64, the JPEG that was sent.
 
 `RtspProtocolTests` checks the SDP choice: the first H.264 or JPEG video track in SDP order (decision 3).
 
@@ -185,6 +197,8 @@ Real servers:
   (`jpegenc ! rtpjpegpay`, 640x480), with Digest.
   - Each played 100 frames at 25 fps, with none damaged or lost and no reconnects.
   - Decoding took 0.7 to 0.8 ms a frame and converting 0.6 ms.
+  - At 2560x1440 (2026-11-16), over 2040 pixels: 50 frames at 2560x1440, none damaged or lost, 6.0 ms to decode and
+    3.8 ms to convert a frame.
 - **mediamtx 1.21.3, nightly** (tools/rtsp-nightly.py, with Digest).
   - mediamtx drops every frame of FFmpeg's own JPEG push ("received wrong fragment"). The same packets with the one
     table sent as two pass, so it seems to need two tables. Its source wasn't read to confirm.
@@ -222,7 +236,39 @@ it on purpose.
 - **mediamtx 1.21.3, nightly** (tools/rtsp-nightly.py), with `rtspTransports: [udp]`, FFmpeg pushing over UDP too. It
   answers our first SETUP with 461, as measured for the note. The first run (2026-11-14) showed 100 frames, all the
   clip's, with none lost or damaged and no reconnects.
-- **Not tried yet:** a real network that loses or reorders packets, a NAT between camera and viewer, and an IP camera.
+- **A network that loses, repeats and reorders packets** (issue #527):
+  - `LiveRtspUdpTests`, by twelve seeds: of GStreamer's 4:2:0 JPEG recording's three middle frames a quarter of the
+    packets are dropped and a fifth sent twice, and every frame after the first arrives shuffled. The frames that lost
+    nothing are shown as sent, the others are dropped, and `LostPackets` is exactly the packets dropped.
+  - Nightly (tools/rtsp-nightly.py), tools/rtsp-lossy-relay.py between mediamtx (UDP only) and `mcdec --live`: it
+    passes the RTSP connection on, rewrites each SETUP so that RTP comes through its own ports, and, by a seeded choice,
+    drops, repeats or holds back (10 ms) packets for 6 s. Three runs of 400 frames:
+    - a twentieth of the packets sent twice and a tenth held back: every frame the clip's, nothing lost, and the last
+      receiver report's cumulative loss −68 for 68 packets sent twice, as RFC 3550's A.3 counts a duplicate;
+    - 2% dropped, H.264: 23 dropped, `LostPackets` 23 and the report 23; 21 frames damaged, none of the last 265 not the
+      clip's, no reconnect (`mcdec --live --lossy`: the last 75 frames must be the clip's);
+    - 2% dropped, H.264 and AAC: 14 dropped, `LostPackets` 14, the two tracks' reports 12 and 2 as the relay dropped
+      them; the last 75 chunks the clip's but for one loop's first.
+    - The relay checks the counts: `LostPackets` against the packets it dropped, and each stream's last receiver
+      report against those dropped less those sent twice.
+  - By hand (2026-11-15), the same relay for the whole run, with sound: at 10% dropped and 30% dropped (with repeats
+    and reordering), `LostPackets` was still exactly the packets dropped (144, and 1622 of 3956), with no reconnect. At
+    30% most pictures waited for the next IDR picture (743 of 1499 skipped), and 300 frames took 64 s. The receiver
+    reports then trail what was dropped by up to their 5 s.
+- **`LossyNetworkTests`**, a network simulated on the test's own clock: each recording played three times over as one
+  stream (`h264-main-slices`, `h264-bench-720p`, `h264-b-motion`; AAC from FFmpeg's and GStreamer's packetizers),
+  through 0.5 to 3% loss, 2% repeated packets, 5% reordered within the 50 ms window and 1% delayed past it, six seeds
+  each, then the reorder window, the depacketizer and the decoder as `LivePlayer` chains them:
+  - The window passes packets on in order, each once, and the depacketizer counts as lost exactly what it never passed.
+  - A unit not marked damaged is the clean stream's byte for byte, and a unit that came whole is not marked damaged.
+  - H.264: every frame the decoder doesn't mark damaged is the clean stream's frame of that time, bit for bit, and an
+    IDR picture that came whole gives a clean frame. AAC: every access unit that comes out is the clean stream's.
+  - They found two bugs, which neither the twelve-seed test above (JPEG) nor the relay's runs reached. A gap inside
+    a picture also marked the next, whole picture damaged (`DamagedFrames` counted too many). And a stream whose
+    parameter sets come only in the SDP, whose first IDR picture lost a packet, never showed a picture: they came
+    before that picture alone, which was skipped, and every later IDR picture failed for want of them.
+    `LiveRtspUdpTests` checks the second through `LivePlayer`: the second pass's frames are shown.
+- **Not tried yet:** a real lossy network (Wi-Fi, a WAN), a NAT between camera and viewer, and an IP camera.
 
 ### RTSPS
 
@@ -351,6 +397,65 @@ reports are the tests' own, so the checks are of the arithmetic and of which tim
 - **Not tried yet:** a camera's own sender reports. JPEG over RTSP's times have no test of their own (a JPEG frame is
   its packets' picture, with nothing reordered).
 
+### live555MediaServer
+
+Many cameras' RTSP servers are built on live555. `tools/live555-check.py` builds live555MediaServer (LIVE555
+2026.11.08, the source from Ubuntu's archive, pinned by SHA-256) and plays its files with `mcdec --live`, as the nightly
+run does mediamtx's. By hand in the cloud session (2026-11-15), not in any workflow yet. The server streams a file once,
+from its start for each reader, so each clip is longer than its run; every frame shown and every chunk taken must be
+the clip's, with no lost packet, damaged frame or reconnect.
+
+| Run | Shown | What it showed |
+|---|---|---|
+| `.264`, 720p25 libx264 with B pictures, RTP over the connection | 400 frames | all the clip's |
+| `.264` without B pictures | 400 | all the clip's |
+| `.mkv`, 640x360 H.264 and AAC LC, `--audio` | 400, 766 chunks | all the clip's, the first chunk too |
+| `.264`, 640x360, held for 90 s | 2250 in 92.1 s | all the clip's, no reconnect |
+| `.264` with B pictures, RTP over UDP only (461 to the connection) | 400 | all the clip's, none lost |
+| `.mkv` with `--audio`, UDP only | 400, 766 chunks | all the clip's |
+| `.264` held for 90 s, UDP only | 2250 in 92.1 s | all the clip's, no reconnect |
+| `.264` with B pictures, Digest | 400 | all the clip's |
+
+- **What live555 sends:**
+  - `Content-Base: rtsp://host/file/`, `a=control:*` for the session and `a=control:track1` a track, and
+    `Session: <id>;timeout=65`. All were read as they are.
+  - H.264 as `packetization-mode=1` with `sprop-parameter-sets`. The frame rate is the SPS's timing (libx264 writes
+    it: 25 fps here); without it live555 assumes 30 fps (its source; not tried).
+  - With B pictures its RTP timestamps go up by a frame in decoding order: it doesn't know the pictures' order. The
+    frames' times still came out a frame apart, in order (the first 23, over the connection).
+  - AAC as `MPEG4-GENERIC`, `mode=AAC-hbr`, one access unit a packet (its sink allows no more), the first real
+    sender of that here.
+  - Sender reports: over UDP `RgbaFrame.CaptureTime` was null for the first second and set by the 100th frame. Over
+    the connection it wasn't looked at.
+  - To a UDP SETUP: `destination`, `source`, `client_port` and `server_port=6972-6973`, no `ssrc`.
+- **live555MediaServer has no options**, so the script patches its `main()` to read environment variables: a user and
+  password (its own `ACCESS_CONTROL` code, with ours instead of fixed ones; live555 has Digest only) and
+  `RTSPServer::disableStreamingRTPOverTCP()`, with which it answers 461 to RTP over the connection. The library is built
+  as it is.
+- **Liveness** (the first server here that drops a silent reader). live555 ends a session it has heard nothing from
+  for 65 s: an RTSP request with the session's id counts, and so does an RTCP receiver report (its source, and
+  measured). With `LivePlayer` changed for the measurement only, 640x360 held for 90 s, over the connection and over
+  UDP alike:
+  - neither keep-alives nor receiver reports: the packets stopped at 65 s, the player stalled for 5 s and reconnected
+    (1 reconnect, 2250 frames in 97.8 s);
+  - receiver reports only: played on, no reconnect;
+  - `GET_PARAMETER` keep-alives only (every 32 s, half the timeout): played on, no reconnect.
+
+  So live555MediaServer itself needs no receiver reports from a reader that sends keep-alives. A camera built on
+  live555 that doesn't count `GET_PARAMETER` would need them; none was in reach.
+- **At a file's end** live555 sends an RTCP BYE and stops, leaving the connection open. `LivePlayer` doesn't read BYE
+  (docs/decisions/2026-11-15-live-rtcp.md, point 4): it stalls for 5 s, reconnects, and the file plays again from its
+  start (620 frames of a 500-frame clip: 1 reconnect, all the clip's).
+- **Each IDR picture cost a frame not shown** with B pictures (`dropped` 8 of 408, 45 of 2295: one a 2 s GOP). Probably
+  the decoder gives its held frames at once at an IDR picture, and the player shows the newest; not looked into.
+  Without B pictures, none.
+- **G.711:** live555MediaServer serves it only from a `.wav` (static payload types 0 and 8, no `a=rtpmap`), which has
+  no video: `LivePlayer` fails with "The camera's SDP has no H.264 or JPEG video track", as it does for any audio-only
+  stream. Its Matroska demuxer leaves an A-law track out of the SDP. So G.711 beside video wasn't tried. (FFmpeg's .wav
+  needs `-bitexact`: live555 answers 404 to one with a `LIST` chunk.)
+- **Not tried:** RTSP over HTTP (which live555 offers on port 80, 8000 or 8080), RTSPS and SRTP (it has them, by
+  code), H.265 and its other formats, multicast, a file the SPS of which has no timing, and a camera built on live555.
+
 ## Real films
 
 Every sample above is a test pattern encoded to isolate a feature. `tools/realworld.py` (nightly, `realworld.yml`, a job
@@ -390,23 +495,30 @@ crops by the container's size.
 ### MXF from other writers
 
 Every MXF sample is FFmpeg's own muxers' (or GStreamer's, which adds nothing to them). `tools/realworld.py` also reads
-three files from other writers (its PACKET_FILES; a job each), whose codec this library only names, so they are
+four files from other writers (its PACKET_FILES; a job each), whose codec this library only names, so they are
 compared packet by packet: `mcdec --packets` against FFmpeg's demuxer's own packets (`ffprobe -fflags
 +nofillin+noparse -show_data_hash MD5`), for the video and the first sound track: the codec's name, the sound's rate
 and channels, the number of packets, each one's size and MD5, and its presentation and decode times where FFmpeg
-gives any. The cloud sessions can't download them (archive.org's data hosts are refused there), so the comparison was
-first run in CI, on the branch.
+gives any; each stream's duration against the header's as ffprobe reads it (`-nofind_stream_info`'s `duration_ts`);
+and each packet's keyframe flag and duration against ffprobe's default listing, where libavformat adds them (its
+parsers and its intra-only rule: FFmpeg's demuxer itself gives none), wherever that listing holds the same packets
+(a parser can cut a file's last partial packet otherwise). Every samples/mxf-*.mxf passes the same comparison
+(`tools/realworld.py --packets`). The cloud sessions can't download the files (archive.org's data hosts are refused
+there), so the comparison was first run in CI, on the branch.
 
 - Two of archive.org's `mxfburger` files (Public Domain Mark, pinned by the SHA-1 archive.org lists), a 9-second
   advertisement: MPEG-2 at 29.97 with B pictures and temporal offsets, 280 pictures, with 16-bit mono and with 24-bit
   5.1 PCM. Their first run found that `MxfDemuxer` never applied a reordered picture's offsets (Temporal offsets,
-  under MXF demuxing).
+  under MXF demuxing), and that an open GOP's I picture, which the index gives no random access flag, is a keyframe
+  to FFmpeg.
 - The first 32 MiB of a NASA broadcast file of 2.6 GB (jsc-pao-video-collection; by HTTP range, pinned by those bytes'
   SHA-256), read as a file cut short: MPEG-2 and 24-bit PCM, 274 packets each, and seven more streams in FFmpeg's
   reading, which are not compared (what they are was not looked at).
+- The first 48 MiB of another file of that collection, 12 GB whole (pinned the same way): 3840x2160 H.264 at 59.94,
+  every picture a keyframe in the index, and eight mono 24-bit sound tracks, the first of which is compared (the others
+  wait for #535). Its first run, before the keyframes and durations were compared, matched packet for packet.
 
-Not compared there: keyframe flags (FFmpeg's demuxer itself gives none) and the header's facts beyond the codec and
-the sound's format.
+Not compared there: the header's facts beyond the codec, the sound's format and the durations.
 
 ## SIMD and ARM64
 
@@ -422,7 +534,7 @@ Decoding straight into the output frame: opt-in, `MjpegDecoder.ZeroCopy` (6% few
 
 ## MP4 demuxing
 
-`VideoProbe` (ManagedCodecs.Thumbnails) is checked against ffprobe on every MP4, Matroska and AVI sample with H.264 or MJPEG
+`VideoProbe` (ManagedCodecs.Thumbnails) is checked against ffprobe on every MP4, Matroska, AVI and MXF sample with H.264 or MJPEG
 video (make-samples.sh's name.probe.json): `format=duration` within 1.5 µs, width and height, sample aspect ratio,
 rotation, average frame rate and the audio stream's rate and channels. The duration is the streams' container
 durations as FFmpeg reads them: MP4's edits' length, but no longer than the samples they take (JM's field-picture
@@ -433,7 +545,13 @@ outlasts its video, and the file lasts as long as ffprobe says), except PCM's, w
 ends nothing (avi-mjpeg-pcm-u8's runs 0.2 s past its video; the camera AVIs' a few ms); Matroska's Segment Duration, which
 FFmpeg takes as the file's own, from the earliest packet (AAC's, 21 ms before the video, at its CodecDelay), not each
 stream's start plus it; without one (mkv-h264-live) ffprobe gives no duration, and the probe's, from the first packet
-to the end of the last, is checked against ffprobe's packets. H.264's size is the decoder's frame size
+to the end of the last, is checked against ffprobe's packets. MXF's are the header metadata's track durations (the
+material package's, ST 377-1 B.11), as FFmpeg's demuxer reads them, the sound's rescaled from edit units to samples and
+rounded to the nearest (`MxfConformanceTests` compares both streams' with name.headers.json); a file cut short keeps the
+header's, longer than its packets (mxf-h264-pcm-cut lasts 2 s, as ffprobe says, its packets 1.2 s); a file written to
+a pipe has none (FFmpeg's muxer can't go back to write them), and ffprobe then gives no duration: the probe's, from the
+first packet to the end of the last, is checked against ffprobe's packets, the sound's alone where the pipe file has
+lost its index (mxf-h264-pipe-norip: ffprobe lists no video times there). H.264's size is the decoder's frame size
 from the SPS, which can crop the container's.
 
 MP3 (decoded: MP3, below) is `CodecIds.Mp3`: h264-mp3 (FFmpeg's MP4 muxer: `mp4a`, object type 0x6B) and
@@ -771,12 +889,26 @@ descriptor's, as ffprobe lists them frame by frame (name.color; `MxfConformanceT
   10 bits, a missing white level, colour range or depth).
 
 
-`MxfConformanceTests` compares every packet of every sample's video and first audio stream with FFmpeg's (`ffprobe
+`MxfConformanceTests` compares every packet of every sample's video and audio streams with FFmpeg's (`ffprobe
 -show_packets -show_data_hash MD5`, name.packets.csv): file order, pts, size, MD5, keyframe flag and duration, and the
 decode times with FFmpeg's MXF demuxer's own (`-fflags +nofillin+noparse`, name.packets.nofillin.csv). Video ticks are
 edit units; audio ticks are samples, a packet's duration its bytes over the block alignment. Where FFmpeg differs from
 what the file says, the file is followed and the test says so:
 
+- Sound tracks (#535, docs/decisions/2026-11-15-sound-tracks.md): `MxfDemuxer.AudioTracks` lists every sound track, a
+  stream each with ffprobe's index, and `SelectAudio` chooses which `ReadPackets` gives (unasked, the first alone).
+  mxf-h264-mono4 has broadcast MXF's layout, four mono 24-bit tracks (each a sine of its own frequency), and
+  mxf-prores-pcm16 two stereo ones: the comparison above runs for the first track alone, each track alone, all of them,
+  and all named backwards, a track's packets being the same whichever others are read with it. By hand: `Audio`
+  following the choice, a read under way keeping its tracks, the refusals, a seek moving the tracks not selected too;
+  `MxfFollowTests` grows mxf-h264-mono4 under two of its four tracks. Not covered by a file: two tracks naming the
+  same essence elements (the first is read). The other demuxers still read their first audio stream alone (the
+  interface's defaults, checked on a one-stream demuxer).
+- The players on those tracks (`PlaybackOptions.AudioTrack`): `AudioPlayer` and `MediaPlayer` play mxf-h264-mono4's
+  mono tracks in pairs, the track named as the left channel and the next as the right, sample for sample FFmpeg's
+  `join` filter's stereo of the two (name.pair01.f32, name.pair23.f32); `AudioPlayerTests` also takes each track as
+  the left one (the last plays on both speakers), a looped pair, mxf-prores-pcm16's second stereo track, and the
+  pairing itself on hand-made packets of unequal sizes (no file has two mono tracks of different lengths).
 - Keyframes: libavformat marks every packet of an intra-only codec (ProRes, DNxHR) a keyframe, while FFmpeg's muxer
   leaves their index entries without the random access flag; `MxfDemuxer` does the same for those codecs, and takes the
   index's flag for the others (H.264 and MPEG-2's first packet). D-10's MPEG-2 is I pictures only (SMPTE ST 356), and
@@ -798,8 +930,11 @@ what the file says, the file is followed and the test says so:
   (PosTableIndex 0, offsets 0), so those packets' pts are their dts though libx264 writes B pictures.
   `MxfConformanceTests` rewrites an H.264 sample's index to check that the offsets are applied whichever delta entry
   says reordered and not without one, and that the random access flag sets the keyframes. mxf-mpeg2-b's GOPs are open:
-  the index gives their I pictures no random access flag, so only its first packet is a keyframe here, where
-  libavformat's parser marks every I picture one (the test lets that sample's differ, and no other's).
+  the index gives their I pictures no random access flag (their first B pictures lean on the GOP before), but
+  libavformat's parser marks every I picture a keyframe, and so does `MxfDemuxer` for MPEG-2, by the entry's prediction
+  flags (Table 28: an I picture has neither): its keyframes are FFmpeg's, as the mxfburger files' were in the nightly
+  check's logs. Not for H.264, whose keyframes FFmpeg's parser takes from the stream (IDR pictures, recovery points),
+  not from the picture type: there the random access flag alone counts (`AppliesTheIndexTablesTemporalOffsetsAndFlags`).
 - Clip-wrapped essence (FFmpeg's OP-Atom muxer, `-f mxf_opatom`: one track a file, the whole clip one element, though
   its essence container labels say frame wrapping): mxf-opatom-h264 is cut by the index entries' stream offsets,
   mxf-opatom-dnxhr by the index's constant edit unit size (no entries), each packet an edit unit as FFmpeg's;
@@ -823,7 +958,12 @@ what the file says, the file is followed and the test says so:
   AES3 element: a sample counts where its kept channels' words are there, the words after them may be missing; checked
   by hand at cuts 8, 16 and 24 bytes into a sample as well) and mxf-opatom-pcm-cut (its one sound clip, which FFmpeg's
   demuxer still cuts into 1920-sample pieces without the index, the track's edit unit being a sample; the last piece
-  keeps a partial sample's bytes). A clip-wrapped H.264 file cut short is one packet of the clip's bytes, as FFmpeg's
+  keeps a partial sample's bytes), and mxf-mpeg2-b-cut (MPEG-2 with B pictures, 100 bytes into its 20th picture).
+  Without the index, which went with the footer, the keyframes are the I pictures, which libavformat's MPEG-2 parser
+  finds by their picture headers' coding type (ISO/IEC 13818-2 6.2.3) and `MxfDemuxer` reads the same way, at open,
+  for each MPEG-2 picture found while no index is known; the times are the edit units, which libavformat's are too
+  there (it can't place the B pictures: an I or P picture's pts is unknown). The NASA MPEG-2 file's first 32 MiB
+  (MXF from other writers, above) showed it first. A clip-wrapped H.264 file cut short is one packet of the clip's bytes, as FFmpeg's
   demuxer gives it (`-fflags +noparse`: libavformat's H.264 parser then cuts it into pictures, which `ffprobe` shows by
   default); a file cut inside its header metadata is refused (`ReadsAClipCutShortAsOnePacket`). A clip-wrapped file cut
   short whose index survives (none of FFmpeg's muxers write one before the essence) is refused: no file shows what

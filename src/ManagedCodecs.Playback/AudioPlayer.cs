@@ -20,6 +20,7 @@ public sealed class AudioPlayer : IDisposable
 
     private readonly IDemuxer _demuxer;
     private readonly PlaybackOptions _options;
+    private readonly PlayedAudio _played;
     private readonly Thread _thread;
     private readonly CancellationTokenSource _stop = new();
     private readonly BlockingCollection<AudioChunk> _audio = new(AudioQueue);
@@ -34,9 +35,10 @@ public sealed class AudioPlayer : IDisposable
     {
     }
 
-    /// <summary>Opens the file at <paramref name="path"/> with <paramref name="options"/> (only <see cref="PlaybackOptions.Loop"/> counts).</summary>
+    /// <summary>Opens the file at <paramref name="path"/> with <paramref name="options"/> (of which <see cref="PlaybackOptions.Loop"/> and <see cref="PlaybackOptions.AudioTrack"/> count).</summary>
     /// <exception cref="NotSupportedException">No audio stream, or one this library doesn't decode.</exception>
     /// <exception cref="InvalidDataException">The file is malformed.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">The file has audio tracks, but not the one <see cref="PlaybackOptions.AudioTrack"/> names.</exception>
     public AudioPlayer(string path, PlaybackOptions? options)
         : this(Demuxer.Open(path), options)
     {
@@ -50,9 +52,10 @@ public sealed class AudioPlayer : IDisposable
     {
     }
 
-    /// <summary>Opens <paramref name="stream"/> with <paramref name="options"/> (only <see cref="PlaybackOptions.Loop"/> counts); the player disposes it with itself.</summary>
+    /// <summary>Opens <paramref name="stream"/> with <paramref name="options"/> (of which <see cref="PlaybackOptions.Loop"/> and <see cref="PlaybackOptions.AudioTrack"/> count); the player disposes it with itself.</summary>
     /// <exception cref="NotSupportedException">No audio stream, or one this library doesn't decode.</exception>
     /// <exception cref="InvalidDataException">The file is malformed.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">The file has audio tracks, but not the one <see cref="PlaybackOptions.AudioTrack"/> names.</exception>
     public AudioPlayer(Stream stream, PlaybackOptions? options)
         : this(Demuxer.Open(stream), options)
     {
@@ -64,13 +67,14 @@ public sealed class AudioPlayer : IDisposable
         _options = options ?? new PlaybackOptions();
         try
         {
-            var audio = demuxer.Audio ?? throw new NotSupportedException("The file has no audio stream.");
-            if (!AudioPipeline.CanPlay(audio.Codec))
+            _played = PlayedAudio.Choose(demuxer, _options) ?? throw new NotSupportedException("The file has no audio stream.");
+            if (!AudioPipeline.CanPlay(_played.Track.Codec))
             {
-                throw new NotSupportedException($"No decoder for {audio.Codec}.");
+                throw new NotSupportedException($"No decoder for {_played.Track.Codec}.");
             }
 
-            Audio = audio;
+            _played.Select(demuxer);
+            Audio = _played.Track;
         }
         catch
         {
@@ -81,7 +85,10 @@ public sealed class AudioPlayer : IDisposable
         _thread = new Thread(Run) { IsBackground = true, Name = "ManagedCodecs audio playback" };
     }
 
-    /// <summary>The audio stream played.</summary>
+    /// <summary>
+    /// The audio stream played: of several tracks, the one <see cref="PlaybackOptions.AudioTrack"/> names (the first
+    /// unasked); of an MXF file's pair of mono tracks played as left and right, the left one.
+    /// </summary>
     public AudioStreamInfo Audio { get; }
 
     /// <summary>Whether every chunk was taken and no more will come (the end of the file, without <see cref="PlaybackOptions.Loop"/>, or an <see cref="Error"/>).</summary>
@@ -165,22 +172,22 @@ public sealed class AudioPlayer : IDisposable
     // for a loop, is worth it).
     private bool Play(CancellationToken token)
     {
-        var decoder = AudioPipeline.CreateDecoder(Audio);
+        var decoding = _played.Decode();
         bool any = false;
         foreach (var packet in _demuxer.ReadPackets())
         {
             token.ThrowIfCancellationRequested();
-            if (packet.StreamIndex != Audio.StreamIndex || packet.Discard)
+            if (decoding.Decode(packet) is { } chunk)
             {
-                continue;
-            }
-
-            var frame = decoder.Decode(packet);
-            if (frame.SampleCount > 0)
-            {
-                _audio.Add(AudioPipeline.ToStereo(frame), token);
+                _audio.Add(chunk, token);
                 any = true;
             }
+        }
+
+        if (decoding.Flush() is { } rest)
+        {
+            _audio.Add(rest, token);
+            any = true;
         }
 
         return any;

@@ -211,6 +211,150 @@ public class LiveRtspUdpTests
         Assert.Equal((1L, 1L, 4L), (player.Statistics.LostPackets, player.Statistics.DamagedFrames, player.Statistics.DecodedFrames));
     }
 
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(4)]
+    [InlineData(5)]
+    [InlineData(6)]
+    [InlineData(7)]
+    [InlineData(8)]
+    [InlineData(9)]
+    [InlineData(10)]
+    [InlineData(11)]
+    [InlineData(12)]
+    public void CountsExactlyThePacketsARandomNetworkDrops(int seed)
+    {
+        // A network by the seed: of the three middle frames' packets a quarter are dropped and a fifth sent twice, and
+        // every frame after the first arrives shuffled. The frames that lost nothing are shown as they were sent, the
+        // others are dropped, and the packets counted lost are the ones dropped, no more (a duplicate, a late packet)
+        // and no fewer. tools/rtsp-nightly.py does the same to mediamtx's stream (tools/rtsp-lossy-relay.py).
+        var frames = LiveRtspJpegTests.Frames(RtpJpegDepacketizerTests.GStreamer("jpeg-420-restart"));
+        var random = new Random(seed);
+        var sent = new List<List<byte[]>>();
+        var whole = new List<bool>();
+        int dropped = 0;
+        for (int f = 0; f < frames.Count; f++)
+        {
+            bool middle = f > 0 && f < frames.Count - 1;
+            var packets = new List<byte[]>();
+            foreach (var packet in frames[f])
+            {
+                double choice = middle ? random.NextDouble() : 1;
+                if (choice < 0.25)
+                {
+                    dropped++;
+                    continue;
+                }
+
+                packets.Add(packet);
+                if (choice < 0.45)
+                {
+                    packets.Add(packet);
+                }
+            }
+
+            whole.Add(packets.Distinct().Count() == frames[f].Count);
+            if (f > 0)
+            {
+                random.Shuffle(System.Runtime.InteropServices.CollectionsMarshal.AsSpan(packets));
+            }
+
+            sent.Add(packets);
+        }
+
+        using var gate = new SemaphoreSlim(0);
+        using var server = new RtspTestServer(JpegSdp, async play =>
+        {
+            for (int f = 0; f < sent.Count; f++)
+            {
+                foreach (var packet in sent[f])
+                {
+                    await play.SendAsync(packet);
+                }
+
+                if (whole[f])
+                {
+                    await gate.WaitAsync(play.Token);
+                }
+            }
+
+            await Task.Delay(Timeout.Infinite, play.Token);
+        })
+        {
+            UdpOnly = true,
+        };
+
+        using var player = new LivePlayer(new RtspSource(server.Uri));
+        player.Start();
+        for (int f = 0; f < frames.Count; f++)
+        {
+            if (whole[f])
+            {
+                var shown = WaitFor(player, player.TakeLatest);
+                Assert.Equal(LiveRtspJpegTests.Expected("jpeg-420-restart", f), shown.Pixels);
+                player.Return(shown);
+                gate.Release();
+            }
+        }
+
+        var statistics = player.Statistics;
+        Assert.Equal((dropped, whole.Count(w => !w), whole.Count(w => w)), (statistics.LostPackets, statistics.DamagedFrames, statistics.DecodedFrames));
+        Assert.Equal((LiveState.Playing, 1), (player.State, server.Connections));
+    }
+
+    [Fact]
+    public void PlaysOnWhenTheFirstIdrPictureLostAPacket()
+    {
+        // The 720p recording, whose parameter sets come only in the SDP, twice over; a packet of the first IDR picture
+        // never arrives. That unit, which the parameter sets came before, is skipped while the player waits for an IDR
+        // picture: the second pass's must bring them again, or no picture is ever shown on this connection.
+        const string Name = "h264-bench-720p";
+        var once = RtpH264DepacketizerTests.Recording(Name);
+        const uint length = 90000 * 2; // its 50 frames at 25 a second
+        var packets = once.Concat(once.Select((p, i) => Renumbered(p, (ushort)(SequenceOf(once[0]) + once.Count + i), TimestampOf(p) + length))).ToList();
+        var units = LiveRtspTests.AccessUnitsOf(packets);
+        var expected = LiveRtspTests.ExpectedFrames(Name, units);
+        int second = units.FindIndex(u => SequenceOf(u[0]) == (ushort)(SequenceOf(once[0]) + once.Count));
+        using var gate = new SemaphoreSlim(0);
+        using var server = new RtspTestServer(RtspTestServer.SdpOf(Name), async play =>
+        {
+            for (int i = 0; i < units.Count; i++)
+            {
+                foreach (var packet in units[i].Where(p => p != units[0][1]))
+                {
+                    await play.SendAsync(packet);
+                }
+
+                if (i >= second)
+                {
+                    await gate.WaitAsync(play.Token);
+                }
+            }
+
+            await Task.Delay(Timeout.Infinite, play.Token);
+        })
+        {
+            UdpOnly = true,
+            Ssrc = SsrcOf(once[0]),
+        };
+
+        using var player = new LivePlayer(new RtspSource(server.Uri) { MaxLag = TimeSpan.FromHours(1), StallTimeout = TimeSpan.FromMinutes(10) });
+        player.Start();
+        for (int i = second; i < units.Count; i++)
+        {
+            var frame = WaitFor(player, player.TakeLatest);
+            Assert.Equal(expected[i], frame.Pixels);
+            player.Return(frame);
+            gate.Release();
+        }
+
+        var statistics = player.Statistics;
+        Assert.Equal((1L, 0L), (statistics.LostPackets, statistics.Reconnects));
+        Assert.True(statistics.SkippedFrames >= second - 1, $"{statistics.SkippedFrames} skipped.");
+    }
+
     [Fact]
     public void SaysUdpWasInUseWhenNothingCame()
     {
@@ -226,6 +370,22 @@ public class LiveRtspUdpTests
     }
 
     private static string JpegSdp => "v=0\r\ns=-\r\nt=0 0\r\nm=video 0 RTP/AVP 26\r\na=control:trackID=1\r\n";
+
+    private static ushort SequenceOf(byte[] packet) => (ushort)((packet[2] << 8) | packet[3]);
+
+    private static uint TimestampOf(byte[] packet) => (uint)((packet[4] << 24) | (packet[5] << 16) | (packet[6] << 8) | packet[7]);
+
+    private static byte[] Renumbered(byte[] packet, ushort sequence, uint timestamp)
+    {
+        var copy = (byte[])packet.Clone();
+        copy[2] = (byte)(sequence >> 8);
+        copy[3] = (byte)sequence;
+        copy[4] = (byte)(timestamp >> 24);
+        copy[5] = (byte)(timestamp >> 16);
+        copy[6] = (byte)(timestamp >> 8);
+        copy[7] = (byte)timestamp;
+        return copy;
+    }
 
     private static uint SsrcOf(byte[] packet) => (uint)((packet[8] << 24) | (packet[9] << 16) | (packet[10] << 8) | packet[11]);
 

@@ -279,10 +279,12 @@ public class LiveRtspTests
     }
 
     // The recording's packets grouped by access unit (a unit ends at the marker bit).
-    internal static List<List<byte[]>> AccessUnits(string name)
+    internal static List<List<byte[]>> AccessUnits(string name) => AccessUnitsOf(RtpH264DepacketizerTests.Recording(name));
+
+    internal static List<List<byte[]>> AccessUnitsOf(List<byte[]> packets)
     {
         var units = new List<List<byte[]>> { new() };
-        foreach (var packet in RtpH264DepacketizerTests.Recording(name))
+        foreach (var packet in packets)
         {
             units[^1].Add(packet);
             if ((packet[1] & 0x80) != 0)

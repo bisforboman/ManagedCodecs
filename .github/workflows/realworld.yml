@@ -37,6 +37,7 @@ jobs:
           - hamburger_16bit_mono.mxf
           - hamburger_24bit_5.1.mxf
           - nasa_russian_eva_44.mxf
+          - nasa_crew7_4k_h264.mxf
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
@@ -70,8 +71,9 @@ jobs:
 
   # LivePlayer against a real RTSP server (tools/rtsp-nightly.py; docs/decisions/2026-11-10-live-rtsp-h264.md, decision
   # 4): mediamtx serving FFmpeg's push of a libx264 clip, with Basic and with Digest, and an MJPEG clip as JPEG over RTP
-  # (docs/decisions/2026-11-12-live-rtsp-jpeg.md), and with RTP over UDP only (docs/decisions/2026-11-14-live-rtsp-udp.md);
-  # every frame shown must be one of the clip's. The pull requests' checks use the tests' loopback server.
+  # (docs/decisions/2026-11-12-live-rtsp-jpeg.md), and with RTP over UDP only (docs/decisions/2026-11-14-live-rtsp-udp.md),
+  # also through tools/rtsp-lossy-relay.py, which drops, repeats and reorders packets; every frame shown must be one of
+  # the clip's (after a loss, the last ones). The pull requests' checks use the tests' loopback server.
   rtsp:
     name: RTSP (mediamtx)
     runs-on: ubuntu-24.04

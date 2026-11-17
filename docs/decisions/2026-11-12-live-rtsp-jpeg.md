@@ -140,3 +140,8 @@ built. No public API changes.
 - Types 64 and 65 come from GStreamer when the JPEGs it is given have restart markers (Pillow 12's
   `restart_marker_rows`): `jpegenc` writes none.
 - Next: RTP over UDP, for servers that answer 461 (docs/decisions/2026-11-14-live-rtsp-udp.md).
+- Sizes over 2040 pixels (2026-11-16, issue #527), left out above for want of a sender: GStreamer's `rtpjpegpay` sends
+  the size as 0 and its server says it in the SDP (`a=x-dimensions`). The depacketizer takes it from there, from RFC
+  6064's `a=framesize`, or from ONVIF's RTP header extension (profile 0xFFD8: the frame's own SOF0), which wins. No
+  public API. GStreamer's 2048x64 recording is committed (`samples/gstreamer/jpeg-large`); the ONVIF extension is
+  checked on hand-made packets only, as no sender in reach writes it (docs/conformance.md, JPEG over RTP).

@@ -111,4 +111,14 @@ built. With 1 (a), no public API changes.
   - `RtspTestServer` over UDP.
   - The checks are in docs/conformance.md, RTP over UDP.
 - The nightly run (tools/rtsp-nightly.py) gained mediamtx with UDP only, FFmpeg pushing over UDP.
+- A network that loses, repeats and reorders (2026-11-15, issue #527): tools/rtsp-lossy-relay.py between mediamtx and
+  the player, nightly, and `LiveRtspUdpTests` by twelve seeds. Nothing in the player had to change: the reorder window
+  put back what 10 ms of holding back moved, and the packets counted lost were the ones dropped, to the packet, up to
+  30% (docs/conformance.md, RTP over UDP).
+- A lossy network simulated (2026-11-16, issue #527, `LossyNetworkTests`: loss, repeats, reordering within the window
+  and past it, through the window, the depacketizers and the decoders, H.264 and AAC). The window held again, but two
+  bugs past it, which the relay's runs hadn't reached, were fixed in `RtpH264Depacketizer`: a gap inside a picture no
+  longer marks the next, whole picture damaged, and the SDP's parameter sets now come before every IDR picture until
+  the stream sends its own. Before, a stream with parameter sets only in its SDP whose first IDR picture lost a packet
+  showed no picture on that connection at all.
 

@@ -62,7 +62,8 @@ The repository's CLAUDE.md (process, core idea, cross-cutting gotchas) applies t
   FFmpeg's demuxer gives its 8-channel AES3 sound elements as PCM, so their packets' MD5s are the PCM's.
 - MXF files cut short: compare with FFmpeg's demuxer under `ffprobe -fflags +nofillin+noparse`. By default
   libavformat's H.264 parser cuts a clip-wrapped H.264 file's one partial packet (its index went with the footer) into
-  pictures, which the demuxer doesn't. Cut by the source's packet positions (make-samples.sh's `mxf_cut`), not by a share
+  pictures, which the demuxer doesn't. Without the index, the keyframes there are libavformat's parsers' (MPEG-2's I
+  pictures by their picture headers, which `MxfDemuxer` reads too; mxf-mpeg2-b-cut). Cut by the source's packet positions (make-samples.sh's `mxf_cut`), not by a share
   of the file: generated samples differ between machines, and the cut has to fall in the same kind of element.
 - MXF: FFmpeg's `-f mxf` muxer writes OP1a, frame-wrapped (`mxf_opatom` and `mxf_d10` are muxers of their own), audio
   at 48 kHz only ("only 48khz is implemented"), and always a random index pack; written to a pipe, the header and body partition packs leave FooterPartition 0. Its demuxer logs
@@ -85,7 +86,7 @@ The repository's CLAUDE.md (process, core idea, cross-cutting gotchas) applies t
   entry, the second after the system item's, has PosTableIndex -1), never for H.264. The offsets lead from display
   order to stored order (the picture shown n-th is stored at n + offset), and FFmpeg's demuxer's decode times then
   start at minus the largest offset. An open GOP's I picture has no random access flag in the index, though
-  libavformat's parser marks it a keyframe.
+  libavformat's parser marks it a keyframe; `MxfDemuxer` does too, for MPEG-2, by the entry's prediction flags.
 - MXF from other writers: none can be downloaded in the cloud sandbox (archive.org's data hosts are refused), so they
   are checked in CI only: `tools/realworld.py`'s PACKET_FILES, `mcdec --packets` against `ffprobe -fflags
   +nofillin+noparse`. Run `realworld.yml` on the branch (workflow_dispatch) and read the job's log; a difference in
@@ -100,3 +101,8 @@ The repository's CLAUDE.md (process, core idea, cross-cutting gotchas) applies t
   `-fps_mode passthrough` it keeps every frame (`.h264.framemd5`). Its frame times there are a guess, not a reference:
   k + D on the 2-second samples, 0 2 3 5 6 7 7 7 on mxf-h264-small, and from 0 where its packets have no times;
   compare the MD5s only.
+- MXF sound tracks: `_packets` lists every sound track's packets, selected or not (SelectAudio is a filter, Refresh
+  and Seek work on all of them). FFmpeg's muxer writes a sound element a track after each frame's picture, mono for a
+  mono input (`-map` each), and its demuxer numbers the streams as the material package's tracks; `.packets.csv` holds
+  every stream, so filter it by the selected ones. Don't edit make-samples.sh while it runs: bash reads the script as
+  it goes, and the run fails at a shifted line.

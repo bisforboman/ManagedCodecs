@@ -17,7 +17,10 @@ internal sealed class RtpH264Depacketizer
     private readonly int _payloadType;
     private readonly MemoryStream _unit = new();
     private readonly MemoryStream _fragment = new();
-    private byte[][] _parameterSets;
+    private readonly byte[][] _parameterSets;
+    private bool _first = true;
+    private bool _inBand;
+    private bool _ownParameterSets;
     private bool _inUnit;
     private uint _timestamp;
     private bool _damaged;
@@ -29,7 +32,9 @@ internal sealed class RtpH264Depacketizer
 
     /// <param name="payloadType">The SDP's payload type for the track (96 to 127, from <c>a=rtpmap</c>); -1 for any.</param>
     /// <param name="parameterSets">
-    /// The SDP's <c>sprop-parameter-sets</c> (SPS and PPS NAL units), put before the first access unit; empty for none.
+    /// The SDP's <c>sprop-parameter-sets</c> (SPS and PPS NAL units), put before the first access unit, and before
+    /// every IDR picture's until the stream sends parameter sets of its own: a decoder that never got the first unit
+    /// (lost, or skipped while waiting for an IDR picture) still gets them. Empty for none.
     /// </param>
     public RtpH264Depacketizer(int payloadType = -1, byte[][]? parameterSets = null)
     {
@@ -102,6 +107,9 @@ internal sealed class RtpH264Depacketizer
         AddPayload(payload);
         if (header.Marker)
         {
+            // Its own marker ended it: a gap seen since it began was inside it, so the next unit starts whole. (Ended by
+            // a new timestamp instead, its marker was lost, and the gap may have taken the next unit's start too.)
+            _gapBeforeNext = false;
             completed.Add(Complete(damaged: false));
         }
     }
@@ -251,6 +259,7 @@ internal sealed class RtpH264Depacketizer
         int type = nal[0] & 0x1F;
         _keyframe |= type == 5;
         _picture |= type is >= 1 and <= 5;
+        _ownParameterSets |= type is 7 or 8;
 
         _unit.Write(StartCode);
         _unit.Write(nal);
@@ -281,14 +290,18 @@ internal sealed class RtpH264Depacketizer
             damaged = true;
         }
 
-        var data = new MemoryStream((int)_unit.Length + _parameterSets.Sum(p => p.Length + 4));
-        foreach (var parameterSet in _parameterSets)
+        // Once the stream has sent parameter sets of its own, the SDP's may be older than them: they are put before
+        // no IDR picture after that.
+        _inBand |= _ownParameterSets;
+        var put = _first || (_keyframe && !_inBand && !_ownParameterSets) ? _parameterSets : [];
+        _first = false;
+        var data = new MemoryStream((int)_unit.Length + put.Sum(p => p.Length + 4));
+        foreach (var parameterSet in put)
         {
             data.Write(StartCode);
             data.Write(parameterSet);
         }
 
-        _parameterSets = [];
         data.Write(_unit.GetBuffer().AsSpan(0, (int)_unit.Length));
         var unit = new RtpAccessUnit(data.ToArray(), _timestamp, _damaged || damaged, _keyframe, _picture);
         _unit.SetLength(0);
@@ -296,6 +309,7 @@ internal sealed class RtpH264Depacketizer
         _damaged = false;
         _keyframe = false;
         _picture = false;
+        _ownParameterSets = false;
         return unit;
     }
 

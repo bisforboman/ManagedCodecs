@@ -2,8 +2,8 @@ namespace ManagedCodecs.Containers;
 
 /// <summary>
 /// An MXF file (SMPTE ST 377-1) with frame-wrapped or clip-wrapped essence in the generic container (ST 379-1), as
-/// FFmpeg's demuxer reads it: the material package's first picture track and first sound track, a packet an essence
-/// element, or an edit unit of a clip-wrapped one.
+/// FFmpeg's demuxer reads it: the material package's first picture track and its sound tracks (the first alone until
+/// <see cref="SelectAudio"/> chooses others), a packet an essence element, or an edit unit of a clip-wrapped one.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -19,7 +19,11 @@ namespace ManagedCodecs.Containers;
 /// <para>
 /// A picture packet is an edit unit: its decode time counts them (<see cref="VideoStreamInfo.TimeBase"/> is one over the
 /// edit rate), its presentation time adds the index table's temporal offset where the index says the element is
-/// reordered, and it is a keyframe where the index entry has its random access flag (without an index, the first), or
+/// reordered, and it is a keyframe where the index entry has its random access flag (without an index, the first, and an MPEG-2 picture whose picture header says I, as
+/// libavformat's parser reads it: a file cut before its footer's index), for
+/// MPEG-2 also where the entry has neither prediction flag (an I picture: one that opens a GOP whose first B pictures
+/// lean on the GOP before has no random access flag, and libavformat's MPEG-2 parser marks every I picture a
+/// keyframe, which a seek to it wants too: the I picture and those after it decode), or
 /// always for an intra-only codec (ProRes, VC-3, JPEG 2000, and D-10's MPEG-2, I pictures only by SMPTE ST 356), whose index entries FFmpeg's muxer leaves without it. A sound packet's times count samples, its duration its bytes over the block
 /// alignment. The essence elements are found by walking the file's KLV items once, when opening; partition packs,
 /// header metadata, index segments and fill items between them are skipped.
@@ -58,9 +62,9 @@ public sealed class MxfDemuxer : IDemuxer
     // Each packet's bytes in the file: its size, but an 8-channel AES3 element's whole value.
     private readonly List<int> _lengths = [];
 
-    // The sound track's 8-channel AES3 elements (D-10's): its channels and bytes a sample, or 0 where it has none.
-    private int _aes3Channels;
-    private int _aes3Bytes;
+    // The MPEG-2 pictures (by sequence) whose picture header says I, read where no index was known when the walk found
+    // them: a file cut before its footer's index (IntraPicture).
+    private readonly HashSet<long> _intraPictures = [];
 
     // The packet (an index into _packets) of the essence element a file cut short ends in, or -1.
     private int _cut = -1;
@@ -69,19 +73,22 @@ public sealed class MxfDemuxer : IDemuxer
     // the element it ended in), each track's packet count, the index tables by BodySID; and how many packets Refresh has
     // given. Refresh walks on from _walkEnd.
     private MxfTrack? _video;
-    private MxfTrack? _audio;
     private int _videoIndex = -1;
-    private int _audioIndex = -1;
     private readonly Dictionary<uint, MxfIndex> _indexes = [];
     private long _walkEnd;
     private long _videoCount;
-    private long _audioCount;
     private int _given;
     private bool _clipWrapped;
 
-    // Where each stream's read starts, as a sequence: 0 until a Seek moves it.
+    // Every sound track read, in the header's order, by its essence elements' number and by its stream index; and the
+    // ones ReadPackets gives (SelectAudio), Audio's first.
+    private readonly List<Sound> _sounds = [];
+    private readonly Dictionary<uint, Sound> _soundsByNumber = [];
+    private readonly Dictionary<int, Sound> _soundsByIndex = [];
+    private Sound[] _selected = [];
+
+    // Where the video's read starts, as a sequence: 0 until a Seek moves it (a sound track's is its Sound.Start).
     private long _videoStart;
-    private long _audioStart;
 
     /// <summary>Reads the file's partitions and header metadata and finds every essence element; packets are read later, by <see cref="ReadPackets"/>.</summary>
     /// <param name="stream">A seekable stream holding the file.</param>
@@ -105,26 +112,39 @@ public sealed class MxfDemuxer : IDemuxer
             var header = MxfHeader.Read(stream, partitions);
             StartTimecode = header.StartTimecode;
             int videoIndex = header.Tracks.ToList().FindIndex(t => t.Kind == MxfTrackKind.Picture && t.BodySid != 0);
-            int audioIndex = header.Tracks.ToList().FindIndex(t => t.Kind == MxfTrackKind.Sound && t.BodySid != 0);
             var video = videoIndex < 0 ? null : header.Tracks[videoIndex];
-            var audio = audioIndex < 0 ? null : header.Tracks[audioIndex];
-            if (audio is not null && (audio.AudioSamplingRate.Numerator <= 0 || audio.AudioSamplingRate.Denominator != 1 || audio.Channels <= 0 || audio.QuantizationBits <= 0))
-            {
-                audio = null;
-            }
-
             if (video is not null && (video.EditRate.Numerator <= 0 || video.EditRate.Denominator <= 0))
             {
                 video = null;
             }
 
-            if (audio is not null && IsAes3Element(audio.TrackNumber) && audio.QuantizationBits is 16 or 24 && audio.Channels is >= 1 and <= 8)
+            // The sound tracks with essence in the file, from the first on: a stream each, as FFmpeg's demuxer gives
+            // them. One whose descriptor says no rate, channels or sample size is left out, and of two that name the same
+            // essence elements the first is read.
+            for (int i = 0; i < header.Tracks.Count; i++)
             {
-                _aes3Channels = audio.Channels;
-                _aes3Bytes = audio.QuantizationBits / 8;
+                var track = header.Tracks[i];
+                if (track.Kind != MxfTrackKind.Sound || track.BodySid == 0)
+                {
+                    continue;
+                }
+
+                if (track.AudioSamplingRate.Numerator <= 0 || track.AudioSamplingRate.Denominator != 1 || track.Channels <= 0 || track.QuantizationBits <= 0)
+                {
+                    continue;
+                }
+
+                bool aes3 = IsAes3Element(track.TrackNumber) && track.QuantizationBits is 16 or 24 && track.Channels is >= 1 and <= 8;
+                var sound = new Sound(track, i, aes3 ? track.Channels : 0, aes3 ? track.QuantizationBits / 8 : 0);
+                if (_soundsByNumber.TryAdd(track.TrackNumber, sound))
+                {
+                    _sounds.Add(sound);
+                    _soundsByIndex.Add(i, sound);
+                }
             }
 
-            (_video, _videoIndex, _audio, _audioIndex) = (video, videoIndex, audio, audioIndex);
+            _selected = _sounds.Count == 0 ? [] : [_sounds[0]];
+            (_video, _videoIndex) = (video, videoIndex);
             var indexes = _indexes;
             Walk(partitions.Header.End, partial: true);
             if (video is not null && indexes.TryGetValue(video.BodySid, out var videoTable))
@@ -132,19 +152,25 @@ public sealed class MxfDemuxer : IDemuxer
                 SplitClip(videoIndex, videoTable, 0, 0);
             }
 
-            if (audio is not null && _aes3Channels == 0)
+            foreach (var sound in _sounds)
             {
+                if (sound.Aes3Channels > 0)
+                {
+                    continue;
+                }
+
                 // The index's constant edit unit size (a sample); without one (a file cut before its footer's index), the
                 // descriptor's block alignment where the track's edit unit is a sample, as OP-Atom's is: FFmpeg's demuxer
                 // cuts such a clip into its pieces all the same.
+                var audio = sound.Track;
                 long pieceBytes = Math.Max(1, audio.AudioSamplingRate.Numerator / 25) * (long)BlockAlign(audio);
                 if (indexes.TryGetValue(audio.BodySid, out var audioTable))
                 {
-                    SplitClip(audioIndex, audioTable, pieceBytes, audioTable.EditUnitByteCount);
+                    SplitClip(sound.Index, audioTable, pieceBytes, audioTable.EditUnitByteCount);
                 }
                 else if (audio.EditRate == (audio.AudioSamplingRate.Numerator, audio.AudioSamplingRate.Denominator))
                 {
-                    SplitClip(audioIndex, null, pieceBytes, BlockAlign(audio));
+                    SplitClip(sound.Index, null, pieceBytes, BlockAlign(audio));
                 }
             }
 
@@ -168,8 +194,17 @@ public sealed class MxfDemuxer : IDemuxer
     /// <summary>The material package's first picture track, or null if it has none with essence in the file.</summary>
     public VideoStreamInfo? Video { get; private set; }
 
-    /// <summary>The material package's first sound track, or null if it has none with essence in the file.</summary>
+    /// <summary>
+    /// The sound track <see cref="ReadPackets"/> gives: the material package's first, or the first of those chosen with
+    /// <see cref="SelectAudio"/>. Null if the package has none with essence in the file.
+    /// </summary>
     public AudioStreamInfo? Audio { get; private set; }
+
+    /// <summary>
+    /// The material package's sound tracks with essence in the file, in its order, a stream each as FFmpeg's demuxer
+    /// gives them: broadcast files usually carry a mono track a channel (4, 8 or 16 of them).
+    /// </summary>
+    public IReadOnlyList<AudioStreamInfo> AudioTracks { get; private set; } = [];
 
     /// <summary>
     /// The start of the material package's first timecode track (SMPTE ST 377-1 B.17: its timecode component's start,
@@ -191,6 +226,7 @@ public sealed class MxfDemuxer : IDemuxer
     /// essence elements written whole since the last call, in file order, each read as it is enumerated; the first call
     /// gives every whole packet so far. Their <see cref="Packet.Sequence"/> and times are those a read of the finished
     /// file gives, and <see cref="ReadPackets"/>, <see cref="Video"/> and <see cref="Audio"/> include them from then on.
+    /// Of the sound tracks, those selected at each call (<see cref="SelectAudio"/>) are given.
     /// The element the writer is still in is held back until it is whole (a file cut short read only by
     /// <see cref="ReadPackets"/> gives it as it is, the last packet), so poll this, as often as the caller likes, until
     /// the file is finished: its footer written, or nothing new for long enough.
@@ -219,10 +255,11 @@ public sealed class MxfDemuxer : IDemuxer
                 if (_packets[_cut].StreamIndex == _videoIndex)
                 {
                     _videoCount--;
+                    _intraPictures.Remove(_videoCount);
                 }
                 else
                 {
-                    _audioCount--;
+                    _soundsByIndex[_packets[_cut].StreamIndex].Count--;
                 }
 
                 _packets.RemoveAt(_cut);
@@ -254,14 +291,48 @@ public sealed class MxfDemuxer : IDemuxer
 
     /// <inheritdoc/>
     /// <remarks>
+    /// Costs no read of the file: every sound track's packets were listed when opening. A <see cref="Seek"/> made before
+    /// holds for the tracks chosen after it.
+    /// </remarks>
+    public void SelectAudio(params int[] streamIndexes)
+    {
+        ArgumentNullException.ThrowIfNull(streamIndexes);
+        if (streamIndexes.Length == 0)
+        {
+            throw new ArgumentException("At least one audio stream must be selected.", nameof(streamIndexes));
+        }
+
+        var selected = new Sound[streamIndexes.Length];
+        for (int i = 0; i < selected.Length; i++)
+        {
+            if (!_soundsByIndex.TryGetValue(streamIndexes[i], out var sound))
+            {
+                throw new ArgumentOutOfRangeException(nameof(streamIndexes), streamIndexes[i], "No audio stream of the MXF demuxer has this index.");
+            }
+
+            if (Array.IndexOf(selected, sound, 0, i) >= 0)
+            {
+                throw new ArgumentException($"Audio stream {streamIndexes[i]} is selected twice.", nameof(streamIndexes));
+            }
+
+            selected[i] = sound;
+        }
+
+        _selected = selected;
+        Audio = selected[0].Info;
+    }
+
+    /// <inheritdoc/>
+    /// <remarks>
     /// Each stream starts at its last keyframe at or before the time (the other stream's rescaled to its time base,
     /// rounded down), found among the packets listed when opening, with no read of the file: every sound packet is a
-    /// keyframe, a picture packet where the index table says so.
+    /// keyframe, a picture packet where the index table says so. Every sound track is moved, selected or not, and
+    /// <paramref name="streamIndex"/> may be any of <see cref="AudioTracks"/>.
     /// </remarks>
     public void Seek(long pts, int streamIndex)
     {
         Rational timeBase = streamIndex == Video?.StreamIndex ? Video.TimeBase
-            : streamIndex == Audio?.StreamIndex ? Audio.TimeBase
+            : _soundsByIndex.TryGetValue(streamIndex, out var named) ? named.Info!.TimeBase
             : throw new ArgumentOutOfRangeException(nameof(streamIndex), streamIndex, "No stream of the MXF demuxer has this index.");
 
         if (Video is { } video)
@@ -269,9 +340,9 @@ public sealed class MxfDemuxer : IDemuxer
             _videoStart = Start(video.StreamIndex, Rescale(pts, timeBase, video.TimeBase));
         }
 
-        if (Audio is { } audio)
+        foreach (var sound in _sounds)
         {
-            _audioStart = Start(audio.StreamIndex, Rescale(pts, timeBase, audio.TimeBase));
+            sound.Start = Start(sound.Index, Rescale(pts, timeBase, sound.Info!.TimeBase));
         }
     }
 
@@ -334,27 +405,47 @@ public sealed class MxfDemuxer : IDemuxer
         return start;
     }
 
-    private bool Included(PacketInfo packet) =>
-        packet.StreamIndex == Video?.StreamIndex ? packet.Sequence >= _videoStart : packet.Sequence >= _audioStart;
+    // Whether ReadPackets gives the packet: the video's or a selected sound track's, from where its stream's read starts.
+    private bool Included(PacketInfo packet) => Selected(packet, _selected, fromStart: false);
 
-    // Each included packet's read and packet, in file order; or, for Refresh, those from `from` to `to`, all of them.
+    private bool Selected(PacketInfo packet, Sound[] selected, bool fromStart)
+    {
+        if (packet.StreamIndex == _videoIndex)
+        {
+            return fromStart || packet.Sequence >= _videoStart;
+        }
+
+        foreach (var sound in selected)
+        {
+            if (sound.Index == packet.StreamIndex)
+            {
+                return fromStart || packet.Sequence >= sound.Start;
+            }
+        }
+
+        return false;
+    }
+
+    // Each included packet's read and packet, in file order; or, for Refresh, those from `from` to `to`, wherever a Seek
+    // put the streams' starts. The sound tracks are those selected when the read was started.
     private IEnumerable<ReadStep> Steps(int from = 0, int to = -1)
     {
         bool all = to >= 0;
+        var selected = _selected;
         for (int i = from; i < (all ? to : _packets.Count); i++)
         {
             var info = _packets[i];
-            if (!all && !Included(info))
+            if (!Selected(info, selected, fromStart: all))
             {
                 continue;
             }
 
             var data = new byte[info.Size];
-            if (_aes3Channels > 0 && info.StreamIndex == Audio?.StreamIndex)
+            if (_soundsByIndex.TryGetValue(info.StreamIndex, out var sound) && sound.Aes3Channels > 0)
             {
                 var element = new byte[_lengths[i]];
                 yield return ReadStep.Read(_positions[i], element);
-                Aes3ToPcm(element, data, _aes3Channels, _aes3Bytes);
+                Aes3ToPcm(element, data, sound.Aes3Channels, sound.Aes3Bytes);
             }
             else
             {
@@ -367,14 +458,14 @@ public sealed class MxfDemuxer : IDemuxer
 
     /// <summary>
     /// Walks the KLV items from <paramref name="start"/> to the end of the file as it is now: the essence elements of the
-    /// two tracks become packets (in file order, timed later by <see cref="Time"/>), index table segments are read into
+    /// tracks read become packets (in file order, timed later by <see cref="Time"/>), index table segments are read into
     /// <see cref="_indexes"/>; the rest is skipped. An essence element the end falls in is a packet of the bytes there
     /// where <paramref name="partial"/> (opening), else left for a later walk (<see cref="Refresh"/>). Sets
     /// <see cref="_walkEnd"/> to where a later walk goes on.
     /// </summary>
     private void Walk(long start, bool partial)
     {
-        var (video, videoIndex, audio, audioIndex, indexes) = (_video, _videoIndex, _audio, _audioIndex, _indexes);
+        var (video, videoIndex, indexes) = (_video, _videoIndex, _indexes);
         Span<byte> key = stackalloc byte[Klv.KeyLength];
         long length = _stream.Length;
         long position = start;
@@ -405,14 +496,19 @@ public sealed class MxfDemuxer : IDemuxer
 
                 if (video is not null && number == video.TrackNumber)
                 {
+                    if (video.Codec == "mpeg2video" && !indexes.ContainsKey(video.BodySid) && IntraPicture(valueStart, size))
+                    {
+                        _intraPictures.Add(_videoCount);
+                    }
+
                     _packets.Add(new PacketInfo(videoIndex, _videoCount++, (int)size, false, 0, 0, 0));
                     _positions.Add(valueStart);
                     _lengths.Add((int)size);
                 }
-                else if (audio is not null && number == audio.TrackNumber)
+                else if (_soundsByNumber.TryGetValue(number, out var sound))
                 {
-                    int pcm = _aes3Channels > 0 ? Aes3PcmSize(valueStart, size, _cut >= 0) : (int)size;
-                    _packets.Add(new PacketInfo(audioIndex, _audioCount++, pcm, true, 0, 0, 0));
+                    int pcm = sound.Aes3Channels > 0 ? Aes3PcmSize(valueStart, size, _cut >= 0, sound.Aes3Channels, sound.Aes3Bytes) : (int)size;
+                    _packets.Add(new PacketInfo(sound.Index, sound.Count++, pcm, true, 0, 0, 0));
                     _positions.Add(valueStart);
                     _lengths.Add((int)size);
                 }
@@ -451,11 +547,26 @@ public sealed class MxfDemuxer : IDemuxer
     private static bool IsAes3Element(uint trackNumber) => (trackNumber >> 24) == 0x06 && ((trackNumber >> 8) & 0xFF) == 0x10;
 
     /// <summary>
+    /// Whether the MPEG-2 picture element at <paramref name="valueStart"/> holds an I picture: its first picture header
+    /// (ISO/IEC 13818-2 6.2.3: start code 00 00 01 00, a 10-bit temporal reference, then the 3-bit picture coding type, 1
+    /// for I) in its first 4 KiB, after the sequence and GOP headers and their extensions. libavformat's MPEG-2 parser
+    /// marks such a packet a keyframe, and an index entry, where there is one, says the same by its flags.
+    /// </summary>
+    private bool IntraPicture(long valueStart, long size)
+    {
+        var head = new byte[(int)Math.Min(size, 4096)];
+        _stream.Position = valueStart;
+        _stream.ReadExactly(head);
+        int at = head.AsSpan().IndexOf((ReadOnlySpan<byte>)[0, 0, 1, 0]);
+        return at >= 0 && at + 5 < head.Length && ((head[at + 5] >> 3) & 7) == 1;
+    }
+
+    /// <summary>
     /// The PCM an 8-channel AES3 element at <paramref name="valueStart"/> (its value, <paramref name="size"/> bytes)
     /// gives: its audio sample count (header bytes 1 and 2, little-endian, ST 331 Figure 2) times the descriptor's
     /// channels and sample size. The element holds all 8 channels' words whether valid or not.
     /// </summary>
-    private int Aes3PcmSize(long valueStart, long size, bool cut)
+    private int Aes3PcmSize(long valueStart, long size, bool cut, int channels, int bytes)
     {
         Span<byte> header = stackalloc byte[4];
         if (cut && size < header.Length)
@@ -473,9 +584,9 @@ public sealed class MxfDemuxer : IDemuxer
         int count = header[1] | (header[2] << 8);
         if (cut)
         {
-            // The samples whose kept channels' words (the first _aes3Channels of its 8) are all before the file's end, as
+            // The samples whose kept channels' words (the first `channels` of its 8) are all before the file's end, as
             // FFmpeg's demuxer counts them: a sample cut after them still gives its PCM.
-            count = (int)Math.Min(count, (size - header.Length + ((8 - _aes3Channels) * 4)) / (8 * 4));
+            count = (int)Math.Min(count, (size - header.Length + ((8 - channels) * 4)) / (8 * 4));
         }
 
         if (!cut && size < header.Length + (count * 8L * 4))
@@ -483,7 +594,7 @@ public sealed class MxfDemuxer : IDemuxer
             throw new InvalidDataException($"An 8-channel AES3 element at byte {valueStart} holds {size} bytes, under its {count} samples of 8 channels.");
         }
 
-        return count * _aes3Channels * _aes3Bytes;
+        return count * channels * bytes;
     }
 
     /// <summary>
@@ -586,7 +697,14 @@ public sealed class MxfDemuxer : IDemuxer
         }
     }
 
-    /// <summary>Times every packet (<see cref="Time"/>) and describes the two streams by the packets found so far.</summary>
+    /// <summary>
+    /// Times every packet (<see cref="Time"/>) and describes the streams by the packets found so far. A stream's
+    /// <see cref="VideoStreamInfo.Duration"/> is its material package track's (ST 377-1 B.11), as FFmpeg's demuxer gives
+    /// it: the picture's in edit units, each sound track's rescaled from edit units to samples, rounded to the nearest. A
+    /// file cut short keeps the header's, longer than its packets, as ffprobe does. Where the header doesn't say (a file
+    /// written to a pipe: -1), the picture's is 0, as the container says nothing, and a sound track's runs to its last
+    /// packet's end.
+    /// </summary>
     private void Describe()
     {
         if (_video is { } video)
@@ -606,26 +724,37 @@ public sealed class MxfDemuxer : IDemuxer
                 ColorPrimaries = video.ColorPrimaries,
                 ColorTransfer = video.ColorTransfer,
                 ColorMatrix = video.ColorMatrix,
+                Duration = video.Duration ?? 0,
             };
         }
 
-        if (_audio is { } audio)
+        foreach (var sound in _sounds)
         {
+            var audio = sound.Track;
             int rate = audio.AudioSamplingRate.Numerator;
-            Time(audio, _audioIndex, null);
-            var packets = _packets.Where(p => p.StreamIndex == _audioIndex).ToList();
-            Audio = new AudioStreamInfo(audio.Codec is { } codec ? AudioCodec(codec) : "unknown", rate, audio.Channels, packets.Count, new Rational(1, rate), ReadOnlyMemory<byte>.Empty, _audioIndex)
+            long samples = Time(audio, sound.Index, null, sound.Aes3Channels * sound.Aes3Bytes);
+            sound.Info = new AudioStreamInfo(audio.Codec is { } codec ? AudioCodec(codec) : "unknown", rate, audio.Channels, _packets.Count(p => p.StreamIndex == sound.Index), new Rational(1, rate), ReadOnlyMemory<byte>.Empty, sound.Index)
             {
-                Duration = packets.Count == 0 ? 0 : packets[^1].Pts + packets[^1].Duration,
+                Duration = audio.Duration is { } units && audio.EditRate.Numerator > 0
+                    ? ((2 * units * rate * audio.EditRate.Denominator) + audio.EditRate.Numerator) / (2L * audio.EditRate.Numerator)
+                    : samples,
             };
         }
+
+        AudioTracks = [.. _sounds.Select(s => s.Info!)];
+        Audio = _selected.Length == 0 ? null : _selected[0].Info;
     }
 
-    /// <summary>Gives the track's packets their times, durations and keyframe flags (the class remarks say how).</summary>
-    private void Time(MxfTrack track, int stream, MxfIndex? index)
+    /// <summary>
+    /// Gives the track's packets their times, durations and keyframe flags (the class remarks say how); a sound sample
+    /// is <paramref name="aes3BlockAlign"/> bytes where its elements are 8-channel AES3 ones, else the descriptor's.
+    /// Returns a sound track's samples.
+    /// </summary>
+    private long Time(MxfTrack track, int stream, MxfIndex? index, int aes3BlockAlign = 0)
     {
         bool intra = track.Codec is "prores" or "dnxhd" or "jpeg2000" || MxfLabels.IsD10Container(track.EssenceContainer ?? []);
-        int blockAlign = _aes3Channels > 0 && track.Kind == MxfTrackKind.Sound ? _aes3Channels * _aes3Bytes : BlockAlign(track);
+        bool mpeg2 = track.Codec == "mpeg2video";
+        int blockAlign = aes3BlockAlign > 0 ? aes3BlockAlign : BlockAlign(track);
         long samples = 0;
 
         // A reordered picture's temporal offsets (ST 377-1 11.2.3, Table 28) lead from display order to stored order:
@@ -666,9 +795,35 @@ public sealed class MxfDemuxer : IDemuxer
                 long unit = packet.Sequence;
                 var entry = index?.Entry(unit);
                 long pts = shown.TryGetValue(unit, out long display) ? display : unit;
-                bool keyframe = intra || (entry is { } f ? (f.Flags & MxfIndex.RandomAccess) != 0 : unit == 0);
+                bool keyframe = intra || (entry is { } f
+                    ? (f.Flags & MxfIndex.RandomAccess) != 0 || (mpeg2 && (f.Flags & MxfIndex.Predicted) == 0)
+                    : unit == 0 || _intraPictures.Contains(unit));
                 _packets[i] = packet with { Dts = unit - delay, Pts = pts, Duration = 1, IsKeyframe = keyframe };
             }
         }
+
+        return samples;
+    }
+
+    /// <summary>
+    /// A sound track read: its header track, its stream index, its 8-channel AES3 elements' channels and bytes a sample
+    /// (D-10's; 0 where its elements are PCM), and what changes: its packets so far, where its read starts as a
+    /// sequence (0 until a Seek moves it), and the stream as last described.
+    /// </summary>
+    private sealed class Sound(MxfTrack track, int index, int aes3Channels, int aes3Bytes)
+    {
+        public MxfTrack Track { get; } = track;
+
+        public int Index { get; } = index;
+
+        public int Aes3Channels { get; } = aes3Channels;
+
+        public int Aes3Bytes { get; } = aes3Bytes;
+
+        public long Count { get; set; }
+
+        public long Start { get; set; }
+
+        public AudioStreamInfo? Info { get; set; }
     }
 }

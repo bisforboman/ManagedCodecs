@@ -18,6 +18,7 @@ internal sealed class LivePage : ContentPage
     private readonly Entry _url = new() { Placeholder = "http://camera/video.mjpg or rtsp://user:password@camera/stream", TextColor = Colors.White, Keyboard = Keyboard.Url };
     private IDispatcherTimer? _timer;
     private LivePlayer? _player;
+    private HttpClient? _client;
     private long _cellsRedUnlikeBlue;
     private string? _drawnWrong;
     private bool _checking;
@@ -82,7 +83,7 @@ internal sealed class LivePage : ContentPage
         {
             player = uri.Scheme is "rtsp" or "rtsps"
                 ? new LivePlayer(new RtspSource(uri) { CertificateHash = _options.CertificateHash })
-                : new LivePlayer(new MjpegHttpSource(uri));
+                : new LivePlayer(MjpegSource(uri));
         }
         catch (ArgumentException e)
         {
@@ -113,11 +114,26 @@ internal sealed class LivePage : ContentPage
         }
     }
 
+    // iOS and Mac Catalyst: MAUI's HttpClient there (NSUrlSession) takes multipart/x-mixed-replace apart itself and
+    // hands over one part as image/jpeg, which the player refuses: a client on .NET's own sockets reads the stream as
+    // the camera sends it. Elsewhere the player's own client.
+    private MjpegHttpSource MjpegSource(Uri uri)
+    {
+#if IOS || MACCATALYST
+        _client = new HttpClient(new SocketsHttpHandler()) { Timeout = Timeout.InfiniteTimeSpan };
+        return new MjpegHttpSource(uri, _client);
+#else
+        return new MjpegHttpSource(uri);
+#endif
+    }
+
     private void Stop()
     {
         _view.Player = null;
         _player?.Dispose();
         _player = null;
+        _client?.Dispose();
+        _client = null;
 #if ANDROID
         _multicast?.Release();
         _multicast = null;
@@ -172,12 +188,21 @@ internal sealed class LivePage : ContentPage
         {
             _done = true;
 
-            // Not a single cell with red unlike blue would mean the check couldn't tell the two swapped.
+            // Not a single cell with red unlike blue would mean the check couldn't tell the two swapped. The passing line
+            // only when every frame asked for was shown: a player that gave up has a result of its own.
             _drawnWrong ??= _view.ShownFrames > 0 && _cellsRedUnlikeBlue == 0 ? "no cell had red unlike blue, so the check of their order saw nothing" : null;
+            bool failed = _drawnWrong is null && _view.ShownFrames < _options.Frames;
+            string result = $"every frame drawn as decoded ({_cellsRedUnlikeBlue} cells with red unlike blue)";
+            if (failed)
+            {
+                result = $"only {_view.ShownFrames} of {_options.Frames} frames shown: the player {player.State}";
+            }
+
+            result = _drawnWrong ?? result;
             Console.WriteLine($"mclive-maui: {_status.Text}");
-            Console.WriteLine($"mclive-maui: {_drawnWrong ?? $"every frame drawn as decoded ({_cellsRedUnlikeBlue} cells with red unlike blue)"}");
+            Console.WriteLine($"mclive-maui: {result}");
             Console.Out.Flush();
-            int code = _drawnWrong is not null ? 2 : player.State == LiveState.Failed ? 1 : 0;
+            int code = _drawnWrong is not null ? 2 : failed ? 1 : 0;
             Stop();
             Environment.Exit(code);
         }

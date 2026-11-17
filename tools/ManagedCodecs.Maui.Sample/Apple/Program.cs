@@ -13,6 +13,8 @@ public static class Program
 {
     private static void Main(string[] args)
     {
+        // What arrived, for a run nobody watches (maui.yml reads lines that start "mclive-maui:", not this one).
+        Console.WriteLine($"mclive-maui started with {args.Length} arguments: {string.Join(' ', args)}");
         MauiProgram.Options = LiveOptions.Parse(args) ?? LiveOptions.None;
         UIApplication.Main(args, null, typeof(AppDelegate));
     }

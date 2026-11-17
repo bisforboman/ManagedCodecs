@@ -28,6 +28,9 @@ internal readonly record struct WaveFormat(
     string Codec,
     ReadOnlyMemory<byte> CodecPrivate)
 {
+    /// <summary>WAVEFORMATEXTENSIBLE's dwChannelMask, the channels' speakers; 0 for a plain WAVEFORMATEX.</summary>
+    public ulong ChannelMask { get; init; }
+
     private const int Extensible = 0xFFFE;
 
     /// <summary>Reads <paramref name="format"/>; false when it is shorter than WAVEFORMAT's 16 bytes.</summary>
@@ -48,10 +51,12 @@ internal readonly record struct WaveFormat(
         int bits = BinaryPrimitives.ReadUInt16LittleEndian(span[14..]);
         int extra = span.Length >= 18 ? BinaryPrimitives.ReadUInt16LittleEndian(span[16..]) : 0;
         var codecPrivate = extra > 0 && 18 + extra <= span.Length ? format.Slice(18, extra) : ReadOnlyMemory<byte>.Empty;
+        uint mask = 0;
         if (tag == Extensible && codecPrivate.Length >= 22)
         {
             // WAVEFORMATEXTENSIBLE: wValidBitsPerSample, dwChannelMask, then the sub-format GUID, whose first two bytes are
             // the format tag it stands for.
+            mask = BinaryPrimitives.ReadUInt32LittleEndian(codecPrivate.Span[2..]);
             tag = BinaryPrimitives.ReadUInt16LittleEndian(codecPrivate.Span[6..]);
             codecPrivate = codecPrivate[22..];
         }
@@ -80,7 +85,7 @@ internal readonly record struct WaveFormat(
             codecPrivate = new[] { (byte)bits };
         }
 
-        waveFormat = new WaveFormat(tag, channels, sampleRate, averageBytes, blockAlign, bits, codec, codecPrivate);
+        waveFormat = new WaveFormat(tag, channels, sampleRate, averageBytes, blockAlign, bits, codec, codecPrivate) { ChannelMask = mask, };
         return true;
     }
 }

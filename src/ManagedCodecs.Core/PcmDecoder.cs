@@ -15,6 +15,7 @@ public sealed class PcmDecoder : IAudioDecoder
     private readonly Format _format;
     private readonly int _bytesPerSample;
     private readonly Rational _timeBase;
+    private readonly ulong _channelMask;
 
     // Samples still to drop at the start of the next packets, from a Packet.SkipSamples larger than its packet's output.
     private int _pendingSkip;
@@ -35,6 +36,7 @@ public sealed class PcmDecoder : IAudioDecoder
         SampleRate = stream.SampleRate;
         Channels = stream.Channels;
         _timeBase = stream.TimeBase;
+        _channelMask = stream.ChannelMask;
     }
 
     private enum Format
@@ -80,7 +82,7 @@ public sealed class PcmDecoder : IAudioDecoder
         }
 
         int count = packet.Length / frameBytes;
-        var frame = new AudioFrame(SampleRate, Channels, count);
+        var frame = new AudioFrame(SampleRate, Channels, count) { ChannelMask = _channelMask, };
         for (int c = 0; c < Channels; c++)
         {
             var samples = frame.Samples[c];

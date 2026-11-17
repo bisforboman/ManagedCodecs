@@ -25,9 +25,17 @@ internal static class AudioPipeline
         _ => new AacDecoder(audio),
     };
 
-    /// <summary>A frame's samples as interleaved stereo: its first two channels, or mono on both.</summary>
+    /// <summary>
+    /// A frame's samples as interleaved stereo: mono on both, stereo as it is, and more channels downmixed as FFmpeg's
+    /// <c>-ac 2</c> (<see cref="Downmix"/>; more than eight with no layout named, their first two).
+    /// </summary>
     public static AudioChunk ToStereo(AudioFrame frame, DateTime? captureTime = null)
     {
+        if (Downmix.Weights(frame.ChannelMask, frame.Channels) is { } weights)
+        {
+            return new AudioChunk(frame.SampleRate, Downmix.Apply(frame, weights)) { CaptureTime = captureTime };
+        }
+
         int count = frame.SampleCount;
         var left = frame.Samples[0];
         var right = frame.Channels > 1 ? frame.Samples[1] : left;
@@ -135,17 +143,19 @@ internal sealed class PlayedAudio
         private int _sampleRate = audio.Track.SampleRate;
 
         /// <summary>
-        /// The audio the packet completes as stereo, or null: a packet of another stream, one to discard or that decodes
-        /// to nothing, or a mono track's samples whose other channel has not come yet.
+        /// The audio the packet completes as stereo, or null: a packet of another stream, one to discard (decoded for its
+        /// state) or that decodes to nothing, or a mono track's samples whose other channel has not come yet.
         /// </summary>
         public AudioChunk? Decode(Packet packet)
         {
             bool left = packet.StreamIndex == audio.Track.StreamIndex;
-            if ((!left && packet.StreamIndex != audio.Right?.StreamIndex) || packet.Discard)
+            if (!left && packet.StreamIndex != audio.Right?.StreamIndex)
             {
                 return null;
             }
 
+            // A packet to discard (an edit list's priming) is decoded all the same, for the state the next one starts
+            // from (AAC's overlap), and gives nothing.
             var frame = (left ? _decoder : _rightDecoder!).Decode(packet);
             if (frame.SampleCount == 0)
             {

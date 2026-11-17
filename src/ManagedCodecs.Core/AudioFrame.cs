@@ -39,6 +39,14 @@ public sealed class AudioFrame
     public long Pts { get; set; }
 
     /// <summary>
+    /// Which speaker each channel is, as WAVE's channel mask (bit 0 front left, 1 front right, 2 front centre, 3 LFE, 4
+    /// and 5 back left and right, 6 and 7 front left and right of centre, 8 back centre, 9 and 10 side left and right,
+    /// then the top speakers), the channels in the order of its bits; 0 where the decoder doesn't know, which is then
+    /// FFmpeg's default layout for the count (docs/decisions/2026-11-17-more-than-two-channels.md).
+    /// </summary>
+    internal ulong ChannelMask { get; set; }
+
+    /// <summary>
     /// This frame without its first <paramref name="start"/> samples and its last <paramref name="end"/> (all of them if
     /// it has fewer).
     /// </summary>
@@ -53,7 +61,7 @@ public sealed class AudioFrame
 
         int first = Math.Min(start, SampleCount);
         int count = Math.Max(0, SampleCount - first - end);
-        var trimmed = new AudioFrame(SampleRate, Channels, count);
+        var trimmed = new AudioFrame(SampleRate, Channels, count) { ChannelMask = ChannelMask, };
         for (int c = 0; c < Channels; c++)
         {
             Samples[c].AsSpan(first, count).CopyTo(trimmed.Samples[c]);

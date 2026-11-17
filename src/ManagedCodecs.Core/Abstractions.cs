@@ -282,6 +282,12 @@ public sealed record AudioStreamInfo(
     /// default (or, where none is, of them all) the one with the most channels, the first of equals.
     /// </summary>
     public bool IsDefault { get; init; }
+
+    /// <summary>
+    /// The speakers of the channels, as WAVE's channel mask (<see cref="AudioFrame.ChannelMask"/>), where the container
+    /// names them (WAVEFORMATEXTENSIBLE in WAV and AVI); 0 where it doesn't.
+    /// </summary>
+    internal ulong ChannelMask { get; init; }
 }
 
 /// <summary>Reads packets out of a container format (AVI, MP4, ...).</summary>

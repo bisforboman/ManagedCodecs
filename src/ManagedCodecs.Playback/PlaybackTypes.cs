@@ -102,7 +102,9 @@ public sealed class AudioChunk
 
     /// <summary>
     /// Left, right, left, right... A mono stream is copied to both (but an MXF file's pair of mono tracks is left and
-    /// right: <see cref="PlaybackOptions.AudioTrack"/>); more channels give their first two.
+    /// right: <see cref="PlaybackOptions.AudioTrack"/>); more channels are downmixed as FFmpeg's <c>-ac 2</c> does in
+    /// float: the centre and the surrounds at -3 dB, a back centre at -6 dB, the LFE left out, not scaled down, so a
+    /// loud passage can exceed 1 (docs/decisions/2026-11-17-more-than-two-channels.md).
     /// </summary>
     public float[] Samples { get; }
 

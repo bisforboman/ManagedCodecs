@@ -946,6 +946,29 @@ file (FFmpeg's muxer writes no DefaultDuration for AAC; libavformat fills in 102
 to the track's next frame, which the test checks against FFmpeg's next pts; Opus's durations come from FFmpeg's
 parser, which reads the packets, so they too are compared that way.
 
+## More than two channels, downmixed to stereo (the players)
+
+`MediaPlayer`, `AudioPlayer` and `LivePlayer` give stereo: more than two channels are downmixed as FFmpeg 6.1's `-ac 2`
+does in float (docs/decisions/2026-11-17-more-than-two-channels.md). `DownmixTests` checks:
+
+- each speaker's weights for the 22 layouts they were measured on (a tone of its own on each channel through `-ac 2`,
+  least squares on the output), and FFmpeg's default layout for a count with none named (3 to 8 channels);
+- the players' samples against FFmpeg's downmix of the decoded audio (name.stereo.f32, `-ac 2 -f f32le`), within 4 x
+  2^-17 (AAC's own difference from FFmpeg's decoder, AacConformanceTests, over the channels a side sums):
+
+| Sample | Layout, and where it comes from |
+|---|---|
+| aac-3.0, aac-4.0, aac-adts-7.1 | AAC channel configurations 3, 4 and 7, FFmpeg's encoder, a tone a channel |
+| aac-mp4-3.0.mp4 | 3.0 in MP4, the priming packet left out by the edit list (decoded for its overlap, not played) |
+| aac-5.1.mp4, aac-adts-5.1-id3, aac-7.1.mp4 | configurations 6 and 7 |
+| aac-quad-pce, aac-adts-pce, aac-fdk-pce | a program config element: quad (FFmpeg's encoder's own for it) and 5.1 (FFmpeg's, the FDK encoder's) |
+| wav-pcm-quad, wav-pcm-7.1, wav-pcm-s16-6ch | WAVEFORMATEXTENSIBLE's channel mask (quad is not the default for four channels) |
+| mkv-pcm-4ch, mkv-pcm-8ch | none named (Matroska): FFmpeg's default for the count, 4.0 and 7.1 |
+
+Not checked against a file: a multichannel frame trimmed mid-frame (a unit test: the layout is kept), the top speakers and the layouts no encoder here writes (their weights are the measured
+ones, unit tests only), and more than eight channels with no layout, which FFmpeg can't downmix (none is the default
+for the count): the first two play, as before.
+
 ## Several sound tracks (MP4, QuickTime, Matroska, AVI)
 
 `Mp4Demuxer`, `MatroskaDemuxer` and `AviDemuxer` list every sound track (`AudioTracks`), with ffprobe's stream index,

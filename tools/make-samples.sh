@@ -808,6 +808,26 @@ ff -f lavfi -i "aevalsrc=0.3*sin(2*PI*220*t)|0.3*sin(2*PI*330*t)|0.3*sin(2*PI*44
 # The same remuxed (FFmpeg's ADTS-to-MP4 filter copies the element into the AudioSpecificConfig, its comment, FFmpeg's
 # name, after the realigned bits): the config the ADTS demuxer builds must equal it.
 ff -i samples/aac-adts-pce.aac -c copy samples/aac-adts-pce-remux.mp4
+# More than two channels downmixed to stereo as FFmpeg's -ac 2 does (the players, docs/decisions/2026-11-17-more-than-two-
+# channels.md), a tone of its own on each channel so a wrong weight shows: AAC channel configurations 3 (3.0), 4 (4.0,
+# a back centre) and 7 (7.1), and quad, which FFmpeg's encoder writes as a program config element (a front and a back
+# pair). In WAV, WAVEFORMATEXTENSIBLE's mask names the layout: quad (not FFmpeg's default for four channels, 4.0) and
+# 7.1. Matroska names none: four and eight channels of PCM are FFmpeg's default layouts for the count (4.0, 7.1).
+tones() { python3 -c "import sys; print('|'.join(f'0.2*sin(2*PI*{110 * (i + 1)}*t)' for i in range(int(sys.argv[1]))))" "$1"; }
+for spec in 3.0:3:aac-3.0.aac 4.0:4:aac-4.0.aac 7.1:8:aac-adts-7.1.aac quad:4:aac-quad-pce.aac; do
+  IFS=: read -r layout channels name <<< "$spec"
+  ff -f lavfi -i "aevalsrc=$(tones "$channels"):s=48000:d=1:c=$layout" -c:a aac -b:a 256k -aac_pns 0 -f adts "samples/$name"
+done
+# The same 3.0 in MP4, whose edit list leaves out the priming packet, which the players decode for its overlap and drop
+# (3.0 is not the default for three channels, 2.1).
+ff -f lavfi -i "aevalsrc=$(tones 3):s=48000:d=1:c=3.0" -c:a aac -b:a 256k -aac_pns 0 samples/aac-mp4-3.0.mp4
+for spec in quad:4:wav-pcm-quad.wav 7.1:8:wav-pcm-7.1.wav; do
+  IFS=: read -r layout channels name <<< "$spec"
+  ff -f lavfi -i "aevalsrc=$(tones "$channels"):s=48000:d=1:c=$layout" -c:a pcm_f32le "samples/$name"
+done
+for channels in 4 8; do
+  ff -f lavfi -i "aevalsrc=$(tones "$channels"):s=48000:d=1" -c:a pcm_f32le "samples/mkv-pcm-${channels}ch.mkv"
+done
 # An edit list that trims more than FFmpeg's muxer writes (it only cuts the 1024 samples of priming): media time 2500,
 # so two whole packets and part of a third come before the start, and 335 ms, which ends mid-packet and leaves whole
 # packets after the end (335 ms is 14773.5 samples, so the end also shows how the movie timescale is rounded).
@@ -1246,6 +1266,13 @@ ff -i samples/mkv-aac-padding.mkv -map 0:a:0 -f f32le samples/mkv-aac-padding.tr
 for f in samples/heaac-*.mp4 samples/heaacv2-*.mp4 samples/heaac-*.aac; do ff -i "$f" -f f32le "${f%.*}.sbr.f32"; done
 # A stream naming FAAC: name.delay.f32, decoded audio as FFmpeg gives it, without FAAC's encoder delay.
 for f in samples/*faac*.aac; do ff -i "$f" -f f32le "${f%.*}.delay.f32"; done
+# More than two channels: name.stereo.f32, decoded audio as FFmpeg's -ac 2 downmixes it to stereo in float, by default
+# (what the players give).
+for f in samples/aac-5.1.mp4 samples/aac-7.1.mp4 samples/aac-adts-5.1-id3.aac samples/aac-adts-pce.aac samples/aac-fdk-pce.aac \
+  samples/aac-3.0.aac samples/aac-mp4-3.0.mp4 samples/aac-4.0.aac samples/aac-adts-7.1.aac samples/aac-quad-pce.aac samples/wav-pcm-s16-6ch.wav samples/wav-pcm-quad.wav samples/wav-pcm-7.1.wav \
+  samples/mkv-pcm-4ch.mkv samples/mkv-pcm-8ch.mkv; do
+  ff -i "$f" -map 0:a:0 -ac 2 -f f32le "${f%.*}.stereo.f32"
+done
 # MP3: name.mp3.f32, every packet decoded whole (MP4: the edit list ignored), and name.mp3.trim.f32, as FFmpeg gives it
 # by default (MP4: the edit list's priming skipped; Matroska: the end's DiscardPadding dropped; a raw .mp3: its LAME
 # tag's delay and padding; AVI: every frame, in either layout). Raw .mp3 files' packets too, as FFmpeg's demuxer gives

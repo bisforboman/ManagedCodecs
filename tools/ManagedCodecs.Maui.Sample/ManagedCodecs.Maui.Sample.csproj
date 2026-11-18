@@ -8,6 +8,10 @@
   <PropertyGroup>
     <TargetFrameworks>net10.0-android</TargetFrameworks>
     <TargetFrameworks Condition="$([MSBuild]::IsOSPlatform('windows'))">$(TargetFrameworks);net10.0-windows10.0.19041.0</TargetFrameworks>
+    <TargetFrameworks Condition="$([MSBuild]::IsOSPlatform('osx'))">$(TargetFrameworks);net10.0-ios;net10.0-maccatalyst</TargetFrameworks>
+    <!-- A build for some of them only (maui.yml's macOS job, whose runner has no Android workload): restore evaluates
+         every listed one. A property of its own, as a global TargetFrameworks would reach the libraries referenced. -->
+    <TargetFrameworks Condition="'$(SampleTargetFrameworks)' != ''">$(SampleTargetFrameworks)</TargetFrameworks>
     <!-- Directory.Build.props sets one TargetFramework for every project; this one has several. -->
     <TargetFramework></TargetFramework>
     <OutputType>Exe</OutputType>
@@ -22,6 +26,8 @@
     <ApplicationVersion>1</ApplicationVersion>
     <SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">24.0</SupportedOSPlatformVersion>
     <SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">10.0.17763.0</SupportedOSPlatformVersion>
+    <SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'ios'">15.0</SupportedOSPlatformVersion>
+    <SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'maccatalyst'">15.0</SupportedOSPlatformVersion>
     <TargetPlatformMinVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">10.0.17763.0</TargetPlatformMinVersion>
     <!-- Windows: an .exe that runs as it is (as mclive-wpf), not an MSIX to install, so CI can start it with arguments. -->
     <WindowsPackageType>None</WindowsPackageType>
@@ -51,6 +57,14 @@
       <EditorConfigFiles Include="$(_WindowsAppSdkInitializerConfig)" />
     </ItemGroup>
   </Target>
+
+  <!-- iOS and Mac Catalyst share one handler and entry point (Apple/, compiled for those two only: not under
+       Platforms/, whose folders other than the target's own MAUI removes after these items); each has its own
+       Info.plist (and Mac Catalyst its Entitlements.plist) in its Platforms folder, where MAUI looks for them. -->
+  <ItemGroup>
+    <Compile Remove="Apple\**" />
+    <Compile Include="Apple\**\*.cs" Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'ios' Or $([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'maccatalyst'" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Maui.Controls" />

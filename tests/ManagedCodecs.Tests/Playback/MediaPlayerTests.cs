@@ -405,8 +405,9 @@ public class MediaPlayerTests
             {
                 Add(decoder.Decode(packet));
             }
-            else if (aac is not null && packet.StreamIndex == demuxer.Audio!.StreamIndex && !packet.Discard)
+            else if (aac is not null && packet.StreamIndex == demuxer.Audio!.StreamIndex)
             {
+                // A packet to discard is decoded for its state, as the player does, and gives nothing.
                 var frame = aac.Decode(packet);
                 var right = frame.Channels > 1 ? frame.Samples[1] : frame.Samples[0];
                 for (int i = 0; i < frame.SampleCount; i++)

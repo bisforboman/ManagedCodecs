@@ -412,6 +412,39 @@ MUTATIONS = [
     dict(file="src/ManagedCodecs.Playback/AudioPipeline.cs",
          find="var right = options.PairMonoTracks && demuxer is MxfDemuxer && track.Channels == 1", replace="var right = options.PairMonoTracks && track.Channels == 1",
          tests="FullyQualifiedName~AudioPlayerTests"),
+    # A packet to discard (an edit list's priming) is decoded by the players, for AAC's overlap, and gives nothing.
+    dict(file="src/ManagedCodecs.Playback/AudioPipeline.cs",
+         find="if (!left && packet.StreamIndex != audio.Right?.StreamIndex)\n",
+         replace="if ((!left && packet.StreamIndex != audio.Right?.StreamIndex) || packet.Discard)\n",
+         tests="DisplayName~h264-audio-edits"),
+    # ---- More than two channels downmixed as FFmpeg's -ac 2 (docs/decisions/2026-11-17-more-than-two-channels.md): the
+    # centre at -3 dB ...
+    dict(file="src/ManagedCodecs.Playback/Downmix.cs",
+         find="2 => (Root, Root),", replace="2 => (1, 1),",
+         tests="FullyQualifiedName~DownmixTests"),
+    # ... a count with no layout named as FFmpeg's default for it (Matroska's PCM) ...
+    dict(file="src/ManagedCodecs.Playback/Downmix.cs",
+         find="            mask = Defaults[channels - 3];\n", replace="            return null;\n",
+         tests="DisplayName~mkv-pcm-4ch"),
+    # ... AAC's layout from its channel configuration (3.0, which isn't the default for three channels) or its program
+    # config element (quad, which isn't the default for four) ...
+    dict(file="src/ManagedCodecs.Aac/AacDecoder.cs",
+         find="_channelMask = _config.Pce?.ChannelMask() ?? ChannelMask(_config.ChannelConfiguration);",
+         replace="_channelMask = _config.Pce is null ? ChannelMask(_config.ChannelConfiguration) : 0;",
+         tests="DisplayName~aac-quad-pce"),
+    dict(file="src/ManagedCodecs.Aac/AacDecoder.cs",
+         find="_channelMask = _config.Pce?.ChannelMask() ?? ChannelMask(_config.ChannelConfiguration);",
+         replace="_channelMask = _config.Pce?.ChannelMask() ?? 0;",
+         tests="DisplayName~aac-3.0"),
+    # ... WAVEFORMATEXTENSIBLE's mask (quad) ...
+    dict(file="src/ManagedCodecs.Containers/WaveFormat.cs",
+         find="            mask = BinaryPrimitives.ReadUInt32LittleEndian(codecPrivate.Span[2..]);\n", replace="",
+         tests="DisplayName~wav-pcm-quad"),
+    # ... and the layout kept on a frame the priming or the end's padding trims (no multichannel sample is trimmed
+    # mid-frame: a unit test).
+    dict(file="src/ManagedCodecs.Core/AudioFrame.cs",
+         find="new AudioFrame(SampleRate, Channels, count) { ChannelMask = ChannelMask, };", replace="new AudioFrame(SampleRate, Channels, count);",
+         tests="FullyQualifiedName~DownmixTests.ATrimmedFrameKeepsItsLayout"),
     # PairMonoTracks false plays an MXF file's mono track alone (as players before 0.18.0 did).
     dict(file="src/ManagedCodecs.Playback/AudioPipeline.cs",
          find="var right = options.PairMonoTracks && demuxer", replace="var right = demuxer",

@@ -88,6 +88,15 @@ Real streams, by hand:
   bitmap (a `RenderTargetBitmap`), so the order of red and blue and the rows are checked. The first run (2026-11-15):
   100 frames shown of 102 received, each drawn as decoded. With the swap of red and blue taken out it failed at the
   first frame. Nobody has looked at the window, and RTSP hasn't been run on Windows.
+- **In .NET MAUI, on Android and Windows** (`.github/workflows/maui.yml`, weekly and on pull requests that change the
+  sample or Playback): the same server and JPEGs to `mclive-maui` (tools/ManagedCodecs.Maui.Sample), 100 frames, on an
+  Android 14 emulator (x86_64, KVM) on `ubuntu-24.04` and on `windows-2025`. What the platform drew of the view is
+  compared with the decoded frame cell by cell (an 8 by 8 grid of mean colours, within 10 levels: the view is drawn at
+  its own size, so not pixel for pixel). The first runs (2026-11-17): 100 frames shown on each, each drawn as decoded;
+  on the emulator about 15 ms to decode and 54 ms to convert a 320x240 frame (Mono on an emulated phone; 0.8 and
+  0.7 ms on the Windows runner). With red and blue swapped in both handlers, both failed at the first frame (cell
+  (0, 0): decoded mean R 100 B 14, drawn R 14 B 103). Nobody has looked at either window, no real phone has run it,
+  and RTSP hasn't been run there.
 - Not tried yet: mjpg-streamer, an ESP32-CAM, an IP camera.
 
 ### H.264 over RTP
@@ -936,6 +945,29 @@ test checks that, that they never go back, and that none is after its pts. Audio
 file (FFmpeg's muxer writes no DefaultDuration for AAC; libavformat fills in 1024 samples' worth, rounded down) run
 to the track's next frame, which the test checks against FFmpeg's next pts; Opus's durations come from FFmpeg's
 parser, which reads the packets, so they too are compared that way.
+
+## More than two channels, downmixed to stereo (the players)
+
+`MediaPlayer`, `AudioPlayer` and `LivePlayer` give stereo: more than two channels are downmixed as FFmpeg 6.1's `-ac 2`
+does in float (docs/decisions/2026-11-17-more-than-two-channels.md). `DownmixTests` checks:
+
+- each speaker's weights for the 22 layouts they were measured on (a tone of its own on each channel through `-ac 2`,
+  least squares on the output), and FFmpeg's default layout for a count with none named (3 to 8 channels);
+- the players' samples against FFmpeg's downmix of the decoded audio (name.stereo.f32, `-ac 2 -f f32le`), within 4 x
+  2^-17 (AAC's own difference from FFmpeg's decoder, AacConformanceTests, over the channels a side sums):
+
+| Sample | Layout, and where it comes from |
+|---|---|
+| aac-3.0, aac-4.0, aac-adts-7.1 | AAC channel configurations 3, 4 and 7, FFmpeg's encoder, a tone a channel |
+| aac-mp4-3.0.mp4 | 3.0 in MP4, the priming packet left out by the edit list (decoded for its overlap, not played) |
+| aac-5.1.mp4, aac-adts-5.1-id3, aac-7.1.mp4 | configurations 6 and 7 |
+| aac-quad-pce, aac-adts-pce, aac-fdk-pce | a program config element: quad (FFmpeg's encoder's own for it) and 5.1 (FFmpeg's, the FDK encoder's) |
+| wav-pcm-quad, wav-pcm-7.1, wav-pcm-s16-6ch | WAVEFORMATEXTENSIBLE's channel mask (quad is not the default for four channels) |
+| mkv-pcm-4ch, mkv-pcm-8ch | none named (Matroska): FFmpeg's default for the count, 4.0 and 7.1 |
+
+Not checked against a file: a multichannel frame trimmed mid-frame (a unit test: the layout is kept), the top speakers and the layouts no encoder here writes (their weights are the measured
+ones, unit tests only), and more than eight channels with no layout, which FFmpeg can't downmix (none is the default
+for the count): the first two play, as before.
 
 ## Several sound tracks (MP4, QuickTime, Matroska, AVI)
 

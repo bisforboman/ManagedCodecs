@@ -239,6 +239,19 @@ internal sealed record ProgramConfigElement(bool[] Front, bool[] Side, bool[] Ba
     /// </summary>
     public int[] OutputOrder()
     {
+        int channels = Channels;
+        return Places() is { } places ? [.. Enumerable.Range(0, channels).OrderBy(c => places[c])] : [.. Enumerable.Range(0, channels)];
+    }
+
+    /// <summary>
+    /// The speakers of the output channels as WAVE's channel mask, where <see cref="OutputOrder"/> places every channel
+    /// on one; 0 where it keeps the listed order.
+    /// </summary>
+    public ulong ChannelMask() => Places() is { } places ? places.Aggregate(0UL, (mask, place) => mask | (1UL << place)) : 0;
+
+    // Each listed channel's place in WAVE's order, or null where the elements don't fit it.
+    private List<int>? Places()
+    {
         var places = new List<int>();
         bool Place(params int[] speakers)
         {
@@ -255,10 +268,10 @@ internal sealed record ProgramConfigElement(bool[] Front, bool[] Side, bool[] Ba
         int channels = Channels;
         if (!placed || places.Count != channels || places.Distinct().Count() != channels)
         {
-            return [.. Enumerable.Range(0, channels)];
+            return null;
         }
 
-        return [.. Enumerable.Range(0, channels).OrderBy(c => places[c])];
+        return places;
 
         bool PlaceFront()
         {

@@ -19,6 +19,9 @@
     <!-- The tests render ManagedCodecs.Avalonia's LiveView without a display. -->
     <PackageVersion Include="Avalonia.Headless" Version="12.1.6" />
     <PackageVersion Include="Avalonia.Skia" Version="12.1.6" />
+    <!-- tools/ManagedCodecs.Maui.Sample: the version of the MAUI workload CI installs for SDK 10.0.1xx (workload set
+         10.0.115 carries MAUI 10.0.110); a newer one is a pull request that moves both. -->
+    <PackageVersion Include="Microsoft.Maui.Controls" Version="10.0.110" />
     <!-- tools/ManagedCodecs.Thumbnails.Blazor, the Blazor WebAssembly sample. -->
     <PackageVersion Include="Microsoft.AspNetCore.Components.WebAssembly" Version="10.0.13" />
     <PackageVersion Include="Microsoft.AspNetCore.Components.WebAssembly.DevServer" Version="10.0.13" />

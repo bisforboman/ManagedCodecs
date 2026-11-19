@@ -11,11 +11,12 @@ share internals, so each depends on the others at exactly its own version (`[X]`
 then reports a mix of versions (NU1107, or NU1608 for a newer one referenced directly) rather than letting it fail at
 run time.
 
-## Unreleased
+## 0.19.0 – 2026-11-17
 
-Features beside fixes (new public API: `AudioTracks` and `SelectAudio` in `AviDemuxer`, `Mp4Demuxer` and
-`MatroskaDemuxer`; `AudioStreamInfo.Language`, `Title` and `IsDefault`; `PlaybackOptions.PairMonoTracks`), hence the
-next version is a minor one; code built against 0.18 keeps working.
+Live cameras that more cameras and networks need: AAC as LATM and G.726 sound, sound with no picture, RTP to a
+multicast group, RTSP over an HTTP tunnel, JPEG over 2040 pixels, and a reconnect on RTCP BYE; every audio track in
+AVI, MP4 and Matroska files (`AudioTracks`, `SelectAudio`, `PlaybackOptions.PairMonoTracks`). New public API, hence a
+minor version; code built against 0.18 keeps working.
 
 ### Added
 

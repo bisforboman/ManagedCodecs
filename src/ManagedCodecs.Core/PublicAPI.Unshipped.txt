@@ -1,15 +1,1 @@
 #nullable enable
-const ManagedCodecs.CodecIds.AdpcmG726 = "ADPCM_G726" -> string!
-const ManagedCodecs.CodecIds.AdpcmG726Le = "ADPCM_G726LE" -> string!
-ManagedCodecs.AudioStreamInfo.IsDefault.get -> bool
-ManagedCodecs.AudioStreamInfo.IsDefault.init -> void
-ManagedCodecs.AudioStreamInfo.Language.get -> string?
-ManagedCodecs.AudioStreamInfo.Language.init -> void
-ManagedCodecs.AudioStreamInfo.Title.get -> string?
-ManagedCodecs.AudioStreamInfo.Title.init -> void
-ManagedCodecs.G726Decoder
-ManagedCodecs.G726Decoder.Channels.get -> int
-ManagedCodecs.G726Decoder.Decode(ManagedCodecs.Packet packet) -> ManagedCodecs.AudioFrame!
-ManagedCodecs.G726Decoder.Decode(System.ReadOnlySpan<byte> packet) -> ManagedCodecs.AudioFrame!
-ManagedCodecs.G726Decoder.G726Decoder(ManagedCodecs.AudioStreamInfo! stream) -> void
-ManagedCodecs.G726Decoder.SampleRate.get -> int

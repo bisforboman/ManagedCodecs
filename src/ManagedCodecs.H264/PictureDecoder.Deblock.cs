@@ -898,6 +898,14 @@ internal sealed partial class PictureDecoder<TPixel>
                 return false;
             }
 
+            // A list no partition uses (handle 0: list 1 of every P macroblock) still holds the picture's reset
+            // values, refIdx -1 and zero motion, so it is uniform without reading them, which deblocking would
+            // otherwise fetch from memory for every macroblock.
+            if (refs[0] == 0)
+            {
+                continue;
+            }
+
             // The index too, as explicit weights go by index and two can name one picture.
             if (MemoryMarshal.Read<uint>(MemoryMarshal.AsBytes(_refIdx[list].AsSpan(mbAddr * 4, 4))) != (byte)_refIdx[list][mbAddr * 4] * 0x01010101u)
             {

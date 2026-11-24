@@ -1,8 +1,9 @@
 name: MAUI
 
 # Builds mclive-maui (tools/ManagedCodecs.Maui.Sample: a live camera in .NET MAUI, issue #526,
-# docs/decisions/2026-11-17-live-maui.md) for Android and Windows, which no other job builds (it needs MAUI's workloads
-# and is not in ManagedCodecs.slnx), and runs it on both: an Android emulator on Linux and the Windows runner's desktop.
+# docs/decisions/2026-11-17-live-maui.md) for Android, Windows, iOS and Mac Catalyst, which no other job builds (it needs
+# MAUI's workloads and is not in ManagedCodecs.slnx), and runs it on each: an Android emulator on Linux, the Windows
+# runner's desktop, and on a macOS runner the Mac Catalyst app itself and an iPhone simulator.
 # tools/mjpeg-http-server.py serves committed JPEGs as a camera would, and the sample checks itself (--frames, or the
 # intent's `frames` extra): every frame shown, it compares what the platform drew of the view with the decoded frame,
 # cell by cell, so a swap of red and blue, rows of the wrong length or no picture fail, not only a crash. Weekly, on
@@ -156,3 +157,69 @@ jobs:
           "mclive-maui exited with $($run.ExitCode)"
           if (-not (Select-String -Path out.txt -Pattern 'every frame drawn as decoded' -Quiet)) { exit 2 }
           exit $run.ExitCode
+
+  apple:
+    runs-on: macos-latest
+    timeout-minutes: 45
+    env:
+      APPLE_WORKLOAD_SET: 10.0.112
+      APPLE_XCODE: '26.6'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6
+        with:
+          dotnet-version: 10.0.x
+
+      # .NET's iOS and Mac Catalyst SDKs each require one Xcode. Workload set 10.0.115 (the other jobs') brings SDK 27.2,
+      # for Xcode 27.2, which the runner image doesn't have yet (26.6 at most, 2026-11-17): this job takes 10.0.112, the
+      # newest whose SDK (26.5, which wants Xcode 26.6) has its Xcode on the image. Its MAUI workload is 10.0.20; the app's MAUI packages stay
+      # 10.0.110 (Directory.Packages.props). Back to MAUI_WORKLOAD_SET once the image has the Xcode it needs.
+      - name: Select Xcode
+        run: |
+          sw_vers
+          ls -d /Applications/Xcode*.app
+          sudo xcode-select -s "/Applications/Xcode_$APPLE_XCODE.app"
+          xcodebuild -version
+
+      - name: Install the MAUI workloads for iOS and Mac Catalyst
+        run: dotnet workload install maui-ios maui-maccatalyst --version "$APPLE_WORKLOAD_SET"
+
+      # Debug: ad hoc signed, which a Mac runs without a developer certificate (and the simulator needs no signing).
+      - name: Build
+        run: |
+          arch=$(uname -m | sed 's/x86_64/x64/')
+          # Restore evaluates every target framework the project lists, Android's too, whose workload isn't here: each
+          # build lists only its own (SampleTargetFrameworks, the sample's own property).
+          dotnet build tools/ManagedCodecs.Maui.Sample -p:SampleTargetFrameworks=net10.0-maccatalyst -p:RuntimeIdentifier=maccatalyst-$arch
+          dotnet build tools/ManagedCodecs.Maui.Sample -p:SampleTargetFrameworks=net10.0-ios -p:RuntimeIdentifier=iossimulator-$arch
+
+      # As on the other platforms: the app's two "mclive-maui:" lines on standard output say how it went. perl's alarm
+      # bounds each run (macOS has no timeout command).
+      - name: Run mclive-maui on Mac Catalyst against MJPEG over HTTP
+        run: |
+          python3 tools/mjpeg-http-server.py samples/gstreamer/jpeg-422 --port 8090 &
+          server=$!
+          app=$(find tools/ManagedCodecs.Maui.Sample/bin/Debug/net10.0-maccatalyst -name mclive-maui.app -maxdepth 2 | head -1)
+          perl -e 'alarm shift; exec @ARGV' 180 "$app/Contents/MacOS/mclive-maui" http://127.0.0.1:8090/video.mjpg --frames 100 > run.txt 2>&1 || echo "exited with $?"
+          kill $server
+          grep 'mclive-maui:' run.txt > out.txt || { tail -60 run.txt; echo '::error::mclive-maui printed no result'; exit 3; }
+          cat out.txt
+          sed 's/.*mclive-maui: /    /' out.txt >> "$GITHUB_STEP_SUMMARY"
+          grep -q 'every frame drawn as decoded' out.txt
+
+      - name: Run mclive-maui in an iPhone simulator against MJPEG over HTTP
+        run: |
+          python3 tools/mjpeg-http-server.py samples/gstreamer/jpeg-422 --port 8090 &
+          server=$!
+          udid=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin)["devices"]; print(next(x["udid"] for r,l in sorted(d.items(), reverse=True) if "iOS" in r for x in l if x["name"].startswith("iPhone")))')
+          xcrun simctl boot "$udid"
+          xcrun simctl bootstatus "$udid" -b > /dev/null
+          app=$(find tools/ManagedCodecs.Maui.Sample/bin/Debug/net10.0-ios -name mclive-maui.app -maxdepth 2 | head -1)
+          xcrun simctl install "$udid" "$app"
+          perl -e 'alarm shift; exec @ARGV' 240 xcrun simctl launch --console-pty "$udid" io.github.managedcodecs.mclive http://127.0.0.1:8090/video.mjpg --frames 100 > run.txt 2>&1 || echo "exited with $?"
+          kill $server
+          grep 'mclive-maui:' run.txt > out.txt || { tail -60 run.txt; echo '::error::mclive-maui printed no result'; exit 3; }
+          cat out.txt
+          sed 's/.*mclive-maui: /    /' out.txt >> "$GITHUB_STEP_SUMMARY"
+          grep -q 'every frame drawn as decoded' out.txt

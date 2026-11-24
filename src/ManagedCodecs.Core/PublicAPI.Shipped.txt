@@ -22,12 +22,18 @@ ManagedCodecs.AudioStreamInfo.Duration.init -> void
 ManagedCodecs.AudioStreamInfo.Equals(ManagedCodecs.AudioStreamInfo? other) -> bool
 ManagedCodecs.AudioStreamInfo.FrameCount.get -> long
 ManagedCodecs.AudioStreamInfo.FrameCount.init -> void
+ManagedCodecs.AudioStreamInfo.IsDefault.get -> bool
+ManagedCodecs.AudioStreamInfo.IsDefault.init -> void
+ManagedCodecs.AudioStreamInfo.Language.get -> string?
+ManagedCodecs.AudioStreamInfo.Language.init -> void
 ManagedCodecs.AudioStreamInfo.SampleRate.get -> int
 ManagedCodecs.AudioStreamInfo.SampleRate.init -> void
 ManagedCodecs.AudioStreamInfo.StreamIndex.get -> int
 ManagedCodecs.AudioStreamInfo.StreamIndex.init -> void
 ManagedCodecs.AudioStreamInfo.TimeBase.get -> ManagedCodecs.Rational
 ManagedCodecs.AudioStreamInfo.TimeBase.init -> void
+ManagedCodecs.AudioStreamInfo.Title.get -> string?
+ManagedCodecs.AudioStreamInfo.Title.init -> void
 ManagedCodecs.ChromaLocation
 ManagedCodecs.ChromaLocation.Bottom = 6 -> ManagedCodecs.ChromaLocation
 ManagedCodecs.ChromaLocation.BottomLeft = 5 -> ManagedCodecs.ChromaLocation
@@ -99,6 +105,12 @@ ManagedCodecs.FieldOrder.Progressive = 1 -> ManagedCodecs.FieldOrder
 ManagedCodecs.FieldOrder.TB = 4 -> ManagedCodecs.FieldOrder
 ManagedCodecs.FieldOrder.TT = 2 -> ManagedCodecs.FieldOrder
 ManagedCodecs.FieldOrder.Unknown = 0 -> ManagedCodecs.FieldOrder
+ManagedCodecs.G726Decoder
+ManagedCodecs.G726Decoder.Channels.get -> int
+ManagedCodecs.G726Decoder.Decode(ManagedCodecs.Packet packet) -> ManagedCodecs.AudioFrame!
+ManagedCodecs.G726Decoder.Decode(System.ReadOnlySpan<byte> packet) -> ManagedCodecs.AudioFrame!
+ManagedCodecs.G726Decoder.G726Decoder(ManagedCodecs.AudioStreamInfo! stream) -> void
+ManagedCodecs.G726Decoder.SampleRate.get -> int
 ManagedCodecs.IAudioDecoder
 ManagedCodecs.IAudioDecoder.Decode(ManagedCodecs.Packet packet) -> ManagedCodecs.AudioFrame!
 ManagedCodecs.IAudioDecoder.Decode(System.ReadOnlySpan<byte> packet) -> ManagedCodecs.AudioFrame!
@@ -304,6 +316,8 @@ ManagedCodecs.VideoStreamInfo.VideoStreamInfo(string! Codec, int Width, int Heig
 ManagedCodecs.VideoStreamInfo.Width.get -> int
 ManagedCodecs.VideoStreamInfo.Width.init -> void
 const ManagedCodecs.CodecIds.Aac = "AAC" -> string!
+const ManagedCodecs.CodecIds.AdpcmG726 = "ADPCM_G726" -> string!
+const ManagedCodecs.CodecIds.AdpcmG726Le = "ADPCM_G726LE" -> string!
 const ManagedCodecs.CodecIds.AdpcmImaWav = "ADPCM_IMA_WAV" -> string!
 const ManagedCodecs.CodecIds.AdpcmMs = "ADPCM_MS" -> string!
 const ManagedCodecs.CodecIds.H264 = "H264" -> string!

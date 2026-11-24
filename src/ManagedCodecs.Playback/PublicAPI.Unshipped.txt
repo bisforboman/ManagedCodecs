@@ -1,5 +1,1 @@
 #nullable enable
-ManagedCodecs.Playback.PlaybackOptions.PairMonoTracks.get -> bool
-ManagedCodecs.Playback.PlaybackOptions.PairMonoTracks.init -> void
-ManagedCodecs.Playback.RtspSource.HttpTunnel.get -> bool
-ManagedCodecs.Playback.RtspSource.HttpTunnel.init -> void

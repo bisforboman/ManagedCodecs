@@ -13,12 +13,12 @@
     <PackageVersion Include="SharpFuzz" Version="2.3.0" />
     <PackageVersion Include="MonoGame.Framework.DesktopGL" Version="3.8.6.1" />
     <!-- src/ManagedCodecs.Avalonia (its floor: the version it is built against) and tools/ManagedCodecs.Avalonia.Sample. -->
-    <PackageVersion Include="Avalonia" Version="12.1.6" />
-    <PackageVersion Include="Avalonia.Desktop" Version="12.1.6" />
-    <PackageVersion Include="Avalonia.Themes.Fluent" Version="12.1.6" />
+    <PackageVersion Include="Avalonia" Version="12.2.0" />
+    <PackageVersion Include="Avalonia.Desktop" Version="12.2.0" />
+    <PackageVersion Include="Avalonia.Themes.Fluent" Version="12.2.0" />
     <!-- The tests render ManagedCodecs.Avalonia's LiveView without a display. -->
-    <PackageVersion Include="Avalonia.Headless" Version="12.1.6" />
-    <PackageVersion Include="Avalonia.Skia" Version="12.1.6" />
+    <PackageVersion Include="Avalonia.Headless" Version="12.2.0" />
+    <PackageVersion Include="Avalonia.Skia" Version="12.2.0" />
     <!-- tools/ManagedCodecs.Maui.Sample: the version of the MAUI workload CI installs for SDK 10.0.1xx (workload set
          10.0.115 carries MAUI 10.0.110); a newer one is a pull request that moves both. -->
     <PackageVersion Include="Microsoft.Maui.Controls" Version="10.0.110" />

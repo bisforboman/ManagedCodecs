@@ -88,15 +88,21 @@ Real streams, by hand:
   bitmap (a `RenderTargetBitmap`), so the order of red and blue and the rows are checked. The first run (2026-11-15):
   100 frames shown of 102 received, each drawn as decoded. With the swap of red and blue taken out it failed at the
   first frame. Nobody has looked at the window, and RTSP hasn't been run on Windows.
-- **In .NET MAUI, on Android and Windows** (`.github/workflows/maui.yml`, weekly and on pull requests that change the
-  sample or Playback): the same server and JPEGs to `mclive-maui` (tools/ManagedCodecs.Maui.Sample), 100 frames, on an
-  Android 14 emulator (x86_64, KVM) on `ubuntu-24.04` and on `windows-2025`. What the platform drew of the view is
+- **In .NET MAUI, on Android, Windows, iOS and Mac Catalyst** (`.github/workflows/maui.yml`, weekly and on pull
+  requests that change the sample or Playback): the same server and JPEGs to `mclive-maui`
+  (tools/ManagedCodecs.Maui.Sample), 100 frames, on an Android 14 emulator (x86_64, KVM) on `ubuntu-24.04`, on
+  `windows-2025`, and on `macos-latest` as the Mac Catalyst app and in an iPhone simulator. What the platform drew of the view is
   compared with the decoded frame cell by cell (an 8 by 8 grid of mean colours, within 10 levels: the view is drawn at
   its own size, so not pixel for pixel). The first runs (2026-11-17): 100 frames shown on each, each drawn as decoded;
   on the emulator about 15 ms to decode and 54 ms to convert a 320x240 frame (Mono on an emulated phone; 0.8 and
   0.7 ms on the Windows runner). With red and blue swapped in both handlers, both failed at the first frame (cell
-  (0, 0): decoded mean R 100 B 14, drawn R 14 B 103). Nobody has looked at either window, no real phone has run it,
-  and RTSP hasn't been run there.
+  (0, 0): decoded mean R 100 B 14, drawn R 14 B 103). iOS and Mac Catalyst (2026-11-17, Debug builds): 100 frames
+  shown on each, each drawn as decoded; about 12 and 64 ms to decode and convert on Mac Catalyst, 75 and 262 ms in the
+  simulator (Debug, not a measure of a phone). Red and blue swapped in their handler failed at the first frame. Their
+  first run found that `NSUrlSession`, MAUI's `HttpClient` there, takes MJPEG's multipart stream apart (the sample
+  reads it with `SocketsHttpHandler`), and that the check printed its passing line with no frame shown when the player
+  gave up (it now passes only when every frame asked for was shown). Nobody has looked at any of the windows, no real
+  phone has run it, and RTSP hasn't been run there.
 - Not tried yet: mjpg-streamer, an ESP32-CAM, an IP camera.
 
 ### H.264 over RTP

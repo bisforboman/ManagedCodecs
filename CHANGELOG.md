@@ -13,9 +13,18 @@ run time.
 
 ## Unreleased
 
-Features beside fixes (new public API: `AudioTracks` and `SelectAudio` in `AviDemuxer`, `Mp4Demuxer` and
-`MatroskaDemuxer`; `AudioStreamInfo.Language`, `Title` and `IsDefault`; `PlaybackOptions.PairMonoTracks`), hence the
-next version is a minor one; code built against 0.18 keeps working.
+### Added
+
+- ManagedCodecs.Rdd36, a new package: `Rdd36Decoder` decodes SMPTE RDD 36 video, 4:2:2, progressive, to 10-bit frames,
+  bit-exact with FFmpeg; `Mp4Demuxer` names QuickTime's sample entries for it `CodecIds.Rdd36`. Interlaced frames,
+  4:4:4, alpha and 12 bits are refused for now (issue #461; docs/decisions/2026-11-15-rdd36-decoder.md).
+
+## 0.19.0 – 2026-11-17
+
+Live cameras that more cameras and networks need: AAC as LATM and G.726 sound, sound with no picture, RTP to a
+multicast group, RTSP over an HTTP tunnel, JPEG over 2040 pixels, and a reconnect on RTCP BYE; every audio track in
+AVI, MP4 and Matroska files (`AudioTracks`, `SelectAudio`, `PlaybackOptions.PairMonoTracks`). New public API, hence a
+minor version; code built against 0.18 keeps working.
 
 ### Added
 
@@ -101,9 +110,6 @@ New public API, hence a minor version; code built against 0.17 keeps working.
 
 ### Added
 
-- ManagedCodecs.Rdd36, a new package: `Rdd36Decoder` decodes SMPTE RDD 36 video, 4:2:2, progressive, to 10-bit frames,
-  bit-exact with FFmpeg; `Mp4Demuxer` names QuickTime's sample entries for it `CodecIds.Rdd36`. Interlaced frames,
-  4:4:4, alpha and 12 bits are refused for now (issue #461; docs/decisions/2026-11-15-rdd36-decoder.md).
 - Containers: sound tracks after the first. `IDemuxer.AudioTracks` lists a file's audio streams and
   `IDemuxer.SelectAudio` chooses which of them `ReadPackets` gives, one or several in one pass; `Audio` is the first
   one chosen, and until a choice is made the file's first audio stream is read alone, as before. `MxfDemuxer` lists

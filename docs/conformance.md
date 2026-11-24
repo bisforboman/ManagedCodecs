@@ -2091,6 +2091,15 @@ middle) by (1, -5) and (inner, 512) by (20, 1), then the saturating packs. Bit-e
 480p Sintel frames) counted 19.14 against 19.23 M instructions a frame (-0.5%), and perf put `HalfVertical` and
 `Center` at 0.25 to 0.27 of an untouched set against 0.26 to 0.30 on the 1080p frames, lower in five pairs of six:
 about 0.3% of the frame, not worth a second loop in `HalfVertical`.
+The deblocking filter's uniform-motion test (`HasUniformMotion`, for every inter macroblock without luma coefficients)
+checked both lists' reference indices and motion vectors, so in P pictures it read list 1's: arrays cleared at the
+picture's start and never written since, a cache miss each by the time a row is deblocked. A list whose four handles
+are 0 is used by no partition (a used list always has a picture's handle, from `StoreMotion` or concealment's guess),
+so it still holds the reset values and is uniform without them; the test now skips it, and the bS paths already
+ignore such a list's vectors (`MotionStrength`). On `h264-bench-720p.mp4` (CAVLC, P) the function fell from 0.061 to
+0.070 of an untouched set (`Cavlc.ReadResidualBlock`, `FilterMacroblock420`, `PredictLuma`, `HalfVertical`) to 0.020
+to 0.025 (perf, six runs each, the order alternating, every branch run below every base run): from about 1.9 to 0.7%
+of the frame. On `h264-high-default.mp4` (B, 320x240, in cache) it moved by under 0.1% of the frame.
 
 ## AAC
 

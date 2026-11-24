@@ -2100,6 +2100,15 @@ ignore such a list's vectors (`MotionStrength`). On `h264-bench-720p.mp4` (CAVLC
 0.070 of an untouched set (`Cavlc.ReadResidualBlock`, `FilterMacroblock420`, `PredictLuma`, `HalfVertical`) to 0.020
 to 0.025 (perf, six runs each, the order alternating, every branch run below every base run): from about 1.9 to 0.7%
 of the frame. On `h264-high-default.mp4` (B, 320x240, in cache) it moved by under 0.1% of the frame.
+Each picture cleared both lists' motion arrays (motion vectors, reference indices and ids, the decoder's handles) when
+it began: about 1.15 MB a 720p picture with the coefficient counts and modes, list 1's 0.37 MB of it. P and I pictures
+never write list 1 (only B slices do; concealment takes list 1 motion only from neighbours a B slice decoded), so the
+picture that owns the arrays now notes whether a B slice wrote them since their last clear (`Picture.List1Touched`, on
+the frame or colour plane its field views share), the decoder the same of its handles, and `ResetInter` clears list 1
+only then. Two mutation entries break the markings. On `h264-bench-720p.mp4` the clears (libc's `memset` and
+`ResetInter`) fell from 0.078 to 0.090 of an untouched set (`Cavlc.ReadResidualBlock`, `FilterMacroblock420`,
+`PredictLuma`, `HalfVertical`) to 0.050 to 0.056 (perf, six runs each, the order alternating, every branch run below
+every base run): about 0.9% of the frame. `h264-high-default.mp4` (I, P and B) moved within its runs' spread.
 
 ## AAC
 

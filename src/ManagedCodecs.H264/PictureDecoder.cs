@@ -291,6 +291,13 @@ internal sealed partial class PictureDecoder<TPixel> : IPictureDecoder
     private void DecodeSliceData(SliceHeader header, PictureParameterSet pps, BitReader r, IReadOnlyList<Picture> refList0, IReadOnlyList<Picture> refList1, MarkSnapshot marks)
     {
         int sliceNum = _slices.Count;
+        if (header.Type == SliceType.B)
+        {
+            // Its partitions may store list 1 motion: the next picture to use these arrays clears them (ResetInter).
+            Picture.Whole.List1Touched = true;
+            _handles1Touched = true;
+        }
+
         _mbaff = header.Mbaff;
         _pairSlots = header.Mbaff || header.FieldPic;
         Picture.Mbaff = _pairSlots;

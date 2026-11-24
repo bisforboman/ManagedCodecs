@@ -58,6 +58,16 @@ MUTATIONS = [
          tests="FullyQualifiedName~H264ConcealmentTests", repeat=3),
 
     # ---- H.264
+    # A picture's list 1 motion arrays, and the decoder's list 1 handles, are cleared only after a B slice wrote them
+    # (Picture.List1Touched, PictureDecoder.ResetInter): without the marking, a B picture decoded into arrays a P
+    # picture reused keeps stale list 1 motion and references.
+    dict(file="src/ManagedCodecs.H264/PictureDecoder.cs",
+         find="            Picture.Whole.List1Touched = true;\n", replace="",
+         tests="FullyQualifiedName~H264ConformanceTests.MatchesFfmpegFrameByFrame&DisplayName~h264-high-default"),
+    dict(file="src/ManagedCodecs.H264/PictureDecoder.cs",
+         find="            Picture.Whole.List1Touched = true;\n            _handles1Touched = true;\n",
+         replace="            Picture.Whole.List1Touched = true;\n",
+         tests="FullyQualifiedName~H264ConformanceTests.MatchesFfmpegFrameByFrame&DisplayName~h264-high-default"),
     # A frame of two field pictures takes its first field's picture type, as FFmpeg does (h264_frame_start), not its
     # second's: JM's PAFF samples pair an I field with a P one.
     dict(file="src/ManagedCodecs.H264/H264Decoder.cs",

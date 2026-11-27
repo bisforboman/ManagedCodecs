@@ -1,1 +1,20 @@
 #nullable enable
+ManagedCodecs.Playback.OnvifDevice
+ManagedCodecs.Playback.OnvifDevice.Addresses.get -> System.Collections.Generic.IReadOnlyList<System.Uri!>!
+ManagedCodecs.Playback.OnvifDevice.Endpoint.get -> string?
+ManagedCodecs.Playback.OnvifDevice.GetStreamsAsync(System.Net.NetworkCredential? credential, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<ManagedCodecs.Playback.OnvifStream!>!>!
+ManagedCodecs.Playback.OnvifDevice.Hardware.get -> string?
+ManagedCodecs.Playback.OnvifDevice.Name.get -> string?
+ManagedCodecs.Playback.OnvifDevice.OnvifDevice(System.Uri! address) -> void
+ManagedCodecs.Playback.OnvifDevice.Scopes.get -> System.Collections.Generic.IReadOnlyList<string!>!
+ManagedCodecs.Playback.OnvifDiscovery
+ManagedCodecs.Playback.OnvifStream
+ManagedCodecs.Playback.OnvifStream.Encoding.get -> string?
+ManagedCodecs.Playback.OnvifStream.Height.get -> int
+ManagedCodecs.Playback.OnvifStream.Name.get -> string!
+ManagedCodecs.Playback.OnvifStream.Profile.get -> string!
+ManagedCodecs.Playback.OnvifStream.Uri.get -> System.Uri!
+ManagedCodecs.Playback.OnvifStream.Width.get -> int
+override ManagedCodecs.Playback.OnvifDevice.ToString() -> string!
+override ManagedCodecs.Playback.OnvifStream.ToString() -> string!
+static ManagedCodecs.Playback.OnvifDiscovery.FindAsync(System.TimeSpan wait, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<ManagedCodecs.Playback.OnvifDevice!>!>!

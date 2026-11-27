@@ -315,6 +315,14 @@ public sealed class OnvifTestDevice : IDisposable
             Calls.Add(action);
         }
 
+        // SOAP 1.2's action, a parameter of the media type (RFC 3902), must name the body's operation: devices route by either.
+        var type = headers.GetValueOrDefault("Content-Type") ?? "";
+        var named = Regex.Match(type, "action=\"([^\"]*)\"", RegexOptions.CultureInvariant).Groups[1].Value;
+        if (named != call.Name.NamespaceName + "/" + action)
+        {
+            return (400, "", Fault("ter:ActionNotSupported", $"The action {named} is not the body's {action}"));
+        }
+
         bool deviceService = path == DeviceService.AbsolutePath;
         bool preAuth = deviceService && action is "GetServices" or "GetCapabilities" or "GetSystemDateAndTime";
         if (!preAuth && Auth == OnvifAuth.Digest && !DigestValid(method, path, headers))

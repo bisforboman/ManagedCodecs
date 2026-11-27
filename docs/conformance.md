@@ -307,6 +307,32 @@ RTP over UDP to the reader alone (docs/decisions/2026-11-16-live-rtsp-multicast.
   clip's but the first chunk and a loop's (3 allowed), none lost or damaged, no reconnect.
 - **Not tried yet:** a camera's multicast, a network with IGMP snooping or more than one hop between, and IPv6 groups.
 
+### ONVIF
+
+`OnvifDiscovery` and `OnvifDevice` (docs/decisions/2026-11-27-live-onvif.md), from ONVIF Core 26.06, ONVIF Media 24.12,
+WS-Discovery and the UsernameToken Profile 1.0.
+
+- **`OnvifTests`** against `OnvifTestDevice`, a simulated camera written from the same specifications: a WS-Discovery
+  responder (on a port of its own, or joined to 239.255.255.250:3702 on loopback) and an HTTP server answering
+  GetServices, GetCapabilities, GetSystemDateAndTime, GetProfiles and GetStreamUri, in other prefixes than the
+  library's, checking that each SOAP action names the body's operation:
+  - two probes, one a type, each sent three times with its own message ID; a device listing only
+    `dn:NetworkVideoTransmitter` is found; the answers of one device merge into one;
+  - answers to another probe's message ID, answers of other types (a printer), and datagrams that aren't XML are
+    ignored; a document with a DTD is not parsed;
+  - the address on the host the device answered from comes first;
+  - each profile's RTSP URI, encoding and size, through HTTP Digest (RFC 2617, qop=auth, checked by the device) and
+    through the UsernameToken alone, with the device's clock five hours off (the device refuses a token outside five
+    minutes of its own time); GetCapabilities where GetServices is a fault; a wrong password and missing credentials
+    throw `UnauthorizedAccessException`; an address that doesn't answer is skipped for the next;
+  - the PasswordDigest of fixed inputs, against Python's `hashlib`.
+  Ten mutation entries break these rules (`tools/mutation/mutations.py`), each caught.
+- **`tools/onvif-discovery-check.py`** publishes a camera through Python's `WSDiscovery` 2.1.2 (an independent
+  WS-Discovery implementation, in the 2005/04 namespaces ONVIF names) and needs `mcdec --onvif` to find it once, with
+  its name, hardware, endpoint and address: with both types, and with `dn:NetworkVideoTransmitter` alone. Both passed
+  (2026-11-27, the cloud sandbox, over its multicast).
+- **Not tried:** a real camera, a Media2-only device, IPv6 discovery, an HTTPS device service.
+
 ### RTSPS
 
 `RtspSource` takes `rtsps://` URLs: RTSP over TLS, RTP interleaved inside it (docs/decisions/2026-11-15-live-rtsps.md).

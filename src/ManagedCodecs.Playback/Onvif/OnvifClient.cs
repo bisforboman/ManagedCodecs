@@ -106,8 +106,14 @@ internal sealed class OnvifClient : IDisposable
             var document = OnvifSoap.TryParse(stream);
             return (response.StatusCode, document is null ? null : OnvifSoap.BodyContent(document));
         }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException)
         {
+            // No exception filter (ExceptionFilterTests): the caller's cancellation goes on as it is.
+            if (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+
             throw new HttpRequestException($"The camera didn't answer {action} within {CallTimeout.TotalSeconds:0} seconds.");
         }
     }
@@ -146,7 +152,19 @@ internal sealed class OnvifClient : IDisposable
             var device = new DateTime(Part(date, "Year"), Part(date, "Month"), Part(date, "Day"), Part(time, "Hour"), Part(time, "Minute"), Part(time, "Second"), DateTimeKind.Utc);
             return device - DateTime.UtcNow;
         }
-        catch (Exception e) when (e is FormatException or OverflowException or ArgumentOutOfRangeException or HttpRequestException)
+        catch (FormatException)
+        {
+            return TimeSpan.Zero;
+        }
+        catch (OverflowException)
+        {
+            return TimeSpan.Zero;
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            return TimeSpan.Zero; // not a date
+        }
+        catch (HttpRequestException)
         {
             return TimeSpan.Zero;
         }

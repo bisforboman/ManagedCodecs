@@ -11,6 +11,15 @@ share internals, so each depends on the others at exactly its own version (`[X]`
 then reports a mix of versions (NU1107, or NU1608 for a newer one referenced directly) rather than letting it fail at
 run time.
 
+## Unreleased
+
+### Added
+
+- Playback: ONVIF cameras found and their streams' RTSP URLs asked for. `OnvifDiscovery.FindAsync` probes the
+  machine's networks (WS-Discovery, ONVIF Core 7), and `OnvifDevice.GetStreamsAsync` asks a camera for each media
+  profile's URL, encoding and size (GetProfiles, GetStreamUri), with HTTP Digest or the WS-Security UsernameToken
+  (issue #527; docs/decisions/2026-11-27-live-onvif.md).
+
 ## 0.19.0 – 2026-11-17
 
 Live cameras that more cameras and networks need: AAC as LATM and G.726 sound, sound with no picture, RTP to a

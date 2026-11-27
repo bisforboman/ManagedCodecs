@@ -66,5 +66,15 @@ if (player.TakeLatest() is { } frame)
 // player.State (Connecting, Playing, Reconnecting, Failed) and player.Error for a status line.
 ```
 
+ONVIF cameras on the machine's networks, and their streams' RTSP URLs, without knowing either:
+
+```csharp
+foreach (var camera in await OnvifDiscovery.FindAsync(TimeSpan.FromSeconds(3)))
+{
+    var streams = await camera.GetStreamsAsync(new NetworkCredential("admin", "password"));
+    // camera.Name, camera.Hardware; each stream's Name, Encoding (H264, JPEG, H265), Width, Height and Uri for RtspSource
+}
+```
+
 Samples for MonoGame, Godot 4 .NET and Unity are in the repository's `tools/` folder. The
 [README](https://github.com/bisforboman/ManagedCodecs#in-game-video) has the rest.

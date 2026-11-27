@@ -158,9 +158,13 @@ public static class OnvifDiscovery
                     {
                         await socket.SendToAsync(new ArraySegment<byte>(message), SocketFlags.None, target).ConfigureAwait(false);
                     }
-                    catch (Exception e) when (e is SocketException or ObjectDisposedException)
+                    catch (SocketException)
                     {
                         // An interface that went down or has no route to the group: the others still probe.
+                    }
+                    catch (ObjectDisposedException)
+                    {
+                        // Closed at the end of a short wait.
                     }
                 }
             }
@@ -195,9 +199,13 @@ public static class OnvifDiscovery
             {
                 result = await socket.ReceiveFromAsync(new ArraySegment<byte>(buffer), SocketFlags.None, any).ConfigureAwait(false);
             }
-            catch (Exception e) when (e is SocketException or ObjectDisposedException)
+            catch (SocketException)
             {
                 return; // closed at the end of the wait
+            }
+            catch (ObjectDisposedException)
+            {
+                return;
             }
 
             var document = OnvifSoap.TryParse(buffer, result.ReceivedBytes);

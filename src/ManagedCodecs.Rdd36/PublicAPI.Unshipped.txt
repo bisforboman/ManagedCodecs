@@ -1,0 +1,9 @@
+#nullable enable
+ManagedCodecs.Rdd36.Rdd36Decoder
+ManagedCodecs.Rdd36.Rdd36Decoder.Decode(ManagedCodecs.Packet packet) -> System.Collections.Generic.IReadOnlyList<ManagedCodecs.VideoFrame!>!
+ManagedCodecs.Rdd36.Rdd36Decoder.Decode(System.ReadOnlySpan<byte> packet) -> ManagedCodecs.VideoFrame!
+ManagedCodecs.Rdd36.Rdd36Decoder.DecodeAsync(ManagedCodecs.Packet packet, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<System.Collections.Generic.IReadOnlyList<ManagedCodecs.VideoFrame!>!>
+ManagedCodecs.Rdd36.Rdd36Decoder.Flush() -> System.Collections.Generic.IReadOnlyList<ManagedCodecs.VideoFrame!>!
+ManagedCodecs.Rdd36.Rdd36Decoder.FlushAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<System.Collections.Generic.IReadOnlyList<ManagedCodecs.VideoFrame!>!>
+ManagedCodecs.Rdd36.Rdd36Decoder.Rdd36Decoder() -> void
+ManagedCodecs.Rdd36.Rdd36Decoder.Rdd36Decoder(ManagedCodecs.VideoStreamInfo! stream) -> void

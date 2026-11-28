@@ -1633,6 +1633,13 @@ public sealed class Mp4Demuxer : IDemuxer
                 case Box.Jpeg or Box.Mjpa:
                     Codec = CodecIds.Mjpeg;
                     break;
+
+                case Box.Apco or Box.Apcs or Box.Apcn or Box.Apch or Box.Ap4h or Box.Ap4x:
+                    // QuickTime's sample entries for SMPTE RDD 36 video. The stream's own frame headers say all the
+                    // decoder needs (RDD 36 leaves the file format out), so nothing of the entry's extensions is read
+                    // but the colour and aspect ratio boxes above.
+                    Codec = CodecIds.Rdd36;
+                    break;
             }
         }
 
@@ -1950,6 +1957,12 @@ public sealed class Mp4Demuxer : IDemuxer
         public const uint PcmC = 0x70636D43;
         public const uint Jpeg = 0x6A706567;
         public const uint Mjpa = 0x6D6A7061;
+        public const uint Apco = 0x6170636F;
+        public const uint Apcs = 0x61706373;
+        public const uint Apcn = 0x6170636E;
+        public const uint Apch = 0x61706368;
+        public const uint Ap4h = 0x61703468;
+        public const uint Ap4x = 0x61703478;
         public const uint Colr = 0x636F6C72;
         public const uint Nclx = 0x6E636C78;
         public const uint Nclc = 0x6E636C63;

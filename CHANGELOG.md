@@ -1,6 +1,6 @@
 # Changelog
 
-Versions are git tags (`vX.Y.Z`); each one publishes every package (ManagedCodecs.Core, .Containers, .Mjpeg, .H264,
+Versions are git tags (`vX.Y.Z`); each one publishes every package (ManagedCodecs.Core, .Containers, .Mjpeg, .Rdd36, .H264,
 .Aac, .Mp3, .Thumbnails, .Playback, .MonoGame, .Avalonia, .Wpf, .Unity and the ManagedCodecs meta-package) to nuget.org at that version, and a GitHub release with this file's section
 as its notes. `release.yml` releases on the push to main that brings a version heading not yet tagged, so a release
 is a pull request that turns "Unreleased" into "## X.Y.Z – date" and runs `tools/ship-public-api.py`. From 0.1.0 on, the
@@ -15,6 +15,9 @@ run time.
 
 ### Added
 
+- ManagedCodecs.Rdd36, a new package: `Rdd36Decoder` decodes SMPTE RDD 36 video, 4:2:2, progressive, to 10-bit frames,
+  bit-exact with FFmpeg; `Mp4Demuxer` names QuickTime's sample entries for it `CodecIds.Rdd36`. Interlaced frames,
+  4:4:4, alpha and 12 bits are refused for now (issue #461; docs/decisions/2026-11-15-rdd36-decoder.md).
 - Playback: ONVIF cameras found and their streams' RTSP URLs asked for. `OnvifDiscovery.FindAsync` probes the
   machine's networks (WS-Discovery, ONVIF Core 7), and `OnvifDevice.GetStreamsAsync` asks a camera for each media
   profile's URL, encoding and size (GetProfiles, GetStreamUri), with HTTP Digest or the WS-Security UsernameToken

@@ -5,6 +5,7 @@ using ManagedCodecs.Containers;
 using ManagedCodecs.H264;
 using ManagedCodecs.Mjpeg;
 using ManagedCodecs.Mp3;
+using ManagedCodecs.Rdd36;
 
 namespace ManagedCodecs.Cli;
 
@@ -26,6 +27,7 @@ public static class OutputHash
         IVideoDecoder? videoDecoder = video?.Codec switch
         {
             CodecIds.Mjpeg => new MjpegDecoder(video),
+            CodecIds.Rdd36 => new Rdd36Decoder(video),
             CodecIds.H264 => new H264Decoder(video),
             _ => null,
         };

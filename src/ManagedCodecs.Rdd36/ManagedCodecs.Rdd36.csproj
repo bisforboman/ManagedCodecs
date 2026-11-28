@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>ManagedCodecs.Rdd36</RootNamespace>
+    <PackageId>ManagedCodecs.Rdd36</PackageId>
+    <Description>Decoder for SMPTE RDD 36 video streams (4:2:2, progressive, 10 bits), compatible with Apple ProRes, bit-exact with FFmpeg, in pure managed C#. Apple ProRes is a trademark of Apple Inc. An independent implementation, not certified or endorsed by Apple.</Description>
+    <PackageTags>$(PackageTags);rdd36;intra;10-bit</PackageTags>
+    <IsAotCompatible>true</IsAotCompatible>
+    <!-- New in the release after 0.17.0: no earlier version on nuget.org to validate against (a restore of the baseline
+         fails, NU1101). The baseline pull request after the release that first ships it removes this line. -->
+    <PackageValidationBaselineVersion></PackageValidationBaselineVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="ManagedCodecs.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ManagedCodecs.Core\ManagedCodecs.Core.csproj" />
+  </ItemGroup>
+
+</Project>

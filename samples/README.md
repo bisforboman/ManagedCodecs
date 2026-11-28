@@ -72,3 +72,6 @@ which is the same tightly packed layout `VideoFrame.WritePacked` produces.
 
 Real camera files are the best test once the synthetic ones pass: they often omit the
 Huffman tables (DHT) and use restart markers.
+
+`rdd36-*.mov` (SMPTE RDD 36 in MOV) come from FFmpeg's prores_ks and prores_aw encoders, and `rdd36-rw-*.mov` from
+`tools/rdd36-rewrite.py` on one of them, for what the encoders never write (docs/conformance.md, SMPTE RDD 36).

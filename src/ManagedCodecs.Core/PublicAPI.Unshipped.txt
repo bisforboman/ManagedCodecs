@@ -1,1 +1,2 @@
 #nullable enable
+const ManagedCodecs.CodecIds.Rdd36 = "RDD36" -> string!

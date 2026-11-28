@@ -1,7 +1,7 @@
 # ManagedCodecs
 
 Pure managed C# media codecs: no native binaries, Native AOT friendly, and running on WebAssembly too. Decoders for
-MJPEG, H.264 (Constrained Baseline up to High 4:4:4 Predictive), AAC LC and HE-AAC, and MP3, with AVI, MP4, Matroska/WebM, raw
+MJPEG, H.264 (Constrained Baseline up to High 4:4:4 Predictive), SMPTE RDD 36 (4:2:2, 10 bits), AAC LC and HE-AAC, and MP3, with AVI, MP4, Matroska/WebM, raw
 AAC (ADTS) and raw MP3 demuxing, every one checked against FFmpeg sample by sample: video **bit-exact**, AAC LC and MP3 within 2^-17 of FFmpeg's float
 output. H.264 decodes
 on several threads if asked, and every decoder has an async API.
@@ -31,6 +31,7 @@ in between. That comparison is not measured here.
 | `src/ManagedCodecs.Core` | `VideoFrame`, `PixelFormat`, `Packet`, `Rational`, `IDemuxer`, `IVideoDecoder` |
 | `src/ManagedCodecs.Containers` | `AviDemuxer`, `Mp4Demuxer`, `MatroskaDemuxer` (Matroska and WebM), `AdtsDemuxer` (raw .aac), and `Demuxer.Open` to pick one by content |
 | `src/ManagedCodecs.Mjpeg` | `MjpegDecoder`: baseline/extended Huffman JPEG, interlaced AVI1, bit-exact with FFmpeg |
+| `src/ManagedCodecs.Rdd36` | `Rdd36Decoder`: SMPTE RDD 36 video, 4:2:2, progressive, to 10 bits, bit-exact with FFmpeg (Status) |
 | `src/ManagedCodecs.H264` | `H264Decoder`: Constrained Baseline, Main, High, High 10, High 4:2:2 and High 4:4:4 Predictive profile H.264 (CAVLC, CABAC, I/P/B, weighted prediction, 8x8 transform, scaling matrices, deblocking, monochrome, 4:2:0, 4:2:2 and 4:4:4, also as separate colour planes, 8 to 14 bits, lossless, progressive and interlaced), bit-exact |
 | `src/ManagedCodecs.Thumbnails` | `VideoProbe`: a video file's duration, displayed size, codecs and rotation as ffprobe reports them, without decoding; `VideoThumbnail`: a frame as a small upright RGBA image, PNG or JPEG; the `ManagedCodecs.Thumbnails` package (see Probing a video, Thumbnails; docs/decisions/2026-10-31-thumbnails.md) |
 | `src/ManagedCodecs.Playback` | `MediaPlayer`: plays a video file for a game engine, decoding on a thread of its own into RGBA frames and float stereo, and handing the game loop the frame due by its clock; `AudioPlayer`: the same for a file's audio alone (.wav, raw MP3 and AAC); `LivePlayer`: shows a camera's MJPEG over HTTP, or its H.264 or JPEG over RTSP (with its AAC or G.711 sound, if asked), the newest frame each render; the `ManagedCodecs.Playback` package (see In-game video, Live cameras) |
@@ -55,6 +56,7 @@ in between. That comparison is not measured here.
 | `tools/gst-audio-record.py` | Makes the committed audio over RTP recordings there (GStreamer's `rtpmp4gpay`, one AAC access unit a packet and fragmented ones; `rtppcmapay`, `rtppcmupay`) |
 | `tools/rtsp-nightly.py` | `LivePlayer` against mediamtx serving an H.264 and an MJPEG clip, each frame checked against the clip's, and an H.264 clip with AAC sound, each chunk of audio checked too, and over a network that loses and reorders packets (`mcdec --live`); nightly in `realworld.yml` |
 | `tools/rtsp-lossy-relay.py` | Relays an RTSP session and drops, repeats and reorders its RTP over UDP by a seeded choice, reading the client's receiver reports; `rtsp-nightly.py` puts it between mediamtx and `LivePlayer` |
+| `tools/rdd36-rewrite.py` | Rewrites an RDD 36 stream's frames for what FFmpeg's encoders never write (higher and reserved quantization indices, version 1, zero bytes, longer headers), for make-samples.sh |
 | `tools/rtp-record.py` | Records the RTP packets FFmpeg sends to a loopback UDP port, for the RTP depacketizer's tests (make-samples.sh) |
 | `tools/compare.sh` | Times mcdec and FFmpeg on the same file |
 | `tools/live555-check.py` | `LivePlayer` against live555MediaServer (built from source, pinned), H.264 and AAC over both transports, Digest, a session held past live555's 65 s, and a file's end (RTCP BYE, a new session at once); by hand, not in a workflow |
@@ -87,6 +89,11 @@ and code that reproduces FFmpeg's reading where it differs from the spec), and n
 - **MJPEG**: baseline and extended Huffman JPEG in 4:2:0, 4:2:2, 4:4:4, 4:1:1, 4:4:0 and gray, restart markers, missing Huffman
   tables, interlaced AVI1 frames; bit-exact. A vector IDCT (AVX2, and `Vector128` for ARM64 and WebAssembly), and
   output straight into the frame's planes (`ZeroCopy`).
+- **SMPTE RDD 36** (`ManagedCodecs.Rdd36`): decodes SMPTE RDD 36 streams, compatible with Apple ProRes (Apple ProRes is
+  a trademark of Apple Inc.; this is an independent implementation, written from the published RDD 36 document, not
+  certified or endorsed by Apple). 4:2:2, progressive, to 10 bits, from MOV (Proxy, LT, 422 and HQ sample entries);
+  bit-exact with FFmpeg on streams from FFmpeg's two encoders and rewritten ones (no Apple-encoded file among them,
+  docs/conformance.md). Interlaced frames, 4:4:4, alpha and 12 bits are refused for now (issue #461).
 - **H.264**: Constrained Baseline to High 4:4:4 Predictive. CAVLC and CABAC; I, P and B pictures; weighted
   prediction, the 8x8 transform, scaling matrices; MBAFF frames and field pictures; monochrome, 4:2:0, 4:2:2 and
   4:4:4, also as separate colour planes (progressive and interlaced); 8, 9, 10, 12 and 14 bits; lossless. Bit-exact on
@@ -137,6 +144,8 @@ and code that reproduces FFmpeg's reading where it differs from the spec), and n
 
 - AAC: SBR's speed (5.1 HE-AAC at about 0.38 ms a frame on GitHub's ARM64 runner once the JIT has warmed up, about
   110 times real time, 1.6 times FFmpeg's time on one thread; Benchmarking).
+- RDD 36: interlaced frames, 4:4:4 and alpha, 12 bits; decoding from MXF; speed (one thread, no vector path yet);
+  frames from Apple's encoders (issue #461).
 - MJPEG: files from real cameras (the samples are all FFmpeg's encoder's, some cut or padded as cameras do,
   docs/conformance.md), and packets holding one field (FFmpeg decodes none).
 - H.264: luma and chroma bit depths that differ are rejected on purpose (no mainstream
@@ -380,7 +389,7 @@ ones, and the ones predicted from them until an IDR picture, have `VideoFrame.Is
 Error concealment). Damage that still parses is not detected, as in any decoder; damaged slice headers and parameter
 sets still throw (the picture is then lost, which the next one conceals).
 
-`tools/fuzz.sh <file|h264|mjpeg|aac|mp3> <minutes>` checks this with AFL++ through SharpFuzz (`file` demuxes a whole file
+`tools/fuzz.sh <file|h264|mjpeg|rdd36|aac|mp3> <minutes>` checks this with AFL++ through SharpFuzz (`file` demuxes a whole file
 and decodes every track; the others feed one decoder its configuration and packets), with seeds taken from
 `samples/`. Inputs that once broke the contract are kept in `tests/ManagedCodecs.Tests/Fuzz/Findings/<target>/`, and
 `MalformedInputTests` replays them, along with a fixed-seed sweep of truncations and byte flips over a few samples.
@@ -857,6 +866,13 @@ regions of window-switching blocks), minimp3 was read for it, and FFmpeg's outpu
 For MBAFF (the neighbour table 6-4, the field scans, the field CABAC context maps, the order of the
 deblocking filter's field edges and the co-located field or frame of direct prediction) the ITU's reference decoder, JM (royalty-free, from the ITU), stood
 in for the specification's text where that was out of reach; no code was copied.
+
+SMPTE RDD 36 (the `Rdd36` decoder) was implemented from the RDD 36:2022 document alone
+(https://pub.smpte.org/doc/rdd36/). The reference decoder SMPTE distributes beside it was not downloaded, read or
+used, nor any other implementation's source. RDD 36 qualifies an inverse transform's accuracy rather than fixing its
+arithmetic; the integer arithmetic that gives FFmpeg's samples was found by measuring FFmpeg's decoded output on
+streams written for the purpose (docs/decisions/2026-11-15-rdd36-decoder.md), as for `SimpleIdct`, and FFmpeg was
+otherwise used for reference output only.
 
 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md), packed into every package, has the notices of the projects whose
 tables were transcribed (OpenH264's CABAC tables; libxaac's QMF window, SBR noise table and 34-band tables; the SMPTE

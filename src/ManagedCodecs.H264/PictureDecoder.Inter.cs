@@ -61,6 +61,9 @@ internal sealed partial class PictureDecoder<TPixel>
     // of the memory to clear a picture, and a macroblock's four compared as one uint.
     private byte[][] _refHandle = [[], []];
 
+    // Whether _refHandle[1] may hold a handle since it was last cleared, as Picture.List1Touched for list 1's arrays.
+    private bool _handles1Touched = true;
+
     // The pictures the current picture's partitions refer to (each view, frame or field, its own entry), from 1.
     // Every one is in the reference lists, so the decoded picture buffer bounds them (16 frames, 3 views each).
     private readonly Picture?[] _handlePictures = new Picture?[256];
@@ -103,13 +106,23 @@ internal sealed partial class PictureDecoder<TPixel>
         _refIdx = picture.RefIdx;
         _refId = picture.RefId;
         _refParity = picture.RefParity;
-        for (int list = 0; list < 2; list++)
+
+        // List 1 only if a B slice or concealment wrote it since its last clear: else it still holds these values.
+        int lists = picture.Whole.List1Touched ? 2 : 1;
+        for (int list = 0; list < lists; list++)
         {
             Array.Clear(_mvX[list]);
             Array.Clear(_mvY[list]);
             Array.Fill(_refIdx[list], (sbyte)-1);
             Array.Clear(_refId[list]);
-            Array.Clear(_refHandle[list]);
+        }
+
+        picture.Whole.List1Touched = false;
+        Array.Clear(_refHandle[0]);
+        if (_handles1Touched)
+        {
+            Array.Clear(_refHandle[1]);
+            _handles1Touched = false;
         }
 
         Array.Clear(_direct);
@@ -126,6 +139,7 @@ internal sealed partial class PictureDecoder<TPixel>
         {
             Array.Clear(_refHandle[0]);
             Array.Clear(_refHandle[1]);
+            _handles1Touched = false;
             ResetHandles(picture);
         }
     }

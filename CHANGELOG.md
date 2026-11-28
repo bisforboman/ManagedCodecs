@@ -18,6 +18,10 @@ run time.
 - ManagedCodecs.Rdd36, a new package: `Rdd36Decoder` decodes SMPTE RDD 36 video, 4:2:2, progressive, to 10-bit frames,
   bit-exact with FFmpeg; `Mp4Demuxer` names QuickTime's sample entries for it `CodecIds.Rdd36`. Interlaced frames,
   4:4:4, alpha and 12 bits are refused for now (issue #461; docs/decisions/2026-11-15-rdd36-decoder.md).
+- Playback: ONVIF cameras found and their streams' RTSP URLs asked for. `OnvifDiscovery.FindAsync` probes the
+  machine's networks (WS-Discovery, ONVIF Core 7), and `OnvifDevice.GetStreamsAsync` asks a camera for each media
+  profile's URL, encoding and size (GetProfiles, GetStreamUri), with HTTP Digest or the WS-Security UsernameToken
+  (issue #527; docs/decisions/2026-11-27-live-onvif.md).
 
 ## 0.19.0 – 2026-11-17
 

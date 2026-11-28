@@ -357,6 +357,16 @@ internal sealed class Picture
     private volatile bool _damaged;
 
     /// <summary>
+    /// Whether list 1's motion arrays (<see cref="MvX"/>, <see cref="MvY"/>, <see cref="RefIdx"/>, <see cref="RefId"/>)
+    /// may hold anything but their reset values (zero motion, refIdx -1) since they were last cleared: set by a B slice,
+    /// their only writer (concealment takes list 1 motion only from neighbours a B slice decoded), and true for new
+    /// arrays (refIdx 0). Read and set on <see cref="Whole"/>, which owns
+    /// the arrays its field views share. P and I pictures leave it false, and the next picture to use the arrays then
+    /// skips clearing them (about a third of a picture's clears).
+    /// </summary>
+    public bool List1Touched { get; set; } = true;
+
+    /// <summary>
     /// Whether the frame holds concealed macroblocks, or was predicted from a frame that does (error concealment,
     /// <see cref="H264Decoder.ConcealErrors"/>); final once the frame is done.
     /// </summary>

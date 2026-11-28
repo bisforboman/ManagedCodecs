@@ -307,6 +307,32 @@ RTP over UDP to the reader alone (docs/decisions/2026-11-16-live-rtsp-multicast.
   clip's but the first chunk and a loop's (3 allowed), none lost or damaged, no reconnect.
 - **Not tried yet:** a camera's multicast, a network with IGMP snooping or more than one hop between, and IPv6 groups.
 
+### ONVIF
+
+`OnvifDiscovery` and `OnvifDevice` (docs/decisions/2026-11-27-live-onvif.md), from ONVIF Core 26.06, ONVIF Media 24.12,
+WS-Discovery and the UsernameToken Profile 1.0.
+
+- **`OnvifTests`** against `OnvifTestDevice`, a simulated camera written from the same specifications: a WS-Discovery
+  responder (on a port of its own, or joined to 239.255.255.250:3702 on loopback) and an HTTP server answering
+  GetServices, GetCapabilities, GetSystemDateAndTime, GetProfiles and GetStreamUri, in other prefixes than the
+  library's, checking that each SOAP action names the body's operation:
+  - two probes, one a type, each sent three times with its own message ID; a device listing only
+    `dn:NetworkVideoTransmitter` is found; the answers of one device merge into one;
+  - answers to another probe's message ID, answers of other types (a printer), and datagrams that aren't XML are
+    ignored; a document with a DTD is not parsed;
+  - the address on the host the device answered from comes first;
+  - each profile's RTSP URI, encoding and size, through HTTP Digest (RFC 2617, qop=auth, checked by the device) and
+    through the UsernameToken alone, with the device's clock five hours off (the device refuses a token outside five
+    minutes of its own time); GetCapabilities where GetServices is a fault; a wrong password and missing credentials
+    throw `UnauthorizedAccessException`; an address that doesn't answer is skipped for the next;
+  - the PasswordDigest of fixed inputs, against Python's `hashlib`.
+  Ten mutation entries break these rules (`tools/mutation/mutations.py`), each caught.
+- **`tools/onvif-discovery-check.py`** publishes a camera through Python's `WSDiscovery` 2.1.2 (an independent
+  WS-Discovery implementation, in the 2005/04 namespaces ONVIF names) and needs `mcdec --onvif` to find it once, with
+  its name, hardware, endpoint and address: with both types, and with `dn:NetworkVideoTransmitter` alone. Both passed
+  (2026-11-27, the cloud sandbox, over its multicast).
+- **Not tried:** a real camera, a Media2-only device, IPv6 discovery, an HTTPS device service.
+
 ### RTSPS
 
 `RtspSource` takes `rtsps://` URLs: RTSP over TLS, RTP interleaved inside it (docs/decisions/2026-11-15-live-rtsps.md).
@@ -2135,6 +2161,24 @@ middle) by (1, -5) and (inner, 512) by (20, 1), then the saturating packs. Bit-e
 480p Sintel frames) counted 19.14 against 19.23 M instructions a frame (-0.5%), and perf put `HalfVertical` and
 `Center` at 0.25 to 0.27 of an untouched set against 0.26 to 0.30 on the 1080p frames, lower in five pairs of six:
 about 0.3% of the frame, not worth a second loop in `HalfVertical`.
+The deblocking filter's uniform-motion test (`HasUniformMotion`, for every inter macroblock without luma coefficients)
+checked both lists' reference indices and motion vectors, so in P pictures it read list 1's: arrays cleared at the
+picture's start and never written since, a cache miss each by the time a row is deblocked. A list whose four handles
+are 0 is used by no partition (a used list always has a picture's handle, from `StoreMotion` or concealment's guess),
+so it still holds the reset values and is uniform without them; the test now skips it, and the bS paths already
+ignore such a list's vectors (`MotionStrength`). On `h264-bench-720p.mp4` (CAVLC, P) the function fell from 0.061 to
+0.070 of an untouched set (`Cavlc.ReadResidualBlock`, `FilterMacroblock420`, `PredictLuma`, `HalfVertical`) to 0.020
+to 0.025 (perf, six runs each, the order alternating, every branch run below every base run): from about 1.9 to 0.7%
+of the frame. On `h264-high-default.mp4` (B, 320x240, in cache) it moved by under 0.1% of the frame.
+Each picture cleared both lists' motion arrays (motion vectors, reference indices and ids, the decoder's handles) when
+it began: about 1.15 MB a 720p picture with the coefficient counts and modes, list 1's 0.37 MB of it. P and I pictures
+never write list 1 (only B slices do; concealment takes list 1 motion only from neighbours a B slice decoded), so the
+picture that owns the arrays now notes whether a B slice wrote them since their last clear (`Picture.List1Touched`, on
+the frame or colour plane its field views share), the decoder the same of its handles, and `ResetInter` clears list 1
+only then. Two mutation entries break the markings. On `h264-bench-720p.mp4` the clears (libc's `memset` and
+`ResetInter`) fell from 0.078 to 0.090 of an untouched set (`Cavlc.ReadResidualBlock`, `FilterMacroblock420`,
+`PredictLuma`, `HalfVertical`) to 0.050 to 0.056 (perf, six runs each, the order alternating, every branch run below
+every base run): about 0.9% of the frame. `h264-high-default.mp4` (I, P and B) moved within its runs' spread.
 
 ## AAC
 

@@ -60,6 +60,7 @@ in between. That comparison is not measured here.
 | `tools/rtp-record.py` | Records the RTP packets FFmpeg sends to a loopback UDP port, for the RTP depacketizer's tests (make-samples.sh) |
 | `tools/compare.sh` | Times mcdec and FFmpeg on the same file |
 | `tools/live555-check.py` | `LivePlayer` against live555MediaServer (built from source, pinned), H.264 and AAC over both transports, Digest, a session held past live555's 65 s, and a file's end (RTCP BYE, a new session at once); by hand, not in a workflow |
+| `tools/onvif-discovery-check.py` | ONVIF discovery against Python's `WSDiscovery` (an independent responder) publishing a camera, with both ONVIF types and with `dn:NetworkVideoTransmitter` alone, found by `mcdec --onvif`; by hand, not in a workflow |
 | `tools/h264-stages.py` | Shares of H.264 decoding by stage, for mcdec and FFmpeg, from perf and callgrind profiles (docs/notes/h264-stages-2026-11.md) |
 | `tools/realworld.py` | Decodes real public films with mcdec and FFmpeg and compares them (nightly, `realworld.yml`) |
 | `tools/mutation/mutate.py` | Breaks each guard in `tools/mutation/mutations.py` and checks that a test fails (every pull request, `mutation.yml`) |
@@ -565,6 +566,13 @@ if (player.TakeLatest() is { } frame)
     the URL gives one, 443 for `rtsps://`), for a camera behind a firewall or proxy that passes only HTTP: a GET carries
     what the camera sends, RTP included, and a POST the requests (docs/decisions/2026-11-16-live-rtsp-http.md).
   - Not yet: SRTP, H.265.
+- **Finding ONVIF cameras:** `await OnvifDiscovery.FindAsync(TimeSpan.FromSeconds(3))` lists the cameras on the
+  machine's networks that answer WS-Discovery's probe (ONVIF Core 7), each once, with its name, hardware and ONVIF
+  addresses; `new OnvifDevice(uri)` is one at a known address (another subnet, a VPN). `await
+  camera.GetStreamsAsync(credential)` asks it for each media profile's RTSP URL, encoding and size, for `RtspSource`:
+  with HTTP Digest, or the WS-Security UsernameToken that older cameras take instead, dated by the camera's own clock
+  (docs/decisions/2026-11-27-live-onvif.md). `mcdec --onvif` lists them. Checked against a simulated camera and an
+  independent WS-Discovery responder, not yet against a real camera (docs/conformance.md, ONVIF).
 - **Sound:** `new RtspSource(uri) { Audio = true }` plays the camera's sound too: the first audio track of its SDP
   that is AAC (RFC 3640's `MPEG4-GENERIC`, AAC LC and HE-AAC, or RFC 6416's `MP4A-LATM`), G.711 (A-law, µ-law) or G.726,
   set up beside the video on the

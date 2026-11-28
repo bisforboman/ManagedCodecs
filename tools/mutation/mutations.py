@@ -57,7 +57,62 @@ MUTATIONS = [
          find="latest.WaitForRow(int.MaxValue);", replace="",
          tests="FullyQualifiedName~H264ConcealmentTests", repeat=3),
 
+    # ---- ONVIF discovery and stream URIs (docs/decisions/2026-11-27-live-onvif.md), the rules only some answers reach.
+    # Only ProbeMatches that answer this client's probes count (RelatesTo), not another client's.
+    dict(file="src/ManagedCodecs.Playback/OnvifDiscovery.cs",
+         find="relatesTo is null || !ids.Contains(relatesTo) || ", replace="",
+         tests="FullyQualifiedName~OnvifTests.IgnoresAnswersToAnotherProbe"),
+    # Only devices of ONVIF's types, not a printer answering a probe it should have ignored.
+    dict(file="src/ManagedCodecs.Playback/OnvifDiscovery.cs",
+         find='if (!types.Contains(OnvifSoap.Device + "Device") && !types.Contains(OnvifSoap.NetworkWsdl + "NetworkVideoTransmitter"))',
+         replace="if (types.Count < 0)",
+         tests="FullyQualifiedName~OnvifTests.IgnoresAnswersOfOtherDeviceTypes"),
+    # A probe of its own for dn:NetworkVideoTransmitter, which older cameras list without tds:Device.
+    dict(file="src/ManagedCodecs.Playback/OnvifDiscovery.cs",
+         find='            (Id: "urn:uuid:" + Guid.NewGuid().ToString(), Namespace: OnvifSoap.NetworkWsdl, Type: "NetworkVideoTransmitter"),\n',
+         replace="",
+         tests="FullyQualifiedName~OnvifTests.ProbesForEachTypeSeparatelyAndRepeatsEachProbeWithItsOwnId"),
+    # Each probe repeated (SOAP over UDP's Appendix I).
+    dict(file="src/ManagedCodecs.Playback/OnvifDiscovery.cs",
+         find="private const int Repeats = 2;", replace="private const int Repeats = 0;",
+         tests="FullyQualifiedName~OnvifTests.ProbesForEachTypeSeparatelyAndRepeatsEachProbeWithItsOwnId"),
+    # One device however many answers it sends.
+    dict(file="src/ManagedCodecs.Playback/OnvifDiscovery.cs",
+         find="int index = _devices.FindIndex(d => d.Key == key);", replace="int index = -1;",
+         tests="FullyQualifiedName~OnvifTests.MergesTheAnswersOfOneDevice"),
+    # The address on the host the device answered from first.
+    dict(file="src/ManagedCodecs.Playback/OnvifDiscovery.cs",
+         find="d.Addresses.OrderBy(a => SameHost(a, d.From) ? 0 : 1)", replace="d.Addresses.OrderBy(a => 0)",
+         tests="FullyQualifiedName~OnvifTests.ListsTheAddressItAnsweredFromFirst"),
+    # The UsernameToken for a device that refuses HTTP authentication (ONVIF Core 5.9.1, legacy devices).
+    dict(file="src/ManagedCodecs.Playback/Onvif/OnvifClient.cs",
+         find="if (!_useToken && _credential is not null && Refused(status, content))",
+         replace="if (!_useToken && _credential is null && Refused(status, content))",
+         tests="FullyQualifiedName~OnvifTests.UsesTheUsernameTokenWhereTheDeviceTakesNothingElse"),
+    # The token dated by the device's clock, which a camera without NTP needs.
+    dict(file="src/ManagedCodecs.Playback/Onvif/OnvifClient.cs",
+         find="DateTime.UtcNow + _clockOffset.Value", replace="DateTime.UtcNow",
+         tests="FullyQualifiedName~OnvifTests.DatesTheUsernameTokenByTheDevicesClock"),
+    # GetCapabilities where GetServices is a fault (older devices).
+    dict(file="src/ManagedCodecs.Playback/OnvifDevice.cs",
+         find='"http://www.onvif.org/ver10/device/wsdl/GetCapabilities"', replace='"http://www.onvif.org/ver10/device/wsdl/GetCapabilitiesX"',
+         tests="FullyQualifiedName~OnvifTests.FindsTheMediaServiceByGetCapabilitiesOnOlderDevices"),
+    # Answers from the network are parsed without DTDs (no entity expansion).
+    dict(file="src/ManagedCodecs.Playback/Onvif/OnvifSoap.cs",
+         find="DtdProcessing = DtdProcessing.Prohibit,", replace="DtdProcessing = DtdProcessing.Parse,",
+         tests="FullyQualifiedName~OnvifTests.RefusesDocumentsWithADocumentTypeDeclaration"),
+
     # ---- H.264
+    # A picture's list 1 motion arrays, and the decoder's list 1 handles, are cleared only after a B slice wrote them
+    # (Picture.List1Touched, PictureDecoder.ResetInter): without the marking, a B picture decoded into arrays a P
+    # picture reused keeps stale list 1 motion and references.
+    dict(file="src/ManagedCodecs.H264/PictureDecoder.cs",
+         find="            Picture.Whole.List1Touched = true;\n", replace="",
+         tests="FullyQualifiedName~H264ConformanceTests.MatchesFfmpegFrameByFrame&DisplayName~h264-high-default"),
+    dict(file="src/ManagedCodecs.H264/PictureDecoder.cs",
+         find="            Picture.Whole.List1Touched = true;\n            _handles1Touched = true;\n",
+         replace="            Picture.Whole.List1Touched = true;\n",
+         tests="FullyQualifiedName~H264ConformanceTests.MatchesFfmpegFrameByFrame&DisplayName~h264-high-default"),
     # A frame of two field pictures takes its first field's picture type, as FFmpeg does (h264_frame_start), not its
     # second's: JM's PAFF samples pair an I field with a P one.
     dict(file="src/ManagedCodecs.H264/H264Decoder.cs",
